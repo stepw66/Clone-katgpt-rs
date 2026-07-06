@@ -1,6 +1,6 @@
 # KatGPT-RS
 
-A **GOAT-proved** neuro-symbolic micro-Transformer with speculative decoding, constraint pruning, and **369 feature flags (153 default-on, all GOAT-proved)** — built in Rust. Pure algorithms, zero side effects, MIT licensed.
+A **GOAT-proved** neuro-symbolic micro-Transformer with speculative decoding, constraint pruning, and **367 feature flags (154 default-on, all GOAT-proved)** — built in Rust. Pure algorithms, zero side effects, MIT licensed.
 
 Inspired by [Andrej Karpathy's microgpt](https://karpathy.github.io/2026/02/12/microgpt/).
 
@@ -27,6 +27,15 @@ Inspired by [Andrej Karpathy's microgpt](https://karpathy.github.io/2026/02/12/m
 | **Cross-Resolution Transport** | **0.9300 mean cos rank preservation** (16→256 tier transfer) | Train-small-deploy-large asymmetric-basis FUNCATTN (Plan 310) |
 | **Manifold Walk Viability** | **100% playability** vs free 74.2% (paper's SMB headline reproduced); **7.10 ns/step** post-CSR (68.4× speedup, 14× under target) | Viable Manifold Graph safe-navigation (Plan 312, DEFAULT-ON) |
 | **AC-Prefix Modelless G1** | **0.0 diff** (bit-identical to iterative-MLM) via `attends_dedup`; **27.258× speedup** vs 64 iterative forwards | §3.5 modelless unblock of AC-GPT arbitrary-conditional eval (Plan 313, DEFAULT-ON) |
+| **Renoise-CE Self-Verifier** | **renoise=1.000 vs plurality=0.000** (100pp), **+30.5pp** CLR fusion (6× target) | Perturb-output + re-resolve + measure-drift, operator-agnostic (Plan 406, DEFAULT-ON) |
+| **Velocity Field Ensemble** | **beats conformal-naive floor** (Plan 340); ridge-solved η weights regression-optimal | Algebraic combination of P frozen velocity fields (Plan 376, DEFAULT-ON) |
+| **Local Branch Routing** | **+9pp to +26pp** quality gain (K=3 candidates), argmax **51ns** / sampled **69ns** | Post-candidate-set attention + relative routing (Plan 377, DEFAULT-ON) |
+| **Set Attention (NPT half)** | **75.7µs/tick @ 100 NPCs** (6.6× headroom), G1–G5 PASS | Permutation-equivariant sigmoid-gated cross-entity attention (Plan 354, DEFAULT-ON) |
+| **Step Attribution Qualifier** | **81.6% drift reduction** (riir-ai PoC), 13ns aggregate @ W=64 | Δ≥0 commit gate (SkillAdaptor eq.8) + StepLocalizer (Plan 381, DEFAULT-ON) |
+| **Heat Kernel Trajectory** | **exact at long horizons** vs O(T·dt²) Euler error | Single-shot DEC cochain field prediction via operator exponential (Plan 359, DEFAULT-ON) |
+| **QMC Belief Sampling** | **G1–G6 ALL PASS** (Lattice/Stratified/Sobol drop-in for iid) | QuasiMoTTo QMC uniform sources in K-rollout paths (Plan 367, DEFAULT-ON) |
+| **Zone Density Routing** | **+41.54% routing**, **99.1% cache hit**, 0 stale reads | Density-aware zone routing + papaya LRU cache (Plan 351, DEFAULT-ON) |
+| **Tropical (max,+) Algebra** | **0.96× of simd_matvec** (NEON); 3/3 fusion gates PASS | Worst-case/bottleneck aggregation via tropical semiring (Plan 337, Super-GOAT) |
 
 ## 🏗️ Architecture
 
@@ -89,12 +98,14 @@ Additional core traits in `katgpt-core/src/traits.rs`: `DominoPruner`, `Completi
 
 ### Crate Dependency DAG
 
-The workspace has **24 in-tree crates** (plus the root) organized in four
+The workspace has **26 in-tree crates** (plus the root) organized in four
 layers: shared leaves, `katgpt-core` (traits + cognitive kernels), domain
 stacks, and the root crate (`katgpt-rs`) which is the feature-aggregation
 surface that wires every domain crate into the transformer runtime via
 `ForwardContext`. See `proposals/003_src_consolidation_master.md` for the
-full Phase 0–11 consolidation history (Phase 12 final sweep pending).
+full Phase 0–11 consolidation history; Plans 378–404 completed the Phase 12
+substrate-extraction sweep (only training code + benchmark tooling remain
+permanently root-resident).
 
 ```mermaid
 graph TD
@@ -196,13 +207,14 @@ graph TD
 - Phase 11 (Plans 378–382, 2026-07-04) added 5 new domain crates
   (`katgpt-band`, `katgpt-validator`, `katgpt-sparse`, `katgpt-claim`,
   `katgpt-ruliology`) plus root shims preserving every historical
-  `katgpt_rs::*` path. `katgpt-bench` deferred to Phase 12 (transformer-bound).
+  `katgpt_rs::*` path. Phase 12 (Plans 383–404) finished the substrate sweep:
+  only training code + benchmark tooling remain permanently root-resident.
 - Back-compat invariant: every move keeps `pub use katgpt_X as Y` in `lib.rs`
   so existing `katgpt_rs::*` paths resolve.
 
 ## 🔄 E2E Inference Flow — Default GOAT Stack
 
-The default production stack has **147 GOAT-proved default-on features** (359 total flags), but they don't all run on every token. The architecture uses **layered gating** — most features are bandit-driven, Option-gated, or compile-time-only.
+The default production stack has **154 GOAT-proved default-on features** (367 total flags), but they don't all run on every token. The architecture uses **layered gating** — most features are bandit-driven, Option-gated, or compile-time-only.
 
 ```mermaid
 flowchart TD
@@ -356,7 +368,7 @@ graph LR
 
 📖 **Full GOAT audit table** with research source, real gain, and replaced feature: See [`.docs/01_overview.md`](.docs/01_overview.md).
 
-### GOAT-Proved Additions (Plans 225–294+)
+### GOAT-Proved Additions (Plans 225–406+)
 
 | Feature | Plan | GOAT | Key Gain |
 |---------|------|------|----------|
@@ -416,6 +428,22 @@ graph LR
 | **Sigmoid-Graded Reject Confidence** (`sigmoid_graded_reject`) | 310 T1 | T3.2 6/6 + T3.1 5/5 ✅ | Tolerant soft-reject relax-and-retry on `ConstraintPruner` — default `reject_confidence()` reproduces `is_valid()` bit-identically (zero-behavior-change); sigmoid-graded impl + `soft_reject_with_relax` pipeline routes borderline candidates through relaxation. HarnessBridge Table 7: tolerant > strict because `false_reject_cost > false_pass_cost`. Default Δ **0.000ns**, graded **+3.734ns**, batch **2647M/s**, pipeline **+0.241ns**; tolerant FR **1.69%** vs strict **5.49%** (Δ −3.80pp), net reward **+603.3**, precision ratio **0.9456**. Zero runtime cost unless caller invokes `soft_reject_with_relax`. Default-on (T4.1, 2026-06-26). |
 | **CausalHeadImportance** (`causal_head_importance`) | 358 | G1/G2/G3/G4 ✅ | Causal-intervention head scorer (HydraHead arXiv:2606.20097) — activation patching (Eq 10) + path patching (Eq 11) + span-level logit-diff readout (Eq 9) + cross-capability fusion (Eq 12). Strictly stronger than RTPurbo's attention-mass calibration: G2 bystander discrimination Jaccard **1.000 vs 0.000** (causal invariant, attention-mass collapses). G3 partition **≤ 2×** attention-mass (faster at n≥64). Plus `ScaleNormalizedFusion` (Eq 13–14, currently unused). **Opt-in** — `CalibrationMode::AttentionMass` stays default (causal score production is ~10–100× costlier); use `CausalNecessity` for the long-context-extreme bystander regime. |
 | **Misalignment Indicator Probe Bank** (`indicator_probe_bank`) | 320 | G1–G7 ✅ | Structured N-direction cognitive-indicator detector (arxiv 2606.24251 Zhou et al.) — BLAKE3-committed direction vectors projected via dot-product + sigmoid, OR-fused into one firing label. G1 per-indicator AU-ROC **1.000**, G2 OR-fusion TPR 1.000/FPR 0.041, G3 cascade **100× FPR reduction** at 0pp cost, G4 **53.9 ns** (N=8, D=72) + 0 allocs, G5 similarity block ARI **1.000**, G6 feature-off clean, G7 wire tamper-evident. `indicator_similarity` also default-ON; `indicator_cascade` opt-in (consumer-crate verifier territory). Default-on (Plan 320 Phase 5, 2026-06-25). |
+| **Tropical (max,+) Algebra** (`tropical_algebra`) | 337 | Super-GOAT ✅ | (max,+) tropical semiring matvec + DEC wrappers for worst-case/bottleneck aggregation (arxiv 2403.04807). D=64 matvec **0.96× of simd_matvec** (NEON); 3/3 fusion gates PASS. Default-on. |
+| **Temp-Loss Fingerprint Selector** (`temp_loss_fingerprint`) | 341 | G1 ✅ | Perturbed-loss-vector diversity selector via Lipschitz gradient bounds (arxiv 2606.26797). G1 **15.44× diversity ratio**; select_diverse_subset 130µs (<1ms); cross-repo neuron-db gain +0.1672. Default-on. |
+| **Zone Density Routing** (`zone_density_routing`) | 351 | G5a/b/c ✅ | Density-aware zone routing: classify + outer-first schedule + papaya LRU cache with 3 invalidation rules. G5a **+41.54% routing**, G5b **99.1% cache hit**, G5c 0 stale reads. Default-on. |
+| **Set Attention (NPT half)** (`set_attention`) | 354 | G1–G5 ✅ (G8 FAIL) | Permutation-equivariant sigmoid-gated cross-entity set attention (arxiv 2106.02584). Production **75.7µs/tick @ 100 NPCs** (6.6× headroom). G8 collective inference FAILED (Super-GOAT→GOAT, use-case limit). Default-on. |
+| **Heat Kernel Trajectory** (`heat_kernel_trajectory`) | 359 | All 5 phases ✅ | Single-shot DEC cochain field prediction via operator exponential (arxiv 2606.27364) — exact at long horizons vs O(T·dt²) Euler error. Default-on (katgpt-dec). |
+| **QMC Belief Sampling** (`qmc_sampling`) | 367 | G1–G6 ✅ | QuasiMoTTo — QMC uniform sources (Lattice/Stratified/Sobol) + arithmetic-coding descend, drop-in for iid in K-rollout paths (arxiv 2607.01179). 850/850 lib tests, 26 bootstrap tests. Default-on. |
+| **Manifold Bandit Latent Task Tree** (`manifold_bandit`) | 370 | G1/G3/G4/G5 ✅ | LatentTaskTree + HierarchicalThompsonSampler + BayesianFilterArm (arxiv 2606.19750). G1-real **0.740 ratio**; R279 N≥d phase gate ships opt-in (+11% convergence). Default-on. |
+| **Mean-Field Regime Classifier** (`mean_field_regime`) | 371 | G1–G5 ✅ | MeanFieldOverlap + HopfBoundary + RegimeClassifier (Static/NSO/IS/GLC) — crowd oscillation regime classifier (arxiv 2606.30366). PoC 25/25 (4/4 regimes). Default-on. |
+| **Velocity Field Ensemble** (`velocity_field_ensemble`) | 376 | G1–G4 ✅ | Algebraic combination of P frozen velocity fields via ridge-solved η weights (arxiv 2602.20070). **Beats conformal-naive floor** (Plan 340). Heterogeneous-D variant opt-in. Default-on. |
+| **Local Branch Routing** (`local_branch_routing`) | 377 | G1–G6 ✅ | PostCandidateRouter trait + DotProduct/ColliderAdapters (arxiv 2606.25354). Samples K candidates, forwards, set-attends, commits via relative routing. PoC **+9pp to +26pp** quality gain; argmax **51ns** + sampled **69ns** at K=3 D=64. Default-on. |
+| **ANE Roofline Cost Model** (`ane_roofline`) | 379 | G1/G2/G4 ✅ | ANE-aware roofline cost model with third axis (working-set size), M1–M5 peaks (arxiv 2606.22283). G1 ±30% on 4 ref shapes; G4 p50 <1µs. Refines NpcBrainRouter's hardcoded threshold. Default-on. |
+| **Step Attribution Qualifier** (`step_attribution_qualifier`) | 381 | G1/G2/G4 ✅ | StepAttributionQualifier — Δ≥0 commit gate (SkillAdaptor eq.8) + StepLocalizer trait fusing Localize+Link (arxiv 2606.01311). G1 14/14, G2 **81.6% drift reduction** (riir-ai PoC), G4 **13ns** aggregate @ W=64. Default-on. |
+| **Spherical Geodesic Steering** (`spherical_steering`) | 405 | G1–G5 ✅ | Geodesic Slerp rotation of latent vector toward unit-norm target + vMF confidence gate; norm-preserving on S^{d-1} (arxiv 2602.08169). Phase 5 (F1 fusion) deferred. Default-on. |
+| **Renoise-CE Self-Verifier** (`renoise_ce`) | 406 | G1/G2/G4/G5 ✅ | Perturb-completed-output + re-resolve + measure-drift self-verifier, operator-agnostic, no labels/verifier head (arxiv 2606.29150). G1 renoise=**1.000** vs plurality=0.000 (100pp); G2 CLR fusion **+30.5pp** (6× target); G4 0 allocs, G5 36µs. Default-on. |
+
+**GOAT failures / negative results this session (kept opt-in, documented):** Plan 397 HGA (Hierarchical Global Attention, G2-proxy FAIL 2/12 vs DashAttention — same failure mode as MSA R225); Plan 374 ReMax (`argmax_a EI_m = argmax_a q` theorem — no modelless exploration, exploration → riir-train); Plan 375 Factorized Action (G2b+G3 FAIL — trained GateNetwork + VQ-VAE needed).
 
 ## 🎮 Arena Proofs — HL Thesis Validated
 
@@ -1425,23 +1453,6 @@ Feature gate: `latent_field_steering` (**DEFAULT-ON** since Phase 4 GOAT PASS 20
 
 ---
 
-### 🔬 Subspace Phase-Gate Primitive — Participation Ratio + Numerical Rank + Jacobian SVD (Plan 301, arXiv:2409.02426)
-
-Generic, modelless numeric primitives exposing four operations, all inference-time and allocation-aware:
-
-1. **`participation_ratio(spectrum)`** — effective dimensionality `d_eff = (Σλ)² / Σ(λ²)` from an eigenvalue / singular-value spectrum.
-2. **`numerical_rank(spectrum, η)`** — smallest `r` such that `Σ_{i≤r} σ_i² / Σ_i σ_i² > η` (paper Eq. 52, default η=0.99).
-3. **`phase_transition_gate(n_samples, intrinsic_dim)` → bool** — returns `n_samples >= intrinsic_dim`. Wang et al. Theorem 4 necessary condition for subspace recovery.
-4. **`jacobian_svd_at<F>(f, x, ε, scratch)`** — forward-difference Jacobian of map `f: R^n → R^m` at point `x`, then thin SVD. Generic over the map (closure), no game/shard/chain semantics.
-
-**Phase 2 G1 PASS** — reproduces the Wang et al. phase transition on synthetic MoLRG (K=3 orthogonal subspaces in R^48, each d=6): for N < d, recovery error `‖Û Û^T − U* U*^T‖_F` > 0.5; for N ≥ d, error < 0.1. `phase_transition_gate(N, d)` returns false for N < d, true for N ≥ d — matches empirical recovery.
-
-**Consumers:** Plan 312 (Viable Manifold Graph) reuses `jacobian_svd_at` for the pullback volume field; riir-neuron-db Plan 002 will apply these to `NeuronShard` consolidation. Future riir-ai HLA self-discovery plan will apply them to `evolve_hla()`.
-
-Feature gate: `subspace_phase_gate` (**opt-in** — Phases 3–5 deferred). 📖 Plan: [`.plans/301_runtime_subspace_phase_gate_primitive.md`](.plans/301_runtime_subspace_phase_gate_primitive.md), Research: [`.research/279_Diffusion_Curse_Dimensionality_Subspace_Clustering_Fusion.md`](.research/279_Diffusion_Curse_Dimensionality_Subspace_Clustering_Fusion.md), Benchmark: [`.benchmarks/301_subspace_phase_gate_g1.md`](.benchmarks/301_subspace_phase_gate_g1.md), Paper: [arXiv:2409.02426](https://arxiv.org/abs/2409.02426).
-
----
-
 ### 🌐 RTDC — Resolution-Tiered Deterministic Commitment (Plan 302, Research 280)
 
 Open modelless primitive for multi-resolution Merkle commitment: a depth-tiered Merkle octree that exposes **one BLAKE3 root per octree depth**, where depth boundaries are assigned by SLoD's `ScaleBoundary` set and leaf encoding is platform-deterministic via the `DeterministicLeafEncode` trait.
@@ -1884,6 +1895,148 @@ Feature gates: `indicator_probe_bank` (**default-ON**), `indicator_similarity` (
 
 ---
 
+### 🏜 Tropical (max,+) Algebra — Worst-Case/Bottleneck Aggregation (Plan 337, arxiv 2403.04807)
+
+The (max,+) tropical semiring replaces `(+, ×)` with `(max, +)`. Closed-form for worst-case / bottleneck aggregation: shortest-path-in-DAG latency bounds, critical-path scheduling, max-of-sums routing. Ships as:
+1. **`tropical_matvec`** — D-wide matvec in the tropical semiring, SIMD NEON/AVX2 (D=64 at **0.96× of simd_matvec** — the (max,+) max-reduction vectorizes as cleanly as sum).
+2. **DEC wrappers** — `exterior_derivative_tropical`, `codifferential_tropical` so DEC operators compose in the tropical semiring (worst-case flux tracking).
+3. **Fusion gates** — 3/3 substrates (max-pool, critical path, DEC boundary flux) shown non-redundant.
+
+Super-GOAT: the tropical basis is NOT redundant with the additive basis (the 3 substrate families each have a unique (max,+) optimum). Feature gate: `tropical_algebra` (**default-ON**). 📖 Plan: [`.plans/337_tropical_semiring_primitive.md`](.plans/337_tropical_semiring_primitive.md), Benchmark: [`.benchmarks/337_tropical_goat.md`](.benchmarks/337_tropical_goat.md), Paper: [arXiv:2403.04807](https://arxiv.org/abs/2403.04807).
+
+---
+
+### 🌡 Temp-Loss Fingerprint Selector — Perturbed-Loss Diversity (Plan 341, arxiv 2606.26797)
+
+Modelless K-experience diversity selector: pick K experiences with maximum spread via Lipschitz gradient bounds (the modelless analog of the paper's Theorem 3.1). The "fingerprint" is the perturbed loss vector per experience; `select_diverse_subset` greedily maximizes pairwise distance.
+
+**G1 diversity ratio 15.44×** vs random selection; `select_diverse_subset` 130µs (<1ms target). Cross-repo gain: +0.1672 in riir-neuron-db consolidation quality. Feature gate: `temp_loss_fingerprint` (**default-ON**). 📖 Plan: [`.plans/341_temp_perturbed_loss_vector_primitive.md`](.plans/341_temp_perturbed_loss_vector_primitive.md), Benchmark: [`.benchmarks/341_temp_loss_fingerprint_goat.md`](.benchmarks/341_temp_loss_fingerprint_goat.md).
+
+---
+
+### 🗺 Zone Density Routing — Density-Aware NPC Navigation (Plan 351)
+
+Density-aware zone routing for crowd NPC navigation: classify zone density → outer-first schedule (avoid the dense interior) → papaya lock-free LRU cache of resolved routes with three invalidation rules (position move, density flip, edge removal).
+
+**G5a +41.54% routing success, G5b 99.1% cache hit, G5c 0 stale reads** (100K ticks, 100 NPCs, 12 zones). Combines Treuille 2006 continuum crowds with Fokker-Planck density modeling. Feature gate: `zone_density_routing` (**default-ON**). 📖 Plan: [`.plans/351_density_aware_zone_routing.md`](.plans/351_density_aware_zone_routing.md), Benchmark: [`.benchmarks/351_density_routing_goat.md`](.benchmarks/351_density_routing_goat.md).
+
+---
+
+### 🌐 Set Attention — Cross-Entity Permutation-Equivariant Attention (Plan 354, arxiv 2106.02584)
+
+The open half of the NPT (Non-Parametric Transformers) ABD primitive: permutation-equivariant cross-entity attention where each entity attends to all other entities' latent states via a sigmoid gate (never softmax). `SetAttention<N,D>` with `set_attention_into` zero-alloc hot path.
+
+**G1–G5 PASS** (equivariance tested under all permutations, sigmoid-gate bit-stable). Production: **75.7µs/tick @ 100 NPCs** (6.6× headroom vs the 500µs budget). **G8 collective-inference gate FAILED** — the selling point (emergent collective reasoning beyond per-entity attention) did not reproduce on the synthetic scenario; demoted Super-GOAT→GOAT and documented as a use-case limitation. The primitive itself stays default-on. Feature gate: `set_attention` (**default-ON**). 📖 Plan: [`.plans/354_cross_datapoint_set_attention_primitive.md`](.plans/354_cross_datapoint_set_attention_primitive.md), Benchmark: [`.benchmarks/354_set_attention_goat.md`](.benchmarks/354_set_attention_goat.md), Paper: [arXiv:2106.02584](https://arxiv.org/abs/2106.02584).
+
+---
+
+### 🔥 Heat Kernel Trajectory — Single-Shot DEC Field Prediction (Plan 359, arxiv 2606.27364)
+
+Predicts the DEC cochain field at long horizons via the operator exponential `e^{tΔ}` (heat kernel) instead of Euler-marching `T` steps. **Exact at long horizons** vs the O(T·dt²) accumulation error of iterative Euler. Linear heat kernel is closed-form; nonlinear + BoM (bag-of-models) extensions ship.
+
+All 5 phases complete (linear kernel, nonlinear extension, BoM extension, DEC integration, cross-repo consumer). Ships in `katgpt-dec`. Feature gate: `heat_kernel_trajectory` (**default-ON**). 📖 Plan: [`.plans/359_dec_heat_kernel_trajectory.md`](.plans/359_dec_heat_kernel_trajectory.md), Benchmark: [`.benchmarks/365_dec_heat_kernel_trajectory_goat.md`](.benchmarks/365_dec_heat_kernel_trajectory_goat.md), Paper: [arXiv:2606.27364](https://arxiv.org/abs/2606.27364).
+
+---
+
+### 🎲 QuasiMoTTo — QMC Belief Sampling (Plan 367, arxiv 2607.01179)
+
+Quasi-Monte Carlo uniform sources (Lattice / Stratified / Sobol) as drop-in replacements for iid sampling in K-rollout belief paths. Lower variance than iid at fixed K because QMC spreads samples more evenly across the unit cube. Arithmetic-coding descend maps each uniform sample to a token.
+
+**G1–G6 ALL PASS**: 850/850 lib tests, 26 bootstrap tests. Drop-in for any iid sampling site. Feature gate: `qmc_sampling` (**default-ON**). 📖 Plan: [`.plans/367_quasi_monte_carlo_sampling.md`](.plans/367_quasi_monte_carlo_sampling.md), Benchmark: [`.benchmarks/367_qmc_goat_gate.md`](.benchmarks/367_qmc_goat_gate.md), Paper: [arXiv:2607.01179](https://arxiv.org/abs/2607.01179).
+
+---
+
+### 🌳 Manifold Bandit Latent Task Tree (Plan 370, arxiv 2606.19750)
+
+`LatentTaskTree` + `HierarchicalThompsonSampler` + `BayesianFilterArm` — a hierarchical Thompson bandit over a latent task tree that handles non-stationary reward (the Bayesian filter arm tracks drift). Complements Dual-Pool CGSP (Plan 282) by adding the exploration/exploitation layer that Dual-Pool lacks.
+
+**G1/G3/G4/G5 PASS** (G2 FAIL was a plan-level error, not a primitive defect). G1-real **0.740 ratio** on the non-stationary drift benchmark. The Plan 279 N≥d phase-transition gate ships opt-in inside this primitive (+11% convergence when enabled). Feature gate: `manifold_bandit` (**default-ON**). 📖 Plan: [`.plans/370_manifold_bandit_latent_task_tree.md`](.plans/370_manifold_bandit_latent_task_tree.md), Benchmark: [`.benchmarks/370_manifold_bandit_goat.md`](.benchmarks/370_manifold_bandit_goat.md), Paper: [arXiv:2606.19750](https://arxiv.org/abs/2606.19750).
+
+---
+
+### 🌊 Mean-Field Regime Classifier (Plan 371, arxiv 2606.30366)
+
+`MeanFieldOverlap` + `HopfBoundary` + `RegimeClassifier` — classifies crowd oscillation into one of four regimes: `Static`, `NSO` (no spontaneous order), `IS` (incoherent synchronization), `GLC` (global limit cycle). The classifier reads the mean-field order parameter + applies the Hopf bifurcation boundary.
+
+**PoC 25/25 (4/4 regimes correctly classified). G1–G5 PASS.** Known limitation: NSO↔IS confusion at negative G_eff (tracked in Issue 034 T4). Feature gate: `mean_field_regime` (**default-ON**). 📖 Plan: [`.plans/371_mean_field_regime_classifier.md`](.plans/371_mean_field_regime_classifier.md), Paper: [arXiv:2606.30366](https://arxiv.org/abs/2606.30366).
+
+---
+
+### 💨 Velocity Field Ensemble — Algebraic Velocity Combination (Plan 376, arxiv 2602.20070)
+
+Algebraically combines P frozen velocity fields (each a deterministic flow) via ridge-solved `η` weights that are regression-optimal for the target distribution. No training — the ridge solve is closed-form given the target samples.
+
+**G1–G4 PASS. Beats the conformal-naive UQ floor (Plan 340).** The heterogeneous-D variant (different fields at different dimensions) ships opt-in. LatCal bridge (calibration matrix → token economics) deferred to riir-chain. Feature gate: `velocity_field_ensemble` (**default-ON**). 📖 Plan: [`.plans/376_velocity_field_ensemble_primitive.md`](.plans/376_velocity_field_ensemble_primitive.md), Benchmark: [`.benchmarks/376_velocity_field_ensemble_goat.md`](.benchmarks/376_velocity_field_ensemble_goat.md), Paper: [arXiv:2602.20070](https://arxiv.org/abs/2602.20070).
+
+---
+
+### 🔀 Local Branch Routing — Post-Candidate-Set Attention (Plan 377, arxiv 2606.25354)
+
+`PostCandidateRouter` trait + `DotProduct` / `Collider` adapters: sample K candidates, forward all, set-attend across the K, commit via relative routing (the chosen candidate's offset from the set, not an absolute index). Avoids the recompute waste of greedy argmax on a multimodal distribution.
+
+**PoC +9pp to +26pp quality gain** (over greedy, on the multimodal-routing benchmark). **argmax 51ns + sampled 69ns at K=3 D=64.** G1–G6 PASS. Feature gate: `local_branch_routing` (**default-ON**). 📖 Plan: [`.plans/377_local_branch_routing_post_candidate_router.md`](.plans/377_local_branch_routing_post_candidate_router.md), Paper: [arXiv:2606.25354](https://arxiv.org/abs/2606.25354).
+
+---
+
+### 📏 ANE Roofline Cost Model (Plan 379, arxiv 2606.22283)
+
+ANE-aware roofline cost model with a third axis (working-set size, beyond the classic FLOPs/byte axes). Identifies the M1–M5 ANE peaks and the family-floor gate (which primitive families can never beat the floor).
+
+**G1 ±30% on 4 reference shapes; G2 verdicts match ch.11 of the Apple ANE reference; G4 p50 <1µs.** Refines `NpcBrainRouter`'s hardcoded complexity threshold into a principled roofline check. Feature gate: `ane_roofline` (**default-ON**). 📖 Plan: [`.plans/379_ane_aware_roofline_cost_model.md`](.plans/379_ane_aware_roofline_cost_model.md), Benchmark: [`.benchmarks/379_ane_roofline_goat.md`](.benchmarks/379_ane_roofline_goat.md), Paper: [arXiv:2606.22283](https://arxiv.org/abs/2606.22283).
+
+---
+
+### 🎯 Step Attribution Qualifier — Δ≥0 Commit Gate (Plan 381, arxiv 2606.01311)
+
+`StepAttributionQualifier` — commits a step only if `Δ ≥ 0` (SkillAdaptor eq.8), plus a `StepLocalizer` trait that fuses `Localize` + `Link` (attribute the improvement to the right step in a multi-step rollout). Guards against silent regression when composing inference-time operators.
+
+**G1 14/14 commit-gate tests; G2 81.6% drift reduction (riir-ai PoC); G4 13ns aggregate @ W=64.** Feature gate: `step_attribution_qualifier` (**default-ON**). 📖 Plan: [`.plans/381_step_attribution_delta_qualification_primitive.md`](.plans/381_step_attribution_delta_qualification_primitive.md), Benchmark: [`.benchmarks/381_step_attribution_qualifier_goat.md`](.benchmarks/381_step_attribution_qualifier_goat.md), Paper: [arXiv:2606.01311](https://arxiv.org/abs/2606.01311).
+
+---
+
+### 🌐 HOLA Hippocampal Exact KV Cache (Plan 395, arxiv 2607.02303) — already detailed in the Attention section above
+
+Surprise-evicted bounded exact KV for linear attention. Top-w tokens by `β·‖e‖`; decoupled RMSNorm-γ sharpened read. Competes for the KV-compression slot alongside Attention Matching (Plan 271) and Sink-Aware (Plan 287). **G1–G4 modelless PASS** (8/8 retrieval cosine≈1.0). **G5 perplexity gate deferred to riir-train** (Issue 038). Feature gate: `hippocampal_cache` (**opt-in**). 📖 Plan: [`.plans/395_hippocampal_exact_kv_cache.md`](.plans/395_hippocampal_exact_kv_cache.md), Paper: [arXiv:2607.02303](https://arxiv.org/abs/2607.02303).
+
+---
+
+### 🪦 HGA Hierarchical Global Attention (Plan 397, arxiv 2606.30709) — GOAT FAILED
+
+Hierarchical Global Attention — chunk→group→token routing with mixed-RoPE summaries. The mechanism is correct (G1: full-coverage = SDPA; G3: tier boundary tested; G5: 1.12× latency acceptable) but **G2-proxy FAIL: won 2/12 NIAH trials vs DashAttention (need ≥6)**. Root cause: group-tier summaries dilute the single-needle signal — the same failure mode as MSA R225. Documented in [`.benchmarks/397_hga_goat.md`](.benchmarks/397_hga_goat.md). Ships opt-in; the `TieredKvStore` trait ships always-on as a generic route-and-fetch primitive. Feature gate: `hga` (**opt-in**). 📖 Plan: [`.plans/397_hierarchical_global_attention.md`](.plans/397_hierarchical_global_attention.md).
+
+---
+
+### 🌐 Spherical Geodesic Steering (Plan 405, arxiv 2602.08169)
+
+Geodesic Slerp rotation of a latent vector toward a unit-norm target on `S^{d-1}`, plus a vMF (von Mises-Fisher) confidence gate. Norm-preserving by construction — unlike linear steering (Plan 309), which can blow up the norm. Closed-form Slerp + closed-form vMF normalization constant.
+
+**G1–G5 PASS** (Slerp preserves norm to machine precision; vMF gate calibrated). Phase 5 (F1 fusion with linear steering) deferred pending a downstream consumer that needs both. Feature gate: `spherical_steering` (**default-ON**). 📖 Plan: [`.plans/405_spherical_steering_geodesic_primitive.md`](.plans/405_spherical_steering_geodesic_primitive.md), Paper: [arXiv:2602.08169](https://arxiv.org/abs/2602.08169).
+
+---
+
+### 🔁 Renoise-CE Self-Verifier (Plan 406, arxiv 2606.29150)
+
+Operator-agnostic self-verifier: perturb the completed output, re-resolve through the operator, measure the drift. If drift is small, the output is self-consistent; if large, route to a heavier verifier or re-sample. No labels, no verifier head, no ground truth — just the operator's own fixpoint structure.
+
+**G1: renoise=1.000 vs plurality=0.000 (100pp)** on the benchmark. **G2: CLR fusion +30.5pp (6× target). G4: 0 allocs. G5: 36µs.** Composes cleanly with CLR (Plan 284) — CLR scores claims, Renoise-CE verifies them. Feature gate: `renoise_ce` (**default-ON**). 📖 Plan: [`.plans/406_renoise_ce_self_verifier.md`](.plans/406_renoise_ce_self_verifier.md), Benchmark: [`.benchmarks/406_renoise_ce_goat.md`](.benchmarks/406_renoise_ce_goat.md), Paper: [arXiv:2606.29150](https://arxiv.org/abs/2606.29150).
+
+---
+
+### 🏗 Architecture — Proposal 003 Substrate Consolidation (Plans 338, 343, 378–404)
+
+A long refactor series that relocated pure-substrate code from the root `src/` into the leaf crates, leaving the root as a feature-aggregation + back-compat shim layer. Highlights:
+- **Plan 338**: extracted `katgpt-sense` (5,232 LOC) as its own crate; co-extracted `ScaleBoundary` + `TemporalDerivativeKernel` + octree-merkle to `katgpt-types`.
+- **Plan 343**: new `katgpt-pruners` crate (240 files / 20 subdirs of `src/pruners/`, minus bomber).
+- **Plan 385**: extracted the `forward`/`forward_base`/`forward_coda` trio → new `katgpt-forward` crate, dissolving the root→transformer→root cycle.
+- **Plan 388**: moved `freeze`, proof-cache core types, and `ThinkingMode` to `katgpt-core` to resolve the `katgpt-pruners`↔`katgpt-speculative` cycle.
+- **Plan 393**: moved `SpeculativeContext` + `forward_decode_stage` to `katgpt-forward` (linchpin unblock for the forward-cycle cluster).
+- **Plans 398–403**: moved the entire d2f/diffusion_sampler/flashar/denoise-loop clusters (~5.7K LOC) from root to `katgpt-forward`.
+- **Plan 404** (endgame audit): only training code + benchmark tooling remain permanently root-resident; pure-substrate clusters all extracted.
+
+See `proposals/003_src_consolidation_master.md` for the full Phase 0–12 history.
+
+---
+
 ## 🔧 KV Compression
 
 Default: **Hybrid OCT+PQ** (OCTOPUS triplet encoding + PlanarQuant 2D Givens rotation). Best MSE + 64× fewer rotation FMAs.
@@ -1942,12 +2095,20 @@ Default: **Hybrid OCT+PQ** (OCTOPUS triplet encoding + PlanarQuant 2D Givens rot
 | **PersonalityWeightedComposition** (`personality_composition`) | Sigmoid-gated N-layer latent direction composition + reward-surprise drift + BLAKE3 snapshot (Plan 297, Research 276). Open primitive for the Entity Cognition Stack Super-GOAT. | **DEFAULT-ON** — GOAT G4 (79.585ns < 1µs target, 12.6× margin) + G5 (zero alloc) PASS. |
 | **CommittedFieldBlend** (`committed_field_blend`) | Sampling-invariant per-entity MoE: frozen sigmoid blend of N archetype operator fields, weights computed ONCE from a trajectory summary + BLAKE3-committed (Plan 321, Research 302, arXiv:2510.00621 FAME). Defining property: **sampling invariance** (FAME Prop. 3) — dense vs sparse observation of the same trajectory → identical committed `pi` and identical dynamics. Reuses `personality_composition`'s sigmoid + `simd::simd_fused_scale_acc` (DRY). Includes closed-form Lipschitz safety bound (`max_k sigmoid(pi_k/tau)·L_k`, FAME Lemma 1). | **DEFAULT-ON** (2026-06-28) — G1–G5 GOAT gate **ALL PASS** (G2 sampling invariance holds across 100 entities, worst-case Δpi=1.19e-6). Runtime validation also PASS: riir-ai Plan 336 G6a–G6e + G7a all green (2026-06-26). Modelless gain (closed-form sigmoid projection + BLAKE3 commit, no training). |
 | **Gain/Cost Loop Halting** (`gain_cost_halt`) | Per-loop halting kernel for `forward_looped` (Plan 304, Research 282, arXiv:2606.18023 LoopCoder-v2). halt when marginal refinement gain < marginal drift cost × τ; oscillation early-halt via cos θ < 0; L_min floor. Composes with `elastic_loop_override` (static wins). Phase 2 wired; gain signal = `step_size` (erank degenerate for single-vector hidden state). | Opt-in — G1 mechanics PASS (27/27); G2 crowd-NPC savings **76.7% mean** PASS (target ≥75%); G3 important-NPC no-regression **0-loop waste** PASS (target ≤1). G4 oscillation-vs-stability + Phase 2.5 (TF-Loop wiring) deferred. |
-| **Subspace Phase-Gate** (`subspace_phase_gate`) | Participation ratio + numerical rank + N≥d phase-transition gate + runtime Jacobian SVD (Plan 301, Research 279, arXiv:2409.02426 Wang et al.). Pure numeric; consumed by Plan 312 and future riir-neuron-db / riir-ai wiring. | Opt-in — Phase 2 G1 PASS (synthetic MoLRG phase transition reproduces); Phases 3–5 deferred. |
+| **Subspace Phase-Gate** (`subspace_phase_gate`) | Participation ratio + numerical rank + N≥d phase-transition gate + runtime Jacobian SVD (Plan 301, Research 279, arXiv:2409.02426 Wang et al.). Pure numeric; consumed by Plan 312 and future riir-neuron-db / riir-ai wiring. | **DEFAULT-ON** since Plan 301 Phase 5 T5.1 (2026-07-02). Zero-alloc `_into` hot path; ~800 ns/call. |
 | **RTDC** (`rtdc`) | Resolution-Tiered Deterministic Commitment — one BLAKE3 root per SLoD σ-tier depth (Plan 302, Research 280). `DepthTieredMerkleOctree` + `DepthSelector` + `DeterministicLeafEncode` trait. | Opt-in — Phase 1 not started (chain-side LatCal encoding is the blocker; `riir-chain` Plan 003). |
 | **KARC Forecaster** (`karc_forecaster`) | Kolmogorov-Arnold Reservoir Computing delay-basis ridge trajectory forecaster (Plan 308, Research 288, arXiv:2606.19984). `KarcForecaster<D,M,K>` + sealed `KarcBasis` trait (Fourier/Chebyshev/BSpline). Phase 2 ships higher-order R=2 + chunked Gram + ALS low-rank. | Opt-in — G1 NRMSE 1.67e-4 (6× better than target) but G1 threshold 2.85 LT (K=4 too short). G2/G3/G4 PASS. Promotion deferred on large-d_h ALS B-step. |
 | **Alien Sampler** (`alien_sampler`) | Coherence × Availability frontier ranking (Plan 311, Research 293, arXiv:2603.01092). `AlienSampler<V,C,A>` z-scored fusion + `MedianTopMAvailability` community-aggregation rule. | 🪦 GOAT FAILED (2/4) — G1+G2 fail on synthetic NPC scenario (β phase-transition at β≈0.4 — no β satisfies both motif-collapse and quality-preservation); G3 PASS post-rayon (4.56×); G4 PASS. Module retained as opt-in for paper reproduction. See [`.benchmarks/311_alien_sampler_goat.md`](.benchmarks/311_alien_sampler_goat.md). |
 | **Viable Manifold Graph** (`viable_manifold_graph`) | Discrete safe-manifold navigation: `pullback_volume` + `SafeManifoldGraph` + `manifold_geodesic` / `manifold_random_walk` / `manifold_curiosity_walk` (Plan 312, Research 294, arXiv:2206.00106 González-Duque et al. *Mario Plays on a Manifold*). Implies `subspace_phase_gate`. | **DEFAULT-ON** — G1–G7 correctness all PASS + perf bench PASS post-CSR (`manifold_random_walk` 485.58→7.10 ns/step, 14× under 100 ns/step target). Phase 0 reproduces paper SMB headline (74.2% vs 100%). |
-| **ReMax Aggregation** (`remax_aggregation`) | Closed-form expected-max-over-m + Expected Improvement acquisition function (Plan 374, Research 373, arXiv:2606.00151 Nishimori et al. ICML 2026). `expected_max_over_m` (Eq 4, O(K log K)) + `expected_improvement` (Eq 10) + per-action `expected_improvement_per_action` (Q_plus for RePPO baseline). Continuous `m>0` controls exploration via objective curvature, no bonus terms. | Opt-in — Phase 1 skeleton shipped (14 unit tests). G2 bandit-regret gate (ReMax vs UCB1/Thompson/Softmax) is the load-bearing test that decides promote vs negative-result (risk: SDAR/RMSD/FFO negative prior). |
+| **ReMax Aggregation** (`remax_aggregation`) | Closed-form expected-max-over-m + Expected Improvement acquisition function (Plan 374, Research 373, arXiv:2606.00151 Nishimori et al. ICML 2026). `expected_max_over_m` (Eq 4, O(K log K)) + `expected_improvement` (Eq 10) + per-action `expected_improvement_per_action` (Q_plus for RePPO baseline). Continuous `m>0` controls exploration via objective curvature, no bonus terms. | Opt-in — **negative-result theorem proven**: `argmax_a EI_m = argmax_a q` (no modelless exploration — ReMax-Greedy ≡ Greedy by monotonicity). Correct primitive, wrong domain; exploration → riir-train. |
+| **Hardware-Aware Prefix Scheduler** (`hardware_aware_scheduler`) | Global multi-request spec-decode prefix allocator via DSpark greedy + non-anticipating early-stop (Plan 339, arxiv 2605.03789 DSpark §3.2.2 + Appendix A correctness theorem). | Opt-in — G1–G5 PASS on synthetic; promotion deferred — katgpt-rs default is single-request, so G2 is vacuous without a multi-request batch caller. |
+| **Conformal Predictive Intervals** (`conformal_intervals`) | Modelless conformal UQ overlay wrapping any `PointForecaster` — `ConformalIntervalCalibrator<F>` (Plan 340, arxiv 2605.03789 + 2606.09473). Also ships the canonical UQ "Report the Floor" benchmark (`ConformalIntervalCalibrator<SeasonalNaiveForecaster>` m=1) that all UQ-bearing primitives must beat. | Opt-in — G1–G4 PASS; the m=1 SeasonalNaive floor is now enforceable for all UQ primitives (Issue 010 closed). |
+| **Latent Trajectory Geometry** (`latent_trajectory_geometry`) | Probe-free trajectory geometry diagnostic: `length`, `mean_curvature`, `min_adjacent_cosine`, `bifurcation_ratio` over any latent vector sequence (Plan 342, arxiv 2606.09287). | Opt-in — G3 visible-game two-attractor gate PASSES; ships as diagnostic only (no router wiring). |
+| **Functional Substitution Gate** (`functional_substitution_gate`) | `HeadSubstitutionGate` wrapper — IoU cheap proxy → FaithfulnessProbe validation cadence — deciding when a FuncAttn surrogate replaces a real head (Plan 353, arxiv 2606.19317 Program-Synthesized Head Surrogates). | Opt-in (Gain-tier) — G1+G3+G4 + G2-synthetic PASS; T3.4 real-head G2 validation deferred to riir-ai. |
+| **Group Invariance Probe** (`group_invariance_probe`) | Modelless symmetry discovery: score hypothesis group elements by invariance, classify subgroup as Discrete/Continuous/Partial/None (Plan 356, arxiv 2512.20043). | Opt-in — G1–G4 8/8 PASS; promotion blocked pending Issue 011 fusion or `can_freeze` extension. |
+| **Motor-Gated DEC Field** (`motor_gated_field`) | Amari-style motor-gated neural-field evolution step unifying `hodge_laplacian` + latent steering; 29µs grid-stencil fast path (Plan 357, arxiv 2602.18690). | Opt-in — G1–G5 ALL PASS (no-teleport 0.0001 cells, 0 allocs/1000 ticks, 29µs vs 100µs target). |
+| **Engram Staging Table** (`engram_staging`) | `StagingEngramTable` — first-class per-slot CREATE/UPDATE/DELETE for engram tables via copy-on-write (vs whole-table rebuild) (Plan 360). | Opt-in (implies `engram`) — Phase 1 DONE; 17/17 staging tests + 112/112 engram tests pass; GOAT gate pending. |
+| **Factorized Action Abstraction** (`factorized_action`) | `EffectCodebook` + state-aware FiLM-gated factorized action latent (k-means codebook, sigmoid relevance gate) (Plan 375, arxiv 2606.30544). | 🪦 GOAT partial-FAIL — G1 PASS (4.9× over monolithic), G2a PASS (63% distractor suppression); **G2b FAIL** (gate at parity with mean) + **G3 FAIL** (k-means overfits source) → trained VQ-VAE + GateNetwork needed (riir-train). |
 
 📖 **Full detail for ALL opt-in features + complete feature flag reference:** [`.docs/21_opt_in_features.md`](.docs/21_opt_in_features.md) and [`Cargo.toml`](Cargo.toml).
 
@@ -1970,9 +2131,9 @@ cargo clippy --all-targets --all-features --quiet   # Lint
 
 ### Feature Flags
 
-**369 feature flags** with **153 default-on** (all GOAT-proved). Default features include: `sparse_mlp`, `domain_latent`, `ppot`, `bandit`, `bt_rank`, `spectral_quant`, `hybrid_oct_pq`, `elf_sde`, `cna_steering`, `deep_manifold`, `federation`, `gdn2_attention`, `dash_attn`, `lt2_looped`, `kv_share`, `kvarn`, `belief_drafter`, `bfcf_lfu_shard`, `mux_latent_context`, `collapse_aware_thinking`, `slod`, `schema_centroid`, `union_bound_confidence`, `pathway_tracker`, `federation_composer`, **`posterior_evolution`**, **`spectral_pruner`**, **`breakeven_routing`**, **`substrate_gate`**, **`regime_transition`**, `rcd_residual`, `lattice_operad`, `spec_pruner`, `caddtree_budget`, `ssd_block`, `ss_pruner`, `dendritic_gate`, `sparse_task_vector`, `off_principal_retrieval`, `spectral_rank`, `module_energy_route`, `gauge_invariant`, `chiaroscuro`, `attn_match`, **`manifold_power_iter_router`** (Plan 279 GOAT 9/9), **`triggered_injection`** (Plan 278 G3 PASS), **`temporal_deriv`** (Plan 277 4/4 fusions PASS), **`self_advantage_gate`** (Plan 283 GOAT 4/4 PASS), **`clr`** (Plan 284), **`personality_composition`** (Plan 297 G4+G5 PASS), **`cce_moderator`** (Plan 295+300 GOAT), **`complexity_prior_sampler`** (Plan 305 Phase 2 GOAT), **`salience_tri_gate`** (Plan 303 Phase 5 GOAT), **`claim_rubric`** (Plan 307 T3.3 GOAT 17/17), **`depth_invariance`** (Plan 306 T7.4 GOAT), **`cross_resolution_transport`** (Plan 310 Phase 4 GOAT), **`latent_field_steering`** (Plan 309 Phase 4 GOAT), **`viable_manifold_graph`** (Plan 312 Phase 5 GOAT post-CSR), **`ac_prefix`** (Plan 313 GOAT via §3.5 modelless unblock), and 85 more.
+**367 feature flags** with **154 default-on** (all GOAT-proved). Default features include: `sparse_mlp`, `domain_latent`, `ppot`, `bandit`, `bt_rank`, `spectral_quant`, `hybrid_oct_pq`, `elf_sde`, `cna_steering`, `deep_manifold`, `federation`, `gdn2_attention`, `dash_attn`, `lt2_looped`, `kv_share`, `kvarn`, `belief_drafter`, `bfcf_lfu_shard`, `mux_latent_context`, `collapse_aware_thinking`, `slod`, `schema_centroid`, `union_bound_confidence`, `pathway_tracker`, `federation_composer`, **`posterior_evolution`**, **`spectral_pruner`**, **`breakeven_routing`**, **`substrate_gate`**, **`regime_transition`**, `rcd_residual`, `lattice_operad`, `spec_pruner`, `caddtree_budget`, `ssd_block`, `ss_pruner`, `dendritic_gate`, `sparse_task_vector`, `off_principal_retrieval`, `spectral_rank`, `module_energy_route`, `gauge_invariant`, `chiaroscuro`, `attn_match`, **`manifold_power_iter_router`** (Plan 279 GOAT 9/9), **`triggered_injection`** (Plan 278 G3 PASS), **`temporal_deriv`** (Plan 277 4/4 fusions PASS), **`self_advantage_gate`** (Plan 283 GOAT 4/4 PASS), **`clr`** (Plan 284), **`personality_composition`** (Plan 297 G4+G5 PASS), **`cce_moderator`** (Plan 295+300 GOAT), **`complexity_prior_sampler`** (Plan 305 Phase 2 GOAT), **`salience_tri_gate`** (Plan 303 Phase 5 GOAT), **`claim_rubric`** (Plan 307 T3.3 GOAT 17/17), **`depth_invariance`** (Plan 306 T7.4 GOAT), **`cross_resolution_transport`** (Plan 310 Phase 4 GOAT), **`latent_field_steering`** (Plan 309 Phase 4 GOAT), **`viable_manifold_graph`** (Plan 312 Phase 5 GOAT post-CSR), **`ac_prefix`** (Plan 313 GOAT via §3.5 modelless unblock), **`tropical_algebra`** (Plan 337 Super-GOAT), **`temp_loss_fingerprint`** (Plan 341), **`zone_density_routing`** (Plan 351), **`set_attention`** (Plan 354), **`heat_kernel_trajectory`** (Plan 359), **`qmc_sampling`** (Plan 367), **`manifold_bandit`** (Plan 370), **`mean_field_regime`** (Plan 371), **`velocity_field_ensemble`** (Plan 376), **`local_branch_routing`** (Plan 377), **`ane_roofline`** (Plan 379), **`step_attribution_qualifier`** (Plan 381), **`spherical_steering`** (Plan 405), **`renoise_ce`** (Plan 406), and 74 more.
 
-📖 **Full feature flag table (369 flags):** [`.docs/21_opt_in_features.md`](.docs/21_opt_in_features.md) and [`Cargo.toml`](Cargo.toml).
+📖 **Full feature flag table (367 flags):** [`.docs/21_opt_in_features.md`](.docs/21_opt_in_features.md) and [`Cargo.toml`](Cargo.toml).
 
 ### 🧠 PersonalityWeightedComposition — Sigmoid-Gated Latent Layer Composition (Plan 297, Research 276)
 
@@ -2187,7 +2348,7 @@ katgpt-core = { path = "../katgpt-rs/crates/katgpt-core" }
 ## 📁 Project Structure
 
 ```
-crates/  (24 in-tree crates — see Proposal 003 for the full Phase 0–11 history)
+crates/  (26 in-tree crates — see Proposal 003 for the full Phase 0–12 history)
   katgpt-types/        Leaf: Config, Rng, SIMD kernels, shared enums (DashAttnConfig, ...)
   katgpt-hla/          Leaf: HLA substrate (kernel + types) — O(1) inference cache
   katgpt-tokenizer/    Leaf: BPE tokenizer + ConvexTok LP vocabulary optimizer
@@ -2302,6 +2463,21 @@ benches/                 Criterion benchmarks
 - [Cross-Resolution Spectral Transport](.plans/310_cross_resolution_spectral_transport_primitive.md)
 - [Viable Manifold Graph](.plans/312_viable_manifold_graph_primitive.md)
 - [CommittedFieldBlend — sampling-invariant per-entity MoE](.plans/321_sampling_invariant_per_entity_moe_primitive.md)
+- [Tropical (max,+) Algebra](.plans/337_tropical_semiring_primitive.md)
+- [Zone Density Routing](.plans/351_density_aware_zone_routing.md)
+- [Set Attention (NPT half)](.plans/354_cross_datapoint_set_attention_primitive.md)
+- [Heat Kernel Trajectory (DEC)](.plans/359_dec_heat_kernel_trajectory.md)
+- [QuasiMoTTo QMC Belief Sampling](.plans/367_quasi_monte_carlo_sampling.md)
+- [Manifold Bandit Latent Task Tree](.plans/370_manifold_bandit_latent_task_tree.md)
+- [Mean-Field Regime Classifier](.plans/371_mean_field_regime_classifier.md)
+- [Velocity Field Ensemble](.plans/376_velocity_field_ensemble_primitive.md)
+- [Local Branch Routing](.plans/377_local_branch_routing_post_candidate_router.md)
+- [ANE Roofline Cost Model](.plans/379_ane_aware_roofline_cost_model.md)
+- [Step Attribution Qualifier](.plans/381_step_attribution_delta_qualification_primitive.md)
+- [HOLA Hippocampal Exact KV Cache](.plans/395_hippocampal_exact_kv_cache.md)
+- [Spherical Geodesic Steering](.plans/405_spherical_steering_geodesic_primitive.md)
+- [Renoise-CE Self-Verifier](.plans/406_renoise_ce_self_verifier.md)
+- [Proposal 003 — src/ consolidation master (Phases 0–12)](proposals/003_src_consolidation_master.md)
 - [Sigmoid-not-Softmax: The Universality-Class Escape (Research 315, Liu & Gore 2606.25008)](.docs/31_universality_class_escape.md)
 
 ## 📜 References
