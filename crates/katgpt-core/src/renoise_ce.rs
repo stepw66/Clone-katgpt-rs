@@ -250,10 +250,10 @@ where
     O: RenoiseCeProbe,
 {
     (0..n)
-        .filter_map(|_| {
+        .map(|_| {
             let (candidate, _) = proposer.propose();
             let score = renoise_ce_score(operator, &candidate, config, rng);
-            Some((score.drift, candidate))
+            (score.drift, candidate)
         })
         .min_by(|a, b| {
             a.0.partial_cmp(&b.0)
@@ -430,8 +430,8 @@ mod tests {
         };
         let _ = score; // suppress unused
         // The gate logic lives in renoise_ce_score; verify via config.
-        assert!(0.5 < 0.6, "0.5 < 0.6 → accepted");
-        assert!(!(0.5 < 0.5), "0.5 < 0.5 is false → NOT accepted (strict)");
+        // Gate is strict less-than: 0.5 < 0.6 (tau) → accepted;
+        // 0.5 < 0.5 (tau) is false → NOT accepted (strict).
     }
 
     #[test]

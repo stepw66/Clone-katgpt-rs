@@ -66,8 +66,8 @@ fn in_memory_store_append_and_fetch_full() {
 
     // Append 3 chunks (12 tokens total).
     for chunk_idx in 0..3 {
-        let keys: Vec<f32> = (0..c * d).map(|i| (chunk_idx as f32 * 100.0 + i as f32)).collect();
-        let values: Vec<f32> = (0..c * d).map(|i| (chunk_idx as f32 * 200.0 + i as f32)).collect();
+        let keys: Vec<f32> = (0..c * d).map(|i| chunk_idx as f32 * 100.0 + i as f32).collect();
+        let values: Vec<f32> = (0..c * d).map(|i| chunk_idx as f32 * 200.0 + i as f32).collect();
         let positions: Vec<usize> = (0..c).map(|t| chunk_idx * c + t).collect();
         store.append_chunk(&keys, &values, &positions);
     }

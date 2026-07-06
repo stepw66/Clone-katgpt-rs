@@ -320,22 +320,22 @@ fn g1_renoise_ce_beats_plurality_at_99pct_coverage() {
     for _ in 0..N_TRIALS {
         let pool = generate_pool(POOL_SIZE, DIM, 0.99, &mut rng);
         // Renoise-CE
-        if let Some(idx) = renoise_ce_select(&pool, &op, &config, &mut rng) {
-            if is_correct(&pool[idx], epsilon) {
-                renoise_correct += 1;
-            }
+        if let Some(idx) = renoise_ce_select(&pool, &op, &config, &mut rng)
+            && is_correct(&pool[idx], epsilon)
+        {
+            renoise_correct += 1;
         }
         // Plurality
-        if let Some(idx) = plurality_vote_select(&pool) {
-            if is_correct(&pool[idx], epsilon) {
-                plurality_correct += 1;
-            }
+        if let Some(idx) = plurality_vote_select(&pool)
+            && is_correct(&pool[idx], epsilon)
+        {
+            plurality_correct += 1;
         }
         // CLR
-        if let Some(idx) = clr_select(&pool) {
-            if is_correct(&pool[idx], epsilon) {
-                clr_correct += 1;
-            }
+        if let Some(idx) = clr_select(&pool)
+            && is_correct(&pool[idx], epsilon)
+        {
+            clr_correct += 1;
         }
     }
 
@@ -375,15 +375,15 @@ fn g1_renoise_ce_beats_plurality_at_lower_coverage() {
     let mut plurality_correct = 0usize;
     for _ in 0..N_TRIALS {
         let pool = generate_pool(POOL_SIZE, DIM, 0.50, &mut rng);
-        if let Some(idx) = renoise_ce_select(&pool, &op, &config, &mut rng) {
-            if is_correct(&pool[idx], epsilon) {
-                renoise_correct += 1;
-            }
+        if let Some(idx) = renoise_ce_select(&pool, &op, &config, &mut rng)
+            && is_correct(&pool[idx], epsilon)
+        {
+            renoise_correct += 1;
         }
-        if let Some(idx) = plurality_vote_select(&pool) {
-            if is_correct(&pool[idx], epsilon) {
-                plurality_correct += 1;
-            }
+        if let Some(idx) = plurality_vote_select(&pool)
+            && is_correct(&pool[idx], epsilon)
+        {
+            plurality_correct += 1;
         }
     }
     let renoise_acc = renoise_correct as f32 / N_TRIALS as f32;
@@ -410,15 +410,15 @@ fn g2_clr_renoise_fusion_beats_clr_alone() {
     for _ in 0..N_TRIALS {
         // 70% coverage — mid-range where fusion should help most.
         let pool = generate_pool(POOL_SIZE, DIM, 0.70, &mut rng);
-        if let Some(idx) = clr_renoise_fusion_select(&pool, &op, &config, &mut rng) {
-            if is_correct(&pool[idx], epsilon) {
-                fusion_correct += 1;
-            }
+        if let Some(idx) = clr_renoise_fusion_select(&pool, &op, &config, &mut rng)
+            && is_correct(&pool[idx], epsilon)
+        {
+            fusion_correct += 1;
         }
-        if let Some(idx) = clr_select(&pool) {
-            if is_correct(&pool[idx], epsilon) {
-                clr_alone_correct += 1;
-            }
+        if let Some(idx) = clr_select(&pool)
+            && is_correct(&pool[idx], epsilon)
+        {
+            clr_alone_correct += 1;
         }
     }
     let fusion_acc = fusion_correct as f32 / N_TRIALS as f32;
@@ -455,8 +455,8 @@ fn g4_renoise_ce_score_zero_alloc_fixed_array_state() {
         fn re_resolve(&self, state: &Self::State) -> Self::State {
             // F(x) = 0.5 * x — stack-only, no heap.
             let mut out = [0.0f32; 8];
-            for i in 0..8 {
-                out[i] = 0.5 * state.0[i];
+            for (o, x) in out.iter_mut().zip(state.0.iter()) {
+                *o = 0.5 * x;
             }
             ArrayState(out)
         }

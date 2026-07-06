@@ -207,8 +207,8 @@ impl SlerpScratch {
 ///
 /// # Performance
 ///
-/// `O(D)`, zero allocation in steady state. One dot + one norm + one `atan2`
-/// + two `sin` + one `div` for the coefficients, then a 4-wide chunked FMA
+/// `O(D)`, zero allocation in steady state. One dot, one norm, one `atan2`,
+/// two `sin`, one `div` for the coefficients, then a 4-wide chunked FMA
 /// mix loop. See module docs for the latency profile.
 #[inline]
 pub fn slerp_steering_into(
@@ -222,7 +222,7 @@ pub fn slerp_steering_into(
     if mu_t.len() != d || h_out.len() != d || scratch.unit_h.len() != d {
         return Err(SlerpError::ShapeMismatch);
     }
-    if !t.is_finite() || t < 0.0 || t > 1.0 {
+    if !t.is_finite() || !(0.0..=1.0).contains(&t) {
         return Err(SlerpError::InvalidStrength);
     }
 

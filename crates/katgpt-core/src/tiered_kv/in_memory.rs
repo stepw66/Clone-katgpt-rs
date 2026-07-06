@@ -69,7 +69,7 @@ impl<F: Fn(&[f32], &[usize], usize, usize) -> Vec<f32>> InMemoryTieredKvStore<F>
     ) -> Self {
         assert!(chunk_size > 0, "chunk_size must be > 0");
         assert!(
-            chunk_size % group_size == 0,
+            chunk_size.is_multiple_of(group_size),
             "chunk_size ({chunk_size}) must be divisible by group_size ({group_size})"
         );
         let n_groups_per_chunk = chunk_size / group_size;
