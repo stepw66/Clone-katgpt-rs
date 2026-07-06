@@ -1073,7 +1073,10 @@ pub use engram::{
 #[cfg(feature = "product_key_memory")]
 pub mod product_key_memory;
 #[cfg(feature = "product_key_memory")]
-pub use product_key_memory::{D_K_FLOOR, PkQuery, ProductKeyMemory, ScoreFn, SQRT_N_FLOOR};
+pub use product_key_memory::{
+    D_K_FLOOR, PkEntry, PkQuery, PkmScratch, ProductKeyMemory, ScoreFn, SQRT_N_FLOOR, score_dot,
+    score_idw,
+};
 
 // Gain/Cost Loop Halting Primitive — open substrate-agnostic kernel for per-loop
 // halting decisions (Plan 304, Research 282, arXiv:2606.18023, LoopCoder-v2).
