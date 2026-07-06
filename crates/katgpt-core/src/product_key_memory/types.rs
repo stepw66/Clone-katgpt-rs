@@ -49,11 +49,12 @@ pub const D_K_FLOOR: usize = 2;
 /// dot product by default; §A.2 introduces the inverse-distance weighting
 /// (IDW) variant `−log(ε + ‖q − K‖²)` which encourages keys to behave as
 /// cluster centroids (they cannot inflate score by growing magnitude).
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub enum ScoreFn {
     /// Dot-product scoring (paper §2.2 default).
     ///
     /// `score(q, k) = q · k`. Linear, SIMD-friendly, magnitude-sensitive.
+    #[default]
     Dot,
 
     /// Inverse-distance-weighted scoring (paper §A.2).
@@ -68,12 +69,6 @@ pub enum ScoreFn {
         /// Additive epsilon under the log (must be > 0). Default 1e-6.
         epsilon: f32,
     },
-}
-
-impl Default for ScoreFn {
-    fn default() -> Self {
-        ScoreFn::Dot
-    }
 }
 
 impl ScoreFn {
@@ -225,7 +220,7 @@ impl<const SQRT_N: usize, const D_K: usize, const D_V: usize>
     /// monomorphization (caller bug — the const generics are wrong).
     fn assert_dims() {
         assert!(
-            D_K >= D_K_FLOOR && D_K % 2 == 0,
+            D_K >= D_K_FLOOR && D_K.is_multiple_of(2),
             "ProductKeyMemory: D_K must be even and >= {}, got {}",
             D_K_FLOOR,
             D_K

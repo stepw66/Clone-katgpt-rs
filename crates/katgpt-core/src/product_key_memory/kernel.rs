@@ -274,11 +274,11 @@ impl<const SQRT_N: usize, const D_K: usize, const D_V: usize>
     ///    → `scratch.top_1`. O(√N).
     /// 3. Score + heapselect top-`K` from codebook 2 into `scratch.scores_2`
     ///    → `scratch.top_2`. O(√N).
-    /// 4–5. Cartesian product `top_1 × top_2` (K² candidates, additive scores),
+    /// 4. Cartesian product `top_1 × top_2` (K² candidates, additive scores),
     ///    top-`k` into `out`. O(K²).
-    /// 6. Softmax-normalize the k selected scores → weights. (Deviation from
+    /// 5. Softmax-normalize the k selected scores → weights. (Deviation from
     ///    the global sigmoid rule — documented at the top of this file.)
-    /// 7. Write `(flat_index, weight)` into `out[..k]`.
+    /// 6. Write `(flat_index, weight)` into `out[..k]`.
     ///
     /// # Arguments
     ///
