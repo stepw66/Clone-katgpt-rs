@@ -439,9 +439,11 @@ pub fn forward_block_causal_positions(
 
 #[cfg(test)]
 mod tests {
+    #[cfg(feature = "set_diffusion")]
     use super::*;
     #[cfg(feature = "set_diffusion")]
     use crate::forward_set_causal::forward_set_causal_positions;
+    #[cfg(feature = "set_diffusion")]
     use katgpt_types::Rng;
 
     #[cfg(feature = "set_diffusion")]

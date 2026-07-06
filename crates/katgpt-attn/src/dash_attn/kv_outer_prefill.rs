@@ -358,7 +358,9 @@ mod tests {
     #[cfg(feature = "msa_sparse")]
     use crate::dash_attn::msa_distill::MaxPoolBlockScorer;
 
+    #[cfg(feature = "msa_sparse")]
     const HD: usize = 8;
+    #[cfg(feature = "msa_sparse")]
     const BS: usize = 4;
 
     #[cfg(feature = "msa_sparse")]

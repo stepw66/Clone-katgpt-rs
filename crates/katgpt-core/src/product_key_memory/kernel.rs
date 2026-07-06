@@ -448,8 +448,8 @@ mod tests {
         // codebook-2 row (a known high-scoring query for the Dot mode).
         let mut q = [0.0f32; D_K];
         let half = D_K / 2;
-        q[..half].copy_from_slice(&table.keys_1_row(0));
-        q[half..].copy_from_slice(&table.keys_2_row(0));
+        q[..half].copy_from_slice(table.keys_1_row(0));
+        q[half..].copy_from_slice(table.keys_2_row(0));
 
         let mut scratch: PkmScratch<SQRT_N, K> = PkmScratch::new();
         let mut out = [(0usize, 0.0f32); OUT_K];

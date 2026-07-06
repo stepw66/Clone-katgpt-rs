@@ -118,8 +118,13 @@ pub fn block_select_entmax(block_scores: &[f32], cfg: &FlashPrefillConfig) -> Ve
 #[cfg(test)]
 mod tests {
     use super::*;
+    // Only used by the `rest`-gated bridge test + helper; gate the imports to
+    // match so they don't read as unused under default features.
+    #[cfg(feature = "rest")]
     use crate::transformer::TransformerWeights;
+    #[cfg(feature = "rest")]
     use crate::types::Rng;
+    #[cfg(feature = "rest")]
     use crate::types::Config;
 
     // Only used by the `rest`-gated bridge test; gate the helper to match so it

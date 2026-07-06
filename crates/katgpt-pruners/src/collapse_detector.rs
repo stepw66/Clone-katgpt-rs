@@ -41,10 +41,11 @@ use katgpt_core::types::ThinkingBudget;
 use katgpt_core::temporal_deriv::TemporalDerivativeKernel;
 
 use crate::freeze::{load_frozen, save_frozen};
-// ThinkingMode is the canonical definition at `crate::ThinkingMode` (lib.rs).
-// Previously duplicated here to break a dependency cycle with the main crate's
-// `speculative::thinking_controller`; the cycle is resolved by defining the
-// shared tag in this (lower) crate and having the root crate re-export it.
+// ThinkingMode is canonically defined in `katgpt_core::thinking_mode` and
+// re-exported from `crate::ThinkingMode` (lib.rs). Previously this crate had
+// its own duplicate enum, which caused nominal type mismatches with
+// `katgpt_speculative::thinking_controller` (Plan 388 Phase 3 relocated the
+// canonical definition to katgpt-core; this crate now re-exports it).
 use crate::ThinkingMode;
 
 // ── Frozen persistence struct (16 bytes, repr(C)) ─────────────────────
