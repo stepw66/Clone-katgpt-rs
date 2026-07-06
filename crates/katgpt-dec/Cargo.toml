@@ -50,6 +50,18 @@ publish = false  # only katgpt-core ships to crates.io
 # for the ReLU-gated source term (`heat_kernel_trajectory_nonlinear`).
 # Extends the linear path to handle the ReLU nonlinearity in motor-gated
 # field evolution. 13 unit tests pass; T5.2 formal GOAT bench still deferred.
+#
+# `sheaf_admm` (Plan 407, Research 384) — DEFAULT-OFF (Phase 1 skeleton,
+# 2026-07-07): the modelless one-step Sheaf-ADMM coordination primitive
+# (`sheaf_admm_step` / `sheaf_admm_step_into`) distilled from Seely et al.,
+# "Learning Multi-Agent Coordination via Sheaf-ADMM" (arXiv:2605.31005,
+# ICML 2026). Gives each vertex a primal/consensus/dual triple and runs one
+# ADMM iteration over a cellular sheaf (x-update proximal solve → z-update
+# sheaf diffusion via explicit restriction maps → u-update dual
+# accumulation). Builds on the DEC substrate (`graph_laplacian` identity
+# reduction); no new deps. Stays opt-in until the Plan 407 Phase 2 GOAT gate
+# (G1–G6) passes; promotion to default-on is gated on all six gates.
 default = ["heat_kernel_trajectory"]
 motor_gated_field = []
 heat_kernel_trajectory = []
+sheaf_admm = []

@@ -4,7 +4,7 @@
 **Research:** [katgpt-rs/.research/384](../.research/384_Sheaf_ADMM_Multi_Agent_Coordination.md)
 **Source paper:** [arXiv:2605.31005](https://arxiv.org/abs/2605.31005) — Seely, Cupiał, Jones, "Learning Multi-Agent Coordination via Sheaf-ADMM", ICML 2026
 **Target:** `katgpt-rs/crates/katgpt-dec/src/sheaf_admm.rs` (new module) + Cargo feature `sheaf_admm`
-**Status:** Active — Phase 1 (skeleton) pending
+**Status:** Active — Phase 1 (skeleton) COMPLETE — ready for Phase 2 GOAT gate
 
 ---
 
@@ -18,20 +18,20 @@ The z-update IS sheaf diffusion, which IS gradient descent on the Hodge energy `
 
 ### Tasks
 
-- [ ] **T1.1** Add `sheaf_admm` feature to `katgpt-rs/crates/katgpt-dec/Cargo.toml` (default-off until G1–G6 pass).
-- [ ] **T1.2** Create `katgpt-rs/crates/katgpt-dec/src/sheaf_admm.rs` with the public API surface:
+- [x] **T1.1** Add `sheaf_admm` feature to `katgpt-rs/crates/katgpt-dec/Cargo.toml` (default-off until G1–G6 pass).
+- [x] **T1.2** Create `katgpt-rs/crates/katgpt-dec/src/sheaf_admm.rs` with the public API surface:
   - `pub struct SheafMaps { d_e: usize, d_v: usize, maps: Vec<[MatrixDimDExDV; 2]> }` — per-edge restriction map pair `(F_{i→e}, F_{j→e})`. Use fixed-size `[[f32; d_v]; d_e]` when `d_e` and `d_v` are bounded at construction (generic consts) — fall back to `Vec<f32>` row-major for runtime-flex dims.
   - `pub enum LocalObjective { DiagonalQuadratic { diag_q: Vec<f32>, q: Vec<f32> }, DiagonalQuadL1 { diag_q: Vec<f32>, q: Vec<f32>, lambda: Vec<f32> } }` — closed-form proximal solvers per paper Appendix A.
   - `pub struct AdmmScratch { ... }` — pre-allocated buffers for sheaf diffusion matvec + temporary cochains.
   - `pub fn sheaf_admm_step(cx, maps, primal_x, consensus_z, dual_u, objective, rho, eta, diffusion_steps, scratch)` — one ADMM iteration, in-place.
   - `pub fn sheaf_admm_step_into(...)` — variant taking pre-sized output buffers (zero-alloc contract).
-- [ ] **T1.3** Implement x-update (closed-form diagonal quadratic): for each vertex i, `x_i = (Q_i + ρI)^{-1} (ρ(z_i - u_i) - q_i)` — elementwise when Q_i is diagonal. Soft-thresholding extension for L1 variant (paper eq. 17). SIMD-vectorize over the d_v axis.
-- [ ] **T1.4** Implement z-update as `T` sheaf-diffusion steps:
+- [x] **T1.3** Implement x-update (closed-form diagonal quadratic): for each vertex i, `x_i = (Q_i + ρI)^{-1} (ρ(z_i - u_i) - q_i)` — elementwise when Q_i is diagonal. Soft-thresholding extension for L1 variant (paper eq. 17). SIMD-vectorize over the d_v axis.
+- [x] **T1.4** Implement z-update as `T` sheaf-diffusion steps:
   - `for t in 0..T { z -= eta * sheaf_laplacian_via_maps(cx, maps, z, scratch); }` where `sheaf_laplacian_via_maps` computes `F^T F z` using the per-edge restriction maps. **This is NOT the same as `hodge_laplacian`** (which uses the cell complex's identity-incidence structure); it uses the explicit restriction maps. Document the relationship: when `F_{i→e}` is the coboundary incidence entry, `sheaf_laplacian_via_maps` reduces to `hodge_laplacian`.
   - Note: for identity restriction maps (homogeneous consensus), we can delegate directly to `hodge_laplacian` as a fast path. Reserve the explicit-maps path for heterogeneous consensus.
-- [ ] **T1.5** Implement u-update: `u_i += x_i - z_i` (vector add). Trivial, but profile to confirm it's not a bottleneck.
-- [ ] **T1.6** Identity restriction-map constructor: `SheafMaps::identity(cx, d_v, d_e)` — `F_{i→e} = [I_{d_e}; 0_{d_e × (d_v - d_e)}]` for all edges. The modelless floor.
-- [ ] **T1.7** Selector restriction-map constructor: `SheafMaps::selector(cx, d_v, dim_indices: &[usize])` — picks a fixed subset of dims per edge. Deterministic, derived from caller-supplied indices (runtime caller picks which dims; this primitive just builds the matrix).
+- [x] **T1.5** Implement u-update: `u_i += x_i - z_i` (vector add). Trivial, but profile to confirm it's not a bottleneck.
+- [x] **T1.6** Identity restriction-map constructor: `SheafMaps::identity(cx, d_v, d_e)` — `F_{i→e} = [I_{d_e}; 0_{d_e × (d_v - d_e)}]` for all edges. The modelless floor.
+- [x] **T1.7** Selector restriction-map constructor: `SheafMaps::selector(cx, d_v, dim_indices: &[usize])` — picks a fixed subset of dims per edge. Deterministic, derived from caller-supplied indices (runtime caller picks which dims; this primitive just builds the matrix).
 
 ## Phase 2 — GOAT Gate (G1–G6)
 

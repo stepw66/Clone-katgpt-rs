@@ -64,6 +64,8 @@ pub mod krylov;
 #[cfg(feature = "heat_kernel_trajectory")]
 pub mod nonlinear_heat_kernel;
 pub mod operators;
+#[cfg(feature = "sheaf_admm")]
+pub mod sheaf_admm;
 pub mod simd;
 pub mod stokes_calculus;
 pub mod types;
@@ -110,6 +112,13 @@ pub use nonlinear_heat_kernel::{
 #[cfg(feature = "heat_kernel_trajectory")]
 pub use bom_heat_kernel::{
     heat_kernel_trajectory_bom, heat_kernel_trajectory_bom_into, near_harmonic_indices,
+};
+
+// Plan 407 — Sheaf-ADMM coordination primitive (modelless, opt-in until
+// the Phase 2 GOAT gate G1–G6 passes).
+#[cfg(feature = "sheaf_admm")]
+pub use sheaf_admm::{
+    AdmmScratch, LocalObjective, SheafMaps, sheaf_admm_step, sheaf_admm_step_into,
 };
 
 pub use types::{CellComplex, CoboundaryIndex, CochainField, MAX_RANK};
