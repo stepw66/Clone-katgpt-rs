@@ -138,21 +138,23 @@ relation whose true direction drifts at a known rate. Measure:
       7 drift regimes × 8 episodes × 3 competitors. Verdict: CONFIRM 7/7.
 - [x] **T4** — Based on T3 outcome: confirm (→ plan) or refute (→ PoC
       addendum update here + one-line cross-ref in Research 377).
-      **CONFIRM with caveat (see PoC Addendum below).** Antithetic-pair wins
-      on mean recovery error in 7/7 regimes. Latency: 179 ns/tick ≈ coherence's
-      180 ns/tick (the 2× forward-pass-cost concern did NOT materialize — both
-      gates do 3 score calls). Caveat: the distilled CoherenceTriggered gate
-      underperforms the real `ReestimationScheduler` (it barely fires in
-      slow-drift and barely recovers in moderate-drift), so the quality win is
-      partly "antithetic beats a weak baseline." A follow-up PoC against the
-      real `ReestimationScheduler` (or a stronger least-squares refit) is needed
-      before opening a katgpt-rs plan.
-- [ ] **T5** — If T4 confirms, run the modelless unblock protocol §3.5 check
+      **Initial verdict CONFIRM-with-caveat revised to TIER DOWN after the
+      strengthened follow-up PoC (see Strengthened PoC Addendum below).** The
+      initial 7/7 CONFIRM was against a weak scalar-score finite-difference
+      distillation. Adding `CoherenceTriggeredDirectObs` (direct vector obs +
+      tracking-appropriate coherence metric) flipped the verdict to 3/7 antithetic
+      wins, 4/7 direct-obs wins. Antithetic-pair is NOT a universal GOAT — it
+      wins only in slow-drift and scalar-score-only regimes. Do NOT promote to
+      default; keep as opt-in research note.
+- [x] **T5** — If T4 confirms, run the modelless unblock protocol §3.5 check
       explicitly: this is a latent-direction update (constraint #4), NOT a
       weight mutation — confirm no `M ← M + ...` step anywhere.
-      **PENDING T4 follow-up.** The antithetic-pair update is `d += sign(s⁺−s⁻)·δ·lr`
+      **DONE.** The antithetic-pair update is `d += sign(s⁺−s⁻)·δ·lr`
       (latent direction only, no weight mutation) — constraint #4 is satisfied by
-      construction. Will confirm explicitly when the plan opens.
+      construction, no `M ← M + ...` step anywhere. The §3.5 modelless-unblock
+      check PASSES. However, the strengthened PoC (T4 follow-up) shows the GOAT
+      gate FAILS in 4/7 regimes — the primitive stays opt-in research note, not
+      a promoted default. See Strengthened PoC Addendum for details.
 
 ## Non-tasks (do NOT do)
 
@@ -231,6 +233,111 @@ real one).**
 
 The PoC stays as a permanent regression check in `riir-poc` per §3.6.
 
+## Strengthened PoC Addendum (2026-07-06, follow-up)
+
+**Verdict revised: TIER DOWN — antithetic-pair is NOT a universal GOAT.**
+
+### What changed
+
+The follow-up added a fourth competitor: `CoherenceTriggeredDirectObs` — a
+coherence gate with **direct vector observations** (the production access
+pattern), using a **tracking-appropriate coherence metric** (cosine between
+current estimate and buffer mean) rather than the production displacement-
+alignment metric (which is not applicable to absolute-direction tracking).
+
+A close reading of the production `ReestimationScheduler` code revealed that
+the prior session's caveat was based on a **misreading**: the latent-functor
+re-estimation path uses **mean displacement** refit
+(`f = (1/N) Σ (target_k − source_k)`, see `extract_functor_into`), NOT a
+Gram-matrix least-squares refit. The Gram-matrix-LSQ pattern is KARC's
+forecasting path (`fit_ridge`), not the latent functor's. The production
+coherence trigger (`entry.coherence < tau_reest`) checks the STORED coherence
+from the last fit — it detects "last fit was poor", not active drift. This is
+fundamentally a fit-quality monitor, not a drift tracker.
+
+The strengthened distillation gives the coherence gate the richest possible
+access pattern (direct noisy direction observations, D numbers per tick vs
+antithetic-pair's 2 scalar scores) and a tracking-optimized coherence metric.
+
+### Full verdict table (4 competitors, 7 regimes, 8 episodes each)
+
+| Regime | Frozen | Coh (scalar) | Coh (direct-obs) | Antithetic | Winner (direct-obs vs anti) |
+|---|---|---|---|---|---|
+| slow ω=0.005, no noise | 0.2063 | 0.2063 | 0.2063 (never fires) | 0.0032 | **Antithetic** |
+| slow ω=0.005, low noise | 0.2063 | 0.2063 | 0.2063 (never fires) | 0.0183 | **Antithetic** |
+| moderate ω=0.02, no noise | 1.5273 | 1.5206 | 0.4870 | 0.4515 | Antithetic (marginal) |
+| moderate ω=0.02, low noise | 1.5273 | 1.5202 | 0.4882 | 0.6014 | **Direct-Obs** |
+| moderate ω=0.02, high noise | 1.5273 | 1.5200 | 0.4885 | 1.1661 | **Direct-Obs** |
+| fast ω=0.05, low noise | 1.1511 | 1.1523 | 0.9629 | 1.0563 | **Direct-Obs** |
+| fast ω=0.05, high noise | 1.1511 | 1.1523 | 0.9603 | 1.1088 | **Direct-Obs** |
+
+### Verdict tally
+
+- Antithetic beats CoherenceTriggered (scalar score): **7/7** (unchanged)
+- Antithetic beats CoherenceDirectObs (direct vec): **3/7**
+- CoherenceDirectObs beats Antithetic: **4/7**
+
+### Latency (criterion, release, CPU)
+
+- Frozen: 1.87 ns (no-op)
+- CoherenceTriggered (scalar score): 167.55 ns (3 score calls + finite-diff probe)
+- CoherenceTriggeredDirectObs (vec): 122.74 ns (no score calls — just buffer mean)
+- AntitheticPair: 159.71 ns (2 score calls + sign update)
+
+The direct-obs gate is cheaper per-tick than antithetic-pair because it doesn't
+sample Gaussian perturbations or call the score kernel — but this isn't a fair
+latency comparison because the direct-obs gate's real cost is in the encoder
+that produces the observations, which is external to the gate.
+
+### Why the direct-obs coherence gate wins in moderate/fast/high-noise regimes
+
+1. **Buffer-mean noise robustness.** The direct-obs gate averages D×OBS_CAPACITY
+   = 8×32 = 256 noisy coordinates per refit. The antithetic-pair gate's ternary
+   signal from 2 score calls per tick is inherently noisier — at high noise
+   (0.1), the sign(s⁺−s⁻) flips randomly, producing erratic updates.
+2. **Buffer lag dominates over per-tick tracking error at moderate/fast drift.**
+   The buffer mean lags behind truth by ~(OBS_CAPACITY/2)·ω radians, but this
+   lag is bounded and predictable. The antithetic-pair gate's per-tick updates
+   have zero lag but higher variance — at moderate drift, variance dominates.
+
+### Why antithetic-pair wins in slow-drift regimes
+
+1. **The coherence gate doesn't fire.** With slow drift (ω=0.005), the buffer
+   mean stays close to the current estimate (both are near the slowly-rotating
+   truth), so coherence stays above `tau_reest=0.4` and the gate never refits.
+   The initial estimate stays stale, accumulating error linearly.
+2. **Antithetic-pair tracks continuously.** Per-tick updates with zero lag mean
+   the estimate stays close to truth even for very slow drift.
+
+### Honest verdict
+
+**Antithetic-pair is NOT a universal GOAT for latent-direction tracking.** It
+wins only in two niche regimes:
+1. **Slow drift** (where coherence gates don't fire — antithetic-pair's
+   continuous tracking is the only option among the competitors).
+2. **Scalar-score-only access patterns** (where direct vector observations
+   aren't available — e.g. black-box LLM-as-judge kernels that return only a
+   scalar reward).
+
+When direct vector observations ARE available and drift is moderate or faster,
+the production coherence gate (mean-displacement refit on a buffer) is
+competitive or superior, especially under noise.
+
+**Recommendation: TIER DOWN to Gain. Do NOT promote antithetic-pair to
+default-on. Keep as opt-in research note. If a future katgpt-rs plan opens for
+this primitive, it should be feature-flagged for the scalar-score-only regime
+only, and the plan must document the access-pattern constraint explicitly.**
+
+### Tasks T5 closure
+
+- [x] **T5** — Modelless unblock protocol §3.5 check: the antithetic-pair update
+      is `d += sign(s⁺−s⁻)·δ·lr` (latent direction only, no weight mutation).
+      Constraint #4 is satisfied by construction. No `M ← M + ...` step anywhere.
+      **However**, the strengthened PoC shows the pattern is not a universal GOAT —
+      the §3.5 modelless-unblock check PASSES (no training needed), but the GOAT
+      gate (quality gain over a strong baseline) FAILS in 4/7 regimes. The
+      primitive stays opt-in research note, not a promoted default.
+
 ## Cross-references
 
 - **Source paper distillation:** `riir-train/.research/377_EGGROLL_Low_Rank_Evolution_Strategies.md`
@@ -248,8 +355,22 @@ speculative modelless reframe survives re-mining: **antithetic-pair perturbation
 → ternary decision → latent direction update** (constraint #4 allows this — no
 weight mutation). Architecturally distinct from `ReestimationScheduler`'s
 single-coherence-threshold gate, but per §3.6 architectural distinctness is
-necessary not sufficient. Open this issue to track a `riir-poc/` defend-wrong
-PoC before any katgpt-rs verdict. Three competitors head-to-head on a synthetic
-functor-drift domain: no-adaptation baseline, shipped coherence-threshold gate,
-paper-derived antithetic-pair gate. PoC defends OR refutes; either outcome is
-honest and recorded.
+necessary not sufficient.
+
+**PoC verdict (strengthened follow-up, 2026-07-06): TIER DOWN.** The initial
+7/7 CONFIRM was against a weak scalar-score finite-difference distillation of
+the coherence gate. Adding a stronger distillation with **direct vector
+observations** (`CoherenceTriggeredDirectObs`) flipped the verdict to **3/7
+antithetic wins, 4/7 direct-obs wins**. Antithetic-pair is NOT a universal GOAT
+for latent-direction tracking — it wins only in slow-drift and scalar-score-only
+regimes. When direct vector observations are available, the production
+coherence gate (mean-displacement refit) is competitive or superior, especially
+under noise.
+
+**A close reading of the production code also corrected a misreading:** the
+latent-functor re-estimation path uses mean-displacement refit (not
+Gram-matrix LSQ — that's KARC's path), and the production coherence trigger is
+a fit-quality monitor (not a drift tracker). The antithetic-pair pattern fills
+a real niche (scalar-score-only drift tracking) but is not broadly superior to
+the shipped primitives. Keep as opt-in research note; do NOT open a katgpt-rs
+plan unless a concrete scalar-score-only use case emerges.
