@@ -3,8 +3,8 @@
 > **Paper:** [DashAttention: Differentiable and Adaptive Sparse Hierarchical Attention](https://arxiv.org/pdf/2605.18753) — Huang, Gonçalves, Alvetreti, Li, Han, Ponti, Martins, Treviso (Tsinghua, IST Lisbon, CMU, etc.), May 2026
 > **Code:** https://github.com/fasa-org/dash-attention
 > **Date:** 2026-05, distilled 2025-07
-> **Related Research:** 22 (Lighthouse Attention), 42 (SP-KV), 63 (OCTOPUS), 28 (HLA), 061 (Delta Attention Residuals)
-> **Related Plans:** 104 (DashAttention Adaptive Sparse Attention)
+> **Related Research:** 22 (Lighthouse Attention), 42 (SP-KV), 63 (OCTOPUS), 28 (HLA), 061 (Delta Attention Residuals), 379 (HGA — sub-chunk group tier refinement, GOAT-proxy FAIL on random-key NIAH)
+> **Related Plans:** 104 (DashAttention Adaptive Sparse Attention), 397 (HGA — opt-in, G2-proxy FAIL)
 > **Verdict: SELECTIVE ADOPTION — The α-entmax router + learned chunk summarization (Stage 0) distills cleanly into our SP-KV + PFlash pipeline. Key takeaway: replace top-k block selection with adaptive sparsity, add learned chunk summaries. GPU kernel work goes to riir-ai. Feature-gate as `dash_attn`.**
 
 ---

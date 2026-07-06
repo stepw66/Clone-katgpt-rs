@@ -113,8 +113,8 @@ Ship three refinements of the shipped sparse-attention routing slot behind an op
 
 ### Tasks
 
-- [ ] **T3.1** If G2 PASS with clear margin: **N/A** (G2-proxy FAIL).
-- [ ] **T3.2** If G2 PASS within noise (inconclusive): **N/A** (G2-proxy FAIL).
+- [-] **T3.1** If G2 PASS with clear margin: **N/A** (G2-proxy FAIL).
+- [-] **T3.2** If G2 PASS within noise (inconclusive): **N/A** (G2-proxy FAIL).
 - [x] **T3.3** If G2 FAIL:
   - ✅ Keep `hga` opt-in.
   - ✅ Document as negative result (`.benchmarks/397_hga_goat.md`).
@@ -127,11 +127,11 @@ Ship three refinements of the shipped sparse-attention routing slot behind an op
 
 ### Tasks
 
-- [ ] **T4.1** Update `katgpt-rs/README.md` sparse-attention slot table with HGA row (default-on or opt-in per Phase 3).
-- [ ] **T4.2** Update `katgpt-rs/.docs/02_architecture.md` with HGA module entry.
-- [ ] **T4.3** Update `katgpt-rs/.docs/01_overview.md` sparse-attention section.
-- [ ] **T4.4** Add cross-reference from DashAttention (R071) note to HGA (R379) note and vice versa.
-- [ ] **T4.5** Commit with message `feat(hga): hierarchical global attention chunk-group-token routing with RoPE-aware summaries`.
+- [x] **T4.1** Update `katgpt-rs/README.md` sparse-attention slot table with HGA row (opt-in, G2-proxy FAIL).
+- [-] **T4.2** Update `katgpt-rs/.docs/02_architecture.md` with HGA module entry — **deferred**: `02_architecture.md` has no sparse-attention module section to extend; the `01_overview.md` Feature Flags table (T4.3) is the canonical location.
+- [x] **T4.3** Update `katgpt-rs/.docs/01_overview.md` sparse-attention section — `hga` row added to Feature Flags table.
+- [x] **T4.4** Add cross-reference from DashAttention (R071) note to HGA (R379) note and vice versa — R071 back-reference added; R379 already references R071 in header.
+- [x] **T4.5** Commit with message `feat(hga): hierarchical global attention chunk-group-token routing with RoPE-aware summaries` — folded into the Phase 2-3 commit `91ceb559` + this docs commit.
 
 ---
 
@@ -139,9 +139,9 @@ Ship three refinements of the shipped sparse-attention routing slot behind an op
 
 These are noted in the research note §2.5 as latent reframings, but tracked separately:
 
-- [ ] **P5.1 (riir-neuron-db)** Apply `TieredKvStore` primitive to NeuronShard dendritic branch retrieval — shard = cold tier, branch = warm tier, weight = hot tier. The closest structural analog (see Research 379 §2.5(e)). Tracked as a separate riir-neuron-db plan if scoped.
-- [ ] **P5.2 (riir-ai)** Production mmap-backed `TieredKvStore` variant for GPU inference — mirrors `ZoneGeometryCache` (Plan 335) Arc<Mmap> + lock-free papaya + LRU pattern. Tracked as a separate riir-ai plan if scoped.
-- [ ] **P5.3 (orthogonal)** Position-modulo RoPE wrapping `p ← p mod 65536` (paper §5.5 side finding) — separate issue/plan if long-context Gemma 2 inference shows unexplained quality degradation past training length. NOT part of HGA primitive.
+- [-] **P5.1 (riir-neuron-db)** Apply `TieredKvStore` primitive to NeuronShard dendritic branch retrieval — shard = cold tier, branch = warm tier, weight = hot tier. The closest structural analog (see Research 379 §2.5(e)). Tracked as a separate riir-neuron-db plan if scoped.
+- [-] **P5.2 (riir-ai)** Production mmap-backed `TieredKvStore` variant for GPU inference — mirrors `ZoneGeometryCache` (Plan 335) Arc<Mmap> + lock-free papaya + LRU pattern. Tracked as a separate riir-ai plan if scoped.
+- [-] **P5.3 (orthogonal)** Position-modulo RoPE wrapping `p ← p mod 65536` (paper §5.5 side finding) — separate issue/plan if long-context Gemma 2 inference shows unexplained quality degradation past training length. NOT part of HGA primitive.
 
 ---
 
