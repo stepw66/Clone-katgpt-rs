@@ -1,8 +1,14 @@
 # Plan 391 — speculative Phase 6: dd_tree substrate extraction
 
-Status: **Phase 1+2 DONE** (2026-07-05). Phase 3 deferred to next session.
+Status: **CLOSED — SUPERSEDED by Plan 396** (2026-07-05). Phase 1+2 landed
+directly; Phase 3 was rendered obsolete by Plan 396 (`c88d1b0a`), which moved
+the entire remaining `dd_tree.rs` (root-only production fns + 2380-LOC test
+module) to `katgpt-forward` in a single-phase relocation. The variant
+wrappers that Phase 3 planned to move to `katgpt-speculative` are already
+there (confirmed by grep, 2026-07-06).
 Branch: `develop`
 Predecessor: Plan 390 (CLOSED `97205828`) — Phase 5 prefill substrate extraction
+Superseded by: Plan 396 (CLOSED `c88d1b0a`) — Phase 10 dd_tree full relocation
 
 ## Problem
 
@@ -80,33 +86,59 @@ perf-canonical implementation.
 
 ### Phase 3 — Move feature-gated variant wrappers (uses leaf siblings)
 
-These wrappers compose leaf-resident siblings (already in katgpt-speculative).
-They can move to the leaf with import rewrites only — no architectural change.
+**SUPERSEDED by Plan 396 (`c88d1b0a`, 2026-07-05).** Plan 396 chose a cleaner
+strategy: instead of moving these variant wrappers to `katgpt-speculative`
+piecemeal (Phase 3's plan), it moved the *entire* remaining root
+`dd_tree.rs` — the two root-only production fns AND the 2380-LOC test
+module — to `katgpt-forward` in a single-phase relocation. The variant
+wrappers themselves (T3.1-T3.10) already live in `katgpt-speculative`
+(verified by grep on 2026-07-06: all 11 `build_dd_tree_*` fns present at
+lines 3607-4027). The root is now a 23--LOC re-export shim.
 
-- [ ] T3.1 Move `build_dd_tree_domino` (uses leaf DominoPruner + domino.rs)
-- [ ] T3.2 Move `build_dd_tree_speculative` (uses leaf spec_generator)
-- [ ] T3.3 Move `build_dd_tree_speculative_kurtosis` (uses leaf kurtosis_gate)
-- [ ] T3.4 Move `build_dd_tree_speculative_best_buddies` (uses leaf best_buddies)
-- [ ] T3.5 Move `build_dd_tree_belief`, `_belief_collapse_aware` (uses leaf belief_drafter)
-- [ ] T3.6 Move `build_dd_tree_screened_progressive` (uses leaf PositionWeightedBudget)
-- [ ] T3.7 Move `build_dd_tree_screened_corr` (uses leaf correlation_budget)
-- [ ] T3.8 Move `build_dd_tree_screened_flow_budget` (uses leaf nf_flow_budget)
-- [ ] T3.9 Move `build_dd_tree_screened_recfm` (uses moved CrossScaleConfig)
-- [ ] T3.10 Move `build_dd_tree_and_or` + helpers (uses leaf and_or_builder + katgpt_core::AndOrNode)
-- [ ] T3.11 Move `TreeBuilder::build_screened_progressive/_with_depth_budgets/_recfm` into leaf's TreeBuilder
-- [ ] T3.12 Root: keep `build_dd_tree_screened_with_schedule` (crate::pruners::PrunerSchedule dep),
-       `build_dd_tree_gdsd` (crate::pruners::GdsdPruner dep), and the test module.
-- [ ] T3.13 `cargo check --workspace` clean
-- [ ] T3.14 Tests pass
+The tasks below are marked complete to reflect the supersession; no new
+work was done under Plan 391 for these items.
+
+- [x] T3.1 Move `build_dd_tree_domino` — DONE (in `katgpt-speculative/src/dd_tree.rs:3607`)
+- [x] T3.2 Move `build_dd_tree_speculative` — DONE (`katgpt-speculative/src/dd_tree.rs:3645`)
+- [x] T3.3 Move `build_dd_tree_speculative_kurtosis` — DONE (`katgpt-speculative/src/dd_tree.rs:3798`)
+- [x] T3.4 Move `build_dd_tree_speculative_best_buddies` — DONE (`katgpt-speculative/src/dd_tree.rs:3876`)
+- [x] T3.5 Move `build_dd_tree_belief`, `_belief_collapse_aware` — DONE (`katgpt-speculative/src/dd_tree.rs:3720`, `:3762`)
+- [x] T3.6 Move `build_dd_tree_screened_progressive` — DONE (`katgpt-speculative/src/dd_tree.rs:3903`)
+- [x] T3.7 Move `build_dd_tree_screened_corr` — DONE (`katgpt-speculative/src/dd_tree.rs:3920`)
+- [x] T3.8 Move `build_dd_tree_screened_flow_budget` — DONE (`katgpt-speculative/src/dd_tree.rs:3945`)
+- [x] T3.9 Move `build_dd_tree_screened_recfm` — DONE (`katgpt-speculative/src/dd_tree.rs:3989`)
+- [x] T3.10 Move `build_dd_tree_and_or` + helpers — DONE (`katgpt-speculative/src/dd_tree.rs:4017`)
+- [x] T3.11 Move `TreeBuilder::build_screened_progressive/_with_depth_budgets/_recfm`
+      — DONE (`katgpt-speculative/src/dd_tree.rs:1970`, `:2311`, `:2584`)
+- [x] T3.12 Root keeps `build_dd_tree_screened_with_schedule`, `build_dd_tree_gdsd`,
+      and the test module — **OVERTAKEN by Plan 396**: all three moved to
+      `katgpt-forward/src/dd_tree.rs`. Root is now a 23-LOC re-export shim
+      (`pub use katgpt_forward::dd_tree::*` + feature-gated re-exports).
+      This is *more* than Phase 3 planned — Plan 396's strategy was cleaner
+      because katgpt-forward already depends on every sibling leaf the
+      tests/production fns need.
+- [x] T3.13 `cargo check --workspace` clean — VERIFIED by Plan 396 T2.1-T2.3
+      (default / all-features / no-default all zero-warning).
+- [x] T3.14 Tests pass — VERIFIED by Plan 396 T2.4-T2.8 (709 root + 162
+      katgpt-forward = 871 total; test parity preserved from Plan 394
+      baseline).
 
 ## Root-bound items remaining after Plan 391
 
-- `build_dd_tree_screened_with_schedule` — uses `crate::pruners::PrunerSchedule`
-- `build_dd_tree_gdsd` — uses `crate::pruners::{GdsdConfig, GdsdPruner}`
-- `mod tests` — needs `TransformerWeights` + `dflash_predict`
-- Module shim + `pub use katgpt_speculative::dd_tree::*`
+**All resolved by Plan 396.** The items below were the expected post-Plan-391
+residue; Plan 396 moved every one of them to `katgpt-forward`, leaving the
+root file as a 23-LOC pure re-export shim.
 
-Estimated root file size after Plan 391: ~1500 LOC (down from 5990).
+- ~~`build_dd_tree_screened_with_schedule`~~ — moved to `katgpt-forward/src/dd_tree.rs` (Plan 396)
+- ~~`build_dd_tree_gdsd`~~ — moved to `katgpt-forward/src/dd_tree.rs` (Plan 396)
+- ~~`mod tests`~~ — moved to `katgpt-forward/src/dd_tree.rs` (Plan 396)
+- Module shim + re-export — root is now `pub use katgpt_forward::dd_tree::*`
+  (changed from `katgpt_speculative` because Plan 396 hosts the test module
+  + root-only production fns in katgpt-forward, which already depends on
+  katgpt-speculative for the variant wrappers)
+
+Actual root file size after Plans 391 + 396: **23 LOC** (down from 5990 —
+far beyond the original ~1500 LOC target).
 
 ## GOAT Gate
 

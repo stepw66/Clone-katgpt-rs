@@ -104,7 +104,9 @@ candidate next steps; this plan executes **two of them**:
 
 ### T6 — Commit
 
-- [ ] Single commit on `develop`: `refactor: Plan 401 — forward_set_causal_positions extraction + proof_6 tolerance fix`.
+- [x] Single commit on `develop`: `refactor: Plan 401 — forward_set_causal_positions extraction + proof_6 tolerance fix`.
+      **DONE** — commit `ed52538a` (2026-07-06) contains all of T1/T3/T4/T5; commit
+      message matches the planned text. Plan 401 is fully closed.
 
 ## (2) Scope Discipline
 
