@@ -1,0 +1,143 @@
+# Plan 408: Product Key Memory (PKM) — O(√N) Factored Retrieval Primitive
+
+**Date:** 2026-07-07
+**Research:** [katgpt-rs/.research/387_Fast_Weight_Product_Key_Memory_PKM.md](../.research/387_Fast_Weight_Product_Key_Memory_PKM.md)
+**Source paper:** [arXiv:2601.00671](https://arxiv.org/abs/2601.00671) — Zhao & Jones, "Fast-weight Product Key Memory", Sakana AI, Feb 2026. (Distills only the PKM factorization from Lample et al. 2019 §2.2; the FwPKM gradient-descent half is forbidden per AGENTS.md constraint #1 and replaced by the shipped δ-rule analog.)
+**Target:** `katgpt-rs/crates/katgpt-core/src/product_key_memory/` (new module) + Cargo feature `product_key_memory`
+**Status:** Active — Phase 1 (skeleton)
+
+---
+
+## Goal
+
+Ship a generic, modelless, inference-time **Product Key Memory** retrieval primitive: split a query into two halves, score two √N codebooks, take top-k of the k×k Cartesian product. This unlocks retrieval over ~10⁶ slots with ~10³ score computations — a complexity class none of our sparse retrievers (Raven RSM, Engram, δ-Mem, NPC Memory Store) currently reach (zero grep hits for PKM across all 5 repos). The value table is a frozen snapshot updated via atomic Arc swap (freeze/thaw); the "online update" is a δ-rule write (Plan 053 analog), NOT gradient descent. Optional IDW scoring (paper §A.2) replaces dot-product to make keys behave as cluster centroids.
+
+**GOAT gate:** G1 O(√N) latency beats O(N) baseline by ≥100× at N=10⁶. G2 top-k correctness (Cartesian product ranking matches brute-force). G3 IDW centroid-ness. G4 zero-alloc hot path. Promote to default-on if G1+G2+G4 all pass; demote the O(N) baseline from the retrieval stack if PKM wins.
+
+**Modelless mandate (§3.5):** the FwPKM paper's gradient-descent half (L_mem GD on V, L_addr GD on K, n-iter TTT loop) is forbidden. All three paths return modelless-validable: δ-rule (Plan 053) replaces L_mem; TEMP diversity (Plan 005) replaces L_addr; Sleep Consolidation (Plan 154) replaces n-iter TTT. **No riir-train deferral.** This plan implements ONLY the PKM retrieval factorization (pure inference).
+
+---
+
+## Phase 1 — Unblocking Skeleton (CORE)
+
+### Tasks
+
+- [ ] **T1.1** Create module `katgpt-core/src/product_key_memory/` with `mod.rs`, `types.rs`, `kernel.rs`. Register in `katgpt-core/src/lib.rs` behind `#[cfg(feature = "product_key_memory")]`.
+- [ ] **T1.2** Add feature `product_key_memory = []` to `katgpt-core/Cargo.toml` (opt-in, no default deps — leaf-clean per tier-0 substrate rule).
+- [ ] **T1.3** Define `ProductKeyMemory<SQRT_N, D_K, D_V>` in `types.rs`:
+  - `keys_1: Box<[[f32; D_K/2]; SQRT_N]>` (heap, √N rows)
+  - `keys_2: Box<[[f32; D_K/2]; SQRT_N]>` (heap, √N rows)
+  - `values: Box<[[f32; D_V]; SQRT_N * SQRT_N]>` (heap, N rows; √N×√N flat)
+  - Constructor `new(keys_1, keys_2, values)`, `from_random(seed)`, `from_centroids(centroids)` (k-means init for IDW mode).
+- [ ] **T1.4** Define `ScoreFn` enum in `types.rs`: `Dot` (default), `Idw { epsilon: f32 }` (paper §A.2, `−log(ε + ‖q−K‖²)`).
+- [ ] **T1.5** Define `PkQuery<const K: usize>` result type: `[(flat_idx: usize, weight: f32); K]` — fixed-size array, zero-alloc.
+
+### Validation
+
+- [ ] **T1.6** `cargo check -p katgpt-core --features product_key_memory` compiles clean.
+
+---
+
+## Phase 2 — Retrieval Kernel
+
+### Tasks
+
+- [ ] **T2.1** Implement `ProductKeyMemory::query_into(&self, q: &[f32; D_K], score_fn: ScoreFn, top_k: usize, out: &mut [(usize, f32)])` in `kernel.rs`:
+  - **Step 1:** Split `q` into `q1 = &q[..D_K/2]`, `q2 = &q[D_K/2..]`.
+  - **Step 2:** Score codebook 1: `s1[i] = score_fn(q1, keys_1[i])` for `i in 0..SQRT_N`. Heapselect top-k → `I1: [usize; K]` with scores. O(√N).
+  - **Step 3:** Score codebook 2: `s2[j] = score_fn(q2, keys_2[j])` for `j in 0..SQRT_N`. Heapselect top-k → `I2: [usize; K]` with scores. O(√N).
+  - **Step 4:** Cartesian product: for each `(i, j) in I1 × I2`, compute `s_{i,j} = s1[i] + s2[j]`. K² candidates. O(K²).
+  - **Step 5:** Top-k of K² candidates → final K pairs. Map pair `(i, j)` to flat index `i * SQRT_N + j`. O(K² log K) via small heap.
+  - **Step 6:** Softmax-normalize the K selected pair scores → weights. (Paper uses softmax over the k² restricted set; we use sigmoid-based normalization where possible, but the paper's softmax over top-k scores is a normalization choice, not a probability claim — keep softmax here for ranking fidelity, document the deviation from the global sigmoid rule.)
+  - **Step 7:** Write `(flat_idx, weight)` into `out`.
+- [ ] **T2.2** Implement `score_dot(q_half: &[f32], key_half: &[f32]) -> f32` — dot product.
+- [ ] **T2.3** Implement `score_idw(q_half: &[f32], key_half: &[f32], epsilon: f32) -> f32` — `−log(epsilon + squared_euclidean_distance(q_half, key_half))`.
+- [ ] **T2.4** Pre-allocate scratch buffers in the caller (not inside `query_into`) — pass `&mut [f32]` scratch for the two √N score arrays. Zero allocation inside the hot path.
+- [ ] **T2.5** SIMD-optimize the two √N scoring loops (chunked f32×4 or f32×8 via `wide` or manual SIMD). Target: the two √N loops dominate at N=10⁶.
+
+### Validation
+
+- [ ] **T2.6** Unit test: `query_into` returns the same top-k set as a brute-force O(N) scan over all `SQRT_N * SQRT_N` flat indices, for a random query on a random table. Run 1000 random queries, assert set-equality of top-k (order may differ within ties).
+- [ ] **T2.7** Unit test: IDW scoring produces centroid-attracting keys — initialize keys as random, run 100 queries, verify the accessed slots are closer (in Euclidean distance) to their cluster centroids than dot-product scoring would produce.
+
+---
+
+## Phase 3 — GOAT Gate (the promote/demote decision)
+
+### Tasks
+
+- [ ] **T3.1** Bench `benches/bench_408_pkm_goat.rs`:
+  - **G1 — O(√N) latency:** at `SQRT_N = 1000` (N = 10⁶ slots), `D_K = 64`, `D_V = 128`, `top_k = 8`, measure `query_into` p50 latency. Compare against brute-force O(N) scan over 10⁶ slots. Target: PKM ≥100× faster than brute-force. Report both as criterion benches.
+  - **G2 — top-k correctness:** on a fixed random table, for 10⁴ random queries, compute the Jaccard overlap between PKM's top-k and brute-force's top-k. Target: ≥0.95 mean Jaccard (paper's factorization is approximate by construction — the Cartesian product of per-codebook top-k may miss the global top-k if the true top-k spans codebook boundaries; characterize this gap honestly).
+  - **G3 — IDW centroid-ness:** on a synthetic k-means task (10 clusters in d_k/2 = 32 dim), initialize keys via k-means centroids, run 1000 queries, measure mean intra-cluster slot access rate. Compare Dot vs IDW. Target: IDW ≥1.2× higher intra-cluster rate.
+  - **G4 — zero-alloc:** run `query_into` 10⁶ times under a heap-alloc counter (`#[global_allocator]` wrapping `System` with an atomic counter). Target: 0 allocations after warmup.
+- [ ] **T3.2** If G1+G2+G4 pass → promote `product_key_memory` to default-on in `katgpt-core/Cargo.toml`. Demote note: the retrieval stack now has Raven RSM (O(1) routing) / Engram (O(1) hash) / δ-Mem (O(r) associative) / **PKM (O(√N) factored)** — four distinct complexity classes, each optimal for a different slot-count regime.
+- [ ] **T3.3** If G2 fails (Jaccard < 0.95) → keep opt-in, document the approximation gap. Consider a "top-2k per codebook" variant (k² = 4k² candidates, higher recall at 2× scoring cost).
+- [ ] **T3.4** Write GOAT results to `.benchmarks/408_pkm_goat.md` with the per-stack ledger entry (retrieval stack: Raven / Engram / δ-Mem / PKM, promote/demote decision).
+
+---
+
+## Phase 4 — Freeze/Thaw Wrapper (F4 fusion, P2)
+
+### Tasks
+
+- [ ] **T4.1** Add `FrozenProductKeyMemory` wrapper in `product_key_memory/freeze.rs` (gated `product_key_memory_freeze`, depends on `katgpt-core/freeze`):
+  - Holds `Arc<ProductKeyMemory>` for readers, `arc_swap::ArcSwap` for atomic swap.
+  - `commit(&self, new: ProductKeyMemory) -> [u8; 32]` — BLAKE3 over the three tables, atomic swap, return commitment.
+  - `verify(&self, expected: &[u8; 32]) -> bool` — re-hash, compare.
+  - `query_into` delegates to the current `Arc` load (lock-free read path).
+- [ ] **T4.2** Stress test: 100K concurrent reads + 100 swaps, verify no torn reads (generalize the Issue 354 `concurrent_lora_no_torn_read` test to a √N×√N table). Target: 0 torn reads.
+- [ ] **T4.3** Bit-identity test: swap in a byte-identical table, verify commitment matches. Swap in a 1-bit-flipped table, verify commitment differs.
+
+---
+
+## Phase 5 — F1 Fusion: PKM × δ-Mem Write Gate (P1, the episodic-memory composition)
+
+### Tasks
+
+- [ ] **T5.1** In `product_key_memory/episodic.rs` (gated `product_key_memory_episodic`, depends on `product_key_memory` + `katgpt-core/pruners/delta_mem`):
+  - `PkmEpisodicStore` — wraps `FrozenProductKeyMemory` + a δ-rule write path.
+  - `write(&mut self, q: &[f32; D_K], target: &[f32; D_V], gate: f32)` — δ-rule update on the top-k accessed value rows: `V[idx] += gate * (target - V[idx])` for each `idx` in the current query's top-k. This IS the modelless analog of FwPKM's `L_mem` GD step at η=1 (the gradient of `½‖target − V[idx]‖²` w.r.t. `V[idx]` is `−(target − V[idx])`, so one GD step at η=1 IS `V[idx] += (target − V[idx])`).
+  - The `gate` parameter is the curiosity signal (paper's `g_t`) — sourced externally from Temporal Derivative Kernel (Plan 277) or CGSP (Plan 274), NOT computed internally. This keeps the primitive generic (no curiosity-signal dependency).
+- [ ] **T5.2** G4 fusion gate: on a synthetic associative recall task (1000 key-value pairs, store all, then query recall), compare `PkmEpisodicStore` (N=10⁶ slots, √N scoring) vs `DeltaMemoryState` (rank r=64). Target: PKM-scaled δ-Mem achieves ≥2× lower reconstruction MSE at equal write budget.
+
+---
+
+## Phase 6 — Example + Docs (P2)
+
+### Tasks
+
+- [ ] **T6.1** Add example `examples/core_03_product_key_memory.rs`:
+  - Part 1: build a PKM table from 10⁴ random key-value pairs, query 100 random queries, print top-k + latency.
+  - Part 2: scale to N=10⁶, show the O(√N) vs O(N) latency cliff.
+  - Part 3: IDW vs Dot scoring comparison on a clustered dataset.
+- [ ] **T6.2** Add `.docs/26_product_key_memory.md` — feature-showcase entry (mirrors Raven RSM `.docs/25_raven_rsm.md` format). Cross-link to Research 387 and Plan 408.
+- [ ] **T6.3** Update `katgpt-rs/README.md` Feature Showcase section with a PKM entry (mirrors the Engram entry at L1077).
+
+---
+
+## Phase 7 — Private Fusion Follow-ups (DEFERRED to riir-* repos)
+
+These are tracked here for visibility but executed in private repos if the GOAT gate passes.
+
+- [-] **T7.1 (riir-neuron-db)** F5 fusion: PKM × Raven consolidation. File `riir-neuron-db/.research/013_*.md` guide + `.plans/` if F5 lands. Gate G6: retention ≥80% after 5 domain shifts vs paper's <30%. **This is the fusion that re-opens the Super-GOAT question** per Research 387 §5.
+- [-] **T7.2 (riir-chain)** F6 fusion: PKM × LatCal commitment. File `riir-chain/.research/010_*.md` guide + `.plans/` if the chain wants quorum-attested PKM snapshots. Gate G8: quorum bit-identity.
+- [-] **T7.3 (riir-ai)** F2 fusion: PKM × CommittedFieldBlend gate. Wire into `riir-engine/src/npc_memory.rs` as the √N-scaled retrieval backend for `NpcMemoryStore`. Private runtime composition.
+
+---
+
+## Constraints (non-negotiable, per AGENTS.md)
+
+1. **Modelless** — no GD, no backprop. The δ-rule write (Phase 5) is the modelless analog of FwPKM's `L_mem` update; it is NOT gradient descent (it's a Hebbian-style associative update, bit-identical to one GD step at η=1 but not iterated).
+2. **Sigmoid preferred** — the output gate uses sigmoid, never softmax, for the relevance mixing. The top-k *normalization* within PKM uses softmax over the k² restricted scores (this is a ranking normalization, not a probability claim — documented in T2.1 step 6).
+3. **Freeze/thaw over fine-tuning** — the value table V is frozen between swaps; updates are atomic Arc swaps with BLAKE3 commitment (Phase 4).
+4. **5-repo discipline** — the PKM primitive is generic (no game/chain/shard semantics) → `katgpt-core`. Private fusions land in riir-* (Phase 7).
+5. **Zero-alloc hot path** — `query_into` takes pre-allocated scratch buffers; no allocation inside the √N scoring loops (G4 gate).
+6. **Fixed-size arrays** — `PkQuery<K>` is `[(usize, f32); K]`, compile-time K. Codebook sizes are const generics `SQRT_N, D_K, D_V`.
+7. **CPU/GPU auto-route** — the √N scoring loops fit in L2 cache for N≤10⁶ (√N≤10³, each key is D_K/2=32 floats = 128 bytes, √N keys = 128KB → L2). Stays on SIMD CPU. GPU dispatch only if N > 10⁸ (√N > 10⁴, exceeds L2).
+
+---
+
+## TL;DR
+
+Ship the PKM factorization (O(√N) retrieval via two √N codebooks + Cartesian-product top-k) as a generic modelless primitive in `katgpt-core/src/product_key_memory/`. The FwPKM paper's gradient-descent half is forbidden (constraint #1) and replaced by the shipped δ-rule analog (Plan 053); the paper's future-work retention gap is already solved by Raven consolidation (riir-neuron-db). GOAT gate: G1 O(√N) ≥100× faster than O(N) at N=10⁶, G2 top-k Jaccard ≥0.95 vs brute-force, G4 zero-alloc. Promote to default-on if G1+G2+G4 pass; the retrieval stack then has four distinct complexity classes (Raven O(1) / Engram O(1)-hash / δ-Mem O(r) / PKM O(√N)). The F5 fusion (PKM × Raven consolidation) is the strongest private follow-up — it closes the paper's explicit future-work gap and could re-open the Super-GOAT question.
