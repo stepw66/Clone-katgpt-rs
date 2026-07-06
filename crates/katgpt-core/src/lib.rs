@@ -1077,6 +1077,13 @@ pub use product_key_memory::{
     D_K_FLOOR, PkEntry, PkQuery, PkmScratch, ProductKeyMemory, ScoreFn, SQRT_N_FLOOR, score_dot,
     score_idw,
 };
+// Phase 4 (F4 fusion) — freeze/thaw wrapper around ProductKeyMemory. Gated
+// separately so the leaf-clean retrieval primitive (above) stays usable
+// without the Arc<RwLock<Arc<...>>> + BLAKE3 commitment machinery. See
+// `product_key_memory/freeze.rs` for the pattern rationale (mirrors
+// `induced_cwm/hot_swap.rs`).
+#[cfg(feature = "product_key_memory_freeze")]
+pub use product_key_memory::FrozenProductKeyMemory;
 
 // Gain/Cost Loop Halting Primitive — open substrate-agnostic kernel for per-loop
 // halting decisions (Plan 304, Research 282, arXiv:2606.18023, LoopCoder-v2).

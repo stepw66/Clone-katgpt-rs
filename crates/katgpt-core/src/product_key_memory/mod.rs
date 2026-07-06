@@ -46,10 +46,11 @@
 //! # Phase status (this module)
 //!
 //! - ✅ Phase 1 (skeleton + types) — [`types`].
-//! - ⏳ Phase 2 (retrieval kernel) — [`kernel`] (stub).
-//! - ⏳ Phase 3 (GOAT gate G1–G4) — `.benchmarks/408_pkm_goat.md`.
-//! - ⏳ Phase 4 (freeze/thaw wrapper) — `freeze.rs`.
-//! - ⏳ Phase 5 (δ-rule write gate, F1 fusion) — `episodic.rs`.
+//! - ✅ Phase 2 (retrieval kernel) — [`kernel`].
+//! - ✅ Phase 3 (GOAT gate G1–G4) — `.benchmarks/408_pkm_goat.md`.
+//! - ✅ Phase 4 (freeze/thaw wrapper) — [`freeze`] (gated
+//!   `product_key_memory_freeze`).
+//! - ⏳ Phase 5 (δ-rule write gate, F1 fusion) — `episodic.rs` (planned).
 //!
 //! # CRITICAL — never softmax at the *gate* level
 //!
@@ -67,6 +68,15 @@
 //! - Source paper: [arXiv:2601.00671](https://arxiv.org/abs/2601.00671) —
 //!   Zhao & Jones, "Fast-weight Product Key Memory", Sakana AI, Feb 2026
 //!   (distills the PKM factorization from Lample et al. 2019 §2.2).
+
+// Phase 4 — freeze/thaw wrapper (Plan 408 T4.1). Gated separately so the
+// leaf-clean retrieval primitive stays usable without pulling in the
+// `Arc<RwLock<Arc<...>>>` + BLAKE3 commitment machinery. The wrapper re-uses
+// the Phase 1/2 retrieval kernel unchanged.
+#[cfg(feature = "product_key_memory_freeze")]
+pub mod freeze;
+#[cfg(feature = "product_key_memory_freeze")]
+pub use freeze::FrozenProductKeyMemory;
 
 pub mod kernel;
 pub mod types;
