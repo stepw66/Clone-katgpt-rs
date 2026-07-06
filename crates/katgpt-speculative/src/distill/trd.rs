@@ -759,28 +759,6 @@ fn bt_rank_winner(candidates: &[&[usize]], marginals: &[&[f32]], temperature: f3
     best
 }
 
-// ── GPU routing stub ──────────────────────────────────────────
-
-/// GPU-batched DDTree expansion for re-drafting.
-///
-/// Placeholder for future GPU integration: when `gpu` feature is enabled,
-/// re-drafting can leverage batched matmul for DDTree expansion on GPU.
-/// Current implementation falls back to CPU re-drafting via `refine_branch`.
-///
-/// TODO(Plan 249): Integrate with riir-ai/riir-gpu CubeCL runtime for
-/// batched speculative draft expansion. Requires DDTree GPU node store.
-#[cfg(feature = "gpu")]
-#[allow(dead_code)]
-fn redraft_gpu_batched(
-    _prefix: &[usize],
-    _marginals: &[&[f32]],
-    _max_steps: usize,
-) -> Option<Vec<usize>> {
-    // GPU re-drafting not yet implemented — fall back to CPU path.
-    // When DDTree GPU integration lands, this will dispatch batched matmul
-    // for tree expansion, returning the GPU-refined branch.
-    None
-}
 
 #[cfg(test)]
 mod tests {

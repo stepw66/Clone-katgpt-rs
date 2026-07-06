@@ -144,10 +144,10 @@ absorption runs (Phase 8). Move the code from `crates/katgpt-pruners/src/` to
 These 4 features have zero active code. Remove the feature line from root
 `Cargo.toml` and clean up any commented-out `#[cfg]` stubs:
 
-- [ ] `embedding_router` — remove from `full` + features section
-- [ ] `language_domain` — remove from features section
-- [ ] `gpu` — remove from `full` + features section; update `src/distill/trd.rs` dead-code stub
-- [ ] `rest` — remove from `full` + features section; update `src/speculative/prefill.rs` test stub
+- [x] `embedding_router` — remove from `full` + features section — **DONE 2026-07-06** (empty `[]` placeholder, Plan 024 not started; commented-out `#[cfg]` test stubs in `katgpt-forward/src/step.rs` left as TODO markers for Plan 024)
+- [x] `language_domain` — remove from features section — **DONE 2026-07-06** (empty `[]` placeholder, Plan 040 future, zero `.rs` refs)
+- [x] `gpu` — remove from `full` + features section; update `src/distill/trd.rs` dead-code stub — **DONE 2026-07-06** (empty `[]` placeholder + `redraft_gpu_batched` no-op stub removed from `crates/katgpt-speculative/src/distill/trd.rs`; GPU training lives in riir-ai/riir-gpu)
+- [-] `rest` — **NOT DEAD, audit was stale.** The 2026-07-01 audit flagged this as dead, but Plan 394 (2026-07-05) revived it: `rest = ["katgpt-forward/rest"]` now forwards to katgpt-forward, and `src/speculative/prefill.rs:127,138` has an active `#[cfg(feature = "rest")]` bridge test (`test_bridge_prefill_to_speculative_decode`). Kept in `full` array.
 
 ---
 
@@ -187,7 +187,7 @@ The 4 audit agents disagreed on 5 features. Coordinator decisions:
 
 **With code (move to `katgpt-deprecated`):** `feedback`, `unit_distance`, `alien_sampler`, `dense_mesh`, `dflare_fusion`, `dflare_kv_routing`, `dflare_progressive_budget`, `sdpg_bandit`, `compression_drafter`, `delta_mem`, `rmsd_distill`, `manifold_pruner`, `stepcode`
 
-**Dead entries (remove from Cargo.toml):** `embedding_router`, `language_domain`, `gpu`, `rest`
+**Dead entries (remove from Cargo.toml):** `embedding_router`, `language_domain`, `gpu` — **DONE 2026-07-06**. (`rest` was on this list but is NOT dead — revived by Plan 394, kept in `full`.)
 
 Of the 13 with code: 4 live in `src/` (Phase 3a), 4 live in `katgpt-core` (Phase 3b), 5 live in `katgpt-pruners` (Phase 3c).
 
@@ -196,6 +196,6 @@ Of the 13 with code: 4 live in `src/` (Phase 3a), 4 live in `katgpt-core` (Phase
 - **Phase 0.5 (audit): DONE.** This document.
 - **Phase 3a (src/ exile): 3 of 4 done.** `feedback`, `unit_distance`, `alien_sampler` exiled to `katgpt-deprecated` with back-compat re-exports. `dense_mesh` deferred (transformer-bound glue). All workspace tests pass (122 in deprecated crate, 5266+ in workspace).
 - **Phase 3b/3c (cross-crate exile): deferred** to Phases 8/10 absorption.
-- **Phase 3d (dead Cargo.toml entries): deferred** — low-risk cleanup, not blocking.
+- **Phase 3d (dead Cargo.toml entries): DONE 2026-07-06.** 3 of 4 removed (`embedding_router`, `language_domain`, `gpu`). The 4th (`rest`) was a false positive — revived by Plan 394 (forwards to `katgpt-forward/rest`, active bridge test). No regression: `default`, `--features full`, `--all-features` all compile clean.
 
 The remaining ~80 opt-in features are either PENDING (GOAT not yet run) or BENCH-LOSER (passed but kept opt-in for A/B). Exiling them would destroy active WIP.
