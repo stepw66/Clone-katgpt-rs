@@ -89,3 +89,9 @@ sparse_mlp = ["katgpt-core/sparse_mlp", "katgpt-forward/sparse_mlp"]
 # the delta-rule write magnitude (β·‖e‖) per token. The cache is a pure observer
 # — it does not perturb the GDN2 state. Zero overhead when None.
 hippocampal_cache = ["katgpt-core/hippocampal_cache"]
+# Hierarchical Global Attention forward path (Plan 397, Research 379).
+# Forwards to katgpt-core/hga. When active, provides `forward_hga` — the
+# three-stage chunk→group→token routing path using dash_attn::entmax_1p5 for
+# chunk selection + katgpt_core::hga::GroupSummaryCache for group selection +
+# katgpt_core::tiered_kv::TieredKvStore for route-and-fetch.
+hga = ["katgpt-core/hga"]

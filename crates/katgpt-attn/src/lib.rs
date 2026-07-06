@@ -52,3 +52,10 @@ pub mod static_cal;
     feature = "funcattn_chiar_blend"
 ))]
 pub mod funcattn_compose;
+
+// HGA forward path — three-stage chunk→group→token routing (Plan 397).
+// Requires BOTH `hga` (forwards to katgpt-core/hga) and `dash_attn` (for entmax_1p5).
+// The primitives (GroupSummaryCache, MixedRopeSummarizer, TieredKvStore) live in
+// katgpt-core; this module only owns the forward composition that needs entmax.
+#[cfg(all(feature = "hga", feature = "dash_attn"))]
+pub mod hga_forward;

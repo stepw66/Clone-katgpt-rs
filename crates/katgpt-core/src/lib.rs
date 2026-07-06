@@ -279,6 +279,27 @@ pub mod hippocampal_cache;
 #[cfg(feature = "hippocampal_cache")]
 pub use hippocampal_cache::{HippocampalCache, SortedSlotCache};
 
+// Tiered Hot/Warm/Cold K/V Store — the route-and-fetch substrate for sparse
+// long-context attention (Plan 397, Research 379, arxiv 2606.30709). Generic
+// trait + in-memory reference impl. Always-on (no feature gate) because it's
+// a generic primitive with no attention-layer deps; the HGA-specific consumer
+// is gated by `hga`.
+pub mod tiered_kv;
+
+// Hierarchical Global Attention (HGA) — chunk→group→token routing with
+// RoPE-aware mixed-frequency summaries (Plan 397, Research 379, arxiv 2606.30709).
+// Three refinements of the sparse-attention routing slot: group middle tier,
+// mixed-RoPE summarizer, tiered route-and-fetch consumer. Opt-in until the
+// Phase 2 GOAT gate (G2 head-to-head vs DashAttention) passes.
+//
+// NOTE: the HGA forward path (which needs dash_attn::entmax_1p5) lives in
+// katgpt-attn/src/hga_forward.rs, not here — katgpt-core cannot import
+// katgpt-attn without a circular dependency.
+#[cfg(feature = "hga")]
+pub mod hga;
+#[cfg(feature = "hga")]
+pub use hga::{GroupSummaryCache, MixedRopeSummarizer};
+
 #[cfg(feature = "dual_leo")]
 pub use traits::{
     ActingMode, AlphaSchedule, AutocurriculumSampler, BcConfig, BcTarget, DualLeoMixer,
