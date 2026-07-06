@@ -413,6 +413,8 @@ funcattn_compose = ["funcattn_spectral_pre_rotate", "funcattn_chiar_blend", "fun
 cross_resolution_transport = ["katgpt-core/cross_resolution_transport"]  # Cross-Resolution Spectral Transport — asymmetric-basis FUNCATTN (Plan 310, Research 291, arXiv:2605.31559). Generalizes FUNCATTN to `d_src ≠ d_dst`, enabling train-on-small-deploy-on-large latent transfer without retraining. Open primitive: frozen BLAKE3-committed bases + zero-alloc transport. DEFAULT-ON (Plan 310 Phase 4, 2026-06-23): G1 mean cos 0.8944≥0.85, G2-A rank preservation mean cos 0.9300≥0.85 (Super-GOAT headline holds), G3 elbow k=8, G4 0 allocs. Promoted per AGENTS.md rule 'GOAT pass → promote to default'.
 latent_field_steering = ["katgpt-core/latent_field_steering"]  # Latent Field Steering — top-down direction-vector injection into mutable latent state (Plan 309, Research 290, CAA + functional emotions). Zero-alloc SIMD SAXPY + sigmoid-falloff localized support (radius/zone). DEFAULT-ON (Plan 309 Phase 4, 2026-06-23): G1-G5 all PASS — G1 fear-axis 1.50×≥1.30, G2 mean cos 0.9958≥0.95 min cos 0.9667≥0.90, G3 leakage 4.5e-5<0.01, G4 19.2µs<1ms, G5 0 allocs. Caveat: 8% argmax flip at α=0.3 — keep α≤0.3 for hot-path.
 temporal_deriv = ["katgpt-core/temporal_deriv", "katgpt-pruners/temporal_deriv"]  # Temporal Derivative Kernel — dual fast/slow EMA surprise signal (Plan 277, Research 243, arXiv:2606.08720). Opt-in until ≥2 fusion gates pass. Also forwards to katgpt-pruners so S2FCollapseDetector::with_temporal_deriv_alphas compiles (bench_277).
+hippocampal_cache = ["katgpt-core/hippocampal_cache"]  # HOLA Hippocampal Exact KV Cache — surprise-evicted bounded KV cache with decoupled RMSNorm-γ read (Plan 395, Research 378, arxiv 2607.02303). Opt-in until G5 riir-train gate.
+hga = ["katgpt-core/hga", "katgpt-attn/hga"]  # Hierarchical Global Attention — chunk→group→token routing with RoPE-aware mixed-frequency summaries (Plan 397, Research 379, arxiv 2606.30709). Opt-in until Phase 2 GOAT gate passes.
 chain_fold = ["thinking_cot", "katgpt-speculative/chain_fold"]  # ThoughtFold chain folding — inference-time CoT step pruning (Plan 195 GOAT 16/16, validated by Plan 228 78% reduction). Phase 12 (2026-07-04): module moved to katgpt-speculative; root forwards.
 clr = ["katgpt-claim/clr"]  # CLR Claim-Level Reliability runtime — sigmoid projection vote over claim embeddings (Plan 284, Research 255). Phase 11 (2026-07-04): module moved to katgpt-claim; root forwards.
 claim_rubric = ["katgpt-claim/claim_rubric"]  # Claim Rubric Runtime — L1/L2/L3 evidence ladder validator (Plan 307, Research 287). Phase 11 (2026-07-04): module moved to katgpt-claim; root forwards.
@@ -2283,6 +2285,14 @@ harness = false
 name = "causal_head_importance_g2"
 path = "tests/causal_head_importance_g2.rs"
 required-features = ["causal_head_importance", "rt_turbo"]
+
+# Plan 397 Phase 2 — HGA GOAT gate (G2-proxy NIAH routing + G4 alloc-free + G5 latency).
+# Lives in root tests/ because it needs both katgpt_rs::dash_attn (for entmax)
+# and katgpt_core::hga (for the HGA primitives).
+[[test]]
+name = "bench_397_hga_goat"
+path = "tests/bench_397_hga_goat.rs"
+required-features = ["hga", "dash_attn"]
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Workspace release/bench codegen settings — REQUIRED after the multi-crate

@@ -4,7 +4,7 @@
 **Research:** [katgpt-rs/.research/379_Hierarchical_Global_Attention_Chunk_Group_Routing.md](../.research/379_Hierarchical_Global_Attention_Chunk_Group_Routing.md)
 **Source paper:** [arxiv 2606.30709](https://arxiv.org/abs/2606.30709) — Hierarchical Global Attention (Frank, Fedosov, Grinenko, BMW Group, Jun 2026)
 **Target:** `katgpt-rs/crates/katgpt-core/src/hga/` (new module) + `katgpt-rs/crates/katgpt-core/src/tiered_kv/` (new module) + Cargo feature `hga`
-**Status:** Active — Phase 1 complete (skeleton shipped, all tests pass); Phase 2 GOAT gate pending.
+**Status:** Active — Phase 1 complete, Phase 2 GOAT gate G2-proxy FAIL (negative result, keep opt-in). G5 latency PASS (1.12×). Phase 3 decision: T3.3 (keep opt-in, document negative result).
 
 ---
 
@@ -90,23 +90,22 @@ Ship three refinements of the shipped sparse-attention routing slot behind an op
 
 ### Tasks
 
-- [ ] **T2.1** Build a synthetic NIAH harness mirroring DashAttention's GOAT 9/9 harness:
-  - Synthetic context: 32K tokens, single needle at controlled depth (25%, 50%, 75%).
-  - RoPE: configurable `rope_theta ∈ {10000, 50000, 1000000}`.
-  - Model: micro-GPT (the existing 40M SmallLM harness used by DashAttention/AM/MSA GOAT gates).
-  - Compare: dense SDPA vs DashAttention (default-on baseline) vs HGA at matched fetched-token budget.
-- [ ] **T2.2 (G1)** Correctness — full-coverage HGA = causal SDPA within `< 1e-5` abs diff. Mirrors paper Table 7 (`< 10⁻⁶` abs diff).
-- [ ] **T2.3 (G2 — LOAD-BEARING)** Per-quality-vs-sparsity head-to-head:
-  - At `rope_theta = 1000000` (Qwen3-style) and 32K context:
-    - Sparsity sweep: HGA at {3.13%, 6.25%, 12.5%, 25%} vs DashAttention at same sparsities.
-    - Metric: per-token loss gap vs dense (`ΔLoss = Loss_sparse − Loss_dense`).
-    - **Pass criterion:** HGA `ΔLoss` ≤ DashAttention `ΔLoss` at all four sparsity levels, OR HGA matches DashAttention `ΔLoss` at half the fetched tokens (≥2× sparsity compounding from the group tier).
-  - At `rope_theta = 10000` (Gemma 2-style): same sweep (the mixed-RoPE threshold risk).
-- [ ] **T2.4 (G3)** No-regression — `cargo check --all-features` zero warnings; existing DashAttention tests still pass.
-- [ ] **T2.5 (G4)** Alloc-free hot path — `forward_hga` route + fetch + attend in pre-allocated scratch buffers (verify via `cargo bench` with allocator hooks or heap profiling on a 1K-iteration loop).
-- [ ] **T2.6 (G5)** Latency — group-routing pass latency ≤ 1.5× DashAttention chunk-routing pass latency at the same context length (criterion bench on 32K context, single query).
-- [ ] **T2.7 (G2 risk — MSA precedent)** If G2 fails (HGA does NOT beat DashAttention at iso-quality on our harness), document as a negative result in `katgpt-rs/.benchmarks/397_hga_goat.md` mirroring the MSA R225 GOAT-FAILED format. Keep `hga` opt-in. Do NOT promote.
-- [ ] **T2.8** Write benchmark report to `katgpt-rs/.benchmarks/397_hga_goat.md`.
+- [-] **T2.1** Build a synthetic NIAH harness mirroring DashAttention's GOAT 9/9 harness:
+  - **DEFERRED:** full transformer-level harness (micro-GPT, 32K context, per-token loss gap) requires riir-train infrastructure. Replaced by the G2-proxy (T2.3) modelless routing comparison.
+- [x] **T2.2 (G1)** Correctness — full-coverage HGA = causal SDPA within `< 1e-5` abs diff. Mirrors paper Table 7 (`< 10⁻⁶` abs diff). **PASS** (verified in Phase 1).
+- [x] **T2.3 (G2 — LOAD-BEARING)** Per-quality-vs-sparsity head-to-head:
+  - **Replaced by G2-proxy** (modelless NIAH routing comparison, `tests/bench_397_hga_goat.rs`). Tests the core claim: does HGA's sub-chunk group tier improve needle retrieval at iso-sparsity?
+  - **VERDICT: FAIL** — HGA won only 2/12 trials against DashAttention. Root cause: group summaries of random keys dilute the single-needle signal below the dot-product detection threshold. Same failure mode as MSA R225. See `.benchmarks/397_hga_goat.md`.
+  - The full G2 (transformer-level loss-gap) is deferred to riir-train — the paper's result uses trained keys with semantic structure.
+- [x] **T2.4 (G3)** No-regression — `cargo check --all-features` zero warnings; existing DashAttention tests still pass. **PASS** (verified in Phase 1).
+- [x] **T2.5 (G4)** Alloc-free hot path — `forward_hga` route + fetch + attend in pre-allocated scratch buffers.
+  - **INFORMATIONAL:** Phase 1 reference implementation allocates ~8 Vecs per routing call. Zero-alloc optimization deferred (not worth optimizing if G2-proxy fails).
+- [x] **T2.6 (G5)** Latency — group-routing pass latency ≤ 1.5× DashAttention chunk-routing pass latency at the same context length (criterion bench on 32K context, single query).
+  - **PASS:** HGA = 3.53ms, DashAttention = 3.14ms at 32K context (512 chunks × 64 tokens). Ratio = 1.12× (target ≤ 1.5×). The group-tier scoring pass adds only 12% overhead.
+- [x] **T2.7 (G2 risk — MSA precedent)** If G2 fails (HGA does NOT beat DashAttention at iso-quality on our harness), document as a negative result in `katgpt-rs/.benchmarks/397_hga_goat.md` mirroring the MSA R225 GOAT-FAILED format. Keep `hga` opt-in. Do NOT promote.
+  - **DONE:** G2-proxy FAIL documented in `.benchmarks/397_hga_goat.md`. `hga` stays opt-in.
+- [x] **T2.8** Write benchmark report to `katgpt-rs/.benchmarks/397_hga_goat.md`.
+  - **DONE:** full report with G2-proxy detailed table, G5 latency, G4 alloc count, root cause analysis, and MSA comparison.
 
 ---
 
@@ -114,16 +113,13 @@ Ship three refinements of the shipped sparse-attention routing slot behind an op
 
 ### Tasks
 
-- [ ] **T3.1** If G2 PASS with clear margin:
-  - Promote `hga` to default-on in `katgpt-rs/crates/katgpt-core/Cargo.toml`.
-  - Run head-to-head vs DashAttention on the same NIAH harness at 32K and 64K.
-  - Demote the loser to opt-in (per the §1.6 promote/demote ledger rule). Update `katgpt-rs/README.md` to reflect the winner.
-- [ ] **T3.2** If G2 PASS within noise (inconclusive):
-  - Keep `hga` opt-in as an alternative routing-summary construction (mixed-RoPE vs DashAttention learned summary).
-  - Document the trade-off in the README sparse-attention slot table.
-- [ ] **T3.3** If G2 FAIL:
-  - Keep `hga` opt-in. Document as negative result.
-  - Investigate which sub-component failed (group tier overhead, mixed-RoPE threshold mismatch, route-and-fetch cost). May split into separate opt-in features (e.g., `mixed_rope_summary` survives without the group tier).
+- [ ] **T3.1** If G2 PASS with clear margin: **N/A** (G2-proxy FAIL).
+- [ ] **T3.2** If G2 PASS within noise (inconclusive): **N/A** (G2-proxy FAIL).
+- [x] **T3.3** If G2 FAIL:
+  - ✅ Keep `hga` opt-in.
+  - ✅ Document as negative result (`.benchmarks/397_hga_goat.md`).
+  - ✅ Investigate which sub-component failed: the group-tier routing (dot-product scoring on group summaries of random keys) dilutes the single-needle signal below the detection threshold. The mixed-RoPE summarizer and the TieredKvStore work correctly.
+  - The primitive may be revisited with trained keys (riir-train).
 
 ---
 
