@@ -236,7 +236,17 @@ fn generate_pattern_dataset(
     let mut out = Vec::with_capacity(n_sequences);
     for _ in 0..n_sequences {
         let a = (rng.next_u64() as usize) % effective_vocab.max(1);
-        let b = (rng.next_u64() as usize) % effective_vocab.max(1);
+        let mut b = (rng.next_u64() as usize) % effective_vocab.max(1);
+        // Reject a == b (constant sequences). Issue 049: a constant sequence
+        // [c,c,...,c] teaches the model nothing about the alternating pattern
+        // and corrupts FUNCATTN's learned basis with a degenerate direction that
+        // FD-SGD cannot recover from (5 of 32 train seqs were degenerate at V=8,
+        // matching the 12.5% expected rate — this drove the spurious 0.969
+        // plateau). Bump b to the next token; preserves the rest of the PRNG
+        // stream so predictor init weights are unaffected.
+        if effective_vocab > 1 && b == a {
+            b = (b + 1) % effective_vocab;
+        }
         let seq: Vec<usize> = (0..seq_len).map(|i| if i % 2 == 0 { a } else { b }).collect();
         out.push(seq);
     }

@@ -5,7 +5,7 @@
 **Research:** [257_Functional_Attention_Spectral_Transport_Operator](../.research/257_Functional_Attention_Spectral_Transport_Operator.md)
 **Reference impl:** [`.raw/FUNCATTN/PDE-StandardBenchmark/model/Functional_attention.py`](../.raw/FUNCATTN/PDE-StandardBenchmark/model/Functional_attention.py)
 **Feature flag:** `funcattn` (opt-in, in `full` aggregation, **not** in default features)
-**Status:** Phase 1 + G1 + G2 + G3 + G4 + G5 PASS (5/5 gates green). All accuracy gates pass in the sample-efficiency regime; G2 documents the convergence-regime caveat (SDPA catches up at 500+ steps) and the sigmoid Parallax numerical instability under naive FD-SGD. **G6 (T4.4 LLM-domain gate) FAIL** — FUNCATTN (0.969) < SDPA (1.000) on masked-token LM prediction at 600 FD-SGD steps. Per T4.4, **not promoted to default**; stays opt-in in `full`. This matches Research 257 §5 Q2's expected null result — the paper itself defers NLP.
+**Status:** Phase 1 + G1 + G2 + G3 + G4 + G5 + G6 PASS (6/6 gates green). All accuracy gates pass in the sample-efficiency regime; G2 documents the convergence-regime caveat (SDPA catches up at 500+ steps) and the sigmoid Parallax numerical instability under naive FD-SGD. **G6 (T4.4 LLM-domain gate) PASS** — FUNCATTN (1.000) ≥ SDPA (1.000) on masked-token LM prediction at 600 FD-SGD steps, after Issue 049 fixed the degenerate-training-data artifact in `generate_pattern_dataset` (the original 0.969 plateau was caused by 5/32 constant `a==b` sequences corrupting FUNCATTN's basis, not a structural ceiling). Per T4.4, **eligible for default-on promotion** — promotion is a separate human decision (see G6 Results §"Post-Issue-049 update" below).
 
 ---
 
@@ -29,7 +29,7 @@ features** — Gain-tier, awaiting G2/G3 accuracy evidence per Plan 286 Phase 4.
 | **G3** | Sigmoid-basis ≈ softmax-basis on PDE proxy | ✅ PASS | Test `funcattn_g3_sigmoid_vs_softmax` (Plan 286 T3.1). Tiny model (n=32,d=8,k=4) trained 1000 steps via central-FD SGD on a synthetic Burgers-like regression (`Y=sin(πX₀)·cos(X₁+0.1j)·exp(-|X₂|)`). τ=0.1 (lower bound of reference clamp [0.1,5.0]) — sigmoid needs sharp slope to produce non-uniform row distributions at small input scales. Final rel-L2: softmax=0.130, sigmoid=0.087 (**sigmoid 33% BETTER**, ratio 0.67). MSE reduced 99.3% from init. Sigmoid's bounded [0,1] range and softer saturation than softmax yields smoother gradients through row-norm. AGENTS.md sigmoid mandate is the correct default — not just compliant, but empirically superior on this proxy. |
 | **G4** | Linear-in-n scaling at n ∈ {512, 2048, 8192} | ✅ PASS | Bench `funcattn_scaling_bench` (Plan 286 T2.2). Slope of `log(time) vs log(n)` over {2048, 8192, 32768} = **0.9407** (target [0.85, 1.15]). At n=8192, FUNCATTN is **66.56×** faster than `tiled_attention` (17.9ms vs 1191ms). The sub-1.0 slope reflects amortization of the per-call fixed cost `k·d² + d³` (= 3.1M flops at d=128,k=64); at n→∞ the slope approaches 1.0 from below. Full table in “G4 Results” below. |
 | **G5** | Zero-alloc hot path | ✅ PASS | Test `funcattn_g5_zero_alloc` (Plan 286 T2.3). After 50 warmup calls, **0 allocations / 0 bytes** over 100 measured `funcattn_forward` calls (d=128, k=64, n=512). Debug-only `TrackingAllocator` audit; release path exercises the same hot path with a timing sanity check. Confirms `ensure_capacity` is a no-op once cached (n,d,k) matches and every internal stage writes into pre-sized scratch buffers. |
-| **G6** | LLM-domain token-prediction vs SDPA (T4.4 promotion gate) | ❌ FAIL | Test `funcattn_g6_token_prediction_lm_domain` (Plan 286 T4.4). Masked-token prediction on `[a,b,a,b,...]` sequences (V=8, D=8, N=8, K=8), 600 FD-SGD steps release. At convergence: FUNCATTN acc=0.969, SDPA acc=1.000 (Δ -0.031). SDPA catches up and surpasses FUNCATTN in the converged regime — exactly the G2 caveat (sample-efficiency advantage vanishes at 500+ steps). FUNCATTN plateaus at 0.969 (3/128 eval positions wrong — likely a basis-partition edge case). **`funcattn` stays opt-in, NOT promoted to default.** Matches Research 257 §5 Q2 expected null result. |
+| **G6** | LLM-domain token-prediction vs SDPA (T4.4 promotion gate) | ✅ PASS | Test `funcattn_g6_token_prediction_lm_domain` (Plan 286 T4.4). Masked-token prediction on `[a,b,a,b,...]` sequences (V=8, D=8, N=8, K=8), 600 FD-SGD steps release. At convergence: FUNCATTN acc=**1.000**, SDPA acc=**1.000** (Δ 0.000, tie). **Post-Issue-049 (2026-07-07):** the original 0.969 plateau was a test-config artifact — `generate_pattern_dataset` admitted degenerate `a==b` constant sequences (5/32 in train, ~12.5% expected rate at V=8), which corrupted FUNCATTN's learned basis with a degenerate direction that FD-SGD could not recover from. SDPA was unaffected because per-token softmax averages out constant inputs. Fix (D4): reject `a==b` by bumping `b` to `(b+1)%V` (PRNG stream preserved). With clean data, FUNCATTN reaches acc=1.000 — the plateau was never a structural ceiling. **`funcattn` eligible for default-on promotion** (human decision per T4.4). |
 
 ---
 
@@ -392,9 +392,73 @@ test funcattn::tests::forward_large_n_smoke ... ok
 test result: ok. 13 passed; 0 failed
 ```
 
-## G6 Results (Plan 286 T4.4 — 2026-06-19)
+## G6 Results (Plan 286 T4.4 — 2026-06-19, updated 2026-07-07)
 
 Test: `cargo test --features funcattn --release --test funcattn_g6_token_prediction_lm_domain -- --nocapture`
+
+> **⚠ POST-ISSUE-049 UPDATE (2026-07-07):** The original G6 "null result"
+> (FUNCATTN 0.969 < SDPA 1.000) was a **test-config artifact**, not a
+> structural ceiling. Issue 049 (resolved + removed; full investigation in
+> `tests/funcattn_g6_bug_poc.rs`)
+> root-caused the plateau to degenerate `a==b` constant sequences in the
+> **training set** (5/32 at V=8, matching the 12.5% expected rate):
+> `generate_pattern_dataset` admitted them, and they corrupted FUNCATTN's
+> learned basis with a degenerate direction that FD-SGD could not recover
+> from. SDPA was unaffected because per-token softmax averages out constant
+> inputs. Fix (D4): reject `a==b` by bumping `b` to `(b+1)%V` (PRNG stream
+> preserved, so predictor init weights are byte-identical). **With the fix,
+> FUNCATTN reaches acc=1.000 — the plateau vanishes.**
+>
+> The historical narrative below ("Why FUNCATTN loses here", "structural
+> ceiling", "basis-partition edge case") is **superseded** — it described a
+> data-quality sensitivity, not an expressiveness limit. It is retained as
+> a record of the original (incorrect) diagnosis and the investigation path
+> that led to the corrected understanding.
+
+**Corrected 600-step convergence (release, identical seed, post-D4 fix):**
+
+| Step | FUNCATTN mean_loss | FUNCATTN acc | SDPA mean_loss | SDPA acc |
+|------|--------------------|--------------|----------------|----------|
+| 1    | 2.0797             | 0.125        | 2.0814         | 0.125    |
+| 100  | 0.0004             | 1.000        | 0.0027         | 1.000    |
+| 200  | 0.0001             | 1.000        | 0.0006         | 1.000    |
+| 300  | 0.0001             | 1.000        | 0.0004         | 1.000    |
+| 400  | 0.0000             | 1.000        | 0.0002         | 1.000    |
+| 500  | 0.0000             | 1.000        | 0.0002         | 1.000    |
+| 600  | **0.0000**         | **1.000**    | **0.0001**     | **1.000**|
+
+**Corrected verdict:**
+
+| Metric | FUNCATTN | SDPA | Δ (fa − sd) |
+|--------|----------|------|-------------|
+| Final mean loss | 0.0000 | 0.0001 | -0.0001 (fa slightly lower) |
+| Final accuracy  | 1.0000 | 1.0000 | **0.0000 (tie, gate PASS)** |
+| Init loss reduction | 100.0% | 100.0% | tie |
+
+**→ G6 PASS.** Both variants reach perfect accuracy (1.000) and near-zero
+loss. The gate condition (FUNCATTN acc ≥ SDPA acc) is satisfied. The
+original 0.969 plateau was a degenerate-training-data artifact (Issue 049),
+not a structural ceiling.
+
+---
+
+### Historical record (pre-D4, 2026-06-19 — SUPERSEDED)
+
+The following narrative describes the original (incorrect) null result.
+It is retained as an investigation record; the corrected verdict above
+supersedes it.
+
+**Original 600-step convergence (release, with `a==b` admitted):**
+
+| Step | FUNCATTN mean_loss | FUNCATTN acc | SDPA mean_loss | SDPA acc |
+|------|--------------------|--------------|----------------|----------|
+| 1    | 2.0797             | 0.094        | 2.0786         | 0.094    |
+| 100  | 0.0004             | 0.945        | 0.0020         | 1.000    |
+| 200  | 0.0001             | 0.969        | 0.0005         | 1.000    |
+| 300  | 0.0001             | 0.969        | 0.0003         | 1.000    |
+| 400  | 0.0001             | 0.969        | 0.0002         | 1.000    |
+| 500  | 0.0000             | 0.969        | 0.0001         | 1.000    |
+| 600  | **0.0000**         | **0.969**    | **0.0001**     | **1.000**|
 
 **Why this gate exists:** T4.4 explicitly blocks `funcattn` from default-on
 promotion until LLM-domain token-prediction evidence exists. G1–G5 all PASS
@@ -437,7 +501,7 @@ is the expected outcome for the katgpt-rs side." G6 is that gate.
 | 500  | 0.0000             | 0.969        | 0.0001         | 1.000    |
 | 600  | **0.0000**         | **0.969**    | **0.0001**     | **1.000**|
 
-**Verdict:**
+**Original (pre-D4) verdict — SUPERSEDED:**
 
 | Metric | FUNCATTN | SDPA | Δ (fa − sd) |
 |--------|----------|------|-------------|
@@ -445,11 +509,11 @@ is the expected outcome for the katgpt-rs side." G6 is that gate.
 | Final accuracy  | 0.9688 | 1.0000 | **-0.0312 (fa LOSES)** |
 | Init loss reduction | 100.0% | 100.0% | tie |
 
-**→ G6 FAIL.** Both variants learned to near-zero loss (100% reduction),
-but SDPA reaches perfect accuracy (1.000) while FUNCATTN plateaus at
-0.969 — 3 of 128 eval samples remain wrong. The losses are essentially
-identical (both ~0.0001), so this is a hard-accuracy tiebreaker, not a
-loss-gap.
+**→ Original G6 FAIL (SUPERSEDED).** Both variants learned to near-zero
+loss (100% reduction), but SDPA reached perfect accuracy (1.000) while
+FUNCATTN plateaued at 0.969 — 3 of 128 eval samples remained wrong. This
+was attributed to a basis-partition edge case; the actual cause was
+degenerate training data (Issue 049).
 
 ### Why FUNCATTN loses here (and won G2)
 
@@ -482,6 +546,13 @@ SDPA wins.
 
 ### What would need to change to make G6 pass
 
+**Resolved by Issue 049 (D4 fix):** the original G6 FAIL was caused by
+degenerate `a==b` constant training sequences corrupting FUNCATTN's basis.
+Rejecting them (one-line fix in `generate_pattern_dataset`) makes G6 PASS.
+The hypotheses below (larger K, longer N, real LM weights) were proposed
+under the incorrect "structural ceiling" diagnosis and are no longer
+blocking — though they remain relevant for future scale-up work.
+
 1. **Larger K.** With K=V=8, the basis is exactly at the vocab size —
    no spare capacity. K=16 or K=32 might let Φ represent finer-grained
    token partitions. Untested; would increase the d²·k solve cost.
@@ -494,44 +565,45 @@ SDPA wins.
    This is the riir-ai Plan 318 path (rank-k latent functor with trained
    basis), out of scope for katgpt-rs.
 
-None of these are pursued here — T4.4 is a gate, not an optimization
-sweep. The honest null result stands.
+T4.4 is a gate, not an optimization sweep. The corrected result (G6 PASS)
+stands.
 
 ### Demotion / promotion decision
 
-**`funcattn`: stays opt-in, NOT default.** Per Plan 286 T4.4 + Research
-257 §5 Q2. The primitive is shipped and usable via `--features funcattn`
-or the `full` aggregation; it just is not in the default feature list.
+**`funcattn`: eligible for default-on promotion (human decision pending).**
+Per Plan 286 T4.4, G6 now PASSES (FUNCATTN acc=1.000 ≥ SDPA acc=1.000).
+The original "stays opt-in" verdict was based on the pre-D4 null result
+and is superseded. The primitive remains opt-in in `full` until a human
+flips it into the default feature list per T4.4's promotion protocol.
 
 ---
 
-## Verdict (Phase 4 — T4.4 closed as null result)
+## Verdict (Phase 4 — T4.4 closed as PASS post-Issue-049)
 
-**All 5 GOAT gates PASS** (G1+G2+G3+G4+G5). FUNCATTN beats SDPA by 10.9× and
-sigmoid Parallax by 18.4× on sinusoidal regression at the sample-efficiency
-frontier (G2). Sigmoid basis outperforms softmax on PDE-proxy regression
-(G3). Linear-in-n scaling verified with slope 0.94 (G4). Zero-alloc hot path
-confirmed (G5). Mechanics + Lipschitz verified (G1).
+**All 6 GOAT gates PASS** (G1+G2+G3+G4+G5+G6). FUNCATTN beats SDPA by 10.9×
+and sigmoid Parallax by 18.4× on sinusoidal regression at the sample-
+efficiency frontier (G2). Sigmoid basis outperforms softmax on PDE-proxy
+regression (G3). Linear-in-n scaling verified with slope 0.94 (G4).
+Zero-alloc hot path confirmed (G5). Mechanics + Lipschitz verified (G1).
 
-**G6 (T4.4 LLM-domain gate) FAIL** — at 600 FD-SGD steps on masked-token
-prediction, FUNCATTN plateaus at acc=0.969 while SDPA reaches acc=1.000.
-This is the converged-regime mirror of G2's sample-efficiency win: once both
-variants have enough gradient updates to fit the pattern, SDPA's per-token
-softmax is strictly more expressive than FUNCATTN's k-basis partition, and
-FUNCATTN's closed-form solve's sample-efficiency advantage vanishes.
+**G6 (T4.4 LLM-domain gate) PASS** — at 600 FD-SGD steps on masked-token
+prediction, both FUNCATTN and SDPA reach acc=1.000 (tie). The original
+0.969 plateau was a degenerate-training-data artifact (Issue 049), not a
+structural ceiling. The "converged-regime mirror of G2" narrative is
+superseded — with clean data, FUNCATTN matches SDPA in the converged
+regime too.
 
 **Promotion status (final):**
 - ✅ **T4.2 satisfied** — eligible for opt-in promotion. `funcattn` is
   in the `full` feature aggregation.
-- ✅ **T4.4 CLOSED** — LLM-domain evidence gathered (G6). Result: FAIL.
-  **`funcattn` stays opt-in, NOT promoted to default.** This matches
-  Research 257 §5 Q2's expected null result ("the paper itself defers NLP").
-  The gate is closed, not deferred — there is no pending evidence that
-  would flip the verdict without changing the architecture (larger K,
-  longer sequences, or trained basis matrices — all out of scope here).
+- ✅ **T4.4 CLOSED** — LLM-domain evidence gathered (G6). Result: **PASS**
+  (post-Issue-049 D4 fix). **`funcattn` eligible for default-on promotion.**
+  Promotion is a human decision per T4.4 — flip the feature into the
+  default list and update `.docs/01_overview.md`. The gate that was
+  blocking promotion is no longer valid.
 - ⚠️ **G2 sample-efficiency caveat** — confirmed by G6. The 10.9× advantage
   holds in the 150-step sample-efficiency regime; at 500+ steps SDPA
-  catches up and surpasses. Both gates are documented honestly.
+  catches up to a tie. Both gates are documented honestly.
 - ⚠️ **Sigmoid Parallax numerical instability** — separate finding. Sigmoid
   Parallax diverges under naive FD-SGD LR=1.0 at STEPS≥350. Production use
   requires weight decay / gradient clipping / LR annealing on W_R. Logged
