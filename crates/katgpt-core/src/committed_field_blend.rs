@@ -306,10 +306,8 @@ impl<const N: usize, const D: usize> CommittedFieldBlend<N, D> {
         );
         debug_assert_eq!(dz_out.len(), D, "dz_out must be exactly D={D} elements");
 
-        // Zero the output. LLVM elides this into a memset.
-        for x in dz_out[..D].iter_mut() {
-            *x = 0.0;
-        }
+        // Zero the output. slice::fill auto-vectorizes to a wide memset.
+        dz_out[..D].fill(0.0);
 
         for (k, field_k) in fields.iter().enumerate() {
             // f_k(z) — writes into dz_scratch, returns a reborrow.

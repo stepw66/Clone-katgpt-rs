@@ -236,10 +236,8 @@ impl BranchingDetector {
         }
 
         // ── Step 2: P̄ = (1/K) Σ_k π_k, written into scratch_p_avg. ──
-        // Chunked-4 accumulation helps autovectorization per AGENTS.md.
-        for slot in self.scratch_p_avg[..n].iter_mut() {
-            *slot = 0.0;
-        }
+        // `slice::fill` auto-vectorizes to a wide memset.
+        self.scratch_p_avg[..n].fill(0.0);
         for traj in trajectories {
             let mut a = 0;
             while a + 4 <= n {

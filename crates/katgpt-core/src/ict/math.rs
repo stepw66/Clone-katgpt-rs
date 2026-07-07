@@ -196,9 +196,7 @@ pub fn js_divergence_batch(dists: &[&[f32]], scratch_m: &mut [f32]) -> Vec<f32> 
         return out;
     }
     // mean over k — write into scratch_m then divide.
-    for slot in scratch_m[..n].iter_mut() {
-        *slot = 0.0;
-    }
+    scratch_m[..n].fill(0.0);
     for d in dists {
         if d.len() != n {
             return out;

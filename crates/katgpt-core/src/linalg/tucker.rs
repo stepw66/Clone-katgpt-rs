@@ -839,9 +839,7 @@ pub fn tucker_decompose_into(
         // Loop order (i outer, j middle, k inner) treats each i as a rank-1 update
         // Y += a_col_j ⊗ unfold_row_i. Inner (j, k) block is SIMD-friendly.
         let y_slice = &mut scratch.y_buf[..r_n * m];
-        for v in y_slice.iter_mut() {
-            *v = 0.0;
-        }
+        y_slice.fill(0.0);
         for i in 0..i_n {
             let b_row = &scratch.unfold_buf[i * m..(i + 1) * m];
             for j in 0..r_n {
@@ -940,9 +938,7 @@ pub fn tucker_reconstruct_into(
         // Loop order (j outer, i middle, k inner): for each j, an outer-product
         // rank-1 update of Y[:, :] by a_col_j ⊗ unfold_row_j.
         let y_slice = &mut scratch.y_buf[..i_n * m];
-        for v in y_slice.iter_mut() {
-            *v = 0.0;
-        }
+        y_slice.fill(0.0);
         for j in 0..r_n {
             // Column j of A^(n) is contiguous at [offset_n + j*I_n .. offset_n + (j+1)*I_n].
             let a_col =

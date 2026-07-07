@@ -312,18 +312,10 @@ impl<const SQRT_N: usize, const D_K: usize, const D_V: usize> ProductKeyMemory<S
         // Steps 2–3: score each codebook into scratch.scores_{1,2}, then
         // heapselect top-K. Reset the top-k buffers first (NEG_INFINITY so
         // every codebook score enters on the first pass).
-        for s in scratch.scores_1.iter_mut() {
-            *s = 0.0;
-        }
-        for s in scratch.scores_2.iter_mut() {
-            *s = 0.0;
-        }
-        for entry in scratch.top_1.iter_mut() {
-            *entry = (0, f32::NEG_INFINITY);
-        }
-        for entry in scratch.top_2.iter_mut() {
-            *entry = (0, f32::NEG_INFINITY);
-        }
+        scratch.scores_1.fill(0.0);
+        scratch.scores_2.fill(0.0);
+        scratch.top_1.fill((0, f32::NEG_INFINITY));
+        scratch.top_2.fill((0, f32::NEG_INFINITY));
 
         // Score codebook 1: O(SQRT_N * D_K/2).
         for i in 0..SQRT_N {

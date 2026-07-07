@@ -369,9 +369,7 @@ pub fn hidden_erank(hidden: &[f32], s: usize, d: usize, scratch_sv: &mut [f32]) 
 
     // ── 1. Column means ────────────────────────────────────────────
     // mean[j] = (1/S) Σ_k hidden[k*d + j]
-    for slot in means.iter_mut() {
-        *slot = 0.0;
-    }
+    means.fill(0.0);
     for k in 0..s {
         let row = &hidden[k * d..(k + 1) * d];
         for (j, &v) in row.iter().enumerate() {
@@ -420,9 +418,7 @@ pub fn hidden_erank(hidden: &[f32], s: usize, d: usize, scratch_sv: &mut [f32]) 
         // m = d: build Xᵀ X (d×d). Outer product over the sequence length s.
         // Zero-fill first — the `+=` accumulation below only touches the
         // upper triangle before the mirror pass.
-        for slot in gram.iter_mut() {
-            *slot = 0.0;
-        }
+        gram.fill(0.0);
         for k in 0..s {
             let row = &hidden[k * d..(k + 1) * d];
             // Fold this centered row into the upper triangle of gram.

@@ -276,9 +276,7 @@ pub fn aggregate_action_latent_into<const K: usize, const D: usize, const S: usi
     );
 
     // Zero the output buffer; we accumulate the numerator in place.
-    for x in out.0.iter_mut() {
-        *x = 0.0;
-    }
+    out.0.fill(0.0);
 
     let mut denominator = 0.0f32;
     let eps = 1e-8f32;
