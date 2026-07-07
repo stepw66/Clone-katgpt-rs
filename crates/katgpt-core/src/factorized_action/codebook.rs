@@ -254,7 +254,8 @@ pub fn fit_codebook_kmeans_into<const K: usize, const D: usize>(
                 let (far_idx, _far_d2) = d2_nearest
                     .iter()
                     .enumerate()
-                    .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
+                    // `total_cmp` is branch-free and NaN-deterministic vs `partial_cmp().unwrap_or(Equal)`.
+                    .max_by(|(_, a), (_, b)| a.total_cmp(b))
                     .map(|(i, &d)| (i, d))
                     .unwrap_or((0, 0.0));
                 centroids[kk].copy_from_slice(&patches[far_idx][..D]);

@@ -547,7 +547,8 @@ fn build_epsilon_knn_graph(
             .map(|j| (dist3(points[i], points[j]), j))
             .collect();
         // Partial sort: get the kk smallest.
-        dists.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+        // `total_cmp` is branch-free and NaN-deterministic vs `partial_cmp().unwrap_or(Equal)`.
+        dists.sort_by(|a, b| a.0.total_cmp(&b.0));
         let kth = dists
             .get(kk.saturating_sub(1))
             .map(|(d, _)| *d)
@@ -556,7 +557,7 @@ fn build_epsilon_knn_graph(
     }
 
     // ε = quantile of the kth-nearest distances.
-    all_kth_distances.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    all_kth_distances.sort_by(|a, b| a.total_cmp(b));
     let qidx = ((epsilon_quantile.clamp(0.0, 1.0)) * (n as f32 - 1.0)).round() as usize;
     let qidx = qidx.min(n - 1);
     let epsilon = all_kth_distances[qidx];
@@ -568,7 +569,7 @@ fn build_epsilon_knn_graph(
             .filter(|&j| j != i)
             .map(|j| (dist3(pi, points[j]), j))
             .collect();
-        dists.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+        dists.sort_by(|a, b| a.0.total_cmp(&b.0));
         for (d, j) in dists.into_iter().take(kk) {
             if d <= epsilon {
                 if !adjacency[i].contains(&j) {

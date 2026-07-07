@@ -37,7 +37,7 @@ use std::path::Path;
 
 use katgpt_core::{Config, SpeculativeGenerator};
 
-use katgpt_core::simd::simd_dot_f32;
+use katgpt_core::simd::{simd_dot_f32, simd_sum_f32};
 
 // ── Magic & Version ────────────────────────────────────────────
 const MAGIC: &[u8; 4] = b"NLDM";
@@ -62,8 +62,17 @@ fn layer_norm(input: &[f32], weight: &[f32], bias: &[f32], output: &mut [f32]) {
     assert_eq!(bias.len(), n);
     assert_eq!(output.len(), n);
 
-    let mean: f32 = input.iter().sum::<f32>() / n as f32;
-    let var: f32 = input.iter().map(|&x| (x - mean) * (x - mean)).sum::<f32>() / n as f32;
+    // Two-pass (numerically stable — one-pass E[x²]−E[x]² suffers catastrophic
+    // cancellation when var ≪ mean²). Use the SIMD sum kernel for both passes.
+    let mean: f32 = simd_sum_f32(input) / n as f32;
+    // Variance pass: (x − mean)². The fused map+sum form keeps the deviation
+    // computation in-register between the subtract and the square.
+    let mut var = 0.0_f32;
+    for &x in input {
+        let d = x - mean;
+        var += d * d;
+    }
+    let var = var / n as f32;
     let inv_std = 1.0 / (var + 1e-5).sqrt();
 
     for i in 0..n {

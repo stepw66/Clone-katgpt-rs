@@ -633,7 +633,8 @@ where
                     scratch.nodes[b].visits,
                     ln_parent,
                 );
-                sa.partial_cmp(&sb).unwrap_or(std::cmp::Ordering::Equal)
+                // `total_cmp` is branch-free and NaN-deterministic vs `partial_cmp().unwrap_or(Equal)`.
+                sa.total_cmp(&sb)
             });
             match best_child {
                 Some(child_idx) => {

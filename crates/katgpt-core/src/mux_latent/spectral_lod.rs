@@ -130,7 +130,8 @@ impl SpectralLOD {
             indices.sort_by(|&a, &b| {
                 let ca = self.energy_concentration(results[a].0);
                 let cb = self.energy_concentration(results[b].0);
-                ca.partial_cmp(&cb).unwrap_or(std::cmp::Ordering::Equal)
+                // `total_cmp` is branch-free and NaN-deterministic vs `partial_cmp().unwrap_or(Equal)`.
+                ca.total_cmp(&cb)
             });
 
             let mut avg = current_avg;

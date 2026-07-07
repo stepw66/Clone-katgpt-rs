@@ -409,6 +409,10 @@ impl PairedLossGap {
         }
         // Sort by gap_to_bound_ratio descending, NaN-aware (NaN sorts last).
         // sort_by is stable; ties keep insertion (HashMap) order.
+        //
+        // NOTE: cannot use `total_cmp` here — it places NaN as largest, which
+        // would put NaN FIRST in this descending sort. The explicit match
+        // preserves the documented "NaN sorts last" semantics.
         rows.sort_by(|a, b| {
             let ra = a.gap_to_bound_ratio;
             let rb = b.gap_to_bound_ratio;
@@ -418,9 +422,8 @@ impl PairedLossGap {
                 (true, true) => std::cmp::Ordering::Equal,
                 (true, false) => std::cmp::Ordering::Greater,
                 (false, true) => std::cmp::Ordering::Less,
-                // Both finite: descending = reverse natural order
-                // (rb.partial_cmp(ra) returns Less when ra > rb).
-                (false, false) => rb.partial_cmp(&ra).unwrap_or(std::cmp::Ordering::Equal),
+                // Both finite: descending = reverse natural order.
+                (false, false) => rb.total_cmp(&ra),
             }
         });
         ClassGapReport { rows }

@@ -100,8 +100,9 @@ pub fn expected_max_over_m(pi: &[f32], q: &[f32], m: f32) -> f32 {
     }
 
     // Sort (q, pi) pairs by q descending.
+    // `total_cmp` is branch-free and NaN-deterministic vs `partial_cmp().unwrap_or(Equal)`.
     let mut idx: Vec<usize> = (0..k).collect();
-    idx.sort_unstable_by(|&a, &b| q[b].partial_cmp(&q[a]).unwrap_or(Ordering::Equal));
+    idx.sort_unstable_by(|&a, &b| q[b].total_cmp(&q[a]));
 
     // q_sorted[0] is the maximum. Accumulate the telescoping sum.
     let mut result = q[idx[0]];
@@ -168,7 +169,7 @@ pub fn expected_improvement(r: f32, pi: &[f32], q: &[f32], m: f32) -> f32 {
 
     // Sort by q descending. v = (r - q)_+ is then ascending.
     let mut idx: Vec<usize> = (0..k).collect();
-    idx.sort_unstable_by(|&a, &b| q[b].partial_cmp(&q[a]).unwrap_or(Ordering::Equal));
+    idx.sort_unstable_by(|&a, &b| q[b].total_cmp(&q[a]));
 
     // v[j] = max(r - q_sorted[j], 0) — ascending because q is descending.
     let v0 = (r - q[idx[0]]).max(0.0);

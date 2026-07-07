@@ -953,7 +953,7 @@ fn chart_test(points: &[[f32; 2]], k: usize, threshold: f32) -> Vec<bool> {
             .filter(|&j| j != i)
             .map(|j| (j, sq_dist(&points[i], &points[j])))
             .collect();
-        dists.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
+        dists.sort_by(|a, b| a.1.total_cmp(&b.1));
 
         // Local PCA on the k+1 points (point i + its kk neighbors).
         let mut local: Vec<[f32; 2]> = Vec::with_capacity(kk + 1);
@@ -1045,11 +1045,11 @@ fn dbscan_adaptive(points: &[[f32; 2]], min_pts: usize) -> Vec<Option<usize>> {
                 .filter(|&j| j != i)
                 .map(|j| sq_dist(&points[i], &points[j]).sqrt())
                 .collect();
-            dists.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+            dists.sort_by(|a, b| a.total_cmp(b));
             dists[k.saturating_sub(1)]
         })
         .collect();
-    knn_dists.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    knn_dists.sort_by(|a, b| a.total_cmp(b));
     let eps = knn_dists[knn_dists.len() / 2];
 
     if eps <= 0.0 {
