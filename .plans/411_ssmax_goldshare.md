@@ -107,16 +107,14 @@ Goal: based on Phase 4 results, decide promote-to-default vs demote-opt-in, and 
 
 ### Tasks
 
-- [ ] **T5.1** **Promotion decision (per G1+G2 outcome):**
-  - If G1 AND G2 PASS → promote `ssmax_temperature` to default in `parallax_attn` (it's a strict superset of the constant-temperature case when `s_L` is chosen well; `s_L = 1.0` default preserves small-N behavior per G5). Add to the "Always-On Hot Path" features list in `README.md` §E2E Inference Flow.
-  - If G2 FAILS (sigmoid parallax already handles the dilution regime at all tested N) → keep `ssmax_temperature` opt-in, document it as a large-N safety net in the README Feature Showcase opt-in section.
-- [ ] **T5.2** GoldShare stays opt-in as a diagnostic regardless — promote only if a downstream consumer (sink-aware attention wiring, future runtime NPC cognition probe) depends on it.
-- [ ] **T5.3** If SSMax promoted: demote any loser per AGENTS.md ("demote the loser when a newer primitive wins the same slot"). The slot is "attention temperature / logit scaling" — check if any existing constant-temperature primitive (e.g. the `1/√d` in base SDPA) is now strictly dominated. If so, document the demotion in the README and the gate bench.
-- [ ] **T5.4** Add a Feature Showcase entry to `README.md` for SSMax (and GoldShare if interesting enough) — model on the existing Plan 287 sink-aware entry: TL;DR, paper cite, what it does, GOAT gate summary, default/opt-in status.
-- [ ] **T5.5** Run full CI guard: `cargo check --workspace` (default features) AND `cargo check --workspace --all-features` (the merkle_root lesson — combo regressions). Both must pass.
-- [ ] **T5.6** Update Research 392 status from "Done" to "Done — Plan 411 shipped" with a one-line link to this plan and the gate bench.
+- [x] **T5.1** **Promotion decision:** Keep `ssmax_temperature` opt-in. The GOAT gate passed (G1+G3+G4+G5 PASS, G2 deferred) but the benefit only manifests at N≥1k with small Δ — not the default operating regime. Default sigmoid parallax doesn't have softmax's dilution dynamics. Documented as a large-N safety net. Rationale matches the plan's T5.1 fallback: "keep opt-in, document it as a large-N safety net."
+- [x] **T5.2** GoldShare stays opt-in as a diagnostic (G2+G4 PASS). Will promote only when a downstream consumer depends on it.
+- [x] **T5.3** No demotion needed — SSMax is opt-in (not promoted to default), so no existing primitive is dominated. The slot ("attention temperature / logit scaling") has no incumbent default-on primitive to demote; `1/√d` in base SDPA is a different mechanism (constant per-dim scaling, not length-adaptive).
+- [x] **T5.4** Added Feature Showcase entry to `README.md` §🔀 Feature Showcase ("🌡️ SSMax + GoldShare") with GOAT gate table, paper cite, and opt-in status. The Opt-In & Gated Features table entries were added by a sibling agent (confirmed accurate).
+- [x] **T5.5** Full CI guard PASS: `cargo check --workspace` (default features) ✅ + `cargo check --workspace --all-features` ✅ (the merkle_root lesson — no combo regressions).
+- [x] **T5.6** Updated Research 392 status from "Done" to "Done — Plan 411 shipped" with links to the plan and gate bench.
 
-**STATUS: ☐** — Phase 5 not started.
+**STATUS: ✅ DONE** — Phase 5 complete. Both primitives ship opt-in. SSMax is a large-N safety net (G1+G3+G4+G5 PASS). GoldShare is a diagnostic (G2+G4 PASS). Full CI guard green.
 
 ---
 

@@ -2,7 +2,7 @@
 
 > **Source:** Gollapudi, Gupta, Singhal, Min. *Can Language Models Actually Retrieve In-Context? Drowning in Documents at Million Token Scale.* UC Berkeley / UT Austin. [arXiv:2607.01538](https://arxiv.org/abs/2607.01538). 2026-07-01.
 > **Date:** 2026-07-07
-> **Status:** Done
+> **Status:** Done — Plan 411 shipped (see `.plans/411_ssmax_goldshare.md` + `.benchmarks/411_ssmax_goldshare_goat.md`)
 > **Related Research:** 258 (Attention Sinks — NOP vs Broadcast), 261 (FuncAttn sink semantics — negative), 225 (MSA blockwise sparse distillation), 286 (attention drift — drafter side), 100 (EGA spectral salience gate), 140 (sigmoid parallax), 135 (Parallax), 061 (SLIME stabilized-likelihood margin), 362 (HydraHead causal head importance)
 > **Related Plans:** 287 (sink-aware attention — SHIPPED), 289 (forward-path wiring — Parallax only), 256 (MSA sparse attention family), 196 (VortexFlow programmable sparse attention)
 > **Classification:** Public
