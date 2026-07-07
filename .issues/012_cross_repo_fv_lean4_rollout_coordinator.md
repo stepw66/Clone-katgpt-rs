@@ -31,11 +31,13 @@ The 5-repo quintet (katgpt-rs / riir-ai / riir-chain / riir-neuron-db / riir-tra
 | # | Instance | Repo | Plan(s) | Toolchain | Theorems | Axioms | Status |
 |---|---|---|---|---|---|---|---|
 | 1 | `RiirChainProof` | `riir-chain` (private) | [004](../../riir-chain/.plans/004_latcal_lean4_roundtrip_proof.md) + [008](../../riir-chain/.plans/008_chain_fv_phase2_quorum_and_merkle_root.md) + [009](../../riir-chain/.plans/009_chain_fv_phase3_slashing_and_split_key.md) | `v4.31.0` (Mathlib-free) | ~25 (LatCal roundtrip, quorum determinism, `merkle_root` stamping, slashing monotonicity, split-key wire-safety) | `{propext}` or **none** (most theorems axiom-free) | ✅ Phases 1–3 COMPLETE |
-| 2 | `KatgptProof` | `katgpt-rs` (public MIT) | [293](../.plans/293_action_bridge_lean4_monotonicity_proof.md) | `v4.32.0-rc1` (Mathlib) | 2 (sigmoid ranking preservation + argmax preservation) | `{propext, Classical.choice, Quot.sound}` | ✅ COMPLETE |
+| 2 | `KatgptProof` | `katgpt-rs` (public MIT) | [293](../.plans/293_action_bridge_lean4_monotonicity_proof.md) + [411 S3](../.plans/411_ssmax_goldshare.md) | `v4.32.0-rc1` (Mathlib) | 6 (2 sigmoid ranking preservation + argmax preservation + 4 SSMax dilution-bound: `alphaGold_strictMono_in_c`, `alphaGold_lt_of_c_lt`, `ssmax_dominates_base`, `alphaGold_bounded`) | `{propext, Classical.choice, Quot.sound}` | ✅ COMPLETE |
 | 3 | `NeuronDbProof` | `riir-neuron-db` (private) | [007](../../riir-neuron-db/.plans/007_neuron_shard_fv_phase1_layout_and_freeze_gate.md) + [008](../../riir-neuron-db/.plans/008_neuron_shard_fv_phase2_merkle_proof_soundness.md) | `v4.31.0` (Mathlib-free) | 19 (shard layout, freeze gate self-consistency, Merkle tamper-evidence) | `{propext, Classical.choice, Quot.sound}` or **none** (7 layout + 4 Merkle axiom-free) | ✅ Phases 1–2 COMPLETE |
 | 4 | `RiirAiProof` | `riir-ai` (private) | [353](../../riir-ai/.plans/353_*.md) + [T2 freeze/thaw](../../riir-ai/.proofs/RiirAiProof/Runtime/FreezeThaw.lean) | `v4.32.0-rc1` (Mathlib) | 16 (HLA boundedness + freeze/thaw reader invariant) + Phase 5 specialization | `{propext, Classical.choice, Quot.sound}` (FreezeThaw: `{propext}` only) | ✅ COMPLETE (Phase 5 CLOSED via specialization) |
 
-**Total: ~62 theorems across 4 instances, 4 theorem classes, zero `sorry`.**
+**Total: ~66 theorems across 4 instances, 4 theorem classes, zero `sorry`.**
+(Plan 411 S3 added 4 theorems to `KatgptProof` on 2026-07-07, bringing the
+instance-2 count from 2 to 6 and the total from ~62 to ~66.)
 
 ---
 
@@ -46,6 +48,17 @@ The first instance. Proves the sync-boundary bridge: LatCal fixed-point round-tr
 
 ### Phase 2 — `KatgptProof` (katgpt-rs, Plan 293) ✅
 The public instance. Proves sigmoid ranking preservation: `∀ q d₁ d₂, dot q d₁ > dot q d₂ → sigmoid (dot q d₁) > sigmoid (dot q d₂)`. Requires Mathlib (`Real.sigmoid_strictMono` — transcendental analysis of `exp` not in Lean core). Toolchain `v4.32.0-rc1` (Mathlib's requirement). Paired Rust spec-match test (`bridge_spec_match`) catches drift between Rust `fast_sigmoid` and Mathlib `Real.sigmoid`.
+
+**Extension (Plan 411 S3, 2026-07-07):** added the SSMax dilution-bound
+theorems (`Ssmax/Basic.lean` + `Ssmax/DilutionBound.lean`). Two headline
+results: (1) `alphaGold_strictMono_in_c` — the gold mass `1/(1+(N−1)·N^{−c})`
+is strictly increasing in `c` for `N > 1` (the monotonicity that makes SSMax
+work — dilution-bound analog of the bridge's sigmoid monotonicity); (2)
+`ssmax_dominates_base` — for `s_L · log(N) ≥ 1` and `c_base > 0`, SSMax does
+not decrease the gold mass. The Lean proof **sharpened the plan's threshold**:
+the informal `N ≥ 2` is false at `N = 2` (`log(2) < 1` makes SSMax milder than
+base); the correct condition is `s_L · log(N) ≥ 1` (i.e. `N ≥ 3` for `s_L = 1`).
+Paired Rust spec-match test: `ssmax_spec_match.rs` (8 tests).
 
 ### Phase 3 — `NeuronDbProof` (riir-neuron-db, Plans 007 + 008) ✅
 The highest-ROI target. Two past bugs (`merkle_root` forgotten in `new_spectral`, `can_freeze` gate decoupling) are textbook invariant violations — now Lean theorems. The crate is a leaf (no chain dep), theorems are pure algebra/boolean logic, Mathlib-free. 19 theorems: 7 shard-layout (axiom-free), 8 freeze-gate self-consistency, 4 Merkle tamper-evidence (axiom-free, cryptographic injectivity is a *hypothesis* not an axiom).
