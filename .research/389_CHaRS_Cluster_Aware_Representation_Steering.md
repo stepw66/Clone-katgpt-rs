@@ -223,7 +223,7 @@ CommittedFieldBlend commits an NPC's personality as a fixed K=3 archetype blend.
 - Q3: Selling point — concrete, demoable. Yes if Q1 holds.
 - Q4: Connects CommittedFieldBlend, latent_functor, HLA, EmotionDirections, freeze/thaw. Yes.
 
-**Status:** This is flagged as a *candidate fusion*, not a committed Super-GOAT. Per §1.5 rule, "candidate" requires either full Q1–Q4 commitment in this session (with mandatory outputs) or downgrade to a `.issues/` entry. **Downgrading F1 to an issue** — see §3 routing.
+**Status:** ✅ EVALUATED (2026-07-07, Issue 049) — **NOT Super-GOAT.** Full Q1–Q4 evaluation complete: Q1 YES (per-input RBF routing genuinely unshipped — CommittedFieldBlend's `pi` is fixed per `functor_bridge.rs`; ReestimationScheduler does periodic re-fit not per-input routing; zone_gating is spatial-density trust adjustment not blend-weight routing), Q2 NO (refinement of soft-MoE-steering class, not new operation — R382 precedent applies), Q3 WEAK (refines R158 committed-personality selling point / Pillar 8), Q4 YES (≥5 pillars). Q2 fails → GOAT-tier refinement, not Super-GOAT. The bare CHaRS primitive ships as GOAT regardless. See [Issue 049](../../.issues/049_chars_committed_blend_fusion_super_goat_evaluation.md) for the full evidence matrix.
 
 **F2 (SECONDARY — katgpt-rs, fusion candidate): CHaRS × Spherical Steering Slerp = "norm-preserving cluster-mixed rotation"**
 
@@ -237,7 +237,7 @@ The OT plan `P⋆`, the anchor bank hashes, and the per-tick routing weight `w_i
 
 CHaRS-rotate the player-context query toward a target style before cosine matching on `ItemEmbedIndex`. The 8-dim item-embedding space is the natural substrate for CHaRS (small D, schema-centroid clusters already exist as `ItemType` buckets). Differs from F3 in R382: CHaRS routes over K anchors, Slerp rotates toward one. **Speculative**, P3.
 
-**Strongest fusion candidate:** F1 (per-NPC archetype-routing steering). Needs full Q1–Q4 evaluation before any Super-GOAT commitment.
+**Strongest fusion candidate:** F1 (per-NPC archetype-routing steering). ✅ **EVALUATED 2026-07-07 (Issue 049) — NOT Super-GOAT** (Q2 fails: refinement of soft-MoE-steering class; Q3 weak: refines R158). Remains a strong GOAT-tier refinement of the committed-personality moat.
 
 ### 2.5 Latent-space reframing (mandatory per fusion protocol §1.3)
 

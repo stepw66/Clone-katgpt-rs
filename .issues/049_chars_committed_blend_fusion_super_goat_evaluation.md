@@ -2,9 +2,10 @@
 
 > **Opened:** 2026-07-07
 > **Source research:** [katgpt-rs/.research/389_CHaRS_Cluster_Aware_Representation_Steering.md](../.research/389_CHaRS_Cluster_Aware_Representation_Steering.md) §2.4 F1
-> **Status:** Open — Super-GOAT candidate, NOT committed. Needs full Q1–Q4 evaluation before any guide/plan.
+> **Status:** ✅ CLOSED (2026-07-07) — NOT Super-GOAT. Full Q1–Q4 evaluation complete. Q2 fails (refinement of soft-MoE-steering class, not new operation); Q3 weak (refines R158's committed-personality selling point). The bare CHaRS primitive (Plan 409) ships as GOAT regardless. R389 §2.4 F1 updated.
 > **Owner:** unassigned
 > **Verdict tier at opening:** GOAT (the bare CHaRS primitive). F1 fusion is the unevaluated Super-GOAT candidate.
+> **Final verdict:** GOAT (confirmed). F1 fusion = NOT Super-GOAT.
 
 ---
 
@@ -20,53 +21,63 @@ Research 389 (CHaRS, arXiv:2603.02237) verdict was **GOAT** for the bare primiti
 
 ## Q1–Q4 evaluation checklist (must complete before any Super-GOAT commitment)
 
-### Q1: No prior art? — UNEVALUATED
+### Q1: No prior art? — **YES (genuinely unshipped)**
 
 Must verify across all 5 repos, both layers (notes+plans+docs AND src+crates), with vocabulary translation:
 
-- [ ] **Q1.1** Grep `CommittedFieldBlend|apply_blended|ArchetypeFieldSource` consumers — is anyone already doing per-input routing on top of the committed blend?
-- [ ] **Q1.2** Grep `chars|cluster.*steer|input.position.*steer|region.aware.*steer|per.tick.*archetype` — any partial implementation?
-- [ ] **Q1.3** Grep `ReestimationScheduler|reestimation_trigger|coherence.*tau` — does the scheduler already do region-aware steering implicitly?
-- [ ] **Q1.4** Grep `latent_functor.*zone_gating|zone_gating.*steer` — does zone gating already provide region-aware routing that CHaRS would duplicate?
-- [ ] **Q1.5** Read `riir-engine/src/committed_blend/` and `riir-engine/src/latent_functor/reestimation.rs` — what's the actual integration surface?
-- [ ] **Q1.6** Read `riir-ai/.research/158_per_npc_committed_personality_blend_guide.md` — does the committed-personality story already include region-aware routing?
+- [x] **Q1.1** Grep `CommittedFieldBlend|apply_blended|ArchetypeFieldSource` consumers — is anyone already doing per-input routing on top of the committed blend? **NO.** `CommittedFieldBlend` ships in `katgpt-core/src/committed_field_blend/` with `apply_blended()` as the hot path. The runtime bridge (`committed_blend/functor_bridge.rs`) confirms: "The blend multiplies the functor — it does not replace it" with `sigmoid(pi_k/tau)` as a **FIXED** weight. `apply_blended_functor(...) = sum_k sigmoid(pi_k/tau) · g_k(e_target)` — the `pi` vector is committed ONCE per NPC and never varies per-input. The bench + example use a fixed blend per entity.
+- [x] **Q1.2** Grep `chars|cluster.*steer|input.position.*steer|region.awware.*steer|per.tick.*archetype` — any partial implementation? **NO.** Zero hits for CHaRS-specific vocabulary. No partial per-input archetype routing exists.
+- [x] **Q1.3** Grep `ReestimationScheduler|reestimation_trigger|coherence.*tau` — does the scheduler already do region-aware steering implicitly? **NO — this is the load-bearing check, and it PASSES (not covered).** The `ReestimationScheduler` (`latent_functor/reestimation.rs`) does **periodic re-estimation** of direction vectors when `coherence < tau_reest`. It fires at most `max_reestimations_per_tick=4` times per tick per NPC (warm tier, budget-capped). It re-fits the GLOBAL direction vector from recent observations — it does NOT compute per-input routing weights. This is a **slow-timescale correction** (re-fit on drift), not **per-tick per-input routing** (route by current HLA position). The detect-then-correct loop is implicit; the detect-then-ROUTE-per-input loop is NOT. CHaRS's `w_i(x)` is computed EVERY tick from the current HLA state — a fundamentally different timescale and mechanism.
+- [x] **Q1.4** Grep `latent_functor.*zone_gating|zone_gating.*steer` — does zone gating already provide region-aware routing that CHaRS would duplicate? **NO (partial overlap, different axis).** `zone_gating.rs` ships zone-density dynamic gating: it adjusts `(tau, beta, reest_budget)` by zone **interaction density** (a SPATIAL/raw scalar `I_d`, synced via SyncBlock). This gates the **trust threshold** for functor coherence, not the **archetype blend weights**. It answers "how much should we trust the functor in this zone?", not "which archetype should dominate this NPC's steering given its current affective region?". Different axis (spatial density vs affective HLA position), different target (trust gate vs blend weights).
+- [x] **Q1.5** Read `riir-engine/src/committed_blend/` and `riir-engine/src/latent_functor/reestimation.rs` — what's the actual integration surface? **DONE.** The `committed_blend/` runtime has 9 files: `mod.rs` (HLA dynamics blend), `functor_bridge.rs` (relational stance blend, D=32), `karc_bridge.rs` (Bi-NCDE forecast), `curiosity_bridge.rs`, `recommit.rs`, `freeze.rs`, `shard_view.rs`, `chain_bridge.rs`, `archetypes.rs`. The integration surface for CHaRS would be `functor_bridge.rs` (replace fixed `sigmoid(pi_k/tau)` with per-input `w_k(x)` from RBF on current HLA) + a new `chars_anchor_bank` field in the committed state. The `reestimation.rs` scheduler would trigger bank re-commit on coherence drop (already the pattern it uses for direction re-estimation).
+- [x] **Q1.6** Read `riir-ai/.research/158_per_npc_committed_personality_blend_guide.md` — does the committed-personality story already include region-aware routing? **NO.** R158's selling point is "committed personalities that survive observation gaps" via a FIXED `pi` computed once from trajectory summary. §2.1 explicitly: "Compute blend weights ONCE: `pi_k = sigmoid(dot(s, dir_k) / tau)` ... Freeze `pi` — never mutate until a major personality event." Per-tick evolution uses `evolve_hla_pi(z) = sum_k pi_k · evolve_hla_k(z)` with CONSTANT `pi_k`. No region-aware routing.
 
-**Q1 verdict:** ___ (YES/NO with evidence)
+**Q1 verdict: YES (genuinely unshipped).** Per-input RBF routing over the committed archetype library, computed from the NPC's current HLA position every tick, is not shipped in any of the 5 repos. The closest cousin (CommittedFieldBlend) is entity-fixed; the scheduler is periodic re-fit; zone-gating is spatial-density trust adjustment. The fusion IS novel at the mechanism level.
 
-### Q2: New class of behavior? — UNEVALUATED
+### Q2: New class of behavior? — **NO (PARTIAL — fails the Super-GOAT bar)**
 
-- [ ] **Q2.1** Is "per-NPC region-aware steering" a new capability class, or a refinement of CommittedFieldBlend's "per-NPC committed archetype blend"?
-- [ ] **Q2.2** Compare against the bar R382 Spherical Steering was measured against — Plan 322 established "norm-preserving rotation as a new latent operation class"; does CHaRS × CommittedFieldBlend establish an analogous new operation class, or is it a new routing criterion on the existing soft-MoE-steering class?
-- [ ] **Q2.3** Identify the closest shipped cousin (likely CommittedFieldBlend + `ReestimationScheduler`) — does the combination produce a behavior neither has alone?
+- [x] **Q2.1** Is "per-NPC region-aware steering" a new capability class, or a refinement of CommittedFieldBlend's "per-NPC committed archetype blend"? **REFINEMENT.** The OPERATION is identical: `blend K archetype translations by soft weights` → `sum_k w_k · f_k(z)`. CommittedFieldBlend uses `w_k = sigmoid(pi_k/tau)` (fixed per NPC); CHaRS fusion uses `w_k = RBF(hla, anchor_k)` (per-input). The **weight source** changes; the **operation class** does not.
+- [x] **Q2.2** Compare against the bar R382 Spherical Steering was measured against — Plan 322 established "norm-preserving rotation as a new latent operation class"; does CHaRS × CommittedFieldBlend establish an analogous new operation class, or is it a new routing criterion on the existing soft-MoE-steering class? **NEW ROUTING CRITERION, not new operation class.** R382 (Spherical Steering) was GOAT not Super-GOAT for the same reason: its norm-preserving Slerp was a refinement of Plan 322's rotation class, not a new class. CHaRS's per-input routing is a refinement of CommittedFieldBlend's soft-MoE-steering class. The R382 precedent applies directly.
+- [x] **Q2.3** Identify the closest shipped cousin (likely CommittedFieldBlend + `ReestimationScheduler`) — does the combination produce a behavior neither has alone? **YES at the individual-NPC level (a single NPC's steering adapts to its current affective region), but NOT at the operation-class level.** The combination produces richer per-NPC behavior, but the operation is still "blend K fields by soft weights" — the same class CommittedFieldBlend already ships.
 
-**Q2 verdict:** ___
+**Q2 verdict: NO (PARTIAL).** Fails the "new capability class" bar. It's a new routing criterion on the existing soft-MoE-steering class. **This is the failing criterion for Super-GOAT.**
 
-### Q3: Product selling point? — UNEVALUATED
+### Q3: Product selling point? — **WEAK (refines R158)**
 
-- [ ] **Q3.1** Finish the sentence: "Our NPCs do X that no competitor can". Is X concrete and demoable?
-- [ ] **Q3.2** Does this selling point already exist in `riir-ai/.docs/pillars/` or `supergoat_candidates/`? (Must `read_file` both indexes first.)
-- [ ] **Q3.3** Is the wolf hunt-mode vs pack-mode example actually a *new* behavior, or is it what `PersonalityWeightedComposition`'s per-layer drift + CommittedFieldBlend's commitment already produce?
+- [x] **Q3.1** Finish the sentence: "Our NPCs do X that no competitor can". Is X concrete and demoable? **PARTIALLY.** "Our NPCs are steered by their current affective region — a wolf in hunt-mode is steered by the hunt archetype's translation, the same wolf in pack-mode by the social archetype's, with smooth sigmoid-gated transitions as its HLA state moves between regions." Concrete and demoable, but...
+- [x] **Q3.2** Does this selling point already exist in `riir-ai/.docs/pillars/` or `supergoat_candidates/`? **YES (overlaps Pillar 8 / R158).** Pillar 8 (Reasoning Pack) covers "personality-driven NPC reasoning at scale." R158's existing selling point is "committed personalities that survive observation gaps... emergent per-NPC personality at crowd scale." The CHaRS fusion REFINES this: R158 already sells "emergent per-NPC personality via blend variation" (different NPCs have different `pi`); CHaRS adds "a SINGLE NPC's blend varies over time by affective region." The product-level selling point ("emergent personality at crowd scale") is already covered.
+- [x] **Q3.3** Is the wolf hunt-mode vs pack-mode example actually a *new* behavior, or is it what `PersonalityWeightedComposition`'s per-layer drift + CommittedFieldBlend's commitment already produce? **It IS new at the individual-NPC timescale (no shipped primitive makes a single NPC's blend adapt per-tick to its HLA position), but the crowd-scale product story is already sold by R158.** The gap is: R158's crowd-scale emergence comes from NPC-to-NPC `pi` variation; CHaRS would add within-NPC temporal variation. Both are "emergent personality" — different axes of the same selling point.
 
-**Q3 verdict:** ___
+**Q3 verdict: WEAK.** The selling point refines R158's committed-personality story. It adds within-NPC temporal adaptivity to the existing cross-NPC blend variation. Concrete and demoable at the individual level, but the product moat sentence is already owned by Pillar 8 / R158.
 
-### Q4: Force multiplier? — UNEVALUATED
+### Q4: Force multiplier? — **YES**
 
-- [ ] **Q4.1** Count pillars touched. Must be ≥2 for Super-GOAT. Candidates: P2 (neuron-db substrate), P8 (reasoning pack), self-learn NPCs, latent_functor, HLA, EmotionDirections, freeze/thaw.
-- [ ] **Q4.2** Are the connections *new capabilities* (force multiplier), or refinements of existing connections?
+- [x] **Q4.1** Count pillars touched. **YES (≥5).** HLA (latent substrate), CommittedFieldBlend/Pillar 8 (archetype library cousin), latent_functor (ReestimationScheduler as re-commit trigger), EmotionDirections (anchor-bank construction recipe), freeze/thaw (CharsAnchorShard). Plus LatCal (F3 commitment) and ItemEmbedIndex (F4 steered retrieval) as speculative connections.
+- [x] **Q4.2** Are the connections *new capabilities* (force multiplier), or refinements of existing connections? **MIXED.** The HLA→CHaRS routing connection is new (per-input affective-region routing is unshipped). The CommittedFieldBlend connection is a refinement (new weight source on existing operation). The ReestimationScheduler connection is new (bank re-commit trigger, not just direction re-fit).
 
-**Q4 verdict:** ___
+**Q4 verdict: YES.** Strong force multiplier — ≥5 pillars touched, with genuinely new connections on the HLA routing + scheduler re-commit axes.
+
+## Final verdict: **NOT Super-GOAT**
+
+| Q | Criterion | Verdict | Evidence |
+|---|---|---|---|
+| Q1 | No prior art? | **YES** | Per-input RBF routing over committed archetype library is genuinely unshipped. CommittedFieldBlend's `pi` is fixed (functor_bridge.rs); scheduler is periodic re-fit; zone-gating is spatial-density trust adjustment. |
+| Q2 | New class of behavior? | **NO (PARTIAL)** | Operation "blend K fields by soft weights" is the CommittedFieldBlend class. CHaRS changes the weight source (fixed `pi` → per-input `w_k(x)`), which is a new routing criterion, not a new operation. R382 precedent applies. **Failing criterion.** |
+| Q3 | Product selling point? | **WEAK** | Refines R158's committed-personality story (Pillar 8). Adds within-NPC temporal adaptivity to existing cross-NPC blend variation. Crowd-scale product sentence already owned by R158. |
+| Q4 | Force multiplier? | **YES** | ≥5 pillars touched (HLA, CommittedFieldBlend, latent_functor, EmotionDirections, freeze/thaw). Genuinely new connections on HLA routing + scheduler re-commit axes. |
+
+**Super-GOAT requires YES on ALL four. Q2 fails, Q3 is weak. Verdict: NOT Super-GOAT.**
+
+This confirms R389 §4's own GOAT verdict for the bare primitive. The F1 fusion (CHaRS × CommittedFieldBlend × latent_functor re-estimation) does NOT elevate to Super-GOAT even with the full composition — it remains a strong GOAT-tier refinement of the committed-personality moat.
 
 ## If Q1–Q4 all YES: mandatory outputs (in the evaluation session, not now)
 
-1. **Open primitive** → `katgpt-rs/.plans/409_chars_cluster_aware_steering_primitive.md` (the bare primitive ships regardless — Plan 409 is in R389's routing already).
-2. **Private guide** → `riir-ai/.research/NNN_per_npc_archetype_routing_steering_guide.md` (selling point: per-NPC region-aware steering).
-3. **Private plan** → `riir-ai/.plans/NNN_chars_committed_blend_runtime_integration.md` (runtime wiring: HLA hook, latent_functor interop, archetype library loader, CharsAnchorShard freeze integration).
-4. **Cross-ref guides** → riir-neuron-db (CharsAnchorShard layout), riir-chain (LatCal commitment of OT plan) — if those fusions are pursued.
+**N/A — Q2 fails.** No Super-GOAT commitment. The mandatory outputs do not apply.
 
 ## If any Q is NO: close this issue
 
-- Update R389 §2.4 F1 to "evaluated, not Super-GOAT, reason: ___".
-- The bare primitive (Plan 409) ships regardless as a GOAT.
+- [x] **DONE** — Update R389 §2.4 F1 to "evaluated, not Super-GOAT, reason: Q2 fails (refinement of soft-MoE-steering class, not new operation; R382 precedent); Q3 weak (refines R158 committed-personality selling point)".
+- [x] The bare primitive (Plan 409) ships regardless as a GOAT. (Plan 409 number was taken by `409_jlens_concept_readout_prefilter_poc.md`; the CHaRS primitive needs the next free plan number if/when implemented.)
 
 ## Pre-evaluation reading list (mandatory before Q1)
 
