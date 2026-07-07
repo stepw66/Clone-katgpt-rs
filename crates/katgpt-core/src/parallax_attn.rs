@@ -117,6 +117,14 @@ pub struct ParallaxConfig {
     /// Default: Sigmoid (sink-free, higher COR capacity per Plan 161).
     /// Set to Softmax for backward-compatible attention sinks.
     pub activation: ParallaxActivation,
+    /// Optional SSMax (length-aware log-N attention temperature) mode.
+    /// When `Some`, the forward path applies `s_L · log(N)` multiplicative
+    /// rescaling to the pre-normalization attention scores, cancelling the
+    /// attention dilution bound at large N (Plan 411, Research 392,
+    /// arXiv:2607.01538). Default `None` — no change to existing behavior.
+    /// Only present when the `ssmax_temperature` feature is enabled.
+    #[cfg(feature = "ssmax_temperature")]
+    pub ssmax: Option<crate::ssmax::SsmaxMode>,
 }
 
 impl Default for ParallaxConfig {
@@ -125,6 +133,8 @@ impl Default for ParallaxConfig {
             gate_scale: 1.0,
             zero_init: true,
             activation: ParallaxActivation::default(),
+            #[cfg(feature = "ssmax_temperature")]
+            ssmax: None,
         }
     }
 }
@@ -157,6 +167,25 @@ fn normalize_attention_weights(row: &mut [f32], activation: ParallaxActivation) 
             // Normalize so Σ_j p(j) = 1 (Nadaraya-Watson requirement)
             let rowsum = simd::simd_sum_f32(row);
             simd::simd_scale_inplace(row, 1.0 / rowsum);
+        }
+    }
+}
+
+/// Apply SSMax (length-aware log-N attention temperature) to a score row,
+/// if the config requests it. No-op when `ssmax` is `None` or the feature
+/// is off.
+///
+/// This is the SSMax intervention point in the parallax forward path:
+/// scores are computed, then SSMax rescales them by `s_L · log(N)` before
+/// normalization (sigmoid/softmax). Plan 411, Research 392.
+#[cfg(feature = "ssmax_temperature")]
+#[inline]
+fn apply_ssmax_to_row(row: &mut [f32], ssmax: Option<&crate::ssmax::SsmaxMode>) {
+    if let Some(mode) = ssmax {
+        let n = row.len();
+        if n > 1 {
+            let log_n = (n as f32).ln();
+            crate::ssmax::apply_ssmax_inplace(row, mode, log_n);
         }
     }
 }
@@ -439,6 +468,8 @@ pub fn tiled_attention_parallax_forward_retaining(
             Some(&mut scratch.scores),
             parallax_config.activation,
             attn_matrix.as_deref_mut(),
+            #[cfg(feature = "ssmax_temperature")]
+            parallax_config.ssmax.as_ref(),
         );
         return;
     }
@@ -458,6 +489,11 @@ pub fn tiled_attention_parallax_forward_retaining(
             scratch.scores[j] =
                 simd::simd_dot_f32(&q[row_off..row_off + d], &k[k_off..k_off + d], d) * scale;
         }
+
+        // SSMax: rescale scores by s_L · log(N) before normalization.
+        // No-op when ssmax is None (the default).
+        #[cfg(feature = "ssmax_temperature")]
+        apply_ssmax_to_row(&mut scratch.scores[..n], parallax_config.ssmax.as_ref());
 
         // Normalize attention weights (softmax or sigmoid)
         let row = &mut scratch.scores[..n];
@@ -757,6 +793,74 @@ pub fn tiled_attention_parallax_forward_sink_aware(
     }
 }
 
+// ── SSMax + Sink-Aware 3-way composition (Plan 411 T2.3) ────────
+// Requires all three of: parallax_attn, sink_aware_attn, ssmax_temperature.
+// SSMax applies at the LOGIT level (pre-normalization), inside the parallax
+// forward; the sink-aware gate applies at the OUTPUT level (post-value-weighted
+// sum). They compose cleanly because they operate at different stages — there
+// is no interference and the composition order is forced by the data flow.
+
+/// Sink-aware parallax forward with SSMax log-N temperature (Plan 411 T2.3).
+///
+/// Three-way composition:
+/// 1. **SSMax** (logit level) — rescales pre-normalization scores by
+///    `s_L · log(N)` via `parallax_config.ssmax` (set by T2.1) or the explicit
+///    `ssmax_mode` override.
+/// 2. **Parallax forward** — normalization + value-weighted sum + covariance
+///    correction.
+/// 3. **Sink-aware gate** (output level) — dual-policy NOP/Broadcast classifier
+///    on the retained attention matrix.
+///
+/// SSMax and the sink-aware gate compose cleanly because they operate at
+/// different stages of the forward (logits vs output); there is no interference.
+///
+/// When `ssmax_mode` is `Some`, it takes precedence over
+/// `parallax_config.ssmax` (the explicit param wins). This lets callers reuse
+/// a base `ParallaxConfig` across SSMax-on / SSMax-off calls without mutating
+/// the shared config.
+///
+/// Requires all three features: `parallax_attn`, `sink_aware_attn`,
+/// `ssmax_temperature`.
+#[cfg(all(feature = "parallax_attn", feature = "sink_aware_attn", feature = "ssmax_temperature"))]
+#[allow(clippy::too_many_arguments)]
+pub fn tiled_attention_parallax_forward_sink_aware_ssmax(
+    q: &[f32],
+    k: &[f32],
+    v: &[f32],
+    output: &mut [f32],
+    seq_len: usize,
+    head_dim: usize,
+    scale: f32,
+    r: &[f32],
+    x: &[f32],
+    parallax_config: &ParallaxConfig,
+    ssmax_mode: Option<&crate::ssmax::SsmaxMode>,
+    policy: &crate::data_probe::SinkAwarePolicy,
+    gate_scale: f32,
+    sink_scratch: &mut SinkAwareParallaxScratch,
+    scratch: Option<&mut ParallaxScratch>,
+) -> crate::data_probe::SinkKind {
+    // Inject SSMax into a cloned config when the explicit override is provided.
+    // The clone is a few f32 + a Copy enum — negligible vs the n×n classifier.
+    // When ssmax_mode is None, use the config as-is (it may already have ssmax set).
+    let owned_cfg;
+    let cfg: &ParallaxConfig = match ssmax_mode {
+        Some(mode) => {
+            owned_cfg = {
+                let mut c = parallax_config.clone();
+                c.ssmax = Some(*mode);
+                c
+            };
+            &owned_cfg
+        }
+        None => parallax_config,
+    };
+    tiled_attention_parallax_forward_sink_aware(
+        q, k, v, output, seq_len, head_dim, scale, r, x, cfg, policy, gate_scale, sink_scratch,
+        scratch,
+    )
+}
+
 // ── Core attention (no feature-flag dependency) ───────────────────
 
 /// Core attention, used when Parallax correction is not needed.
@@ -776,6 +880,7 @@ fn tiled_attention_core(
     scores: Option<&mut [f32]>,
     activation: ParallaxActivation,
     mut attn_matrix: Option<&mut [f32]>,
+    #[cfg(feature = "ssmax_temperature")] ssmax: Option<&crate::ssmax::SsmaxMode>,
 ) {
     let d = head_dim;
     let n = seq_len;
@@ -801,6 +906,11 @@ fn tiled_attention_core(
             let k_off = j * d;
             *score_slot = simd::simd_dot_f32(&q[q_off..q_off + d], &k[k_off..k_off + d], d) * scale;
         }
+
+        // SSMax: rescale scores by s_L · log(N) before normalization.
+        // No-op when ssmax is None (the default).
+        #[cfg(feature = "ssmax_temperature")]
+        apply_ssmax_to_row(&mut scores[..n], ssmax);
 
         // Normalize attention weights (softmax or sigmoid)
         let row = &mut scores[..n];
@@ -895,6 +1005,7 @@ mod tests {
             gate_scale: 0.0,
             zero_init: false,
             activation: ParallaxActivation::Softmax,
+            ..Default::default()
         };
 
         let mut output_parallax = vec![0.0f32; n * d];
@@ -924,6 +1035,8 @@ mod tests {
             scale,
             None,
             ParallaxActivation::Softmax,
+            None,
+            #[cfg(feature = "ssmax_temperature")]
             None,
         );
 
@@ -958,6 +1071,7 @@ mod tests {
             gate_scale: 1.0,
             zero_init: true,
             activation: ParallaxActivation::Softmax,
+            ..Default::default()
         };
 
         let mut output_parallax = vec![0.0f32; n * d];
@@ -987,6 +1101,8 @@ mod tests {
             scale,
             None,
             ParallaxActivation::Softmax,
+            None,
+            #[cfg(feature = "ssmax_temperature")]
             None,
         );
 
@@ -1073,6 +1189,7 @@ mod tests {
             gate_scale: 0.0,
             zero_init: false,
             activation: ParallaxActivation::Sigmoid,
+            ..Default::default()
         };
 
         let mut output_parallax = vec![0.0f32; n * d];
@@ -1101,6 +1218,8 @@ mod tests {
             scale,
             None,
             ParallaxActivation::Sigmoid,
+            None,
+            #[cfg(feature = "ssmax_temperature")]
             None,
         );
 
@@ -1133,6 +1252,7 @@ mod tests {
             gate_scale: 0.0,
             zero_init: true,
             activation: ParallaxActivation::Sigmoid,
+            ..Default::default()
         };
 
         let mut output = vec![0.0f32; n * d];
@@ -1177,11 +1297,13 @@ mod tests {
             gate_scale: 0.0,
             zero_init: true,
             activation: ParallaxActivation::Softmax,
+            ..Default::default()
         };
         let config_sig = ParallaxConfig {
             gate_scale: 0.0,
             zero_init: true,
             activation: ParallaxActivation::Sigmoid,
+            ..Default::default()
         };
 
         tiled_attention_parallax_forward(
@@ -1239,11 +1361,13 @@ mod tests {
             gate_scale: 0.0,
             zero_init: false,
             activation: ParallaxActivation::Sigmoid,
+            ..Default::default()
         };
         let config_with_corr = ParallaxConfig {
             gate_scale: 1.0,
             zero_init: false,
             activation: ParallaxActivation::Sigmoid,
+            ..Default::default()
         };
 
         let mut out_no = vec![0.0f32; n * d];
@@ -1373,7 +1497,7 @@ mod tests {
         lcg_fill(0xC0DE, &mut q);
         lcg_fill(0xFEED, &mut k);
 
-        let cfg = ParallaxConfig { gate_scale: 0.0, zero_init: true, activation: ParallaxActivation::Sigmoid };
+        let cfg = ParallaxConfig { gate_scale: 0.0, zero_init: true, activation: ParallaxActivation::Sigmoid, ..Default::default() };
         let r = vec![0.0f32; d * d];
         let x = vec![0.0f32; d];
 
@@ -1402,7 +1526,7 @@ mod tests {
         lcg_fill(0x1234, &mut q);
         lcg_fill(0x5678, &mut k);
 
-        let cfg = ParallaxConfig { gate_scale: 0.0, zero_init: true, activation: ParallaxActivation::Softmax };
+        let cfg = ParallaxConfig { gate_scale: 0.0, zero_init: true, activation: ParallaxActivation::Softmax, ..Default::default() };
         let r = vec![0.0f32; d * d];
         let x = vec![0.0f32; d];
 
@@ -1428,7 +1552,7 @@ mod sink_aware_tests {
     };
 
     fn parallax_zero_cfg(act: ParallaxActivation) -> ParallaxConfig {
-        ParallaxConfig { gate_scale: 0.0, zero_init: true, activation: act }
+        ParallaxConfig { gate_scale: 0.0, zero_init: true, activation: act, ..Default::default() }
     }
 
     /// T3.1 — Uniform policy path produces bit-identical output to vanilla forward.

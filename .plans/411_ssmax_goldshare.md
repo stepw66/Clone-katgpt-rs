@@ -54,15 +54,15 @@ Goal: SSMax is callable from both attention paths (sigmoid parallax + standard S
 
 ### Tasks
 
-- [ ] **T2.1** Extend `ParallaxConfig` in `crates/katgpt-core/src/parallax_attn.rs` with an optional `ssmax: Option<SsmaxMode>` field (default `None` — no change to existing behavior). Field is `#[cfg(feature = "ssmax_temperature")]`.
-- [ ] **T2.2** In the parallax forward path, if `config.ssmax.is_some()`, call `apply_ssmax_inplace` on the score-matrix scratch *before* the sigmoid/softmax kernel is applied. The score matrix is already computed into a scratch buffer (see `compute_score_matrix` in `attn_match/score_matrix.rs` for the pattern); SSMax is one extra in-place pass.
-- [ ] **T2.3** Add a sink-aware + SSMax composition entry point `tiled_attention_parallax_forward_sink_aware_ssmax` behind `#[cfg(all(feature = "parallax_attn", feature = "sink_aware_attn", feature = "ssmax_temperature"))]` — mirrors the existing `tiled_attention_parallax_forward_sink_aware` (Plan 289). SSMax applied first (logit level), then sink-aware gate (output level) — they compose cleanly because they operate at different stages.
-- [ ] **T2.4** In `crates/katgpt-core/src/attention.rs` (standard SDPA), add an optional `ssmax: Option<SsmaxMode>` to the config struct (if one exists) OR expose a standalone `scaled_dot_product_ssmax` entry point that wraps the base SDPA with a logit-rescale pre-pass. Prefer the wrapper to avoid touching the hot default path.
-- [ ] **T2.5** Document in `ssmax.rs` module doc: SSMax does NOT apply to `funcattn` (Research 261 closed: basis-mode structure has no `(n,n)` attention matrix, so dilution is structurally absent). Don't wire it.
-- [ ] **T2.6** Run `cargo check -p katgpt-core --features parallax_attn,ssmax_temperature --lib` — must pass.
-- [ ] **T2.7** Run `cargo check -p katgpt-core --features parallax_attn,sink_aware_attn,ssmax_temperature --lib` — must pass (the 3-way composition).
+- [x] **T2.1** Extended `ParallaxConfig` in `crates/katgpt-core/src/parallax_attn.rs` with `#[cfg(feature = "ssmax_temperature")] pub ssmax: Option<crate::ssmax::SsmaxMode>` (default `None`). Manual `Default` impl updated with the cfg-gated field.
+- [x] **T2.2** In both parallax forward paths (the main path + `tiled_attention_core`), added `apply_ssmax_to_row` calls before `normalize_attention_weights`. Added a private helper `apply_ssmax_to_row(row, ssmax: Option<&SsmaxMode>)` that's a no-op when None. Updated the 3 test calls to `tiled_attention_core` to pass the cfg-gated None.
+- [x] **T2.3** The 3-way composition (parallax + sink-aware + SSMax) is **implicit** — since SSMax is a field on `ParallaxConfig`, the existing `tiled_attention_parallax_forward_sink_aware` entry point picks it up automatically (it passes `parallax_config` through to `tiled_attention_parallax_forward_retaining`). No separate entry point needed — the composition compiles and works. Deviation from plan T2.3 documented: instead of a new entry point, the field-on-config approach (which the plan T2.1 specified) makes the composition automatic.
+- [x] **T2.4** Added `tiled_attention_forward_ssmax` to `crates/katgpt-core/src/attention.rs` behind `#[cfg(all(feature = "tiled_attention", feature = "ssmax_temperature"))]`. Folds `s_L · log(N)` into the softmax scale — the zero-overhead way to apply SSMax to flash-attention (no score matrix materialization). `#[cfg(all(feature = "tiled_attention", feature = "ssmax_temperature"))]`.
+- [x] **T2.5** Documented in `ssmax.rs` module doc: SSMax does NOT apply to `funcattn` (Research 261 closed negative: basis-mode structure has no `(n,n)` attention matrix, so dilution is structurally absent). Not wired.
+- [x] **T2.6** `cargo check -p katgpt-core --features parallax_attn,ssmax_temperature --lib` passes clean.
+- [x] **T2.7** `cargo check -p katgpt-core --features parallax_attn,sink_aware_attn,ssmax_temperature --lib` passes clean (3-way composition). Also verified `tiled_attention,ssmax_temperature` compiles (the SDPA wrapper).
 
-**STATUS: ☐** — Phase 2 not started.
+**STATUS: ✅ DONE** — Phase 2 complete. All 12 parallax_attn tests pass with and without ssmax_temperature (default None preserves bit-identical behavior).
 
 ---
 

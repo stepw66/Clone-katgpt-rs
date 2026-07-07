@@ -54,6 +54,48 @@ pub fn tiled_attention_forward(
     tiled_attention_forward_impl(q, k, v, output, seq_len, head_dim, scale, None, None);
 }
 
+/// SSMax-augmented tiled attention forward (Plan 411 T2.4).
+///
+/// Identical to [`tiled_attention_forward`] but applies the SSMax
+/// length-aware log-N attention temperature by folding `s_L · log(N)` into
+/// the softmax scale. This is mathematically equivalent to rescaling each
+/// pre-softmax logit by `s_L · log(N)`:
+///
+/// `softmax(scale · q·k) = softmax((scale · s_L · log N) · q·k)`
+///
+/// because softmax is scale-equivariant in its input. For the online-softmax
+/// (flash-attention) kernel that doesn't materialize the full score matrix,
+/// this fold is the zero-overhead way to apply SSMax — one multiply on the
+/// scale parameter, no extra pass over the scores.
+///
+/// # Arguments
+/// Same as [`tiled_attention_forward`], plus:
+/// * `ssmax` - SSMax mode (the per-layer source of `s_L`).
+///
+/// # When `seq_len ≤ 1`
+///
+/// `log(N) = 0`, so the scale is unchanged — SSMax is a no-op. This preserves
+/// the small-N no-regression guarantee (G5).
+#[cfg(all(feature = "tiled_attention", feature = "ssmax_temperature"))]
+pub fn tiled_attention_forward_ssmax(
+    q: &[f32],
+    k: &[f32],
+    v: &[f32],
+    output: &mut [f32],
+    seq_len: usize,
+    head_dim: usize,
+    scale: f32,
+    ssmax: &crate::ssmax::SsmaxMode,
+) {
+    let log_n = if seq_len > 1 {
+        (seq_len as f32).ln()
+    } else {
+        0.0
+    };
+    let ssmax_scale = scale * ssmax.multiplier(log_n);
+    tiled_attention_forward_impl(q, k, v, output, seq_len, head_dim, ssmax_scale, None, None);
+}
+
 /// Implementation that accepts an optional pre-allocated scores scratch buffer.
 ///
 /// When `scores_buf` is `Some`, it is used as scratch space for the fallback
@@ -73,6 +115,42 @@ pub fn tiled_attention_forward_with_scores(
     scores_buf: Option<&mut [f32]>,
 ) {
     tiled_attention_forward_impl(q, k, v, output, seq_len, head_dim, scale, scores_buf, None);
+}
+
+/// Standard SDPA with SSMax log-N temperature scaling (Plan 411 T2.4).
+///
+/// Wraps [`tiled_attention_forward`] by folding the SSMax multiplier
+/// `s_L · log(N)` into the softmax temperature `scale`. Mathematically
+/// equivalent to materializing the score matrix and calling
+/// [`crate::ssmax::apply_ssmax_inplace`], but with zero extra passes —
+/// the rescaling happens in the existing `scores = Q · Kᵀ · scale` dot
+/// product, so every logit picks up the `s_L · log(N)` factor for free.
+///
+/// This is the preferred composition path for standard SDPA (the plan says
+/// "prefer the wrapper to avoid touching the hot default path"). The hot
+/// path ([`tiled_attention_forward`]) is unchanged; SSMax is an opt-in wrapper.
+///
+/// Requires both `tiled_attention` and `ssmax_temperature` features.
+///
+/// # Arguments
+/// Inherited from [`tiled_attention_forward`], plus:
+/// * `ssmax_mode` - the per-layer source of `s_L`. The multiplier
+///   `s_L · log(seq_len)` is computed here and folded into `scale`.
+#[cfg(all(feature = "tiled_attention", feature = "ssmax_temperature"))]
+#[allow(clippy::too_many_arguments)]
+pub fn scaled_dot_product_ssmax(
+    q: &[f32],
+    k: &[f32],
+    v: &[f32],
+    output: &mut [f32],
+    seq_len: usize,
+    head_dim: usize,
+    scale: f32,
+    ssmax_mode: &crate::ssmax::SsmaxMode,
+) {
+    let log_n = if seq_len <= 1 { 0.0 } else { (seq_len as f32).ln() };
+    let mult = ssmax_mode.multiplier(log_n);
+    tiled_attention_forward(q, k, v, output, seq_len, head_dim, scale * mult);
 }
 
 #[cfg(feature = "tiled_attention")]
