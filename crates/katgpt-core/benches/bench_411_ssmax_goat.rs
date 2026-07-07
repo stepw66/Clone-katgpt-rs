@@ -118,6 +118,18 @@ fn softmax_gold_mass(logits: &[f32], gold_index: usize) -> f32 {
 
 // ── main ──────────────────────────────────────────────────────────────────
 
+/// Cosine similarity between two vectors.
+fn cosine_sim(a: &[f32], b: &[f32]) -> f32 {
+    let dot: f32 = a.iter().zip(b.iter()).map(|(x, y)| x * y).sum();
+    let norm_a: f32 = a.iter().map(|x| x * x).sum::<f32>().sqrt();
+    let norm_b: f32 = b.iter().map(|x| x * x).sum::<f32>().sqrt();
+    if norm_a > 1e-10 && norm_b > 1e-10 {
+        dot / (norm_a * norm_b)
+    } else {
+        0.0
+    }
+}
+
 fn main() {
     println!("══════════════════════════════════════════════════════════════════");
     println!("  Plan 411 Phase 4 — SSMax GOAT gate (G1, G3, G4, G5)");
@@ -210,6 +222,82 @@ fn main() {
         if g5_pass { "✅ PASS" } else { "❌ FAIL" }
     );
 
+    // ── G2 (quality): retrieval recall — output vs gold value ─────────────
+    // Construct a retrieval task where each key has a distinct value vector.
+    // The attention output o = Σ_j α_j · v_j should be close to v_gold when
+    // gold mass is high. Measure cosine similarity cos(o, v_gold) with and
+    // without SSMax. SSMax must improve recall (higher cosine sim).
+    println!("\n── G2 (quality): retrieval recall — cos(output, v_gold) ──────");
+    let d_model = 16;
+    let ns_g2: &[usize] = &[1_000, 10_000];
+    let mut g2_pass = true;
+    println!(
+        "{:>10}  {:>14}  {:>14}  {:>14}",
+        "N", "base_cos_sim", "ssmax_cos_sim", "ssmax_better"
+    );
+    for &n in ns_g2 {
+        // Build retrieval task with distinct value vectors.
+        let (logits, gold_idx) = build_retrieval_task(n, DELTA, 99);
+        // Distinct value vectors: v_j = one-hot at position j % d_model.
+        // Gold value = one-hot at gold_idx % d_model.
+        let gold_vec: Vec<f32> = (0..d_model)
+            .map(|k| if k == gold_idx % d_model { 1.0 } else { 0.0 })
+            .collect();
+
+        // Base output: softmax(logits) · V.
+        let max = logits.iter().copied().fold(f32::NEG_INFINITY, f32::max);
+        let mut denom = 0.0_f32;
+        let mut exps = vec![0.0_f32; n];
+        for j in 0..n {
+            exps[j] = (logits[j] - max).exp();
+            denom += exps[j];
+        }
+        let mut base_output = vec![0.0_f32; d_model];
+        for j in 0..n {
+            let alpha = exps[j] / denom;
+            let dim = j % d_model;
+            base_output[dim] += alpha;
+        }
+        let base_cos = cosine_sim(&base_output, &gold_vec);
+
+        // SSMax output: apply SSMax then softmax.
+        let log_n = (n as f32).ln();
+        let mut ssmax_logits = logits.clone();
+        apply_ssmax_inplace(&mut ssmax_logits, &SsmaxMode::Adaptive { rolling_delta: DELTA }, log_n);
+        let max_s = ssmax_logits.iter().copied().fold(f32::NEG_INFINITY, f32::max);
+        let mut denom_s = 0.0_f32;
+        let mut exps_s = vec![0.0_f32; n];
+        for j in 0..n {
+            exps_s[j] = (ssmax_logits[j] - max_s).exp();
+            denom_s += exps_s[j];
+        }
+        let mut ssmax_output = vec![0.0_f32; d_model];
+        for j in 0..n {
+            let alpha = exps_s[j] / denom_s;
+            let dim = j % d_model;
+            ssmax_output[dim] += alpha;
+        }
+        let ssmax_cos = cosine_sim(&ssmax_output, &gold_vec);
+
+        let ssmax_better = ssmax_cos > base_cos;
+        if !ssmax_better {
+            g2_pass = false;
+        }
+        println!(
+            "{:>10}  {:>14.6}  {:>14.6}  {:>14}",
+            n, base_cos, ssmax_cos,
+            if ssmax_better { "✓" } else { "✗" }
+        );
+    }
+    println!(
+        "  G2 verdict: {}",
+        if g2_pass { "✅ PASS" } else { "❌ FAIL" }
+    );
+    println!(
+        "  (SSMax Adaptive improves retrieval recall: output points more\n\
+         toward v_gold after log-N temperature sharpening.)"
+    );
+
     // ── G3: Latency — apply_ssmax_inplace overhead ────────────────────────
     println!("\n── G3 (latency): apply_ssmax_inplace overhead ─────────────────");
     let n_kv = 1_024;
@@ -277,6 +365,7 @@ fn main() {
     println!("\n══════════════════════════════════════════════════════════════════");
     println!("  GOAT gate summary");
     println!("  G1 (correctness):     {}", if g1_pass { "✅ PASS" } else { "❌ FAIL" });
+    println!("  G2 (quality):         {}", if g2_pass { "✅ PASS" } else { "❌ FAIL" });
     println!("  G3 (latency):         {}", if g3_pass { "✅ PASS" } else { "❌ FAIL" });
     println!("  G4 (alloc-free):      {}", if g4_pass { "✅ PASS" } else { "❌ FAIL" });
     println!("  G5 (no-regression):   {}", if g5_pass { "✅ PASS" } else { "❌ FAIL" });

@@ -1760,3 +1760,332 @@ mod sink_aware_tests {
         }
     }
 }
+
+// ── SSMax composition tests (Plan 411 T2.2/T2.3) ──────────────────
+// These verify the wiring: SSMax is actually applied when configured, and
+// is a bit-identical no-op when ssmax is None. The SSMax primitive's own
+// numerics are tested in ssmax.rs; here we test the parallax integration.
+
+#[cfg(all(test, feature = "parallax_attn", feature = "ssmax_temperature"))]
+mod ssmax_composition_tests {
+    use super::*;
+    use crate::ssmax::SsmaxMode;
+
+    /// ParallaxConfig with ssmax=None must produce bit-identical output to a
+    /// config constructed without the ssmax field (the Default::default() path).
+    /// This is the zero-regression contract: when SSMax is off, nothing changes.
+    #[test]
+    fn ssmax_none_is_bit_identical_to_base() {
+        let n = 64;
+        let d = 16;
+        let scale = 1.0 / (d as f32).sqrt();
+        let q: Vec<f32> = (0..n * d).map(|i| ((i as f32) * 0.017).sin()).collect();
+        let k: Vec<f32> = (0..n * d).map(|i| ((i as f32) * 0.023).cos()).collect();
+        let v: Vec<f32> = (0..n * d).map(|i| ((i as f32) * 0.011).sin()).collect();
+        let r: Vec<f32> = vec![0.5; d * d];
+        let x: Vec<f32> = (0..d).map(|i| (i as f32) * 0.1).collect();
+
+        let cfg_base = ParallaxConfig {
+            gate_scale: 0.0,
+            zero_init: true,
+            activation: ParallaxActivation::Sigmoid,
+            ..Default::default()
+        };
+        // Same config but explicitly setting ssmax = None.
+        let cfg_none = ParallaxConfig {
+            gate_scale: 0.0,
+            zero_init: true,
+            activation: ParallaxActivation::Sigmoid,
+            ssmax: None,
+        };
+
+        let mut out_base = vec![0.0f32; n * d];
+        let mut out_none = vec![0.0f32; n * d];
+        tiled_attention_parallax_forward(
+            &q, &k, &v, &mut out_base, n, d, scale, &r, &x, &cfg_base, None,
+        );
+        tiled_attention_parallax_forward(
+            &q, &k, &v, &mut out_none, n, d, scale, &r, &x, &cfg_none, None,
+        );
+
+        for i in 0..(n * d) {
+            assert_eq!(out_base[i], out_none[i], "ssmax=None must be bit-identical at [{}]", i);
+        }
+    }
+
+    /// SSMax at N=1 is skipped by the `n > 1` guard in `apply_ssmax_to_row`,
+    /// because log(1)=0 would zero every logit otherwise. This test verifies
+    /// that guard: n=1 output is identical with and without SSMax configured.
+    #[test]
+    fn ssmax_n1_is_noop() {
+        let n = 1;
+        let d = 8;
+        let scale = 1.0 / (d as f32).sqrt();
+        let q = vec![0.5; d];
+        let k = vec![0.3; d];
+        let v = vec![0.7; d];
+        let r = vec![0.0; d * d];
+        let x = vec![0.0; d];
+
+        let cfg_base = ParallaxConfig {
+            gate_scale: 0.0,
+            zero_init: true,
+            activation: ParallaxActivation::Sigmoid,
+            ..Default::default()
+        };
+        let cfg_ssmax = ParallaxConfig {
+            gate_scale: 0.0,
+            zero_init: true,
+            activation: ParallaxActivation::Sigmoid,
+            ssmax: Some(SsmaxMode::Fixed { s_l: 1.0 }),
+        };
+
+        let mut out_base = vec![0.0f32; d];
+        let mut out_ssmax = vec![0.0f32; d];
+        tiled_attention_parallax_forward(
+            &q, &k, &v, &mut out_base, n, d, scale, &r, &x, &cfg_base, None,
+        );
+        tiled_attention_parallax_forward(
+            &q, &k, &v, &mut out_ssmax, n, d, scale, &r, &x, &cfg_ssmax, None,
+        );
+
+        for i in 0..d {
+            assert_eq!(out_base[i], out_ssmax[i], "n=1 SSMax must be skipped (guard)");
+        }
+    }
+
+    /// SSMax with a real multiplier (n > 1, s_L = 1.0) must change the output
+    /// when the logits are not all identical. This verifies the wiring: SSMax
+    /// is actually applied in the parallax forward, not silently dropped.
+    #[test]
+    fn ssmax_changes_output_at_large_n() {
+        let n = 64;
+        let d = 16;
+        let scale = 1.0 / (d as f32).sqrt();
+        // Non-uniform q/k so logits vary — SSMax's multiplicative rescaling
+        // will shift the normalized sigmoid weights.
+        let q: Vec<f32> = (0..n * d).map(|i| ((i as f32) * 0.07).sin()).collect();
+        let k: Vec<f32> = (0..n * d).map(|i| ((i as f32) * 0.05).cos()).collect();
+        let v: Vec<f32> = (0..n * d).map(|i| ((i as f32) * 0.03).sin()).collect();
+        let r = vec![0.0f32; d * d];
+        let x = vec![0.0f32; d];
+
+        let cfg_base = ParallaxConfig {
+            gate_scale: 0.0,
+            zero_init: true,
+            activation: ParallaxActivation::Sigmoid,
+            ..Default::default()
+        };
+        let cfg_ssmax = ParallaxConfig {
+            gate_scale: 0.0,
+            zero_init: true,
+            activation: ParallaxActivation::Sigmoid,
+            ssmax: Some(SsmaxMode::Fixed { s_l: 1.0 }),
+        };
+
+        let mut out_base = vec![0.0f32; n * d];
+        let mut out_ssmax = vec![0.0f32; n * d];
+        tiled_attention_parallax_forward(
+            &q, &k, &v, &mut out_base, n, d, scale, &r, &x, &cfg_base, None,
+        );
+        tiled_attention_parallax_forward(
+            &q, &k, &v, &mut out_ssmax, n, d, scale, &r, &x, &cfg_ssmax, None,
+        );
+
+        // SSMax multiplies logits by log(64) ≈ 4.16. With non-uniform logits,
+        // the sharpened sigmoid weights must differ from the base.
+        let diff_count = (0..n * d)
+            .filter(|&i| (out_base[i] - out_ssmax[i]).abs() > 1e-6)
+            .count();
+        assert!(
+            diff_count > 0,
+            "SSMax at n=64 with s_L=1.0 must change the output (got 0 differing elements)"
+        );
+    }
+
+    /// SSMax scales logits by a constant factor. For sigmoid normalization,
+    /// this is equivalent to scaling the temperature `scale` by the same factor.
+    /// Verify: parallax(cfg.ssmax=Some(mode), scale=s) == parallax(cfg.ssmax=None, scale=s*mult).
+    /// This cross-checks the scale-folding equivalence used in the tiled_attention_core path.
+    #[test]
+    fn ssmax_equivalent_to_scale_folding_sigmoid() {
+        let n = 32;
+        let d = 8;
+        let scale = 1.0 / (d as f32).sqrt();
+        let q: Vec<f32> = (0..n * d).map(|i| ((i as f32) * 0.07).sin()).collect();
+        let k: Vec<f32> = (0..n * d).map(|i| ((i as f32) * 0.05).cos()).collect();
+        let v: Vec<f32> = vec![1.0; n * d]; // uniform v so only weights matter
+        let r = vec![0.0f32; d * d];
+        let x = vec![0.0f32; d];
+
+        let mode = SsmaxMode::Fixed { s_l: 1.0 };
+        let log_n = (n as f32).ln();
+        let mult = mode.multiplier(log_n);
+
+        let cfg_ssmax = ParallaxConfig {
+            gate_scale: 0.0,
+            zero_init: true,
+            activation: ParallaxActivation::Sigmoid,
+            ssmax: Some(mode),
+        };
+        let cfg_folded = ParallaxConfig {
+            gate_scale: 0.0,
+            zero_init: true,
+            activation: ParallaxActivation::Sigmoid,
+            ..Default::default()
+        };
+
+        let mut out_ssmax = vec![0.0f32; n * d];
+        let mut out_folded = vec![0.0f32; n * d];
+        // SSMax path: logits rescaled inside the forward.
+        tiled_attention_parallax_forward(
+            &q, &k, &v, &mut out_ssmax, n, d, scale, &r, &x, &cfg_ssmax, None,
+        );
+        // Folded path: scale pre-multiplied by mult, no SSMax.
+        tiled_attention_parallax_forward(
+            &q, &k, &v, &mut out_folded, n, d, scale * mult, &r, &x, &cfg_folded, None,
+        );
+
+        for i in 0..(n * d) {
+            assert!(
+                (out_ssmax[i] - out_folded[i]).abs() < 1e-5,
+                "SSMax apply must match scale-folding at [{}]: {} vs {}",
+                i, out_ssmax[i], out_folded[i]
+            );
+        }
+    }
+}
+
+// ── SSMax + Sink-Aware 3-way composition tests (Plan 411 T2.3) ────
+
+#[cfg(all(test, feature = "parallax_attn", feature = "sink_aware_attn", feature = "ssmax_temperature"))]
+mod ssmax_sink_aware_tests {
+    use super::*;
+    use crate::data_probe::{SinkAwarePolicy, SinkClassifierConfig, SinkKind};
+    use crate::ssmax::SsmaxMode;
+
+    /// The 3-way entry point with ssmax_mode=None must produce identical
+    /// output to the 2-way sink-aware forward (the explicit None is a no-op).
+    #[test]
+    fn three_way_none_matches_two_way() {
+        let n = 16;
+        let d = 8;
+        let scale = 1.0 / (d as f32).sqrt();
+        let (q, k, v) = super::tests::build_sink_case(n, d, 0, true);
+        let cfg = ParallaxConfig {
+            gate_scale: 0.0,
+            zero_init: true,
+            activation: ParallaxActivation::Sigmoid,
+            ..Default::default()
+        };
+        let r = vec![0.0f32; d * d];
+        let x = vec![0.0f32; d];
+        let policy = SinkAwarePolicy::DualPolicy(SinkClassifierConfig::default());
+
+        let mut out_two = vec![0.0f32; n * d];
+        let mut sa_two = SinkAwareParallaxScratch::new(n, d);
+        let kind_two = tiled_attention_parallax_forward_sink_aware(
+            &q, &k, &v, &mut out_two, n, d, scale, &r, &x, &cfg,
+            &policy, -5.0, &mut sa_two, None,
+        );
+
+        let mut out_three = vec![0.0f32; n * d];
+        let mut sa_three = SinkAwareParallaxScratch::new(n, d);
+        let kind_three = tiled_attention_parallax_forward_sink_aware_ssmax(
+            &q, &k, &v, &mut out_three, n, d, scale, &r, &x, &cfg,
+            None, &policy, -5.0, &mut sa_three, None,
+        );
+
+        assert_eq!(kind_two, kind_three, "SinkKind must match");
+        for i in 0..(n * d) {
+            assert_eq!(out_two[i], out_three[i], "3-way(None) must match 2-way at [{}]", i);
+        }
+    }
+
+    /// The 3-way entry point with ssmax_mode=Some must apply SSMax.
+    /// Verify by comparing to the 2-way forward with ssmax injected into the config.
+    #[test]
+    fn three_way_some_matches_config_injection() {
+        let n = 16;
+        let d = 8;
+        let scale = 1.0 / (d as f32).sqrt();
+        let (q, k, v) = super::tests::build_sink_case(n, d, 0, true);
+        let cfg_base = ParallaxConfig {
+            gate_scale: 0.0,
+            zero_init: true,
+            activation: ParallaxActivation::Sigmoid,
+            ..Default::default()
+        };
+        let r = vec![0.0f32; d * d];
+        let x = vec![0.0f32; d];
+        let policy = SinkAwarePolicy::DualPolicy(SinkClassifierConfig::default());
+        let mode = SsmaxMode::Fixed { s_l: 1.0 };
+
+        // Path A: 3-way entry point with explicit ssmax_mode.
+        let mut out_a = vec![0.0f32; n * d];
+        let mut sa_a = SinkAwareParallaxScratch::new(n, d);
+        let kind_a = tiled_attention_parallax_forward_sink_aware_ssmax(
+            &q, &k, &v, &mut out_a, n, d, scale, &r, &x, &cfg_base,
+            Some(&mode), &policy, -5.0, &mut sa_a, None,
+        );
+
+        // Path B: manually inject ssmax into config, call 2-way forward.
+        let mut cfg_injected = cfg_base.clone();
+        cfg_injected.ssmax = Some(mode);
+        let mut out_b = vec![0.0f32; n * d];
+        let mut sa_b = SinkAwareParallaxScratch::new(n, d);
+        let kind_b = tiled_attention_parallax_forward_sink_aware(
+            &q, &k, &v, &mut out_b, n, d, scale, &r, &x, &cfg_injected,
+            &policy, -5.0, &mut sa_b, None,
+        );
+
+        assert_eq!(kind_a, kind_b, "SinkKind must match");
+        for i in 0..(n * d) {
+            assert_eq!(out_a[i], out_b[i], "3-way(Some) must match config-injected at [{}]", i);
+        }
+    }
+
+    /// SSMax with a real mode must change the 3-way output vs no SSMax.
+    /// Uses the Broadcast case (build_sink_case with sink_v_zero=true produces
+    /// a Broadcast head) so the gate is active and SSMax's logit rescaling
+    /// flows through to the gated output.
+    #[test]
+    fn three_way_ssmax_changes_output() {
+        let n = 16;
+        let d = 8;
+        let scale = 1.0 / (d as f32).sqrt();
+        let (q, k, v) = super::tests::build_sink_case(n, d, 0, true);
+        let cfg = ParallaxConfig {
+            gate_scale: 0.0,
+            zero_init: true,
+            activation: ParallaxActivation::Sigmoid,
+            ..Default::default()
+        };
+        let r = vec![0.0f32; d * d];
+        let x = vec![0.0f32; d];
+        let policy = SinkAwarePolicy::DualPolicy(SinkClassifierConfig::default());
+        let mode = SsmaxMode::Fixed { s_l: 2.0 };
+
+        let mut out_no = vec![0.0f32; n * d];
+        let mut sa_no = SinkAwareParallaxScratch::new(n, d);
+        tiled_attention_parallax_forward_sink_aware_ssmax(
+            &q, &k, &v, &mut out_no, n, d, scale, &r, &x, &cfg,
+            None, &policy, -5.0, &mut sa_no, None,
+        );
+
+        let mut out_yes = vec![0.0f32; n * d];
+        let mut sa_yes = SinkAwareParallaxScratch::new(n, d);
+        tiled_attention_parallax_forward_sink_aware_ssmax(
+            &q, &k, &v, &mut out_yes, n, d, scale, &r, &x, &cfg,
+            Some(&mode), &policy, -5.0, &mut sa_yes, None,
+        );
+
+        let diff_count = (0..n * d)
+            .filter(|&i| (out_no[i] - out_yes[i]).abs() > 1e-6)
+            .count();
+        assert!(
+            diff_count > 0,
+            "3-way with SSMax s_L=2.0 must differ from no-SSMax (got 0 diffs)"
+        );
+    }
+}
