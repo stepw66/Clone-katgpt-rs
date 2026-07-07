@@ -361,7 +361,7 @@ on the `jacobian_svd_at_into` hot path.
   that need robust rank should call `numerical_rank(spectrum, η)` explicitly
   rather than trusting `result.rank` on forward-diff-noisy inputs.
 
-## Issue 043 addendum (2026-07-07): rank-deficient SVD perf fix + docstring correction
+## Issue 043 addendum (2026-07-07, issue resolved-and-removed): rank-deficient SVD perf fix + docstring correction
 
 **Context:** Plan 409 Phase 2's latency bench (Research 388 Fusion A refutation)
 discovered that the T3.4 latency numbers above are specific to the
