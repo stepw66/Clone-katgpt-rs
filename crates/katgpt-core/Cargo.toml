@@ -297,6 +297,7 @@ memory_soup_lora = []  # Memory Soup LoRA — MSP0 binary format parser (Plan 29
 salience_tri_gate = []  # Salience Tri-Gate Primitive — 3-way per-tick emit gate (Plan 303, Research 281). DEFAULT-ON.
 skill_opt = []  # SkillOpt text-space skill optimization (Plan 144, Research 105).
 ssd_block = []  # Dual-mode SSD block decomposition (Plan 263). DEFAULT-ON.
+linking_fold = []  # Linking-Number Detector + Fold Correction (Plan 410, Research 391, arXiv:2606.31856 Ren & Lim ICML 2026). Two modelless primitives: (1) `linking_detector` — Algorithm 1 (PCA-3D + ε-kNN + fundamental cycle basis via BFS spanning forest + Gauss linking integral) detects whether two point clouds are topologically linked (link≠0); (2) `fold_projection_into` / `fold_gelu_into` — coordinate-wise |x−c| fold (paper Eq. 1: |x|=x+2·ReLU(−x)) as the deterministic modelless unlinking correction. Closes a gap the codebase has implicitly: every sigmoid projection (HLA scalars, direction-vector projections, ItemEmbedIndex cosine retrieval) is monotonic → provably cannot linearly separate linked manifolds (paper Thm 4.7), but the codebase had no way to detect when. Detector is cold-path (audit cadence, brute-force O(n²) k-NN, no deps); fold is hot-path (zero-alloc, #[inline]). Opt-in until G1–G5 GOAT gate passes.
 channel_simd_align = []  # Channel SIMD Alignment — cache-line-padded weight storage (Plan 227 Phase 5).
 # Phase 10 absorption (2026-07-04): `trigger_gate` is always-on as a module,
 # but its `RvThresholds` struct + `TriggerGate::rv_tier_boost` method are gated
