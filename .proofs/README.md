@@ -12,6 +12,8 @@ Second Lean 4 formal-verification instance in the 5-repo quintet (katgpt-rs / ri
 | `Ssmax/Basic.lean` | (spec only) | `alphaGold N c = 1 / (1 + (N−1)·N^(−c))` — the paper's dilution bound; `alphaGold_bounded` proves `(0,1)` |
 | `Ssmax/DilutionBound.lean` | `alphaGold_strictMono_in_c` | For `N > 1`, `alphaGold` is strictly increasing in `c` — the monotonicity that makes SSMax work |
 | `Ssmax/DilutionBound.lean` | `ssmax_dominates_base` | For `s_L · log(N) ≥ 1` and `c_base > 0`: SSMax does not decrease gold mass (threshold is `s_L·log(N)≥1`, NOT `N≥2`) |
+| `Ssmax/Asymptotic.lean` | `tendsto_leakage_zero` | For `s_L · Δ > 0`: the leakage term `(N−1)·N^(−s_L·log N·Δ) → 0` as `N → ∞` (squeeze against `0 ≤ leakage ≤ 1/N`) |
+| `Ssmax/Asymptotic.lean` | `tendsto_alphaGold_one` | **SSMax asymptotically defeats dilution**: for `s_L · Δ > 0`, `α_gold(N, s_L·log N·Δ) → 1` as `N → ∞` |
 
 The headline theorem is `action_bridge_ranking_preserved`: it proves that `ActionBridge::select_action`'s sigmoid projection preserves dot-product ordering. This is the ∀-form of the empirical `g1_3_bridge_ranking_preservation` test in `crates/katgpt-core/src/micro_belief/tests.rs` (Plan 281 G1.3), which samples only 1000 random triples. The Lean theorem holds for **every** triple.
 
@@ -75,7 +77,8 @@ No `sorry`. No `sorryAx`. Verified by `#print axioms`. These are the same axioms
     │   └── RankingPreserved.lean       # Theorems: ranking + argmax preservation (Plan 293)
     └── Ssmax/
         ├── Basic.lean                  # Spec: alphaGold dilution bound + monotonicity of N^c (Plan 411 S3)
-        └── DilutionBound.lean           # Theorems: alphaGold strictMono in c + ssmax_dominates_base (Plan 411 S3)
+        ├── DilutionBound.lean           # Theorems: alphaGold strictMono in c + ssmax_dominates_base (Plan 411 S3)
+        └── Asymptotic.lean              # Theorem: alphaGold → 1 as N → ∞ (Plan 411 S3 asymptotic follow-up)
 ```
 
 ## The f32 caveat (and why it doesn't break the theorem)
@@ -117,8 +120,8 @@ If `katgpt-rs/crates/katgpt-core/src/bridge/mod.rs::select_action` or `simd/acti
 
 **Plan 411 S3 (SSMax dilution-bound theorems): COMPLETE.** Added 2026-07-07.
 
-- **G1** (Lean builds): ✅ `lake build` succeeds — `Ssmax/Basic.lean` + `Ssmax/DilutionBound.lean`.
-- **G2** (theorem type-checks): ✅ `alphaGold_strictMono_in_c` + `alphaGold_lt_of_c_lt` + `ssmax_dominates_base` + `alphaGold_bounded` all compile, no `sorry`, axioms = `{propext, Classical.choice, Quot.sound}`.
+- **G1** (Lean builds): ✅ `lake build` succeeds — `Ssmax/Basic.lean` + `Ssmax/DilutionBound.lean` + `Ssmax/Asymptotic.lean`.
+- **G2** (theorem type-checks): ✅ `alphaGold_strictMono_in_c` + `alphaGold_lt_of_c_lt` + `ssmax_dominates_base` + `alphaGold_bounded` + `tendsto_leakage_zero` + `tendsto_alphaGold_one` all compile, no `sorry`, axioms = `{propext, Classical.choice, Quot.sound}`.
 - **G3** (Rust spec matches Lean): ✅ `cargo test --features ssmax_temperature --test ssmax_spec_match` — 8/8 tests pass (now runs by default since `ssmax_temperature` is Phase 13 DEFAULT-ON).
 
 **The formal-verification value-add:** the Lean proof *sharpened the plan's
@@ -128,9 +131,18 @@ correct condition is `s_L · log(N) ≥ 1` (i.e. `N ≥ 3` for `s_L = 1`, since
 tight threshold; the `spec_threshold_is_s_l_times_log_n_geq_one_not_n_geq_two`
 Rust test guards both the dominance (for `N ≥ 3`) and the reversal at `N = 2`.
 
+**Asymptotic complement** (`Ssmax/Asymptotic.lean`, added 2026-07-07): the
+finite-N theorems above show SSMax helps at every fixed `N ≥ 3` (for `s_L = 1`);
+the asymptotic theorem `tendsto_alphaGold_one` shows SSMax *completely defeats*
+dilution in the large-`N` limit — `α_gold(N, s_L·log N·Δ) → 1` as `N → ∞` for
+any `s_L · Δ > 0`. Proof via squeeze: `0 ≤ leakage N ≤ 1/N` eventually (where
+`leakage = (N−1)·N^(−s_L·log N·Δ)`), and `1/N → 0`. The key rate comparison is
+that `(log N)²` dominates `log N`, so `N^(−s_L·log N·Δ) = exp(−s_L·Δ·(log N)²)`
+collapses super-polynomially.
+
 Verified by:
 ```bash
-cd katgpt-rs/.proofs && lake build    # → Build completed successfully (2276 jobs)
+cd katgpt-rs/.proofs && lake build    # → Build completed successfully (2281 jobs)
 cd katgpt-rs && cargo test -p katgpt-core --test ssmax_spec_match  # → 8 passed
 cd katgpt-rs && cargo test -p katgpt-core --test bridge_spec_match --features action_bridge  # → 6 passed
 ```
