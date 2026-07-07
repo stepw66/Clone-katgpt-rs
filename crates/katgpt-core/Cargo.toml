@@ -1103,6 +1103,21 @@ name = "bench_408_pkm_goat"
 harness = false
 required-features = ["product_key_memory"]
 
+# Plan 411 — SSMax + GoldShare GOAT gate. G1 correctness (argmax preservation
+# across N ∈ {1k, 10k, 100k}), G3 latency (apply_ssmax_inplace ≤1% of forward),
+# G4 alloc-free (CountingAllocator), G5 no-regression at small N. Standalone
+# bench: uses softmax directly (not parallax_attn) to make the dilution effect
+# visible at the synthetic scale.
+[[bench]]
+name = "bench_411_ssmax_goat"
+harness = false
+required-features = ["ssmax_temperature"]
+
+[[bench]]
+name = "bench_411_gold_share_goat"
+harness = false
+required-features = ["gold_share_probe", "sink_aware_attn"]
+
 # Plan 410 — Linking-Fold GOAT gate (G1 correctness smoke + G2 detector cold-path
 # ≤50ms @ n=2×1000,d=8 + G2 fold hot-path ≤50ns @ d=8 / ≤500ns @ d=64 + G5
 # determinism). G4 (alloc-free hot path) is the separate CountingAllocator test
