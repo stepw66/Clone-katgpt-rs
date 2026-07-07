@@ -117,12 +117,14 @@ Ship a generic, modelless, inference-time **Product Key Memory** retrieval primi
 
 ### Tasks
 
-- [ ] **T6.1** Add example `examples/core_03_product_key_memory.rs`:
+- [x] **T6.1** Add example `examples/core_03_product_key_memory.rs`:
   - Part 1: build a PKM table from 10⁴ random key-value pairs, query 100 random queries, print top-k + latency.
   - Part 2: scale to N=10⁶, show the O(√N) vs O(N) latency cliff.
   - Part 3: IDW vs Dot scoring comparison on a clustered dataset.
-- [ ] **T6.2** Add `.docs/26_product_key_memory.md` — feature-showcase entry (mirrors Raven RSM `.docs/25_raven_rsm.md` format). Cross-link to Research 387 and Plan 408.
-- [ ] **T6.3** Update `katgpt-rs/README.md` Feature Showcase section with a PKM entry (mirrors the Engram entry at L1077).
+  - **DONE (2026-07-07):** ships as `examples/product_key_memory_demo.rs` — **name deviation**: the plan-specified `core_03_product_key_memory.rs` conflicts with the existing `examples/core_03_ppot.rs`; renamed to `product_key_memory_demo.rs` (matches the `<feature>_demo.rs` convention, e.g. `engram_demo.rs`). PKM is DEFAULT-ON so no `required-features` gate needed (auto-discovered). Three parts implemented: Part 1 (100 queries, mean 16µs/query), Part 2 (PKM 15.5µs vs brute-force 7.8ms = 507× speedup, inline honest number vs the bench's 1670×), Part 3 (IDW mean ‖q₁−key₁‖ 0.24 vs Dot 7.52 — confirms centroid attraction). Compiles clean + runs.
+- [x] **T6.2** Add `.docs/26_product_key_memory.md` — feature-showcase entry (mirrors Raven RSM `.docs/25_raven_rsm.md` format). Cross-link to Research 387 and Plan 408.
+  - **DONE (2026-07-07):** ships as `.docs/28_product_key_memory.md` — **number deviation**: `.docs/26_micro_belief.md` already exists; `.docs/27_engram_conditional_memory.md` also exists; used 28 (next free). Mirrors the Raven RSM format (status banner, complexity-class table, architecture diagram, scoring-function table, GOAT evidence table, code locations, modelless mandate, latent-vs-raw boundary, honest approximation gap, related links).
+- [x] **T6.3** Update `katgpt-rs/README.md` Feature Showcase section with a PKM entry (mirrors the Engram entry at L1077). **DONE (2026-07-07):** inserted after the Engram entry (grouped with the other retrievers: Raven → Engram → PKM). Full GOAT status, complexity-class ledger, demo command, honest approximation-gap callout.
 
 ---
 

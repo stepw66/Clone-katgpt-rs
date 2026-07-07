@@ -1107,6 +1107,27 @@ Feature gate: `engram` (**opt-in**, rolls in `unicode-normalization` for NFKC + 
 
 > **Unblocks:** riir-ai Guide 147 (NPC conditional-memory selling-point guide) and the chain-commitment half `riir-chain/.research/007_Engram_LatCal_Commitment_Bridge.md` (filed 2026-07-04). The Super-GOAT (U-shape hybrid Engram+Raven) requires the riir-ai inference wiring + G6 to land.
 
+### 🔑 Product Key Memory (PKM) — O(√N) Factored Retrieval (Plan 408)
+
+Distills Lample et al. 2019 §2.2 (Zhao & Jones 2026 distillation, Research 387) into the **fourth complexity class** in the katgpt retrieval stack. Where Raven routes **computation** (O(1), ~10³ experts) and Engram routes **memory lookups** (O(1) hash, ~10⁵ slots), PKM retrieves the top-k value rows for a query in **O(√N)** at scales up to **~10⁶ slots** — the only retriever in the stack that scales to millions of slots at sub-linear cost.
+
+The mechanism is pure inference-time math — **no training, no backprop** (the FwPKM paper's GD half is forbidden by the modelless mandate and replaced by the shipped δ-rule, Plan 053):
+
+```text
+q1, q2    = split_half(q)                          # split D_K-dim query
+top1      = heapselect_top_k(score(q1, keys_1))     # √N-row codebook 1, O(√N)
+top2      = heapselect_top_k(score(q2, keys_2))     # √N-row codebook 2, O(√N)
+(flat, w) = top_k_cartesian(top1 × top2)            # K² candidates → top-k, O(K²)
+```
+
+Two scoring functions: `Dot` (`q·k`, magnitude-sensitive) and `Idw` (`−log(ε+‖q−k‖²)`, magnitude-invariant centroid attraction). Caller-allocated `PkmScratch<SQRT_N, K>` holds the √N score arrays + K-length top-k buffers, reused across queries → **zero allocation** in the hot path.
+
+**GOAT status:** G1 (latency) ✅ **1670× speedup** at N=10⁶ (PKM p50 17.5µs vs O(N) brute-force p50 29.2ms; target ≥100×). G2 (top-k Jaccard) ✅ **1.0000** vs brute-force (50 queries; Phase 2 unit test 1000-query mean Jaccard ≥0.95). G3 (IDW centroid-ness, advisory) ✅ Dot intra-cluster rate 0.000 vs IDW 1.000. G4 (zero-alloc) ✅ **0 allocations** / 1000 steady-state `query_into` calls. **Decision: `product_key_memory` DEFAULT-ON** (Phase 3, 2026-07-07). Retrieval stack ledger: Raven O(1) / Engram O(1)-hash / δ-Mem O(r) / **PKM O(√N)** — four distinct complexity classes, each optimal for a different slot-count regime.
+
+Feature gate: `product_key_memory` (**DEFAULT-ON** since 2026-07-07; zero runtime cost unless a caller constructs `ProductKeyMemory`). Phase 4 freeze/thaw wrapper (`product_key_memory_freeze`, opt-in): `Arc<RwLock<Arc<...>>>` + BLAKE3 commitment + atomic swap. Phase 5 δ-rule write gate (`product_key_memory_episodic`, opt-in): F1 fusion PKM × δ-Mem. 📖 Plan: [`.plans/408_Product_Key_Memory_Primitive.md`](.plans/408_Product_Key_Memory_Primitive.md), Research: [`.research/387_Fast_Weight_Product_Key_Memory_PKM.md`](.research/387_Fast_Weight_Product_Key_Memory_PKM.md), Benchmark: [`.benchmarks/408_pkm_goat.md`](.benchmarks/408_pkm_goat.md), Docs: [`.docs/28_product_key_memory.md`](.docs/28_product_key_memory.md). Demo: `cargo run --example product_key_memory_demo`.
+
+> **Honest approximation gap:** PKM is *approximate by construction* — the true global top-k can span codebook boundaries the per-codebook top-k misses. On random tables the gap is zero (G2=1.0000); on adversarial key distributions use `K=16` or `K=32` per codebook (still far below O(N)).
+
 ### 🌀 Manifold Power Iteration MoE Router (Plan 279)
 
 Distills Redesign MoE Routers with Manifold Power Iteration (arXiv:2606.12397, RUC/Tencent) into a **modelless, one-shot router-row conditioning** primitive. Given a frozen MoE router `R ∈ ℝ^{N×D}` and per-expert Gram matrices `M[i] = W_g[i]·W_g[i]ᵀ`, produce the MPI-conditioned router `R'[i] = C·(R[i]·M[i])/‖R[i]·M[i]‖₂` with `C = C'/√N` (paper Eq. 4–5). **Fires once per freeze/thaw snapshot swap, never per-token** — inference behavior is identical to vanilla top-k gating, only the router rows change.
@@ -2443,6 +2464,7 @@ benches/                 Criterion benchmarks
 - [Raven RSM — Opt-in O(1) routing slot memory](.docs/25_raven_rsm.md)
 - [MicroRecurrentBeliefState (attractor + leaky)](.docs/26_micro_belief.md)
 - [Engram conditional memory](.docs/27_engram_conditional_memory.md)
+- [Product Key Memory (PKM) — DEFAULT-ON O(√N) factored retrieval](.docs/28_product_key_memory.md)
 - [Salience Tri-Gate](.docs/30_salience_tri_gate.md)
 - [CCE moderator](.docs/cce_moderator.md)
 - [Claim rubric audit](.docs/claim_rubric_audit.md)

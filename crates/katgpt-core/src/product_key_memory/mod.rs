@@ -52,7 +52,8 @@
 //!   `product_key_memory_freeze`).
 //! - ✅ Phase 5 (δ-rule write gate, F1 fusion) — [`episodic`] (gated
 //!   `product_key_memory_episodic`).
-//! - ⏳ Phase 6 (example + docs) — planned.
+//! - ✅ Phase 6 (example + docs) — `examples/product_key_memory_demo.rs` +
+//!   `.docs/28_product_key_memory.md` + README Feature Showcase entry.
 //! - ⏳ Phase 7 (private fusions) — deferred to riir-* repos.
 //!
 //! # CRITICAL — never softmax at the *gate* level
