@@ -250,7 +250,7 @@ pub fn expected_improvement_per_action_inplace(pi: &[f32], q: &[f32], m: f32, ou
 
     // Sort by q descending.
     let mut idx: Vec<usize> = (0..k).collect();
-    idx.sort_unstable_by(|&a, &b| q[b].partial_cmp(&q[a]).unwrap_or(Ordering::Equal));
+    idx.sort_unstable_by(|&a, &b| q[b].total_cmp(&q[a]));
 
     // Precompute weights w[j] = clip(1 - C[j], eps, 1)^(m-1) for j = 0..K-2.
     // These don't depend on the reference R, so we compute them once.

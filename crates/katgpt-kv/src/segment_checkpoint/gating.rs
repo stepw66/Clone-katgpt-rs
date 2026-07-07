@@ -22,7 +22,7 @@ pub fn top_k_gates(query: &[f32], summaries: &[&[f32]], k: usize) -> Vec<(usize,
     let gates = compute_gates(query, summaries);
     let mut indexed: Vec<(usize, f32)> = gates.into_iter().enumerate().collect();
     // Partial sort: keep top k
-    indexed.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+    indexed.sort_by(|a, b| b.1.total_cmp(&a.1));
     indexed.truncate(k);
     indexed
 }

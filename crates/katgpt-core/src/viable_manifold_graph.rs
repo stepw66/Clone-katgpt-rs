@@ -455,8 +455,7 @@ where
         }
         // Partial sort: take k smallest. For small k vs n, a full sort is
         // simple and cache-friendly; the paper's grids are ≤10³ nodes.
-        dist_buf
-            .sort_unstable_by(|x, y| x.0.partial_cmp(&y.0).unwrap_or(std::cmp::Ordering::Equal));
+        dist_buf.sort_unstable_by(|x, y| x.0.total_cmp(&y.0));
         for &(_d2, b) in dist_buf.iter().take(k) {
             if build_cfg.edge_midpoint_check {
                 let zb = &kept_nodes[(b as usize) * dim..(b as usize + 1) * dim];

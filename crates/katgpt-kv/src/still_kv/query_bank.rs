@@ -361,7 +361,7 @@ impl QueryBank for SpectralQueryBank {
             .collect();
 
         // Sort descending by variance
-        variances.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        variances.sort_by(|a, b| b.1.total_cmp(&a.1));
 
         // Take top `budget` tokens and normalize each to unit length
         let mut out = Vec::with_capacity(budget * self.latent_dim);
@@ -444,7 +444,7 @@ impl QueryBank for BfcfQueryBank {
                 .enumerate()
                 .map(|(i, r)| (i, sq_norm(r)))
                 .collect();
-            indexed.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+            indexed.sort_by(|a, b| b.1.total_cmp(&a.1));
             for &(idx, _) in &indexed[..budget] {
                 out.extend_from_slice(&regions[idx]);
             }

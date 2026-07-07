@@ -195,12 +195,10 @@ pub fn select_topk_indices(scores: &[f32], k: usize) -> Vec<usize> {
     let mut indexed: Vec<(usize, f32)> = scores.iter().copied().enumerate().collect();
 
     // Partial sort to partition top K (unstable, O(N))
-    indexed.select_nth_unstable_by(k - 1, |a, b| {
-        b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal)
-    });
+    indexed.select_nth_unstable_by(k - 1, |a, b| b.1.total_cmp(&a.1));
 
     // Sort the top K by score descending (O(K log K))
-    indexed[..k].sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+    indexed[..k].sort_by(|a, b| b.1.total_cmp(&a.1));
 
     indexed[..k].iter().map(|(i, _)| *i).collect()
 }

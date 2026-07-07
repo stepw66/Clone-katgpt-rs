@@ -18,7 +18,7 @@ pub fn top_k_segments(gates: &[(u32, f32)], k: usize) -> Vec<(u32, f32)> {
     }
     if gates.len() <= k {
         let mut out = gates.to_vec();
-        out.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        out.sort_by(|a, b| b.1.total_cmp(&a.1));
         return out;
     }
 
@@ -30,16 +30,14 @@ pub fn top_k_segments(gates: &[(u32, f32)], k: usize) -> Vec<(u32, f32)> {
         .collect();
 
     // O(N) partial partition — everything at indices < k is >= pivot
-    indexed.select_nth_unstable_by(k - 1, |a, b| {
-        b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal)
-    });
+    indexed.select_nth_unstable_by(k - 1, |a, b| b.1.total_cmp(&a.1));
 
     // Take top-k, then sort descending for deterministic ordering
     let mut result: Vec<(u32, f32)> = indexed[..k]
         .iter()
         .map(|&(idx, score)| (gates[idx].0, score))
         .collect();
-    result.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+    result.sort_by(|a, b| b.1.total_cmp(&a.1));
     result
 }
 
