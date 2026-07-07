@@ -64,7 +64,7 @@ DEFAULT-ON there (G1–G4 pass, pure math). The riir-neuron-db *integration*
 materializes. If none does within a reasonable soak window, the integration
 should be considered for removal (the primitive in katgpt-core stays).
 
-**Tracked in:** [`riir-neuron-db/.issues/002_compact_tucker_consumer_adoption_or_removal.md`](../../riir-neuron-db/.issues/002_compact_tucker_consumer_adoption_or_removal.md) — 30-day soak window (re-evaluate 2026-07-25). The decision is binary: either a production consumer PR lands (integration stays opt-in), or the integration is removed (the `katgpt-core` primitive stays default-on regardless).
+**Tracked in:** `riir-neuron-db/.issues/002_compact_tucker_consumer_adoption_or_removal.md` (RESOLVED + removed 2026-07-07 — no consumer materialized in the soak window; the `riir-neuron-db` integration wrapper was removed. The `katgpt-core` primitive stays DEFAULT-ON regardless — it has independent value as pure math and is consumed directly by Plan 328's chain-collusion and game-RMT analytics.)
 
 ---
 
