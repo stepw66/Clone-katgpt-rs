@@ -220,7 +220,8 @@ Synthesize Phase 2 + Phase 3 results into the final PoC verdict. Per skill §3.6
   - **Phase 2 latency gate failed.** Revised Research 388's verdict from "Gain → GOAT-conditional" to **Refuted (Fusion A latency path)**. The latency claim (B ~2000× cheaper than A) is false; the architectural insight (SVD principal directions) remains true but has no latency value as a pre-filter.
   - Opened `.issues/043_jacobian_svd_perf_docstring_and_rank_deficient_regression.md` tracking: (a) the misleading ~455 ns docstring claim in `subspace_phase_gate.rs`, (b) the rank-deficient matrix SVD perf regression (8× slower than full-rank), (c) whether a better SVD algorithm or a rank-deficiency fast-path could recover Fusion A's latency claim.
 - [x] **T4.3** Leave the PoC in place as a permanent regression check. The latency bench (`jlens_concept_readout_goat.rs`) stays in `riir-poc/benches/` and will catch any SVD perf regression that changes the verdict.
-- [ ] **T4.4** Commit all PoC code, the updated Research 388, and this plan on `develop` per global AGENTS.md (commit prefix `docs:` for the research note + plan, `feat:` if Phase 4.2 promotes to GOAT and lands code). Do NOT push.
+- [x] **T4.4** Commit all PoC code, the updated Research 388, and this plan on `develop` per global AGENTS.md (commit prefix `docs:` for the research note + plan, `feat:` if Phase 4.2 promotes to GOAT and lands code). Do NOT push.
+  - **DONE.** Substantive commits already landed in prior sessions: `838837f4` (riir-ai, `feat:` — PoC scaffolding code) and `d11edcf0` (katgpt-rs, `docs:` — Plan 409 + updated Research 388 refuting Fusion A + Issue 043). Working tree verified clean for all Plan 409 files in both repos. Phase 4.2 did NOT promote to GOAT (Phase 2 latency gate FAILED), so no `feat:` promotion commit was needed. This checkbox flip closes the plan.
 
 ---
 
