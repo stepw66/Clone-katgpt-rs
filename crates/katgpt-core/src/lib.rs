@@ -148,6 +148,15 @@ pub mod parallax_attn;
 #[cfg(feature = "tropical_algebra")]
 pub mod algebra;
 pub mod shard_embedding;
+// SSMax — length-aware log-N attention temperature (Plan 411, Research 392,
+// arxiv 2607.01538 Gollapudi et al. *Drowning in Documents at Million Token
+// Scale*). Multiplicative pre-attention logit rescaling that cancels the
+// attention dilution at large N. Default `s_L = 1.0` is truly modelless.
+// Composes with parallax_attn (sigmoid) and attention.rs (SDPA); does NOT
+// apply to funcattn (Research 261 closed negative: basis-mode has no (n,n)
+// attention matrix → no dilution). Opt-in until G1+G2 GOAT gate passes.
+#[cfg(feature = "ssmax_temperature")]
+pub mod ssmax;
 // Position-Offset Reveal-Time Schedule for Set Diffusion (Research 376).
 // Canonical source for `PositionOffsetSchedule` — pure math (CDF/inverse-CDF/
 // ordering), RNG-agnostic via closure-based sampling. No feature gate because

@@ -28,55 +28,23 @@ Goal: two compiling, feature-gated, minimally-tested modules with the public API
 
 ### Tasks
 
-- [ ] **T1.1** Add two feature flags to `katgpt-rs/Cargo.toml` features section (alphabetical, near `sink_aware_attn`):
+- [x] **T1.1** Add two feature flags to `katgpt-rs/Cargo.toml` features section (alphabetical, near `sink_aware_attn`):
   ```toml
   ssmax_temperature = ["katgpt-core/ssmax_temperature"]   # Length-aware log-N attention temperature (Plan 411, Research 392, arxiv 2607.01538). Modelless; default s_L = 1.0. Composes with parallax_attn (sigmoid) and attention.rs (SDPA). Opt-in pending G1/G2 GOAT gate.
-  gold_share_probe = ["data_probe"]                       # GoldShare content-specific output-fraction diagnostic ‖a^G_L‖/‖a_L‖ (Plan 411, Research 392). Complements effective_rank / stable_rank_update. Opt-in diagnostic.
+  gold_share_probe = ["data_probe", "katgpt-core/gold_share_probe"]  # GoldShare content-specific output-fraction diagnostic ‖a^G_L‖/‖a_L‖ (Plan 411, Research 392). Complements effective_rank / stable_rank_update. Opt-in diagnostic; implies data_probe + sink_aware_attn.
   ```
-- [ ] **T1.2** Forward the features to katgpt-core: add `ssmax_temperature = []` and `gold_share_probe = ["dirichlet_energy"]` (or the right `data_probe` umbrella dep) to `crates/katgpt-core/Cargo.toml`.
-- [ ] **T1.3** Add `#[cfg(feature = "ssmax_temperature")] pub mod ssmax;` to `crates/katgpt-core/src/lib.rs` (alphabetical).
-- [ ] **T1.4** Implement `crates/katgpt-core/src/ssmax.rs` types:
-  - [ ] `SsmaxConfig { scale: f32, log_n: f32 }` — `scale` is `s_L`, `log_n` is precomputed `ln(N)` (avoids recomputing in the hot loop; caller passes it because they already know N).
-  - [ ] `SsmaxMode` enum: `Fixed { s_l: f32 }` (truly modelless, default `s_l = 1.0`), `Adaptive { rolling_delta: f32 }` (caller-managed rolling estimate; `s_l = 1.0 / rolling_delta` clamped to `[0.1, 10.0]`).
-  - [ ] `SsmaxScratch { scaled_logits: Vec<f32> }` — caller-owned scratch, reused across calls (no hot-loop alloc per AGENTS.md).
-- [ ] **T1.5** Implement `crates/katgpt-core/src/ssmax.rs` core function:
-  ```rust
-  /// Rescale pre-attention logits in place by `s_L · log(N)`.
-  /// `logits` is `(n_heads, n_kv)` row-major f32, modified in place.
-  /// `n` is the number of attended keys (drives `log_n`).
-  #[inline]
-  pub fn apply_ssmax_inplace(logits: &mut [f32], mode: &SsmaxMode, log_n: f32) {
-      let s_l = match mode {
-          SsmaxMode::Fixed { s_l } => *s_l,
-          SsmaxMode::Adaptive { rolling_delta } => (1.0 / rolling_delta.max(1e-3)).clamp(0.1, 10.0),
-      };
-      let mult = s_l * log_n;
-      // Chunked 8-wide loop for SIMD auto-vectorization (AGENTS.md hot-loop rule)
-      for chunk in logits.chunks_exact_mut(8) {
-          for x in chunk { *x *= mult; }
-      }
-      for x in logits.chunks_exact_mut(8).remainder() { *x *= mult; }
-  }
-  ```
-- [ ] **T1.6** Implement `crates/katgpt-core/src/data_probe/gold_share.rs`:
-  - [ ] `GoldShareReport { gold_norm: f32, total_norm: f32, gold_share: f32, gold_pre_softmax_max: f32, noise_gap: f32 }`
-  - [ ] `gold_share(attn_weights, values, gold_mask, w_o, scratch) -> GoldShareReport` — signature sketched in Research 392 §2.2. Reuse `data_probe/geometry.rs` scratch conventions.
-  - [ ] `gold_share_flat(...)` — flat-`&[f32]` variant matching `apply_dual_policy_gate_flat`'s convention in `sink_classify.rs` (consistency with the existing data_probe API).
-- [ ] **T1.7** Wire `pub mod gold_share;` into `crates/katgpt-core/src/data_probe/mod.rs` behind `#[cfg(feature = "gold_share_probe")]`, with re-exports mirroring the `sink_classify` block.
-- [ ] **T1.8** Write unit tests in `crates/katgpt-core/src/ssmax.rs`:
-  - [ ] `apply_ssmax_inplace` scales every logit by `s_l · log_n` exactly (bit-exact on small input).
-  - [ ] `SsmaxMode::Adaptive` clamps `s_l` to `[0.1, 10.0]` for both tiny and huge `rolling_delta`.
-  - [ ] In-place modification is confirmed (input == output on identity scale).
-  - [ ] SIMD chunk path and remainder path produce identical results to a naive scalar loop.
-- [ ] **T1.9** Write unit tests in `crates/katgpt-core/src/data_probe/gold_share.rs`:
-  - [ ] When `gold_mask` is all-true, `gold_share == 1.0`.
-  - [ ] When `gold_mask` is all-false, `gold_share == 0.0`.
-  - [ ] On the paper's Table 1 toy (4-head, 8-key, half gold), `gold_share` matches the hand-computed `‖a^G‖/‖a‖` to 4 decimal places.
-  - [ ] `gold_share` and `gold_share_flat` agree bit-exactly on the same input.
-- [ ] **T1.10** Add a doc example to `ssmax.rs` showing `SsmaxMode::Fixed { s_l: 1.0 }` applied to a synthetic logit vector with `n = 10_000`.
-- [ ] **T1.11** Run `cargo check -p katgpt-core --features ssmax_temperature,gold_share_probe --lib` — must pass with no new warnings.
+- [x] **T1.2** Forward the features to katgpt-core: added `ssmax_temperature = []` and `gold_share_probe = ["sink_aware_attn"]` to `crates/katgpt-core/Cargo.toml`. Deviation: gold_share_probe implies sink_aware_attn (not `dirichlet_energy`) for the StableRankScratch convention reuse.
+- [x] **T1.3** Added `#[cfg(feature = "ssmax_temperature")] pub mod ssmax;` to `crates/katgpt-core/src/lib.rs` (alphabetical).
+- [x] **T1.4** Implemented `crates/katgpt-core/src/ssmax.rs` types: `SsmaxMode` enum (`Fixed { s_l }` / `Adaptive { rolling_delta }`), `SsmaxConfig` bundle, default `Fixed { s_l: 1.0 }`.
+- [x] **T1.5** Implemented `apply_ssmax_inplace(logits, mode, log_n)` — chunked 8-wide SIMD-friendly in-place multiply.
+- [x] **T1.6** Implemented `crates/katgpt-core/src/data_probe/gold_share.rs` (pre-existing skeleton from prior session, kept as-is): `GoldShareReport` with the 5 plan fields (`gold_norm`, `total_norm`, `gold_share`, `gold_pre_softmax_max`, `noise_gap`), `gold_share`/`gold_share_flat` with `GoldShareScratch` (caller-owned, zero-alloc hot path).
+- [x] **T1.7** Wired `#[cfg(feature = "gold_share_probe")] pub mod gold_share;` into `crates/katgpt-core/src/data_probe/mod.rs`, with re-exports of `GoldShareReport`, `GoldShareScratch`, `gold_share`, `gold_share_flat`.
+- [x] **T1.8** Wrote 13 unit tests in `crates/katgpt-core/src/ssmax.rs` (all PASS): fixed/adaptive mode resolution, clamping (tiny/huge/zero/negative delta), multiplier math, in-place scaling bit-exactness, SIMD+remainder paths agree with naive, identity-at-multiplier-one, empty-slice no-op, `SsmaxConfig` caching.
+- [x] **T1.9** Wrote 8 unit tests in `crates/katgpt-core/src/data_probe/gold_share.rs` (all PASS): all-true/all-false masks, empty-gold-set, degenerate all-zero, paper's Table 1 toy (4-head 8-key half-gold), pre-softmax-max + noise-gap correctness, flat/typed agreement, scratch ensure_capacity no-op.
+- [x] **T1.10** Added module-level docs to `ssmax.rs` with composition notes (sigmoid parallax, SDPA, sink-aware; NOT funcattn per Research 261).
+- [x] **T1.11** `cargo check -p katgpt-core --features ssmax_temperature,gold_share_probe --lib` passes clean. `--all-features` also clean. Root `cargo check --features ssmax_temperature,gold_share_probe` clean. 1347 tests pass at the crate level.
 
-**STATUS: ☐** — Phase 1 not started.
+**STATUS: ✅ DONE** — Phase 1 complete. Committed as `feat(katgpt-core): ssmax + gold_share skeleton (Plan 411 Phase 1)`.
 
 ---
 

@@ -14,6 +14,7 @@
 //! - [`claim`]            — Claim card infrastructure for formal C1–C4 validation (always-on)
 //! - [`geometry`]         — Representation geometry diagnostics (Plan 151) — gated `sink_aware_attn`
 //! - [`sink_classify`]    — Per-head NOP/Broadcast sink classifier (Plan 287) — gated `sink_aware_attn`
+//! - [`gold_share`]       — Content-specific output-fraction diagnostic (Plan 411) — gated `gold_share_probe`
 //!
 //! # Always-on vs feature-gated split
 //!
@@ -32,6 +33,12 @@
 //! Broadcast sinks reduce `effective_rank` across tokens (Fesser et al.
 //! Lemma 4); the classifier tells you *why*. Phase 4's `LayerSinkSummary`
 //! (in [`geometry`]) bridges the two.
+//!
+//! [`gold_share`] (Plan 411, Research 392) adds the **content-specific**
+//! view: it tells you whether the layer's output still carries the *gold*
+//! signal or has been rewritten to carry aggregate noise — orthogonal to
+//! both `effective_rank` (content-agnostic) and `stable_rank_update`
+//! (per-sink degeneracy).
 //!
 //! # Plan 404 history (2026-07-06)
 //!
@@ -69,6 +76,14 @@ pub mod geometry;
 #[cfg(feature = "sink_aware_attn")]
 pub mod sink_classify;
 
+/// GoldShare content-specific output-fraction diagnostic (Plan 411,
+/// Research 392, arxiv 2607.01538). `‖a^G_L‖ / ‖a_L‖` — the gold fraction
+/// of a layer's attention output. Detects the paper's recall-generation
+/// gap (signal in heads, lost in residual). Standalone norm computation
+/// (no deps); gated `gold_share_probe`.
+#[cfg(feature = "gold_share_probe")]
+pub mod gold_share;
+
 // ── Re-exports (always-on items) ────────────────────────────────────────
 
 pub use claim::{ClaimCard, Intervention, ValidityVerdict};
@@ -101,3 +116,8 @@ pub use sink_classify::{
     classify_all_sinks_flat, classify_sink_at, classify_sink_at_flat, stable_rank_update_into,
     stable_rank_update_into_flat,
 };
+
+// ── Re-exports (gold_share items, gated) ───────────────────────────────
+
+#[cfg(feature = "gold_share_probe")]
+pub use gold_share::{GoldShareReport, GoldShareScratch, gold_share, gold_share_flat};
