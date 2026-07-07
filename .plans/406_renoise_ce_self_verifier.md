@@ -109,7 +109,7 @@ A **contractive linear operator** `F(x) = α·x` with `α ∈ (0, 1)`. Ground tr
 - [ ] **P5.1 (riir-ai)** CLR + renoise-CE fusion arm (F1) — add renoise-CE as a third vote arm in CLR's sharpening gate. Tracked as a separate riir-ai plan if scoped.
 - [ ] **P5.2 (riir-ai)** Proactive functor stability probe (F2) — perturb observation buffer, re-estimate direction into scratch, measure cosine drift. Extends `ReestimationScheduler` (Plan 303). Separate riir-ai plan.
 - [ ] **P5.3 (riir-neuron-db)** Proactive freeze-gate probe (F5) — perturb wake-event embeddings, re-run `sleep()`, measure `weight_delta` drift. Extends `can_freeze` (Plan 002). Separate riir-neuron-db plan.
-- [ ] **P5.4 (speculative)** HLA committed-belief probe (F4) — perturb committed HLA state, re-resolve one step, measure drift. Carries R344 null-result caveat. File as `.issues/` follow-up, do NOT plan until R344 re-validation.
+- [-] **P5.4 (speculative)** HLA committed-belief probe (F4) — perturb committed HLA state, re-resolve one step, measure drift. Carries R344 null-result caveat. **Filed as [`.issues/048_hla_committed_belief_probe_blocked_on_r344.md`](../.issues/048_hla_committed_belief_probe_blocked_on_r344.md)** — BLOCKED on R344 re-validation; do NOT plan until the committed-belief attractor stability is confirmed.
 
 ---
 
