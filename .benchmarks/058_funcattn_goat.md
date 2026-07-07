@@ -4,8 +4,8 @@
 **Plan:** [286_functional_attention_spectral_transport](../.plans/286_functional_attention_spectral_transport.md)
 **Research:** [257_Functional_Attention_Spectral_Transport_Operator](../.research/257_Functional_Attention_Spectral_Transport_Operator.md)
 **Reference impl:** [`.raw/FUNCATTN/PDE-StandardBenchmark/model/Functional_attention.py`](../.raw/FUNCATTN/PDE-StandardBenchmark/model/Functional_attention.py)
-**Feature flag:** `funcattn` (opt-in, in `full` aggregation, **not** in default features)
-**Status:** Phase 1 + G1 + G2 + G3 + G4 + G5 + G6 PASS (6/6 gates green). All accuracy gates pass in the sample-efficiency regime; G2 documents the convergence-regime caveat (SDPA catches up at 500+ steps) and the sigmoid Parallax numerical instability under naive FD-SGD. **G6 (T4.4 LLM-domain gate) PASS** — FUNCATTN (1.000) ≥ SDPA (1.000) on masked-token LM prediction at 600 FD-SGD steps, after Issue 049 fixed the degenerate-training-data artifact in `generate_pattern_dataset` (the original 0.969 plateau was caused by 5/32 constant `a==b` sequences corrupting FUNCATTN's basis, not a structural ceiling). Per T4.4, **eligible for default-on promotion** — promotion is a separate human decision (see G6 Results §"Post-Issue-049 update" below).
+**Feature flag:** `funcattn` (**DEFAULT-ON** since 2026-07-07, also in `full` aggregation)
+**Status:** Phase 1 + G1 + G2 + G3 + G4 + G5 + G6 PASS (6/6 gates green). All accuracy gates pass in the sample-efficiency regime; G2 documents the convergence-regime caveat (SDPA catches up at 500+ steps) and the sigmoid Parallax numerical instability under naive FD-SGD. **G6 (T4.4 LLM-domain gate) PASS** — FUNCATTN (1.000) ≥ SDPA (1.000) on masked-token LM prediction at 600 FD-SGD steps, after Issue 049 fixed the degenerate-training-data artifact in `generate_pattern_dataset` (the original 0.969 plateau was caused by 5/32 constant `a==b` sequences corrupting FUNCATTN's basis, not a structural ceiling). Per T4.4, **promoted to DEFAULT-ON on 2026-07-07** (commit `776000b9`) — see G6 Results §"Post-Issue-049 update" below).
 
 ---
 
@@ -15,8 +15,9 @@ Shipped the FUNCATTN primal operator as a Gain-tier open primitive in
 `crates/katgpt-core/src/funcattn.rs`, matching the reference implementation's
 **dual form** (d×d convex-combo regularization `(1-α)·K̃ᵀK̃ + α·I_d`, column-
 normalized slice tokens, per-slice-token to_q/to_k/to_v linear projections).
-All 13 unit tests pass against a scalar reference. **Not promoted to default
-features** — Gain-tier, awaiting G2/G3 accuracy evidence per Plan 286 Phase 4.
+All 13 unit tests pass against a scalar reference. **Promoted to DEFAULT-ON**
+2026-07-07 (post-Issue-049 D4 fix) — 6/6 GOAT gates green, modelless, heavy
+downstream use in riir-ai (plans 318/329/330/309/310/321).
 
 ---
 
