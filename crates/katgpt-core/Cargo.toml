@@ -1128,3 +1128,13 @@ required-features = ["mcts_state_action_cache"]
 [[example]]
 name = "mcts_state_action_cache_basic"
 required-features = ["mcts_state_action_cache"]
+
+# Plan 390 Phase 3 T3.1/T3.2 — State-Action Cache GOAT gate benchmark.
+# Synthetic dLLM-like domain (16-token, 7 depth levels, 3 actions) measuring
+# G1 hit rate, G2 budget expansion, G3 no-regression, G5 cache size.
+# G4 (zero-alloc) is deferred to a separate CountingAllocator binary if promoted.
+# std::time::Instant + harness = false (no Criterion dev-dep).
+[[bench]]
+name = "bench_390_mcts_state_action_cache_goat"
+harness = false
+required-features = ["mcts_state_action_cache"]
