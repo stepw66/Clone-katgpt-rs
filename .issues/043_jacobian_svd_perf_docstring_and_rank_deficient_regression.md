@@ -1,9 +1,10 @@
 # Issue 043: `jacobian_svd_at_into` perf — misleading docstring + rank-deficient regression
 
 > **Opened:** 2026-07-07
+> **Resolved:** 2026-07-07
 > **Source:** Plan 409 Phase 2 latency gate failure (Research 388 Fusion A refuted)
 > **Priority:** P2 (correctness-adjacent — the misleading docstring led to a wrong research verdict; the rank-deficient regression affects all real-world consumers)
-> **Status:** Open
+> **Status:** ✅ Resolved
 
 ## Problem
 
@@ -82,3 +83,50 @@ Two options:
 ## Non-goals
 
 - **Does NOT recover Research 388 Fusion A.** Even with a fixed SVD, the prefilter needs n+1 eval calls vs the probe's 5 — structurally slower for n ≥ 4. This issue fixes the shipped primitive's perf and docs; the Fusion A verdict remains refuted.
+
+## Resolution (2026-07-07)
+
+### (a) Docstring correction — DONE
+
+Rewrote `jacobian_svd_at_into` docstring (`subspace_phase_gate.rs` lines 422-454) to:
+1. State the ~455 ns figure is the SVD-only floor on a trivial `f` (identity).
+2. Add a latency table for realistic `f` types (trivial ~420 ns, linear full-rank ~3.9 µs, linear rank-deficient ~4 µs post-fix).
+3. Note the `(n+1) × cost(f)` scaling and the SVD sweep-count dependence.
+4. Include a pre-Issue-043 caveat pointing to the benchmark doc.
+
+### (b) Rank-deficient SVD perf fix — DONE (Option 1)
+
+Raised `col_floor_sq` from `frob_sq * tol²` (= `frob_sq * 1e-14` ≈ 3e-13) to
+`frob_sq * 1e-10` (≈ 3e-9) in `one_sided_jacobi_svd_into` (line ~706). The
+new floor is consistent with the rank threshold `sigma_max * 1e-5` (squared).
+Borderline null-space columns now fall below the floor earlier and their pairs
+are deflated by the existing AND check at line ~738, preventing the spurious
+noise rotations that caused the 60-sweep blowup.
+
+**Result:** rank-deficient SVD latency dropped from ~8× to ≈1.05× full-rank
+(debug-mode measured ratio; release-mode ratio expected similar). All 19
+pre-existing G1 recovery tests pass unchanged.
+
+### Regression guard — DONE
+
+Added `thin_svd_rank_deficient_not_slower_than_full_rank` test: constructs a
+generic (non-block-structured) rank-4 8×8 matrix and asserts `thin_svd_into`
+latency ≤ 3× the full-rank 8×8 baseline.
+
+**Note on `thin_svd_into` vs `jacobian_svd_at_into`:** the regression test
+uses `thin_svd_into` directly because forward-differencing with `eps=1e-4`
+introduces ~1e-3 relative noise that elevates null-space singular values above
+the rank threshold — so a rank-4 linear map appears as rank-8 through the
+Jacobian path. The SVD convergence fix is independent of how the matrix was
+built; testing the SVD directly isolates the fix. The original issue proposed
+`jacobian_svd_at_into` for the regression test, but `thin_svd_into` is the
+correct entry point for isolating the SVD convergence behavior.
+
+### Validation
+
+- ✅ `cargo test -p katgpt-core --features subspace_phase_gate --lib subspace_phase_gate::` — 20/20 pass (19 pre-existing + 1 new regression guard)
+- ✅ `cargo test -p katgpt-core --lib` — 1326/1326 pass (default features)
+- ✅ `cargo test -p katgpt-core --all-features --lib subspace_phase_gate` — 20/20 pass
+- ✅ `cargo test --release -p katgpt-core --features subspace_phase_gate --test subspace_phase_gate_alloc_check` — zero-alloc gate passes
+- ✅ `cargo build --release --example subspace_phase_gate_goat` + run — G1 PASS
+- ✅ Debug-mode regression guard ratio: 1.05× (threshold 3.0×)

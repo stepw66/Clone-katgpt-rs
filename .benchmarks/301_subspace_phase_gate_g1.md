@@ -361,6 +361,43 @@ on the `jacobian_svd_at_into` hot path.
   that need robust rank should call `numerical_rank(spectrum, η)` explicitly
   rather than trusting `result.rank` on forward-diff-noisy inputs.
 
+## Issue 043 addendum (2026-07-07): rank-deficient SVD perf fix + docstring correction
+
+**Context:** Plan 409 Phase 2's latency bench (Research 388 Fusion A refutation)
+discovered that the T3.4 latency numbers above are specific to the
+`known_rank3_map_r8x8()` test fixture — a block-structured rank-3 matrix where
+null-space columns converge to EXACTLY zero in one Jacobi sweep. For generic
+rank-deficient matrices (non-block-structured, like real-world HLA / NeuronShard
+/ Plan 312 Jacobians), the one-sided Jacobi SVD was **~8× slower** (31 µs vs
+3.9 µs at R^8→R^8) because borderline null-space column pairs triggered
+spurious noise rotations every sweep, hitting `max_sweeps = 60`.
+
+**Fix:** raised `col_floor_sq` from `frob_sq * tol²` (≈3e-13) to
+`frob_sq * 1e-10` (≈3e-9) in `one_sided_jacobi_svd_into`. The new floor is
+consistent with the rank threshold `sigma_max * 1e-5` (squared). Borderline
+null-space columns now fall below the floor earlier and their pairs are
+deflated (skipped) by the existing AND check, preventing the noise rotations.
+
+**Correctness:** all 19 pre-existing G1 recovery tests pass unchanged (Plan 301
+rank-3, Issue 008 wide 3×12, bit-identical `_into` vs `_at`). The fix only
+affects which null-null column pairs are skipped; signal-signal and
+signal-null pairs are processed identically. See the `col_floor_sq` comment in
+`subspace_phase_gate.rs` for the full analysis.
+
+**Regression guard:** `thin_svd_rank_deficient_not_slower_than_full_rank` —
+constructs a generic (non-block-structured) rank-4 8×8 matrix and asserts
+`thin_svd_into` latency ≤ 3× the full-rank 8×8 baseline. Before the fix this
+was ~8×; after the fix it is ≈1.05× (debug-mode measured; release-mode ratio
+expected similar since both paths are equally optimized).
+
+**Docstring correction:** the `jacobian_svd_at_into` docstring's ~455 ns claim
+was measured on a trivial `f` (identity) and omitted both the Jacobian
+forward-diff cost and the SVD convergence cost on non-trivial Jacobians. The
+docstring now includes a latency table by `f` type and notes the `(n+1) ×
+cost(f)` scaling. The T3.4 numbers above (~800 ns for `_into`) remain valid
+for the `known_rank3_map_r8x8()` fixture (block-structured, clean convergence)
+but should NOT be cited as the primitive's general-case latency.
+
 ## Reproducibility
 
 - **Tests:** `subspace_phase_gate::tests::jacobian_svd_recovers_rank3_r8x8_singular_values_and_vectors`

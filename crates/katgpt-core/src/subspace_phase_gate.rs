@@ -423,10 +423,35 @@ where
 ///
 /// After warmup, **zero allocations per call**: all work happens in the
 /// pre-sized `scratch` buffers (`f_x`, `f_x_pert`, `f_x_plus`, `x_pert`,
-/// `jac`, `svd_work`, `svd_result`). The benchmark breakdown for R^8→R^8:
-/// - [`jacobian_svd_at`] (with 17-`Vec` conversion): ~830 ns/call
-/// - [`jacobian_svd_at_into`] (this fn, zero alloc): ~455 ns/call
-///   The ~375 ns difference is the SOA→owned-`Vec` conversion cost.
+/// `jac`, `svd_work`, `svd_result`).
+///
+/// # Latency — depends strongly on the cost of `f` and the Jacobian's rank
+///
+/// The total cost has two components: (1) the Jacobian forward-difference
+/// build (`n+1` calls to `f` for forward diff, `2n+1` for central), and (2)
+/// the one-sided Jacobi SVD of the `m × n` Jacobian. The SVD sweep count
+/// depends on the Jacobian's spectral structure.
+///
+/// Measured latencies at R^8→R^8 (release, 2026 M-series Mac; Issue 043):
+///
+/// | `f` type | `_into` latency | Notes |
+/// |---|---|---|
+/// | Trivial (identity, near-identity) | ~420 ns | SVD converges in 1 sweep; matches the pre-Issue-043 ~455 ns claim |
+/// | Linear full-rank `W·x` | ~3.9 µs | 9 forward-diff evals + ~10 SVD sweeps |
+/// | Linear rank-deficient `W·x` (rank 4 of 8) | ~4 µs post-Issue-043 | Was ~31 µs before the `col_floor_sq` fix (hit `max_sweeps = 60` from borderline null-space pairs) |
+///
+/// The Jacobian build cost scales as `(n+1) × cost(f)` and dominates for
+/// expensive `f` (e.g. a neural-network forward pass). The SVD cost is
+/// ~O(n² × sweeps) per call; ~10 sweeps for well-separated full-rank spectra,
+/// more for degenerate/clustered singular values. The [`jacobian_svd_at`]
+/// allocating wrapper adds ~400 ns (17-`Vec` SOA→owned conversion).
+///
+/// **Pre-Issue-043 caveat:** the original docstring claimed ~455 ns/call
+/// without qualifying the `f`. That figure is the SVD-only floor on a trivial
+/// `f`; it omits both the Jacobian build and the SVD convergence cost on
+/// non-trivial Jacobians. See `.benchmarks/301_subspace_phase_gate_g1.md`
+/// Phase 3 §T3.4 for the full breakdown and Issue 043 for the rank-deficient
+/// regression analysis.
 ///
 /// # Panics
 ///
@@ -679,17 +704,35 @@ fn one_sided_jacobi_svd_into(
     let max_sweeps = 60;
 
     // Frobenius-norm scale of the matrix, for the null-space deflation floor
-    // (Issue 008). On wide rank-deficient matrices (m ≪ n, rank = m), the
-    // (n − m) null-space columns converge to ~zero norm during Jacobi sweeps.
-    // Pairs of near-zero columns produce a degenerate per-pair test (rhs → 0)
-    // that fires spurious noise rotations every sweep; skipping pairs where
-    // both columns are below this floor prevents the noise injection and lets
-    // the signal columns converge cleanly.
+    // (Issue 008 + Issue 043). On rank-deficient matrices, the (n − rank)
+    // null-space columns converge to ~zero norm during Jacobi sweeps. Pairs of
+    // near-zero columns produce a degenerate per-pair test (rhs → 0) that fires
+    // spurious noise rotations every sweep; skipping pairs where both columns
+    // are below this floor prevents the noise injection and lets the signal
+    // columns converge cleanly.
+    //
+    // Issue 043 (2026-07-07): the original floor `frob_sq * tol²` (= frob_sq *
+    // 1e-14 ≈ 3e-13 for a typical matrix) was too aggressive — borderline
+    // null-space columns with norm² ≈ 1e-12 sat above the floor, passed the
+    // per-pair convergence check (`apq.abs() <= tol * sqrt(app * aqq)` fails
+    // when aqq ≈ 1e-12), and triggered spurious rotations that prevented the
+    // `!rotated` convergence break, burning all `max_sweeps = 60` sweeps. This
+    // made rank-deficient SVD ~8× slower than full-rank (31 µs vs 3.9 µs at
+    // R^8→R^8), affecting HLA (rank 5 in 64-dim), NeuronShard, and Plan 312.
+    //
+    // The raised floor `frob_sq * 1e-10` is consistent with the rank threshold
+    // `sigma_max * 1e-5` at line ~807 (squared = sigma_max² * 1e-10, and
+    // frob_sq ≥ sigma_max²). Columns deflated by this floor are exactly those
+    // that would be counted as rank-deficient in the extraction step. Signal
+    // columns (norm² = σ² ≥ 1 for unit-scaled spectra) are unaffected: even
+    // for an 8-dim flat spectrum, floor = frob_sq * 1e-10 ≤ n * sigma_max² *
+    // 1e-10 = 8e-10 * sigma_max² ≪ sigma_max². Verified: all existing G1
+    // recovery tests pass unchanged (Plan 301 rank-3, Issue 008 wide 3×12).
     let mut frob_sq: f32 = 0.0;
     for v in work.a[..m * n].iter() {
         frob_sq += v * v;
     }
-    let col_floor_sq: f32 = frob_sq * tol * tol;
+    let col_floor_sq: f32 = frob_sq * 1e-10;
 
     for _sweep in 0..max_sweeps {
         // Convergence criterion: break when a full sweep applies no rotation.
@@ -1547,6 +1590,105 @@ mod tests {
             result.rank, 3,
             "rank should be 3, got {}",
             result.rank
+        );
+    }
+
+    // ── Issue 043 regression: rank-deficient SVD must not be slower than ────
+    //    full-rank. Before the `col_floor_sq` fix, borderline null-space
+    //    column pairs triggered spurious noise rotations every sweep, hitting
+    //    `max_sweeps = 60` and making rank-deficient SVD ~8× slower (31 µs vs
+    //    3.9 µs at R^8→R^8). This test guards against that regression.
+    //
+    // The matrix construction is deliberately NON-block-structured (unlike
+    // `known_rank3_map_r8x8`, which uses disjoint 2×2 rotation blocks where
+    // null-space columns converge to EXACTLY zero in one sweep). A generic
+    // rank-deficient matrix has column interactions across all coordinates,
+    // so null-space columns converge gradually and hover at borderline norms
+    // during intermediate sweeps — the exact scenario the floor fix addresses.
+
+    /// Construct a generic rank-`r` 8×8 matrix via W = U_r · Σ_r · V_rᵀ where
+    /// U_r, V_r have entries from irrational-ish sin/cos formulas (deterministic,
+    /// no PRNG dependency). The result is non-axis-aligned and has genuine
+    /// cross-column interactions, so the Jacobi SVD cannot exploit any block
+    /// structure — null-space columns converge gradually, exercising the
+    /// `col_floor_sq` deflation path.
+    fn generic_rank_r_r8x8(r: usize) -> [f32; 64] {
+        debug_assert!(r <= 8);
+        let mut w = [0.0f32; 64];
+        // Distinct singular values so the spectrum is well-separated.
+        let sigma = |k: usize| 1.0 + k as f32; // 1, 2, 3, ..., r
+        for j in 0..8 {
+            for i in 0..8 {
+                let mut acc = 0.0f32;
+                for k in 0..r {
+                    // U entry: sin of an irrational-ish product (no axis alignment).
+                    let u_jk = ((j as f32 + 1.0) * (k as f32 + 1.0) * 0.37).sin();
+                    // V entry: cos of a different irrational-ish product.
+                    let v_ik = ((i as f32 + 1.0) * (k as f32 + 1.0) * 0.23).cos();
+                    acc += sigma(k) * u_jk * v_ik;
+                }
+                w[j * 8 + i] = acc;
+            }
+        }
+        w
+    }
+
+    /// Issue 043 perf regression guard: `thin_svd_into` (the one-sided Jacobi
+    /// SVD that `jacobian_svd_at_into` calls internally) on a rank-4 8×8 matrix
+    /// must not be dramatically slower than on a full-rank 8×8 matrix. Before
+    /// the `col_floor_sq` fix, the ratio was ~8× (31 µs vs 3.9 µs); after the
+    /// fix it should be ≈1×. The guard threshold (3.0×) is generous for
+    /// debug/CI stability while still catching the 8× regression.
+    ///
+    /// We test `thin_svd_into` directly (not `jacobian_svd_at_into`) because
+    /// forward-differencing with `eps=1e-4` introduces ~1e-3 relative noise
+    /// that elevates null-space singular values above the rank threshold — so
+    /// a rank-4 linear map appears as rank-8 through the Jacobian path. The
+    /// SVD convergence regression is independent of how the matrix was built;
+    /// testing the SVD directly isolates the fix.
+    #[test]
+    fn thin_svd_rank_deficient_not_slower_than_full_rank() {
+        let w_full = generic_rank_r_r8x8(8); // full-rank
+        let w_rank4 = generic_rank_r_r8x8(4); // rank-4 (4 null-space columns)
+        let mut work = SvdScratch::with_capacity(8, 8);
+        let mut result = SvdResultScratch::with_capacity(8, 8);
+
+        // Sanity: verify ranks are as expected (catches a construction bug that
+        // would make the perf comparison meaningless).
+        thin_svd_into(&w_full, 8, 8, &mut result, &mut work);
+        assert_eq!(result.rank, 8, "full-rank matrix should be rank 8");
+        thin_svd_into(&w_rank4, 8, 8, &mut result, &mut work);
+        assert_eq!(result.rank, 4, "rank-4 matrix should be rank 4, got {}", result.rank);
+
+        // Warmup both paths.
+        thin_svd_into(&w_full, 8, 8, &mut result, &mut work);
+        thin_svd_into(&w_rank4, 8, 8, &mut result, &mut work);
+
+        let iters = 5_000;
+
+        // Full-rank baseline.
+        let start = std::time::Instant::now();
+        for _ in 0..iters {
+            thin_svd_into(&w_full, 8, 8, &mut result, &mut work);
+        }
+        let ns_full = start.elapsed().as_nanos() as f64 / iters as f64;
+
+        // Rank-deficient (the path that was 8× slower before the fix).
+        let start = std::time::Instant::now();
+        for _ in 0..iters {
+            thin_svd_into(&w_rank4, 8, 8, &mut result, &mut work);
+        }
+        let ns_rank4 = start.elapsed().as_nanos() as f64 / iters as f64;
+
+        let ratio = ns_rank4 / ns_full;
+        eprintln!(
+            "Issue 043 perf guard: full-rank={ns_full:.0} ns/call, rank-4={ns_rank4:.0} ns/call, ratio={ratio:.2}× (threshold 3.0×)"
+        );
+        assert!(
+            ratio < 3.0,
+            "rank-deficient SVD is {ratio:.1}× slower than full-rank (threshold 3.0×). \
+             Before the Issue 043 `col_floor_sq` fix this was ~8×; the fix should bring it to ≈1×. \
+             full-rank={ns_full:.0} ns/call, rank-4={ns_rank4:.0} ns/call."
         );
     }
 }
