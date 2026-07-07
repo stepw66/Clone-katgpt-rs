@@ -17,7 +17,8 @@
 //! cannot linearly separate linked manifolds. By contrapositive: **if the
 //! detector says "linked," every monotonic projection (HLA affect scalars,
 //! direction-vector projections, cosine retrieval) is provably doomed**,
-//! and a [`super::fold::fold_projection_into`] is required to unlink.
+//! and a coordinate-fold (`fold_projection_into`, gated under the
+//! `linking_fold_fold` feature) is required to unlink.
 //!
 //! # Algorithm (paper §H)
 //!
@@ -717,6 +718,10 @@ fn gauss_integrand(x: [f32; 3], dx: [f32; 3], y: [f32; 3], dy: [f32; 3]) -> f32 
 #[cfg(test)]
 mod tests {
     use super::*;
+    // The unlinking test needs the fold correction (gated under
+    // `linking_fold_fold`). When only `linking_fold_detector` is enabled, the
+    // fold module is absent and this import would fail — gate it.
+    #[cfg(feature = "linking_fold_fold")]
     use crate::linking_fold::fold_projection_into;
 
     /// Generate a thickened Hopf link (paper §G.1 parametrization).
@@ -785,7 +790,12 @@ mod tests {
         );
     }
 
+    /// Cross-feature test: needs both the detector AND the fold.
+    /// Gated out when only the detector is enabled (the fold module is absent
+    /// in that configuration). Run with `--features linking_fold` (umbrella)
+    /// or `--features linking_fold_fold,linking_fold_detector`.
     #[test]
+    #[cfg(feature = "linking_fold_fold")]
     fn fold_unlinks_hopf_link() {
         let (x, y) = thickened_hopf_link(80, 0.05);
         let cfg = LinkingDetectorConfig::default();

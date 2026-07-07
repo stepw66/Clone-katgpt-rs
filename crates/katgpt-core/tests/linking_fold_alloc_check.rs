@@ -19,7 +19,7 @@
 //! `CountingAllocator` (parallel test execution would corrupt the deltas —
 //! the alloc counter is process-wide).
 
-#![cfg(feature = "linking_fold")]
+#![cfg(feature = "linking_fold_fold")]
 
 use katgpt_core::linking_fold::{fold_gelu_into, fold_projection_into};
 use std::sync::atomic::Ordering;

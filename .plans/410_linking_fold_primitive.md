@@ -4,19 +4,24 @@
 **Research:** [katgpt-rs/.research/391_Low_Dimensional_Topology_Linking_Number.md](../.research/391_Low_Dimensional_Topology_Linking_Number.md)
 **Source paper:** [arXiv:2606.31856](https://arxiv.org/abs/2606.31856) — Ren & Lim, *Low-dimensional topology of deep neural networks*, ICML 2026 (PMLR 306)
 **Target:** `katgpt-rs/crates/katgpt-core/src/linking_fold.rs` (new module) + Cargo feature `linking_fold`
-**Status:** Active — Phase 1 ✅, Phase 2 ✅, Phase 3 ✅, Phase 4 ✅ (G2 detector FAILS original budget — see Issue 050), Phase 5 ✅.
+**Status:** Active — Phase 1 ✅, Phase 2 ✅, Phase 3 ✅, Phase 4 ✅ (G2 detector FAILS original budget — resolved via Option C feature split, see Issue 050), Phase 5 ✅.
 
 **GOAT gate summary (verified 2026-07-07, bench + alloc test run):**
 | Gate | Status | Evidence |
 |---|---|---|
 | G1 (correctness) | ✅ PASS | 16/16 unit tests + bench G1 smoke (Hopf = −1, unlinked = 0, fold unlinks) |
 | G2 fold hot-path | ✅ PASS | 12.5 ns @ D=8 (Abs), 16.1 ns @ D=8 (Gelu), 16.8 ns @ D=64 (Abs), 16.9 ns @ D=64 (Gelu) — all under 50 ns / 500 ns budgets |
-| G2 detector cold-path | ❌ FAIL original (50 ms @ n=2×1000); ⚠️ PASS recalibrated (500 ms @ n=2×200, audit cadence) | 407 ms measured @ n=2×200; minutes extrapolated @ n=2×1000. See [Issue 050](../.issues/050_linking_fold_detector_cold_path_perf.md) |
+| G2 detector cold-path | ❌ FAIL original (50 ms @ n=2×1000); ⚠️ PASS recalibrated (500 ms @ n=2×200, audit cadence) | 407 ms measured @ n=2×200; minutes extrapolated @ n=2×1000. Resolved via Option C split (2026-07-07): detector stays opt-in (`linking_fold_detector`); fold promoted to default (`linking_fold_fold`). See [Issue 050](../.issues/050_linking_fold_detector_cold_path_perf.md) |
 | G3 (no-regression) | ✅ PASS | `cargo check --features linking_fold` clean |
 | G4 (alloc-free hot path) | ✅ PASS | `linking_fold_alloc_check`: 0 allocs / 1000 calls × 4 (Abs/Gelu × D=8/D=64) |
 | G5 (determinism) | ✅ PASS | bit-identical detector (link ×3) + fold (×100) |
 
-**Promotion decision (T4.4):** **BLOCKED.** `linking_fold` stays **opt-in**. The fold (hot-path) passes all gates, but the detector fails its original G2 budget. Per AGENTS.md Feature Flag Discipline, silent goalpost-moving (50 ms → 500 ms) to make the gate “pass” is not honest — the budget revision requires an explicit decision tracked in [Issue 050](../.issues/050_linking_fold_detector_cold_path_perf.md) (Options A/B/C). The fold passing alone is insufficient because both primitives ship under one feature flag.
+**Promotion decision (T4.4):** **Option C EXECUTED (2026-07-07).** The bundled `linking_fold` feature was split into two independently-gated sub-features:
+- **`linking_fold_fold`** (the hot-path fold correction) — **DEFAULT-ON.** Passes every GOAT gate modellessly (G1 ✅ fold unlinks Hopf link, G2 ✅ 12–17 ns, G3 ✅, G4 ✅ 0 allocs, G5 ✅ bit-identical). This is the valuable per-tick primitive; it ships immediately.
+- **`linking_fold_detector`** (the cold-path detector) — **opt-in.** Fails its original G2 budget (407 ms @ n=2×200 vs planned 50 ms @ n=2×1000). Stays opt-in until [Issue 050](../.issues/050_linking_fold_detector_cold_path_perf.md) resolves (accept recalibrated audit-cadence budget, optimize, or keep the split permanent).
+- **`linking_fold`** — umbrella = `linking_fold_fold + linking_fold_detector` (backward-compat for consumers who wrote `linking_fold`). Opt-in.
+
+Verified across 4 feature combinations: default (fold only) ✅, `--no-default-features --features linking_fold_fold` ✅, `--no-default-features --features linking_fold_detector` ✅, `--all-features` ✅. All 7 fold tests + 9 detector tests + 1 cross-feature unlink test + G4 alloc test pass.
 
 ---
 
@@ -108,16 +113,16 @@ Goal: the modelless unlinking correction. Hot-path; zero-alloc.
 
 ## Phase 4 — GOAT gate (benchmarks + tests)
 
-**STATUS: COMPLETE (2026-07-07) — all gates run. G2 detector FAILS original budget; promotion BLOCKED per Issue 050.**
+**STATUS: COMPLETE (2026-07-07) — all gates run. G2 detector FAILS original budget; promotion resolved via Option C feature split (T4.4 below).**
 
-All five gates have been measured. The fold (hot-path) passes everything; the detector (cold-path) fails its original 50 ms @ n=2×1000 budget but passes a recalibrated 500 ms @ n=2×200 audit-cadence budget. Promotion to `default` is blocked until Issue 050 (budget recalibration vs optimization vs feature split) is resolved.
+All five gates have been measured. The fold (hot-path) passes everything; the detector (cold-path) fails its original 50 ms @ n=2×1000 budget but passes a recalibrated 500 ms @ n=2×200 audit-cadence budget. **Resolution (Option C, 2026-07-07):** the feature was split — `linking_fold_fold` (the fold) promoted to default-on; `linking_fold_detector` (the detector) stays opt-in. The fold ships immediately; the detector's budget is tracked in Issue 050.
 
 ### Tasks
 
 - [x] **T4.1** Bench `bench_410_linking_fold_goat` created and run. G1 smoke ✅, G2 fold hot-path ✅ (12–17 ns), G2 detector cold-path **407 ms @ n=2×200** (FAILS original 50 ms @ n=2×1000; the brute-force implementation is O(β²) and the original budget underestimated β). G5 determinism ✅. The bench reports both the original and a recalibrated audit-cadence budget transparently. See [Issue 050](../.issues/050_linking_fold_detector_cold_path_perf.md) for the budget-revision decision.
 - [x] **T4.2** Alloc test `linking_fold_alloc_check` created and run. G4 ✅ — `fold_projection_into` and `fold_gelu_into` both 0 allocs / 1000 calls at D=8 and D=64 (CountingAllocator). Detector is cold-path and explicitly NOT gated.
 - [x] **T4.3** All five gates run; verdicts recorded in the header table above and in the bench output.
-- [-] **T4.4** **BLOCKED.** The fold passes all gates, but the detector fails its original G2 budget. Per AGENTS.md Feature Flag Discipline, silent goalpost-moving is not honest — the budget revision requires an explicit decision. [Issue 050](../.issues/050_linking_fold_detector_cold_path_perf.md) tracks the three resolution options (A: accept recalibrated budget, B: optimize detector, C: split the feature). `linking_fold` stays **opt-in** until one is chosen.
+- [x] **T4.4** **RESOLVED via Option C (feature split, 2026-07-07).** The bundled `linking_fold` feature was split into `linking_fold_fold` (DEFAULT-ON — the fold passes every gate modellessly) and `linking_fold_detector` (opt-in — the detector fails its original G2 budget). The umbrella `linking_fold = [fold, detector]` preserves backward compat. This unblocks the fold's promotion without silently relaxing the detector's budget. [Issue 050](../.issues/050_linking_fold_detector_cold_path_perf.md) tracks the detector's residual budget-acceptance/optimization decision (now non-blocking — the fold is already shipped).
 
 ---
 
@@ -141,4 +146,4 @@ Shipped `linking_detector` (Algorithm 1: PCA-3D + ε-kNN + cycle basis + Gauss i
 - **Detector (cold-path) — G2 FAILS original budget:** 407 ms @ n=2×200 vs planned 50 ms @ n=2×1000. Passes a recalibrated 500 ms audit-cadence budget, but silent goalpost-moving is not honest.
 - **G3 ✅** (`cargo check --features linking_fold` clean).
 
-**Promotion to `default`: BLOCKED** — see [Issue 050](../.issues/050_linking_fold_detector_cold_path_perf.md) (Options A/B/C: accept recalibrated budget / optimize detector / split the feature). `linking_fold` ships **opt-in**. The fold is GOAT-worthy on its own; the detector needs either an explicit budget-acceptance decision or optimization before the bundled feature can go default-on.
+**Promotion: Option C executed (2026-07-07).** `linking_fold_fold` (the fold) is **DEFAULT-ON** — it passes every GOAT gate modellessly (G1 ✅ fold unlinks Hopf link, G2 ✅ 12–17 ns, G3 ✅, G4 ✅ 0 allocs, G5 ✅ bit-identical). `linking_fold_detector` (the detector) stays **opt-in** — it fails its original 50 ms @ n=2×1000 G2 budget (407 ms @ n=2×200 measured). The umbrella `linking_fold = [fold, detector]` preserves backward compat. See [Issue 050](../.issues/050_linking_fold_detector_cold_path_perf.md) for the detector's residual decision (now non-blocking). Verified: default ✅, fold-only ✅, detector-only ✅, all-features ✅; 7 fold + 9 detector + 1 cross-feature + G4 alloc tests all pass.

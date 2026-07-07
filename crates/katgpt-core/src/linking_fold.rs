@@ -59,12 +59,23 @@
 // a submodule namespace. The fold is the cheap correction that consumers will
 // call per-tick; the detector is the audit-cadence diagnostic that tells them
 // when to call it.
+//
+// Feature split (Plan 410 T4.4 Option C, 2026-07-07): each submodule is gated
+// on its own sub-feature so they ship independently.
+//   - `linking_fold_fold`     → `fold` (hot-path, DEFAULT-ON)
+//   - `linking_fold_detector` → `linking_detector` (cold-path, opt-in)
+// The umbrella `linking_fold = [fold, detector]` enables both. The module root
+// exists under either sub-feature (see lib.rs).
 // ═══════════════════════════════════════════════════════════════════════════
 
+#[cfg(feature = "linking_fold_fold")]
 pub mod fold;
+#[cfg(feature = "linking_fold_detector")]
 pub mod linking_detector;
 
+#[cfg(feature = "linking_fold_fold")]
 pub use fold::{fold_gelu_into, fold_projection_into, gelu_smoothed_abs};
+#[cfg(feature = "linking_fold_detector")]
 pub use linking_detector::{
     LinkingDetectorConfig, LinkingVerdict, detect_linking, detect_linking_into,
 };

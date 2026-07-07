@@ -2,8 +2,8 @@
 
 **Date:** 2026-07-07
 **Source plan:** [katgpt-rs/.plans/410_linking_fold_primitive.md](../.plans/410_linking_fold_primitive.md) (Phase 4 T4.1/T4.4)
-**Type:** Optimization / budget-acceptance decision (blocks default-on promotion of `linking_fold`)
-**Status:** OPEN — promotion of `linking_fold` to `default` blocked until resolved
+**Type:** Optimization / budget-acceptance decision (~originally blocked~ default-on promotion of the bundled feature; resolved via Option C split — detector optimization is now a non-blocking follow-up)
+**Status:** Option C CHOSEN (2026-07-07) — the blocking condition (default-on promotion of the bundled feature) is removed. The fold ships default-on as `linking_fold_fold`; the detector stays opt-in as `linking_fold_detector`. The detector's residual decision (accept recalibrated budget / optimize / keep the split permanent) is now a **non-blocking** follow-up.
 
 ## Summary
 
@@ -36,7 +36,20 @@ At `n = 200`, `β ≈ 400` per cloud → `β_X · β_Y ≈ 160 k` cycle pairs, e
 
 The paper (§H) presents Algorithm 1 as a reference implementation; it does not claim sub-50ms perf. The 50ms@n=2000 budget in Plan 410 was set from a complexity estimate that underestimated `β`.
 
-## Resolution options (pick one)
+## Resolution (2026-07-07): Option C — Feature split executed
+
+**Option C was chosen and executed.** The bundled `linking_fold` feature was split into:
+- **`linking_fold_fold`** — the hot-path fold correction. **DEFAULT-ON** (promoted to `default` in `katgpt-core/Cargo.toml`). Passes every GOAT gate modellessly.
+- **`linking_fold_detector`** — the cold-path detector. **opt-in.** Fails its original G2 budget.
+- **`linking_fold`** — umbrella = `linking_fold_fold + linking_fold_detector` (backward-compat).
+
+The blocking condition (the fold couldn't ship default-on because it was bundled with the slow detector under one flag) is removed. The fold is now available to all consumers by default. The detector's residual decision below is **non-blocking** — it only affects whether `linking_fold_detector` itself ever gets promoted or optimized.
+
+Verified across 4 feature combinations (default / fold-only / detector-only / all-features) — all compile clean. 7 fold tests + 9 detector tests + 1 cross-feature unlink test + G4 alloc test all pass.
+
+## Residual decision for the detector (non-blocking)
+
+The detector still fails its original 50 ms @ n=2×1000 G2 budget. Pick one when a real consumer hits the perf wall at audit cadence:
 
 ### Option A — Accept the recalibrated audit-cadence budget (promote as-is)
 
@@ -69,7 +82,7 @@ Split `linking_fold` into `linking_fold_fold` (the hot-path fold, all gates pass
 
 **Option A** if the detector is only ever called from audit/sleep-cycle paths (verify by grepping call sites once consumers exist — currently zero in-tree consumers, so the risk is hypothetical). **Option C** if the fold is expected to be used independently of the detector (likely — the fold is the per-tick correction, the detector is the rare audit trigger). **Option B** only if a real consumer hits the perf wall at audit cadence.
 
-Default-on promotion is **BLOCKED** until one of A/B/C is chosen. The fold passing all gates is not sufficient on its own because the feature bundles both primitives under one flag.
+**Default-on promotion:** ✅ resolved (Option C, 2026-07-07) — `linking_fold_fold` ships default-on; the detector stays opt-in. **Detector follow-up:** **Option A** if the detector is only ever called from audit/sleep-cycle paths (verify by grepping call sites once consumers exist — currently zero in-tree consumers, so the risk is hypothetical). **Option B** only if a real consumer hits the perf wall at audit cadence. The split itself (Option C) may remain permanent — there's no requirement to ever re-bundle.
 
 ## Cross-references
 

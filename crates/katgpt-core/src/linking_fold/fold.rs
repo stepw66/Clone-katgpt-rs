@@ -10,9 +10,10 @@
 //! argument that underlies the impossibility theorem.
 //!
 //! This module ships the modelless fold as an in-place latent correction.
-//! When [`super::linking_detector::detect_linking`] fires (two latent
-//! clusters are topologically linked), apply one coordinate-fold pass per
-//! axis to unlink them before the monotonic projection. The fold is:
+//! When the linking detector (`detect_linking`, paper Algorithm 1, gated under
+//! the `linking_fold_detector` feature) fires (two latent clusters are
+//! topologically linked), apply one coordinate-fold pass per axis to unlink
+//! them before the monotonic projection. The fold is:
 //!
 //! - **Closed-form**: `state[i] ← center[i] + |state[i] − center[i]|` (Abs
 //!   variant), or a smooth GELU-surrogate with a local minimum (Gelu variant).

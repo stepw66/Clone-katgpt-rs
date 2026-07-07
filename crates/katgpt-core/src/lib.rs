@@ -47,11 +47,16 @@ pub mod attention;
 pub mod newton_schulz;
 
 // linking_fold — Linking-Number Detector + Fold Correction (Plan 410,
-// Research 391, arXiv:2606.31856 Ren & Lim ICML 2026). Modelless detector
-// (Algorithm 1: PCA-3D + ε-kNN + cycle basis + Gauss integral) for whether two
-// point clouds are topologically linked + coordinate-wise |x−c| fold as the
-// deterministic unlinking correction. Opt-in until G1–G5 GOAT gate passes.
-#[cfg(feature = "linking_fold")]
+// Research 391, arXiv:2606.31856 Ren & Lim ICML 2026). SPLIT (Plan 410 T4.4
+// Option C, 2026-07-07) into two independently-gated sub-features:
+//   - linking_fold_fold     (hot-path |x−c| fold correction) — DEFAULT-ON
+//   - linking_fold_detector (cold-path Algorithm-1 linking detector) — opt-in
+//   - linking_fold          (umbrella = fold + detector) — opt-in
+// The fold passes every GOAT gate modellessly and ships default-on; the
+// detector fails its original G2 budget (Issue 050) and stays opt-in. The
+// module root exists when EITHER sub-feature is on; submodules gate their own
+// parts.
+#[cfg(any(feature = "linking_fold_fold", feature = "linking_fold_detector"))]
 pub mod linking_fold;
 // best_belief — ε-quantile Beta lower bound for conservative selection
 // (Plan 336, Research 320, RQGM arXiv:2606.26294 Prop. 4). Complements
