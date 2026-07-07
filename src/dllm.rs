@@ -1326,7 +1326,15 @@ pub fn generate_pattern_dataset(
     let mut seq = Vec::with_capacity(seq_len);
     for _ in 0..n_sequences {
         let a = (rng.next() as usize) % effective_vocab;
-        let b = (rng.next() as usize) % effective_vocab;
+        let mut b = (rng.next() as usize) % effective_vocab;
+        // Reject a == b (constant sequences). Issue 049: a constant sequence
+        // [c,c,...,c] teaches the model nothing about the alternating pattern
+        // and corrupts FUNCATTN's learned basis with a degenerate direction.
+        // Bump b to the next token; preserves the rest of the PRNG stream so
+        // downstream RNG state is byte-identical to the pre-fix behavior.
+        if effective_vocab > 1 && b == a {
+            b = (b + 1) % effective_vocab;
+        }
         seq.clear();
         seq.extend((0..seq_len).map(|i| if i % 2 == 0 { a } else { b }));
         // Clone seq into output and reuse the allocation for next iteration.
