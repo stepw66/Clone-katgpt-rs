@@ -283,12 +283,8 @@ impl<const P: usize, const D: usize> EnsembleFitScratch<P, D> {
     /// `fit_into` before use.
     #[inline]
     pub fn clear(&mut self) {
-        for v in self.gram.iter_mut() {
-            *v = 0.0;
-        }
-        for v in self.rhs.iter_mut() {
-            *v = 0.0;
-        }
+        self.gram.fill(0.0);
+        self.rhs.fill(0.0);
     }
 }
 
@@ -1416,12 +1412,8 @@ impl<const P: usize, const D: usize> HeterogeneousFitScratch<P, D> {
     /// Zero the Gram and RHS (does not touch solver scratch).
     #[inline]
     pub fn clear(&mut self) {
-        for v in self.gram.iter_mut() {
-            *v = 0.0;
-        }
-        for v in self.rhs.iter_mut() {
-            *v = 0.0;
-        }
+        self.gram.fill(0.0);
+        self.rhs.fill(0.0);
     }
 }
 
