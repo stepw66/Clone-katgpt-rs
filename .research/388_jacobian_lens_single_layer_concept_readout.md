@@ -2,7 +2,7 @@
 
 > **Source:** "Verbalizable Representations Form a Global Workspace in Language Models" — Gurnee, Sofroniew, Lindsey, Olah et al., Transformer Circuits Thread, 2026-07-06. https://transformer-circuits.pub/2026/workspace/index.html
 > **Date:** 2026-07-07
-> **Status:** Active — verdict Gain → GOAT-conditional; Fusion A's PoC plan opened (Plan 409).
+> **Status:** Closed — verdict revised to **Refuted (Fusion A latency path)** per Plan 409 Phase 2. The latency claim (~2000× prefilter speedup) failed empirically: the prefilter is 10–70× SLOWER than the probe at every size tested. The architectural insight (SVD principal directions as concept basis) remains true but has no latency value as a pre-filter. Fusion B (Percepta verification) and Fusion C (HLA readout) remain documented as deferred / not-pursued respectively.
 > **Related Research:** 031 (Percepta deep dive), 032 (Percepta distillation), 244 (Self-Evolver FaithfulnessProbe), 277 (DiffusionGemma transparency/smearing), 290 (latent field steering), 301 (Misalignment Indicator Probe Bank), 353 (program-synthesized attention head surrogates), 379 (hierarchical global attention chunk-group routing), 382 (spherical steering)
 > **Related Plans:** 271 (attention matching compaction), 278 (FaithfulnessProbe, referenced via `cgsp/dual_pool.rs` integration), 301 (runtime subspace phase gate — ships `jacobian_svd_at`/`jacobian_svd_at_into`), 312 (viable manifold graph), 405 (spherical steering geodesic primitive), 409 (this note's Fusion A PoC)
 > **Classification:** Public
@@ -14,9 +14,9 @@
 Anthropic's "Jacobian Lens" (J-lens) makes an activation's *causally faithful verbalizable basis* explicit by reading off the principal directions of `J_ℓ = E[∂h_final/∂h_ℓ]` — the corpus-averaged per-layer Jacobian of the model's logit head. On a single-layer map the corpus average collapses to the **instantaneous Jacobian at the current point**, which is exactly what `jacobian_svd_at_into` already computes at ~455 ns zero-alloc (`katgpt-rs/crates/katgpt-core/src/subspace_phase_gate.rs`, Plan 301). The expensive part of the paper's recipe (per-layer corpus averaging across ~1000 prompts) **disappears for our 1-layer substrate**. The novel primitive to extract: a **causally-faithful concept readout** that reads the SVD's top-k right singular vectors as "what directions of latent perturbation does this map actually route to its output right now" — a representational pre-check before the more expensive behavioral probe.
 
 **Distilled for katgpt-rs (modelless, inference-time):**
-- At 1 layer, `J(x) = ∂f/∂x|x` *is* the effective global-workspace map. Skip the corpus average; one forward-difference Jacobian + thin SVD (~455 ns zero-alloc) yields the principal concept directions.
-- This is **not** a substitute for the causal-behavior probe (`FaithfulnessProbe`, ~<1 ms) — it is a **cheap representational pre-filter**: "is the injected/concept direction inside the principal row-space of the local map at all?" If not, the more expensive causal probe can be skipped because no path through the local map can route that direction to output.
-- The math ships. What does not ship is the **J-lens interpretation**: the SVD's right singular vectors as a *causally-faithful verbalizable basis*, with the steering/ablation semantics the paper establishes (swapping directions changes the output, ablating them removes the capability).
+- At 1 layer, `J(x) = ∂f/∂x|x` *is* the effective global-workspace map. Skip the corpus average; one forward-difference Jacobian + thin SVD yields the principal concept directions.
+- ~~This is **not** a substitute for the causal-behavior probe (`FaithfulnessProbe`, ~<1 ms) — it is a **cheap representational pre-filter**~~ **[REFUTED — see §6 PoC Addendum]**: the Jacobian-SVD prefilter costs MORE than the probe (n+1 eval calls vs 5), not less. The ~455 ns claim was measured on a trivial `f` (identity), not a realistic linear map (~3.9 µs full-rank, ~31 µs rank-deficient at R^8→R^8).
+- The math ships. What does not ship is the **J-lens interpretation**: the SVD's right singular vectors as a *causally-faithful verbalizable basis*. This interpretation remains architecturally valid (Phase 1 confirmed the SVD does reveal principal directions) but has no latency value as a `FaithfulnessProbe` pre-filter (Phase 2 refuted).
 
 ---
 
@@ -146,16 +146,18 @@ The fusion-first mindset (skill §Workflow step 1) calls for combining this pape
 
 ## 3. Verdict
 
-**Tier: Gain → GOAT-conditional (Fusion A path).**
+**Tier: Refuted (Fusion A latency path).** Revised from "Gain → GOAT-conditional" on 2026-07-07 per Plan 409 Phase 2 latency gate failure. The ~2000× prefilter speedup claim is empirically false — the prefilter is 10–70× SLOWER than the probe at every size tested. The architectural insight (SVD right singular vectors = principal directions) remains true but has no latency value as a pre-filter.
 
 | Tier | Criteria | Routing |
 |---|---|---|
-| ~~Super-GOAT~~ | Not reached. The Jacobian math already ships (Plan 301); the contribution is the *interpretation* + a new integration point with an existing probe, not a new capability class. | — |
-| ~~GOAT~~ (yet) | Conditional on PoC. The ~2000× pre-filter speedup is a clean measurable gain, but the quality claim (no missed faithfulness violations) is unproven. Skill §3.6 mandates a defend-wrong PoC before any "parity" / "covers" verdict. | — |
-| **Gain → GOAT-conditional** | ✓ (Fusion A). Architectural coverage confirmed by grep; latency claim measurable by single criterion bench; quality claim requires Plan 409's PoC. **If the PoC shows false-negative rate < τ at the target pre-filter threshold, Fusion A promotes to GOAT and lands in `katgpt-core/faithfulness/concept_readout.rs` behind the `concept_readout` feature flag.** | Plan 409 (defend-wrong PoC). Implementation plan opens only after the PoC verdict. |
-| Pass | Not reached. The single-layer collapse + existing Jacobian machinery produce a real, cheap primitive the codebase does not have (the concept-readout interpretation). | — |
+| ~~Super-GOAT~~ | Not reached (Q2/Q3 fail — see §3.2). | — |
+| ~~GOAT~~ | Not reached. | — |
+| ~~Gain → GOAT-conditional~~ | ~~Superceded by Phase 2 latency gate failure.~~ | — |
+| **Refuted (Fusion A)** | ✓ The latency claim failed empirically. Strategy B (prefilter) is 10–70× slower than Strategy A (probe) at every (n,m) tested. Root cause: B needs n+1 eval calls + SVD; A needs 5 eval calls. For n ≥ 4, B is structurally incapable of being cheaper. Phase 3 (quality bench) did not run — no point measuring false-negative rates on a slower prefilter. | Plan 409 (halted Phase 2). Issue 043 (SVD perf + docstring). |
 
-**One-line reasoning:** The J-lens collapses to one ~455 ns Jacobian SVD at 1 layer; the math ships (Plan 301); the interpretation (causally-faithful concept readout as a faithfulness pre-filter) is the novel contribution; the quality claim needs a PoC (Plan 409) before it can promote from Gain to GOAT.
+**One-line reasoning:** The J-lens collapses to one Jacobian SVD at 1 layer; the SVD principal directions DO represent the local concept basis (Phase 1 confirmed); BUT the Jacobian computation (n+1 eval calls) + SVD costs MORE than the probe's 5 interventions, so the prefilter has no latency value. Refuted as a `FaithfulnessProbe` pre-filter.
+
+**What survives:** The architectural insight — SVD principal directions as a causally-relevant concept basis — is true. Fusions B (Percepta verification) and C (HLA diagnostic) do not depend on the latency claim and remain documented as deferred / not-pursued. A future use that does NOT require beating the probe on latency (e.g. offline analysis, Percepta weight verification) could still consume the interpretation.
 
 ### 3.1 MOAT gate (per domain, skill §1.6)
 
@@ -209,4 +211,66 @@ No `goat-audit` skill invocation required for this PoC; the implementation plan 
 
 ## TL;DR
 
-The J-lens paper's expensive per-layer corpus-averaged Jacobian **collapses to a single ~455 ns Jacobian SVD at 1 layer** — exactly what Plan 301 already ships (`jacobian_svd_at_into`). The novel contribution is the **interpretation**: read the SVD's top-k right singular vectors as a causally-faithful concept basis, and use that as a ~2000× cheaper representational pre-filter before the existing ~1 ms `FaithfulnessProbe` causal probe. **Verdict: Gain → GOAT-conditional** — the architectural coverage is trivially true (the math exists), the quality claim (no missed faithfulness violations) requires a defend-wrong PoC (Plan 409) per skill §3.6 before any promotion to GOAT. Counterfactual reflection training → riir-train (one-line deferred note). Fusion B (Percepta verification) and Fusion C (adaptive HLA readout) documented but not pursued as primary — B depends on unshipped Percepta P4–P6, C violates the sync-boundary bridge rule.
+The J-lens paper's expensive per-layer corpus-averaged Jacobian **collapses to a single Jacobian SVD at 1 layer** — exactly what Plan 301 already ships (`jacobian_svd_at_into`). The proposed novel contribution was a **~2000× cheaper representational pre-filter** before the existing `FaithfulnessProbe` causal probe. **Verdict: REFUTED (Fusion A latency path)** — Plan 409 Phase 2 showed the prefilter is 10–70× SLOWER than the probe (not faster), because the Jacobian computation (n+1 eval calls) + SVD costs more than the probe's 5 interventions. The architectural insight (SVD principal directions as concept basis) remains true but has no latency value as a pre-filter. Fusion B (Percepta verification) and Fusion C (HLA readout) remain documented as deferred / not-pursued respectively. Counterfactual reflection training → riir-train (one-line deferred note).
+
+---
+
+## 6. PoC Addendum (Plan 409 Phase 2, 2026-07-07)
+
+### 6.1 What was tested
+
+Criterion bench at `(n, m) ∈ {(4,4), (8,8), (16,16), (8,16), (16,8)}` measuring three strategies on a `LinearFaithfulConsumer` with a rank-4 weight matrix:
+- **Strategy A** — `FaithfulnessProbe::faithfulness_profile` + verdict (the causal probe).
+- **Strategy B** — `prefilter_verdict` (Jacobian-SVD concept readout via native `eval_into`, zero-alloc hot path).
+- **Strategy C** — Strategy B as a gate; if Accept, run Strategy A.
+
+Bench file: `riir-ai/crates/riir-poc/benches/jlens_concept_readout_goat.rs`.
+
+### 6.2 Claim types — confirmed vs refuted
+
+| Claim type | Original claim | PoC result | Verdict |
+|---|---|---|---|
+| **Architectural** | SVD right singular vectors represent the local principal concept directions | Phase 1 confirmed: projection ratio ≥ 0.95 for rowspace memories, ≤ 0.05 for nullspace | **Confirmed** |
+| **Latency** | B is ~2000× cheaper than A (~455 ns vs ~1 ms) | B is **10–70× SLOWER** than A at every size | **Refuted** |
+| **Quality** | Low false-negative rate at target (k, ρ) | NOT TESTED — Phase 2 halt makes Phase 3 moot | **N/A** |
+
+### 6.3 Raw latency numbers (criterion medians, sample_size=100, 3s)
+
+| (n, m) | Strategy A (probe) | Strategy B (prefilter) | B vs A |
+|---|---|---|---|
+| (4, 4) | 281 ns | 736 ns | 2.6× slower |
+| (8, 8) | 445 ns | 31.3 µs | 70× slower |
+| (16, 16) | 782 ns | 181 µs | 232× slower |
+| (8, 16) | 585 ns | 48.1 µs | 82× slower |
+| (16, 8) | 570 ns | 126 µs | 220× slower |
+
+### 6.4 Root cause — why the latency claim failed
+
+A diagnostic bench (since deleted) isolated `jacobian_svd_at_into` at (8, 8) across three `f` closures:
+
+| `f` closure | Latency | What it measures |
+|---|---|---|
+| Identity (`f(x)=x`) | 417 ns | SVD cost only (identity converges in 1 sweep) — matches the Plan 301 docstring's ~455 ns claim |
+| Flat linear map | 3.9 µs | Jacobian forward-diff (9 eval calls) + SVD of full-rank 8×8 |
+| Rank-4 linear map via `prefilter_verdict` | 31 µs | Jacobian + SVD of rank-deficient matrix (null-space convergence is slow) |
+
+**Three findings, each independently fatal:**
+
+1. **The Plan 301 docstring's ~455 ns claim was measured on a trivial `f` (identity).** For a realistic linear map, `jacobian_svd_at_into` costs ~3.9 µs (full-rank) to ~31 µs (rank-deficient) at R^8→R^8. The docstring at `subspace_phase_gate.rs:426-429` is misleading. Issue 043 tracks this.
+
+2. **Rank-deficient matrices make the one-sided Jacobi SVD 8× slower.** Null-space column pairs with norms hovering just above `col_floor_sq = frob_sq · tol² ≈ 3e-13` pass the convergence check, apply spurious noise rotations every sweep, and prevent early termination. This affects all real-world consumers (HLA rank 5 in 64-dim, NeuronShard rank ≪ ambient dim). Issue 043 tracks this as a perf bug.
+
+3. **Strategy A (probe) is cheaper than expected for linear consumers** (~445 ns, not ~1 ms). The original analysis assumed a complex neural-network forward pass per intervention. For any consumer complexity, the prefilter never wins because it does n+1 eval calls (Jacobian) vs the probe's 5 eval calls — for n ≥ 4, the prefilter does strictly more work.
+
+### 6.5 What this means for the three fusions
+
+- **Fusion A (pre-filter):** REFUTED as a latency optimization. No `(k, ρ)` operating point can rescue it because the latency gap is structural (n+1 evals + SVD vs 5 evals), not a tunable parameter.
+- **Fusion B (Percepta verification):** Unaffected — does not claim a latency win. Remains deferred until Percepta P4–P6 lands.
+- **Fusion C (adaptive HLA readout):** Unaffected — does not claim a latency win. Remains not-pursued (violates sync-boundary bridge rule).
+
+### 6.6 Issue opened
+
+`katgpt-rs/.issues/043_jacobian_svd_perf_docstring_and_rank_deficient_regression.md` tracks:
+- (a) Correcting the misleading ~455 ns docstring in `subspace_phase_gate.rs`.
+- (b) Investigating the rank-deficient SVD perf regression (8× slower than full-rank).
+- (c) Whether a better SVD algorithm or a rank-deficiency fast-path could recover Fusion A's latency claim (unlikely — the n+1 eval call structural issue remains).

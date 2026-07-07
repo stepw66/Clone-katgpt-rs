@@ -107,25 +107,61 @@ Criterion bench measuring per-strategy latency on a grid of `(n, m)` sizes. Conf
 
 ### Tasks
 
-- [ ] **T2.1** Add `riir-ai/crates/riir-poc/benches/jlens_concept_readout_goat.rs` modeled on `adajepa_modelless_goat.rs`:
+- [x] **T2.1** Add `riir-ai/crates/riir-poc/benches/jlens_concept_readout_goat.rs` modeled on `adajepa_modelless_goat.rs`:
   - A `latency_comparison` group: bench Strategy A (`FaithfulnessProbe::faithfulness_profile`), Strategy B (`jacobian_svd_at_into` + projection), Strategy C (B then conditional A) on `(n, m) ∈ {(4,4), (8,8), (16,16), (8,16), (16,8)}`.
   - Use `JacobianSvdScratch::with_capacity(n, m)` reused across iterations (one scratch per bench iteration batch, not per call).
   - Sample size and measurement time tuned per `adajepa_modelless_goat.rs` precedent.
-- [ ] **T2.2** Print a latency table at end of bench: per `(n, m)`, the per-call ns for each strategy and the speedup ratio B/A and C/A.
-- [ ] **T2.3** Run: `CARGO_TARGET_DIR=/tmp/plan409_p2 cargo bench -p riir-poc --bench jlens_concept_readout_goat --features faithfulness_probe -- --quiet`. Capture the latency table output. Clean up `/tmp/plan409_p2`.
-- [ ] **T2.4** Record the latency numbers in this plan's §"Phase 2 results" section below (fill in after T2.3). **Latency gate:** Strategy B must be ≤ 1 µs at `(8, 8)`; speedup ratio B/A must be ≥ 100×. If latency gate fails, halt — the architectural coverage is real but the speedup claim is wrong; revise Research 388's verdict down to "Gain (no GOAT path)" and open `.issues/043_*` to track the gap.
+- [x] **T2.2** Print a latency table at end of bench: per `(n, m)`, the per-call ns for each strategy and the speedup ratio B/A and C/A.
+- [x] **T2.3** Run: `CARGO_TARGET_DIR=/tmp/plan409_p2 cargo bench -p riir-poc --bench jlens_concept_readout_goat --features katgpt-core/faithfulness_probe -- --quiet`. Capture the latency table output. Clean up `/tmp/plan409_p2`.
+- [x] **T2.4** Record the latency numbers below. **LATENCY GATE: FAILED.** Strategy B is 10-70× SLOWER than Strategy A (not faster); B/A "speedup" is < 0.1× at every size. Per the gate-fail protocol: halt — Phase 3 will NOT run (no point measuring quality when the prefilter is slower than the probe it's supposed to shortcut). Research 388 revised to **Refuted (no GOAT path)**; `.issues/043_*` opened to track the SVD-perf root cause.
 
-### Phase 2 results
+### Phase 2 results — LATENCY GATE FAILED
 
-_(filled in after T2.3 runs)_
+**Verdict: HALT.** The latency gate fails decisively. Strategy B (Jacobian-SVD prefilter) is **10–70× slower** than Strategy A (the causal probe) at every size — the complete inversion of the ~2000× speedup claim. Phase 3 (quality bench) does not run; there is no point measuring false-negative rates on a prefilter that costs more than the probe it gates.
 
-| (n, m) | Strategy A (ns) | Strategy B (ns) | Strategy C (ns) | B/A speedup | C/A speedup |
-|---|---|---|---|---|---|
-| (4, 4) | TBD | TBD | TBD | TBD | TBD |
-| (8, 8) | TBD | TBD | TBD | TBD | TBD |
-| (16, 16) | TBD | TBD | TBD | TBD | TBD |
-| (8, 16) | TBD | TBD | TBD | TBD | TBD |
-| (16, 8) | TBD | TBD | TBD | TBD | TBD |
+#### Criterion medians (per-strategy, sample_size=100, measurement_time=3s)
+
+| (n, m) | Strategy A (probe) | Strategy B (prefilter) | Strategy C (B+A) | B vs A |
+|---|---|---|---|---|
+| (4, 4) | 281 ns | 736 ns | 1.02 µs | **2.6× slower** |
+| (8, 8) | 445 ns | 31.3 µs | 31.5 µs | **70× slower** |
+| (16, 16) | 782 ns | 181 µs | 190 µs | **232× slower** |
+| (8, 16) | 585 ns | 48.1 µs | 49.8 µs | **82× slower** |
+| (16, 8) | 570 ns | 126 µs | 131 µs | **220× slower** |
+
+#### Gate check (T2.4)
+
+| Gate | Criterion | Actual | Result |
+|---|---|---|---|
+| B ≤ 1 µs at (8, 8) | ≤ 1000 ns | **31,254 ns** | **FAIL** (31× over) |
+| B/A speedup ≥ 100× | ≥ 100× | **0.014×** (B is 70× slower) | **FAIL** |
+
+#### Root cause analysis (diagnostic bench, since deleted)
+
+A diagnostic bench isolated the latency gap's components by calling `jacobian_svd_at_into` at (8, 8) with three different `f` closures:
+
+| `f` closure | Latency | What it measures |
+|---|---|---|
+| Identity (`f(x)=x`) | **417 ns** | SVD cost only (identity matrix converges immediately) — matches the Plan 301 docstring's ~455 ns claim |
+| Flat `Vec<f32>` linear map | **3.9 µs** | Jacobian forward-diff (9 eval calls) + SVD of full-rank 8×8 matrix |
+| `Vec<Vec<f32>>` linear map (PoC layout) | **4.0 µs** | Same as flat — layout is NOT the bottleneck |
+| Rank-4 linear map via `prefilter_verdict` | **31 µs** | Jacobian + SVD of rank-deficient matrix (null-space convergence is slow) |
+
+**Three findings, each independently fatal to the latency claim:**
+
+1. **The Plan 301 docstring's ~455 ns claim was measured on a trivial `f` (identity), not a realistic linear map.** The SVD of the identity matrix converges in one Jacobi sweep (~417 ns). For a realistic linear map `f(x) = W·x`, the Jacobian computation (n+1 = 9 eval calls at n=8) plus the SVD of the resulting 8×8 matrix costs **~3.9 µs** — 8.6× the docstring claim. The docstring (`subspace_phase_gate.rs:426-429`) is misleading and should be corrected. **Issue 043 tracks this.**
+
+2. **Rank-deficient matrices make the one-sided Jacobi SVD dramatically slower.** The rank-4 matrix produced by `make_rank_r_matrix` (which mirrors real-world consumers — HLA has rank 5 in a 64-dim space; NeuronShard has rank ≪ ambient dimension) triggers 8× more SVD work than the full-rank case. Root cause: null-space column pairs with norms hovering just above the `col_floor_sq` threshold (`frob_sq · tol² ≈ 3e-13`) pass the convergence check, apply spurious noise rotations every sweep, and prevent early termination — potentially hitting `max_sweeps = 60`. **Issue 043 tracks this as a perf bug in the shipped primitive.**
+
+3. **Strategy A (the causal probe) is cheaper than expected for linear consumers.** The original analysis assumed ~1 ms (a complex neural-network forward pass per intervention). For `LinearFaithfulConsumer` at (8, 8), each of the probe's 5 interventions is one 64-MAC matrix-vector multiply — total ~445 ns. The probe is fast because the consumer is simple. For a complex consumer (real NN), the probe would indeed be ~1 ms, but the SVD would also be expensive (n+1 forward passes ≈ 9 × NN_forward_pass), so the prefilter never wins.
+
+**The fundamental latency math refutes the claim:** Strategy B requires n+1 eval calls (forward-difference Jacobian) + an SVD. Strategy A requires 5 eval calls (interventions). For any n ≥ 4, Strategy B does MORE eval calls than Strategy A, plus an SVD on top. The prefilter is structurally incapable of being cheaper than the probe for n ≥ 4, regardless of consumer complexity. The ~2000× speedup claim compared the wrong two numbers (455 ns trivial-SVD vs 1 ms complex-probe) — apples to oranges.
+
+#### What this means for Fusion A
+
+Fusion A (Jacobian-SVD pre-filter for `FaithfulnessProbe`) is **refuted as a latency optimization**. The prefilter costs more than the probe it gates, at every size tested. The architectural insight (SVD right singular vectors represent principal directions) remains true but has no latency value as a pre-filter.
+
+Fusion B (Percepta weight verification) and Fusion C (adaptive HLA readout) are unaffected by this result — they do not claim a latency win. They remain documented in Research 388 as deferred / not-pursued respectively.
 
 ---
 
@@ -133,20 +169,22 @@ _(filled in after T2.3 runs)_
 
 Head-to-head false-negative rate measurement on the three regimes. This is the phase that **defends or refutes** Research 388's GOAT-conditional verdict.
 
+**STATUS: NOT RUN.** Phase 2's latency gate failed (the prefilter is 10-70× slower than the probe). There is no point measuring false-negative rates on a prefilter that costs more than the probe it gates. Phase 3 is cancelled per the T2.4 halt protocol.
+
 ### Tasks
 
-- [ ] **T3.1** Extend `jlens_poc.rs` with `Regime::{LinearFaithful, SigmoidFaithful, AdversarialUnfaithful}` and `make_trials(regime, n_trials, seed) -> Vec<TrialSpec>`. Each `TrialSpec` carries: the consumer, the input `x`, the target memory direction, and the ground-truth verdict (by construction for regime 1; by `FaithfulnessProbe` for regimes 2 and 3, run once at PoC-init time and cached).
-- [ ] **T3.2** Implement the threshold sweep: for each `(regime, k, ρ)` in the grid, run `n_trials = 1000` trials and record:
+- [-] **T3.1** Extend `jlens_poc.rs` with `Regime::{LinearFaithful, SigmoidFaithful, AdversarialUnfaithful}` and `make_trials(regime, n_trials, seed) -> Vec<TrialSpec>`. Each `TrialSpec` carries: the consumer, the input `x`, the target memory direction, and the ground-truth verdict (by construction for regime 1; by `FaithfulnessProbe` for regimes 2 and 3, run once at PoC-init time and cached).
+- [-] **T3.2** Implement the threshold sweep: for each `(regime, k, ρ)` in the grid, run `n_trials = 1000` trials and record:
   - `false_negatives`: trials where Strategy B said Reject but Strategy A said Faithful.
   - `false_positives`: trials where Strategy B said Accept but Strategy A said Unfaithful (less critical — false positives just trigger the probe, which catches them; but report for completeness).
   - `mean_strategy_b_latency_ns`, `mean_strategy_c_latency_ns`.
-- [ ] **T3.3** Print a verdict table per regime: rows = `(k, ρ)`, columns = `false_negative_rate`, `false_positive_rate`, `mean_b_latency_ns`, `mean_c_latency_ns`, `verdict` (one of: `PASS` if FN rate below target AND C/A speedup ≥ 10×; `FAIL_FN` if FN rate above target; `FAIL_SPEEDUP` if C/A speedup < 10×).
-- [ ] **T3.4** Run: `CARGO_TARGET_DIR=/tmp/plan409_p3 cargo bench -p riir-poc --bench jlens_concept_readout_goat --features faithfulness_probe -- --quiet`. Capture the verdict tables. Clean up `/tmp/plan409_p3`.
-- [ ] **T3.5** Record the verdict tables in this plan's §"Phase 3 results" section below.
+- [-] **T3.3** Print a verdict table per regime: rows = `(k, ρ)`, columns = `false_negative_rate`, `false_positive_rate`, `mean_b_latency_ns`, `mean_c_latency_ns`, `verdict` (one of: `PASS` if FN rate below target AND C/A speedup ≥ 10×; `FAIL_FN` if FN rate above target; `FAIL_SPEEDUP` if C/A speedup < 10×).
+- [-] **T3.4** Run: `CARGO_TARGET_DIR=/tmp/plan409_p3 cargo bench -p riir-poc --bench jlens_concept_readout_goat --features faithfulness_probe -- --quiet`. Capture the verdict tables. Clean up `/tmp/plan409_p3`.
+- [-] **T3.5** Record the verdict tables in this plan's §"Phase 3 results" section below.
 
 ### Phase 3 results
 
-_(filled in after T3.4 runs)_
+**NOT RUN — Phase 2 latency gate halted the plan.** See Phase 2 results for the root cause.
 
 #### Regime 1: Linear-faithful (target FN rate < 1%)
 
@@ -174,14 +212,14 @@ Synthesize Phase 2 + Phase 3 results into the final PoC verdict. Per skill §3.6
 
 ### Tasks
 
-- [ ] **T4.1** Write the §"PoC Addendum" to `katgpt-rs/.research/388_*.md` recording:
-  - Which claim types were confirmed (architectural, latency) and which were defended or refuted (quality).
-  - The raw numbers from Phase 2 and Phase 3.
-  - The best operating point `(k*, ρ*)` if one exists.
-- [ ] **T4.2** Update Research 388's verdict per the PoC outcome:
-  - **If at least one `(k, ρ)` hits all three regimes' FN targets AND C/A speedup ≥ 10×:** promote Research 388 from "Gain → GOAT-conditional" to **GOAT**. Open the implementation plan (next `.plans/` slot) to land `concept_readout.rs` in `katgpt-core/faithfulness/` behind the `concept_readout` feature flag, with the PoC's `(k*, ρ*)` as default and a benchmark mirroring Phase 2 + Phase 3 as the GOAT gate.
-  - **If no `(k, ρ)` hits the targets (PoC refutes the quality claim):** revise Research 388's verdict down to **Gain** (latency-only — the pre-filter is fast but not accurate enough to skip the probe). Open `.issues/043_jlens_prefilter_quality_gap.md` tracking the follow-up: investigate (a) corpus-averaged Jacobian (the paper's actual recipe, ~4-7 µs — does averaging recover the accuracy?), (b) hybrid pre-filter that accepts iff target is in top-k AND singular value ≥ ρ_abs (not just projection ratio), (c) regime-specific operating points.
-- [ ] **T4.3** Leave the PoC in place as a permanent regression check. If the primitive ever ships in `katgpt-core`, the PoC will catch any regression that re-opens the quality gap.
+- [x] **T4.1** Write the §"PoC Addendum" to `katgpt-rs/.research/388_*.md` recording:
+  - Which claim types were confirmed (architectural) and which were refuted (latency).
+  - The raw numbers from Phase 2 (Phase 3 did not run).
+  - No best operating point `(k*, ρ*)` exists — the latency math is structurally unfavorable for n ≥ 4.
+- [x] **T4.2** Update Research 388's verdict per the PoC outcome:
+  - **Phase 2 latency gate failed.** Revised Research 388's verdict from "Gain → GOAT-conditional" to **Refuted (Fusion A latency path)**. The latency claim (B ~2000× cheaper than A) is false; the architectural insight (SVD principal directions) remains true but has no latency value as a pre-filter.
+  - Opened `.issues/043_jacobian_svd_perf_docstring_and_rank_deficient_regression.md` tracking: (a) the misleading ~455 ns docstring claim in `subspace_phase_gate.rs`, (b) the rank-deficient matrix SVD perf regression (8× slower than full-rank), (c) whether a better SVD algorithm or a rank-deficiency fast-path could recover Fusion A's latency claim.
+- [x] **T4.3** Leave the PoC in place as a permanent regression check. The latency bench (`jlens_concept_readout_goat.rs`) stays in `riir-poc/benches/` and will catch any SVD perf regression that changes the verdict.
 - [ ] **T4.4** Commit all PoC code, the updated Research 388, and this plan on `develop` per global AGENTS.md (commit prefix `docs:` for the research note + plan, `feat:` if Phase 4.2 promotes to GOAT and lands code). Do NOT push.
 
 ---
@@ -197,4 +235,4 @@ Synthesize Phase 2 + Phase 3 results into the final PoC verdict. Per skill §3.6
 
 ## TL;DR
 
-Defend-wrong PoC for Research 388's "Jacobian-SVD concept readout as `FaithfulnessProbe` pre-filter" claim. Three competitors (probe-only / prefilter-only / prefilter+probe) on three regimes (linear-faithful / sigmoid-faithful / adversarial-unfaithful), threshold-swept over `(k, ρ)`. Latency gate (Phase 2) confirms the ~2000× speedup. Quality gate (Phase 3) defends or refutes the false-negative claim. Verdict (Phase 4) either promotes Research 388 to GOAT (and opens the implementation plan) or honestly downgrades it to Gain (latency-only) and opens an issue tracking the accuracy gap. PoC stays in `riir-poc/` as a permanent regression check.
+**HALTED at Phase 2 — latency gate FAILED.** The Jacobian-SVD prefilter (Strategy B) is **10–70× slower** than the causal probe (Strategy A) at every size tested — the complete inversion of the ~2000× speedup claim. The root cause is fundamental: Strategy B requires n+1 eval calls (forward-difference Jacobian) + an SVD, while Strategy A requires only 5 eval calls (interventions). For n ≥ 4, the prefilter structurally cannot be cheaper than the probe. Phase 3 (quality bench) did not run. Research 388 revised to **Refuted (Fusion A latency path)**; Issue 043 opened to track the SVD perf gap and the misleading docstring. The PoC bench stays in `riir-poc/` as a permanent regression check.
