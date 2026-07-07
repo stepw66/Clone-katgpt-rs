@@ -86,10 +86,9 @@ pub fn near_harmonic_indices(eig: &DecEigendecomposition, motor_d: f32, n: usize
             (i, a_k.abs())
         })
         .collect();
-    // Sort by |a_k| ascending (smallest decay rate first). partial_cmp because
-    // f32 is not Ord; NaN (shouldn't occur for finite eigenvalues + motor) maps
-    // to Equal as a defensive fallback.
-    scored.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(Ordering::Equal));
+    // Sort by |a_k| ascending (smallest decay rate first).
+    // `total_cmp` is branch-free and NaN-deterministic vs `partial_cmp().unwrap_or(Equal)`.
+    scored.sort_by(|a, b| a.1.total_cmp(&b.1));
     scored.into_iter().take(n_capped).map(|(i, _)| i).collect()
 }
 

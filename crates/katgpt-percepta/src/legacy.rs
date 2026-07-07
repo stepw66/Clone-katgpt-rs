@@ -585,7 +585,7 @@ impl SymbolicValidator {
             .filter(|(digit, _)| state.is_valid_move(row, col, *digit))
             .copied()
             .collect();
-        valid.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        valid.sort_by(|a, b| b.1.total_cmp(&a.1));
         valid
     }
 }

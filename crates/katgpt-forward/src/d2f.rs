@@ -322,7 +322,7 @@ fn logit_normal_schedule(n_steps: usize, mean: f32, std: f32, rng: &mut Rng) -> 
                     sigmoid(mean + std * z)
                 })
                 .collect();
-            steps.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+            steps.sort_by(|a, b| a.total_cmp(b));
             steps
         }
     }

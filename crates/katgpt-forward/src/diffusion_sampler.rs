@@ -621,7 +621,7 @@ impl DiffusionSampler {
 
         // sort_unstable_by is faster than sort_by — doesn't preserve equal-element
         // order (fine for AUC computation) and avoids O(n) worst-case merges.
-        pairs.sort_unstable_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
+        pairs.sort_unstable_by(|a, b| b.0.total_cmp(&a.0));
 
         // Count positives and negatives
         let n_pos = pairs.iter().filter(|(_, c)| *c).count() as f64;
