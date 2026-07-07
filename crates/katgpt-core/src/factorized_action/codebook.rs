@@ -213,13 +213,9 @@ pub fn fit_codebook_kmeans_into<const K: usize, const D: usize>(
 
         // Update step.
         for s in sums.iter_mut() {
-            for x in s.iter_mut() {
-                *x = 0.0;
-            }
+            s.fill(0.0);
         }
-        for c in counts.iter_mut() {
-            *c = 0;
-        }
+        counts.fill(0);
         for i in 0..n {
             let kk = assignments[i];
             counts[kk] += 1;

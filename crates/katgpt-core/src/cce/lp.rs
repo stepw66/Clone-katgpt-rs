@@ -286,9 +286,7 @@ fn enumerate_bfs(
     loop {
         if let Some(x_basic) = solve_square_system(mat, rhs, &combo) {
             // Scatter into the full solution vector (zero the others).
-            for xi in x.iter_mut() {
-                *xi = 0.0;
-            }
+            x.fill(0.0);
             for (i, &col) in combo.iter().enumerate() {
                 x[col] = x_basic[i];
             }

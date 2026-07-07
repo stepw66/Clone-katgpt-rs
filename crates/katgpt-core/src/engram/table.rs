@@ -114,9 +114,7 @@ impl EngramTable for InMemoryEngramTable {
         // Guard against n == 0 to avoid division-by-zero. Treat empty tables
         // as all-zero outputs.
         if n == 0 {
-            for v in out[..K_MAX * d].iter_mut() {
-                *v = 0.0;
-            }
+            out[..K_MAX * d].fill(0.0);
             return 0;
         }
 

@@ -111,9 +111,7 @@ mod leo_head_oracle {
         ) {
             let all_q = self.head.all_goals_q(state);
             if self.goal_idx >= self.head.goal_count() {
-                for slot in out.iter_mut() {
-                    *slot = 0.0;
-                }
+                out.fill(0.0);
                 return;
             }
             let q_slice = self.head.q_for_goal(&all_q, self.goal_idx);

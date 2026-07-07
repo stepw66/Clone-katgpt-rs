@@ -246,9 +246,7 @@ impl ZipfianCacheHierarchy {
         }
 
         // ── Full miss ──────────────────────────────────────────────────
-        for x in out.iter_mut() {
-            *x = 0.0;
-        }
+        out.fill(0.0);
         self.stats.misses.fetch_add(1, Ordering::Relaxed);
         CacheResult {
             tier: None,

@@ -209,9 +209,7 @@ impl ChiaroscuroRouter {
 
     /// Reset utilization counters.
     pub fn reset_utilization(&mut self) {
-        for c in self.utilization.iter_mut() {
-            *c = 0;
-        }
+        self.utilization.fill(0);
     }
 }
 

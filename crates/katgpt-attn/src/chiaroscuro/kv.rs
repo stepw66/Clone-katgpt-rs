@@ -191,9 +191,7 @@ impl StrategyUtilization {
 
     /// Reset all counters to zero.
     pub fn reset(&mut self) {
-        for c in self.counts.iter_mut() {
-            *c = 0;
-        }
+        self.counts.fill(0);
     }
 }
 
