@@ -10,23 +10,39 @@
 //!
 //! `const` initialization in `thread_local!` avoids lazy-init allocation on
 //! the fast path — the TLS slot holds the `Cell` directly.
+//!
+//! **Whole-module `debug_assertions` gate:** every item below — the
+//! `TrackingAllocator`, the `THREAD_ALLOC` slot, the `AllocStats` record, and
+//! the `reset`/`get` accessors — exists *only* under `debug_assertions`. In a
+//! release build the entire tracking machinery compiles away to nothing: the
+//! binary installs the plain `System` allocator (see `lib.rs`'s
+//! `#[cfg(all(test, debug_assertions))]` `TEST_GLOBAL_ALLOC`), there are no
+//! counters, and there is nothing to test. The `tests` module is therefore
+//! gated on `cfg(all(test, debug_assertions))` so a `--release` test build
+//! (where `cfg(test)` is on but `debug_assertions` is off) does not reference
+//! absent symbols.
 
+#[cfg(debug_assertions)]
 use std::alloc::{GlobalAlloc, Layout, System};
+#[cfg(debug_assertions)]
 use std::cell::Cell;
 
 /// Aggregate per-thread allocation stats (count + bytes). `Copy` so it can
 /// live in a `Cell` (single load + store per `alloc`, no `RefCell` overhead).
+#[cfg(debug_assertions)]
 #[derive(Clone, Copy)]
 struct AllocStats {
     count: usize,
     bytes: usize,
 }
 
+#[cfg(debug_assertions)]
 impl AllocStats {
     /// `const` constructor so the `thread_local!` initializer is const-evaluable.
     const ZERO: Self = Self { count: 0, bytes: 0 };
 }
 
+#[cfg(debug_assertions)]
 thread_local! {
     /// Single TLS key for both counters — one TLS address computation per
     /// `alloc`, not two.
@@ -75,7 +91,11 @@ pub fn get_alloc_stats() -> (usize, usize) {
     })
 }
 
-#[cfg(test)]
+// See module docs: the tests exercise accessors that only exist under
+// `debug_assertions`, so the module must be gated to match. A `--release`
+// test build has `cfg(test)` on but `debug_assertions` off — without this
+// gate the tests would reference absent symbols and fail to compile.
+#[cfg(all(test, debug_assertions))]
 mod tests {
     use super::*;
 
