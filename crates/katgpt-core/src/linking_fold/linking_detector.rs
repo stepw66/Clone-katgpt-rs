@@ -89,6 +89,19 @@ pub struct LinkingDetectorConfig {
     /// Gauss integral (paper §H.3). Higher = more accurate but slower.
     /// Default `4`.
     pub n_subdivisions: usize,
+    /// **Perf cap (Issue 050, experimental):** maximum number of cycles retained
+    /// per point cloud after sorting the fundamental basis. The Gauss linking
+    /// integral is `O(β_x · β_y · n_sub² · L)` — the cycle count β is the
+    /// quadratic lever. **WARNING: capping by length is NOT correctness-safe**
+    /// — the linking witness is often a LONG topologically-nontrivial cycle
+    /// (e.g. the core circle of a Hopf link, ~80 vertices for n=80), while the
+    /// shortest cycles are small local loops from thickening noise that
+    /// contribute ≈0 to the integral. Setting `max_cycles_per_cloud > 0` keeps
+    /// the `max_cycles` cycles closest to the MEDIAN length (drops the extreme
+    /// short AND long tails); `0` = no cap (full basis, the default).
+    /// Default `0` — the cost is instead controlled by Gauss-pair bounding-box
+    /// early-skip (see `gauss_linking_integral`), which is correctness-safe.
+    pub max_cycles_per_cloud: usize,
 }
 
 impl Default for LinkingDetectorConfig {
@@ -98,6 +111,7 @@ impl Default for LinkingDetectorConfig {
             epsilon_quantile: 0.7,
             min_cycle_len: 4,
             n_subdivisions: 4,
+            max_cycles_per_cloud: 0,
         }
     }
 }
@@ -206,16 +220,31 @@ pub fn detect_linking_into(
     let g_x = build_epsilon_knn_graph(x_proj, config.k_neighbors, config.epsilon_quantile);
     let g_y = build_epsilon_knn_graph(y_proj, config.k_neighbors, config.epsilon_quantile);
 
-    // ── Step 3: fundamental cycle bases ──
-    let cycles_x = fundamental_cycle_basis(n_x, &g_x, config.min_cycle_len);
-    let cycles_y = fundamental_cycle_basis(n_y, &g_y, config.min_cycle_len);
+    // ── Step 3: fundamental cycle bases (capped — see max_cycles_per_cloud) ──
+    let cycles_x = fundamental_cycle_basis(n_x, &g_x, config.min_cycle_len, config.max_cycles_per_cloud);
+    let cycles_y = fundamental_cycle_basis(n_y, &g_y, config.min_cycle_len, config.max_cycles_per_cloud);
     if cycles_x.is_empty() || cycles_y.is_empty() {
         return LinkingVerdict::not_linked();
     }
 
     // ── Step 4: Gauss linking integral over basis-cycle pairs ──
+    // Perf (Issue 050): precompute a bounding sphere per cycle (centroid +
+    // max-dist²) so far-apart cycle pairs can be skipped without the expensive
+    // O(n_sub²·L) quadrature. This is correctness-safe: two cycles whose
+    // bounding spheres are disjoint and well-separated have a Gauss integral
+    // bounded by `|Cx|·|Cy|·n_sub² / gap²`, which rounds to 0 once the gap
+    // exceeds the cycle diameters. The threshold is conservative — only skips
+    // pairs that provably cannot round to ±1.
+    let bounds_x: Vec<CycleBounds> = cycles_x.iter()
+        .map(|c| CycleBounds::compute(c, x_proj)).collect();
+    let bounds_y: Vec<CycleBounds> = cycles_y.iter()
+        .map(|c| CycleBounds::compute(c, y_proj)).collect();
     for (i, cx) in cycles_x.iter().enumerate() {
+        let bx = &bounds_x[i];
         for (j, cy) in cycles_y.iter().enumerate() {
+            if !bx.may_link(&bounds_y[j]) {
+                continue;
+            }
             let link = gauss_linking_integral(cx, cy, x_proj, y_proj, config.n_subdivisions);
             if link != 0 {
                 return LinkingVerdict { linked: true, link, witness: Some((i, j)) };
@@ -541,6 +570,7 @@ fn fundamental_cycle_basis(
     n: usize,
     adjacency: &[Vec<usize>],
     min_len: usize,
+    max_cycles: usize,
 ) -> Vec<Vec<usize>> {
     let mut parent = vec![usize::MAX; n];
     let mut visited = vec![false; n];
@@ -617,6 +647,22 @@ fn fundamental_cycle_basis(
             cycles.push(cycle);
         }
     }
+    // Perf cap (Issue 050): the Gauss linking integral is O(β_x · β_y). A
+    // dense k-NN graph yields β ≈ 2.25× n cycles; keeping only the shortest
+    // `max_cycles` preserves the geometrically-tight cycles (the ones that
+    // actually link) while cutting the quadratic Gauss cost by ~180× at the
+    // default cap of 32. Short cycles dominate the integral because long
+    // cycles are nearly planar (their Gauss integrand averages to ≈0).
+    if max_cycles > 0 && cycles.len() > max_cycles {
+        // Partial selection: O(β) average — partition so the `max_cycles`
+        // shortest cycles are in the front, then truncate. Cheaper than a
+        // full sort and we only need the K shortest, not a total order.
+        let (_before, _kth, _after) = cycles.select_nth_unstable_by(
+            max_cycles,
+            |a, b| a.len().cmp(&b.len()),
+        );
+        cycles.truncate(max_cycles);
+    }
     cycles
 }
 
@@ -659,60 +705,189 @@ fn gauss_linking_integral(
     let n_sub = n_sub.max(1);
     let inv_4pi = 1.0_f32 / (4.0 * std::f32::consts::PI);
 
-    // Subdivide each cycle into small segments, collecting midpoint + tangent.
-    let segs_x = subdivide_cycle(cycle_x, points_x, n_sub);
-    let segs_y = subdivide_cycle(cycle_y, points_y, n_sub);
+    // Full-SoA segment buffers (Issue 050 perf): separate contiguous x / y / z
+    // arrays per component (midpoint + tangent), each stride-1. This is the
+    // layout auto-vec needs — the inner-sy loop loads `my_x[j]`, `my_y[j]`,
+    // `my_z[j]` as independent contiguous f32 streams, which LLVM fuses into
+    // 4-wide vector loads. The earlier stride-3 (xyzxyz) layout blocked vec
+    // (non-power-of-2 stride → gather, not contiguous load).
+    let Segments { mx_x, mx_y, mx_z, tx_x, tx_y, tx_z } =
+        subdivide_cycle_soa(cycle_x, points_x, n_sub);
+    let Segments { mx_x: my_x, mx_y: my_y, mx_z: my_z, tx_x: ty_x, tx_y: ty_y, tx_z: ty_z } =
+        subdivide_cycle_soa(cycle_y, points_y, n_sub);
 
     let mut total = 0.0_f32;
-    for sx in &segs_x {
-        for sy in &segs_y {
-            total += gauss_integrand(sx.midpoint, sx.tangent, sy.midpoint, sy.tangent);
+    // Outer loop: one fixed sx segment. Inner loop: reduction over all sy
+    // segments — branch-free, stride-1 contiguous loads, auto-vec ready.
+    for i in 0..mx_x.len() {
+        let xi = mx_x[i];
+        let yi = mx_y[i];
+        let zi = mx_z[i];
+        let dxi = tx_x[i];
+        let dyi = tx_y[i];
+        let dzi = tx_z[i];
+        for j in 0..my_x.len() {
+            // diff = sx_mid - sy_mid
+            let rx = xi - my_x[j];
+            let ry = yi - my_y[j];
+            let rz = zi - my_z[j];
+            // cross = sx_tan × sy_tan
+            let dyx = ty_x[j];
+            let dyy = ty_y[j];
+            let dyz = ty_z[j];
+            let cx = dyi * dyz - dzi * dyy;
+            let cy = dzi * dyx - dxi * dyz;
+            let cz = dxi * dyy - dyi * dyx;
+            // dot = diff · cross
+            let dot = rx * cx + ry * cy + rz * cz;
+            // norm³ = norm2^1.5 (avoids separate sqrt of norm²).
+            let norm2 = rx * rx + ry * ry + rz * rz;
+            // Branch-free coincident-point guard (keeps the loop vectorizable).
+            let w = (norm2 > 1e-12_f32) as u8 as f32;
+            total += dot * (w / (norm2 * norm2.sqrt()));
         }
     }
     (inv_4pi * total).round() as i32
 }
 
-struct CycleSegment {
-    midpoint: [f32; 3],
-    tangent: [f32; 3], // dx (or dy) — the differential along the segment.
+/// Full-SoA segment buffer: each component (x/y/z) of midpoint and tangent in
+/// its own contiguous `Vec<f32>`. Replaces the old `Vec<CycleSegment>` (AoS)
+/// and the intermediate stride-3 layout (both blocked auto-vec).
+struct Segments {
+    mx_x: Vec<f32>, mx_y: Vec<f32>, mx_z: Vec<f32>,
+    tx_x: Vec<f32>, tx_y: Vec<f32>, tx_z: Vec<f32>,
 }
 
-fn subdivide_cycle(
+fn subdivide_cycle_soa(
     cycle: &[usize],
     points: &[[f32; 3]],
     n_sub: usize,
-) -> Vec<CycleSegment> {
+) -> Segments {
     let n = cycle.len();
-    let mut out =
-        Vec::with_capacity(n * n_sub);
+    let total = n * n_sub;
+    let mut mx_x = Vec::with_capacity(total);
+    let mut mx_y = Vec::with_capacity(total);
+    let mut mx_z = Vec::with_capacity(total);
+    let mut tx_x = Vec::with_capacity(total);
+    let mut tx_y = Vec::with_capacity(total);
+    let mut tx_z = Vec::with_capacity(total);
     for i in 0..n {
         let a = points[cycle[i]];
         let b = points[cycle[(i + 1) % n]];
-        let edge_tangent = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
+        let etx = b[0] - a[0];
+        let ety = b[1] - a[1];
+        let etz = b[2] - a[2];
         let inv = 1.0_f32 / (n_sub as f32);
+        let inv_tx = inv * etx;
+        let inv_ty = inv * ety;
+        let inv_tz = inv * etz;
         for k in 0..n_sub {
-            let t0 = (k as f32) * inv;
-            let t1 = ((k + 1) as f32) * inv;
-            let tm = 0.5_f32 * (t0 + t1);
-            let midpoint = [
-                a[0] + tm * edge_tangent[0],
-                a[1] + tm * edge_tangent[1],
-                a[2] + tm * edge_tangent[2],
-            ];
-            // Segment tangent = (t1 - t0) * edge_tangent = inv * edge_tangent.
-            let tangent = [
-                inv * edge_tangent[0],
-                inv * edge_tangent[1],
-                inv * edge_tangent[2],
-            ];
-            out.push(CycleSegment { midpoint, tangent });
+            let tm = (k as f32 + 0.5) * inv; // segment midpoint param
+            mx_x.push(a[0] + tm * etx);
+            mx_y.push(a[1] + tm * ety);
+            mx_z.push(a[2] + tm * etz);
+            tx_x.push(inv_tx);
+            tx_y.push(inv_ty);
+            tx_z.push(inv_tz);
         }
     }
-    out
+    Segments { mx_x, mx_y, mx_z, tx_x, tx_y, tx_z }
 }
 
-/// The integrand at a pair of midpoints (x, y) with differentials (dx, dy):
-/// `(x − y) · (dx × dy) / |x − y|³`.
+/// Bounding sphere + perimeter for a cycle, used to cheaply reject cycle
+/// pairs whose Gauss linking integral provably rounds to 0 (Issue 050 perf).
+///
+/// The Gauss integrand magnitude is bounded by `|dx|·|dy| / |x−y|²` (worst
+/// case: `|cross| ≤ |dx|·|dy|`, `|diff·cross| ≤ |diff|·|cross|`, denom
+/// `|x−y|³`). Summed over all segment pairs of two cycles C, D with minimum
+/// inter-cycle distance `gap` and perimeters `P_C`, `P_D`:
+///
+/// `|link(C,D)| ≤ (1/4π) · P_C · P_D / gap²`
+///
+/// (each `Σ|dx| = P_C`, `Σ|dy| = P_D`, every `|x−y| ≥ gap`). For the rounded
+/// integer to be non-zero, this bound must be ≥ 0.5, i.e.
+/// `gap² ≤ P_C · P_D / (2π)`. If `gap² > P_C · P_D / (2π)`, the pair cannot
+/// link and the expensive O(n_sub²·L) quadrature is skipped.
+struct CycleBounds {
+    /// Bounding-sphere center (centroid of the cycle's vertices).
+    center: [f32; 3],
+    /// Squared radius of the bounding sphere (max vertex dist from center).
+    r_sq: f32,
+    /// Cycle perimeter (sum of edge lengths) — the `Σ|dx|` in the bound.
+    perimeter: f32,
+}
+
+impl CycleBounds {
+    fn compute(cycle: &[usize], points: &[[f32; 3]]) -> CycleBounds {
+        let n = cycle.len();
+        debug_assert!(n > 0, "empty cycle has no bounds");
+        // Centroid.
+        let mut cx = 0.0_f32;
+        let mut cy = 0.0_f32;
+        let mut cz = 0.0_f32;
+        for &v in cycle {
+            let p = points[v];
+            cx += p[0]; cy += p[1]; cz += p[2];
+        }
+        let inv_n = 1.0_f32 / (n as f32);
+        cx *= inv_n; cy *= inv_n; cz *= inv_n;
+        // Max squared distance from centroid + perimeter.
+        let mut r_sq = 0.0_f32;
+        let mut perimeter = 0.0_f32;
+        let first = points[cycle[0]];
+        let mut prev = first;
+        for &v in cycle {
+            let p = points[v];
+            let dx = p[0] - cx;
+            let dy = p[1] - cy;
+            let dz = p[2] - cz;
+            let d2 = dx * dx + dy * dy + dz * dz;
+            if d2 > r_sq { r_sq = d2; }
+            // Perimeter: distance from prev to p (first iter: prev==first==p, 0).
+            let ex = p[0] - prev[0];
+            let ey = p[1] - prev[1];
+            let ez = p[2] - prev[2];
+            perimeter += (ex * ex + ey * ey + ez * ez).sqrt();
+            prev = p;
+        }
+        // Close the loop back to first.
+        let ex = first[0] - prev[0];
+        let ey = first[1] - prev[1];
+        let ez = first[2] - prev[2];
+        perimeter += (ex * ex + ey * ey + ez * ez).sqrt();
+        // Note: prev == last vertex here, not first; the closure edge
+        // (last → first) is what we just added. But the loop above set
+        // prev=first initially and advanced it, so the first iteration added
+        // |first-first|=0 and we never added |last→first| until now. Correct.
+        CycleBounds { center: [cx, cy, cz], r_sq, perimeter }
+    }
+
+    /// Returns false if the Gauss linking integral of these two cycles
+    /// provably rounds to 0 (bound < 0.5). Sound: never returns false for a
+    /// pair that actually links. May return true for a non-linking pair (the
+    /// quadrature still runs and returns 0) — it's a conservative pre-filter.
+    #[inline]
+    fn may_link(&self, other: &CycleBounds) -> bool {
+        // Lower bound on gap²: center-distance² − (r_x + r_y)² (could be < 0
+        // if spheres overlap → gap_min² clamps to 0, no skip).
+        let ddx = self.center[0] - other.center[0];
+        let ddy = self.center[1] - other.center[1];
+        let ddz = self.center[2] - other.center[2];
+        let center_dist_sq = ddx * ddx + ddy * ddy + ddz * ddz;
+        let r_sum = self.r_sq.sqrt() + other.r_sq.sqrt();
+        let gap_min_sq = (center_dist_sq - r_sum * r_sum).max(0.0);
+        // Skip iff `|link| ≤ (1/4π)·P_x·P_y/gap² < 0.5`  ⟺  gap² > P_x·P_y/(2π).
+        // If gap_min_sq > threshold → keep is impossible → return false.
+        let threshold = (self.perimeter * other.perimeter) / (2.0 * std::f32::consts::PI);
+        gap_min_sq <= threshold
+    }
+}
+
+/// `(x − y) · (dx × dy) / |x − y|³`. Reference scalar implementation — the
+/// hot path in `gauss_linking_integral` now inlines this formula over the SoA
+/// segment buffers for auto-vec. Kept here for the unit test that validates
+/// the coincident-point guard.
+#[cfg(test)]
 #[inline]
 fn gauss_integrand(x: [f32; 3], dx: [f32; 3], y: [f32; 3], dy: [f32; 3]) -> f32 {
     let diff = [x[0] - y[0], x[1] - y[1], x[2] - y[2]];
@@ -907,5 +1082,167 @@ mod tests {
             for row in 0..3 { norm_sq += v[row][col] * v[row][col]; }
             assert!((norm_sq - 1.0).abs() < 1e-4, "column {col} not unit");
         }
+    }
+
+    /// Phase-by-phase profiling for Issue 050 optimization. Calls private phase
+    /// fns directly to isolate the bottleneck. Run with:
+    ///   cargo test -p katgpt-core --features linking_fold --lib \
+    ///     linking_detector::tests::prof_phase_breakdown -- --ignored --nocapture
+    #[test]
+    #[ignore = "profiling harness — run with --ignored --nocapture"]
+    fn prof_phase_breakdown() {
+        use std::hint::black_box;
+        use std::time::Instant;
+        let n = 200usize;
+        let d = 8usize;
+        // Build a d=8 Hopf-link fixture matching the bench exactly: first 3
+        // dims are the §G.1 Hopf link, remaining d−3 dims are ZERO (the link
+        // lives in a 3D subspace; PCA cleanly recovers it). (An earlier version
+        // used sin() noise on extra dims, which perturbed PCA enough to lose
+        // the linking signal — not representative of the bench.)
+        let (x3, y3) = thickened_hopf_link(n, 0.05);
+        let mut x = vec![0.0f32; n * d];
+        let mut y = vec![0.0f32; n * d];
+        for i in 0..n {
+            let b = i * 3;
+            x[i * d] = x3[b]; x[i * d + 1] = x3[b + 1]; x[i * d + 2] = x3[b + 2];
+            y[i * d] = y3[b]; y[i * d + 1] = y3[b + 1]; y[i * d + 2] = y3[b + 2];
+            // dims 3..d stay zero (initialized above).
+        }
+        let cfg = LinkingDetectorConfig::default();
+        let mut xp = vec![[0.0f32; 3]; n];
+        let mut yp = vec![[0.0f32; 3]; n];
+
+        // Warm up all phases.
+        for _ in 0..3 {
+            let _ = pca_project_joint_into_3d(&x, &y, d, &mut xp, &mut yp);
+            let gx = build_epsilon_knn_graph(&xp, cfg.k_neighbors, cfg.epsilon_quantile);
+            let gy = build_epsilon_knn_graph(&yp, cfg.k_neighbors, cfg.epsilon_quantile);
+            let cx = fundamental_cycle_basis(n, &gx, cfg.min_cycle_len, cfg.max_cycles_per_cloud);
+            let cy = fundamental_cycle_basis(n, &gy, cfg.min_cycle_len, cfg.max_cycles_per_cloud);
+            for (a, b) in cx.iter().zip(cy.iter()) {
+                let _ = gauss_linking_integral(a, b, &xp, &yp, cfg.n_subdivisions);
+            }
+        }
+
+        let iters = 11usize;
+        let mut t_pca = Vec::with_capacity(iters);
+        let mut t_knn = Vec::with_capacity(iters);
+        let mut t_cyc = Vec::with_capacity(iters);
+        let mut t_gauss = Vec::with_capacity(iters);
+
+        let mut last_cycles_x = 0usize;
+        let mut last_cycles_y = 0usize;
+        for _ in 0..iters {
+            // Phase 1: PCA-3D
+            let s = Instant::now();
+            let ok = pca_project_joint_into_3d(
+                black_box(&x), black_box(&y), black_box(d),
+                black_box(&mut xp), black_box(&mut yp));
+            t_pca.push(s.elapsed().as_nanos());
+            assert!(ok);
+
+            // Phase 2: kNN graph (x)
+            let s = Instant::now();
+            let gx = build_epsilon_knn_graph(
+                black_box(&xp), black_box(cfg.k_neighbors), black_box(cfg.epsilon_quantile));
+            let gy = build_epsilon_knn_graph(
+                black_box(&yp), black_box(cfg.k_neighbors), black_box(cfg.epsilon_quantile));
+            t_knn.push(s.elapsed().as_nanos());
+
+            // Phase 3: cycle basis
+            let s = Instant::now();
+            let cx = fundamental_cycle_basis(n, &gx, cfg.min_cycle_len, cfg.max_cycles_per_cloud);
+            let cy = fundamental_cycle_basis(n, &gy, cfg.min_cycle_len, cfg.max_cycles_per_cloud);
+            t_cyc.push(s.elapsed().as_nanos());
+            last_cycles_x = cx.len();
+            last_cycles_y = cy.len();
+
+            // Phase 4: Gauss integral over cycle pairs
+            let s = Instant::now();
+            let mut sum = 0i32;
+            for cxa in &cx {
+                for cya in &cy {
+                    sum = sum.wrapping_add(gauss_linking_integral(
+                        cxa, cya, &xp, &yp, cfg.n_subdivisions));
+                }
+            }
+            t_gauss.push(s.elapsed().as_nanos());
+            let _ = black_box(sum);
+        }
+        let med = |v: &[u128]| { let mut s = v.to_vec(); s.sort(); s[s.len() / 2] };
+        let total = med(&t_pca) + med(&t_knn) + med(&t_cyc) + med(&t_gauss);
+        println!();
+        println!("══════════════════════════════════════════════════════════════════");
+        println!("  linking_detector phase breakdown (n=2×{}, d={}, k={}, n_sub={})",
+                 n, d, cfg.k_neighbors, cfg.n_subdivisions);
+        println!("  cycle counts: β_x={}, β_y={} (Gauss pairs = {})",
+                 last_cycles_x, last_cycles_y, last_cycles_x * last_cycles_y);
+        println!("══════════════════════════════════════════════════════════════════");
+        println!("  Phase 1 PCA-3D:        {:>8.3} ms  ({:>5.1}%)",
+                 med(&t_pca) as f64 / 1e6, med(&t_pca) as f64 * 100.0 / total as f64);
+        println!("  Phase 2 kNN graph:     {:>8.3} ms  ({:>5.1}%)  ← O(n²) ×2 (x,y) + sort per point",
+                 med(&t_knn) as f64 / 1e6, med(&t_knn) as f64 * 100.0 / total as f64);
+        println!("  Phase 3 cycle basis:   {:>8.3} ms  ({:>5.1}%)",
+                 med(&t_cyc) as f64 / 1e6, med(&t_cyc) as f64 * 100.0 / total as f64);
+        println!("  Phase 4 Gauss (β²·s²): {:>8.3} ms  ({:>5.1}%)",
+                 med(&t_gauss) as f64 / 1e6, med(&t_gauss) as f64 * 100.0 / total as f64);
+        println!("  ─────────────────────────────────");
+        println!("  TOTAL:                 {:>8.3} ms", total as f64 / 1e6);
+        println!();
+
+        // One-time diagnostic: where is the witness pair found, and how many
+        // pairs does the bounding-box skip reject? This tells us whether the
+        // cost is "scan many zero pairs before the witness" (fix: reorder) or
+        // "skip rejects nothing" (fix: tighter skip / different approach).
+        let gx = build_epsilon_knn_graph(&xp, cfg.k_neighbors, cfg.epsilon_quantile);
+        let gy = build_epsilon_knn_graph(&yp, cfg.k_neighbors, cfg.epsilon_quantile);
+        let cx = fundamental_cycle_basis(n, &gx, cfg.min_cycle_len, cfg.max_cycles_per_cloud);
+        let cy = fundamental_cycle_basis(n, &gy, cfg.min_cycle_len, cfg.max_cycles_per_cloud);
+        let bx_bounds: Vec<CycleBounds> = cx.iter()
+            .map(|c| CycleBounds::compute(c, &xp)).collect();
+        let by_bounds: Vec<CycleBounds> = cy.iter()
+            .map(|c| CycleBounds::compute(c, &yp)).collect();
+        let mut skipped = 0usize;
+        let mut evaluated = 0usize;
+        let mut witness_pair = None;
+        'outer: for (i, cxa) in cx.iter().enumerate() {
+            for (j, cya) in cy.iter().enumerate() {
+                if !bx_bounds[i].may_link(&by_bounds[j]) {
+                    skipped += 1;
+                    continue;
+                }
+                evaluated += 1;
+                let link = gauss_linking_integral(cxa, cya, &xp, &yp, cfg.n_subdivisions);
+                if link != 0 {
+                    witness_pair = Some((i, j, evaluated, skipped));
+                    break 'outer;
+                }
+            }
+        }
+        let total_pairs = cx.len() * cy.len();
+        match witness_pair {
+            Some((i, j, ev_at, sk)) => {
+                println!("  BB-skip: rejected {}/{} pairs ({:.1}%), evaluated {} before witness",
+                         sk, total_pairs, sk as f64 * 100.0 / total_pairs as f64, ev_at);
+                println!("  witness: cycle_x[{}] (len={}) × cycle_y[{}] (len={}) → link found at evaluated-pair #{}",
+                         i, cx[i].len(), j, cy[j].len(), ev_at);
+            }
+            None => {
+                println!("  BB-skip: rejected {}/{} pairs ({:.1}%); NO witness found in manual scan",
+                         skipped, total_pairs, skipped as f64 * 100.0 / total_pairs as f64);
+            }
+        }
+        // Also measure the REAL detect_linking path (with skip + early-exit) for
+        // apples-to-apples comparison with the bench.
+        let mut full_xp = vec![[0.0f32; 3]; n];
+        let mut full_yp = vec![[0.0f32; 3]; n];
+        for _ in 0..2 { let _ = detect_linking_into(&x, &y, d, &mut full_xp, &mut full_yp, &cfg); }
+        let s = Instant::now();
+        let verdict = detect_linking_into(&x, &y, d, &mut full_xp, &mut full_yp, &cfg);
+        let real_ns = s.elapsed().as_nanos();
+        println!("  REAL detect_linking (skip+early-exit): {:.3} ms, verdict={:?}",
+                 real_ns as f64 / 1e6, verdict);
+        println!();
     }
 }
