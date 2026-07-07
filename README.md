@@ -658,6 +658,53 @@ Feature gates: `ssmax_temperature` (**DEFAULT-ON**, composes via `ParallaxConfig
 
 📖 Plan: [`.plans/411_ssmax_goldshare.md`](.plans/411_ssmax_goldshare.md). Research: [`.research/392_Attention_Dilution_SSMax_GoldShare.md`](.research/392_Attention_Dilution_SSMax_GoldShare.md). GOAT gate bench: [`.benchmarks/411_ssmax_goldshare_goat.md`](.benchmarks/411_ssmax_goldshare_goat.md). Paper: [arxiv 2607.01538](https://arxiv.org/abs/2607.01538).
 
+### 🪢 Linking-Fold: Topological Unlinking for Monotonic Projections (Plan 410, arxiv 2606.31856)
+
+Two modelless primitives distilled from Ren & Lim, *Low-dimensional topology of deep neural networks* (ICML 2026). The paper's Theorem 4.7 proves a structural limitation that this codebase hits implicitly: width-d feedforward nets with coordinate-wise **monotonic** activations (ReLU, sigmoid, tanh) preserve the linking number and therefore **cannot linearly separate two topologically linked class manifolds**, regardless of depth. Every sigmoid projection in the codebase (HLA affect scalars, direction-vector projections, `ItemEmbedIndex` cosine retrieval) is monotonic → provably doomed on linked manifolds, but there was no way to *detect* when, nor to *correct* it.
+
+**`fold_projection_into` / `fold_gelu_into`** is the closed-form modelless correction (paper Eq. 1: `|x| = x + 2·ReLU(−x)`, realized as a single coordinate-wise fold `state[i] ← center[i] + |state[i] − center[i]|`). One fold pass per axis (three for R³, paper Fig. 9) breaks the straight-line homotopy that underlies the impossibility theorem, making a linked pair of manifolds linearly separable. The Gelu variant uses a smooth GELU-surrogate local-extremum fold instead of the hard `|·|`. Hot-path, zero-allocation, `#[inline]`, bit-identical determinism. This is the §3.5 path-3 latent-space correction the modelless-unblock protocol prefers over riir-train deferral.
+
+**`detect_linking`** (paper Algorithm 1) is the audit-cadence diagnostic that tells you *when* to fold: take two point clouds X, Y in R^d, PCA-project to R³, build ε-filtered k-NN graphs, extract a fundamental cycle basis per graph via BFS spanning forest, compute the Gauss linking integral over O(β_X · β_Y) basis-cycle pairs. Returns `LinkingVerdict { linked, link: i32, witness }`. Cold-path; may allocate.
+
+```text
+   two latent clusters X, Y          monotonic projection σ(·)
+        │  detect_linking(X, Y)            │  (sigmoid / ReLU / tanh)
+        ▼                                 ▼
+  ┌──────────────────────────┐    ┌────────────────────────────────┐
+  │ PCA-3D → ε-kNN graph     │    │  Thm 4.7: σ preserves link     │
+  │ → BFS cycle basis        │    │  → linked manifolds NOT        │
+  │ → Gauss linking integral │    │    linearly separable by σ     │
+  │ link ∈ ℤ                 │    └────────────────────────────────┘
+  └────────────┬─────────────┘                 │
+               │ link ≠ 0                      │ doomed
+               ▼                               ▼
+       ┌──────────────────────────────────────────┐
+       │ fold_projection_into(state, center)      │
+       │   state[i] ← center[i] + |state[i]−c[i]| │
+       │  (one pass per axis — breaks homotopy)   │
+       │ fold_gelu_into(state, center, α)         │
+       │   (smooth GELU-surrogate local extremum) │
+       └────────────────────┬─────────────────────┘
+                            │ now linearly separable
+                            ▼
+                       σ(·) works
+```
+
+| Gate | Fold (hot-path) | Detector (cold-path) |
+|------|-----------------|----------------------|
+| **G1 (correctness)** | ✅ fold unlinks synthetic thickened Hopf link (link ±1 → 0 after 3 axis passes); bit-identical to paper §G.1 | ✅ detects Hopf link as `link = ±1`; returns `0` on two unlinked circles; handles degenerate inputs (empty/single/coincident) |
+| **G2 (perf)** | ✅ **10.05 ns** (Abs, D=8) / **13.68 ns** (Gelu, D=8) / **16.61 ns** (Abs, D=64) / **17.02 ns** (Gelu, D=64) — all under 50 ns / 500 ns budgets | ❌ **401.8 ms @ n=2×200, d=8** — FAILS original 50 ms @ n=2×1000 budget (brute-force O(β²); extrapolates to minutes @ n=2×1000). PASSES a recalibrated 500 ms audit-cadence budget. |
+| **G3 (no-regression)** | ✅ default + `--features linking_fold_fold` + `--all-features` all clean | ✅ `--features linking_fold_detector` + umbrella + `--all-features` clean |
+| **G4 (alloc-free)** | ✅ **0 allocs / 1000 calls** × 4 (Abs/Gelu × D=8/D=64, CountingAllocator) | n/a — cold-path, may allocate |
+| **G5 (determinism)** | ✅ bit-identical across 100 runs (closed-form) | ✅ same integer `link` across 3 runs |
+| **G6 (modelless)** | ✅ closed-form `|x−c|`, no weights/training/GD | ✅ PCA + k-NN + cycle basis + Gauss quadrature, pure geometry |
+
+**Promotion decision (Plan 410 T4.4 — Option C feature split, 2026-07-07):** the bundled `linking_fold` feature was split into two independently-gated sub-features so the fold could ship without silently relaxing the detector's G2 budget. `linking_fold_fold` is **DEFAULT-ON** — it passes every GOAT gate modellessly and is the valuable per-tick primitive. `linking_fold_detector` stays **opt-in** — it fails its original G2 budget (Issue 050 tracks the residual accept-budget / optimize / keep-split decision, now non-blocking). The umbrella `linking_fold = [fold, detector]` preserves backward-compat for consumers who wrote `linking_fold`. The split is verified clean across all 4 feature combinations (default, fold-only, detector-only, all-features) — each sub-feature gates exactly its own tests, with no cross-contamination.
+
+Feature gates: `linking_fold_fold` (**DEFAULT-ON** — `fold_projection_into` / `fold_gelu_into`), `linking_fold_detector` (**opt-in** — `detect_linking` / `LinkingVerdict` / `LinkingDetectorConfig`), `linking_fold` (umbrella = both, opt-in).
+
+📖 Plan: [`.plans/410_linking_fold_primitive.md`](.plans/410_linking_fold_primitive.md). Research: [`.research/391_Low_Dimensional_Topology_Linking_Number.md`](.research/391_Low_Dimensional_Topology_Linking_Number.md). Detector perf issue: [`.issues/050_linking_fold_detector_cold_path_perf.md`](.issues/050_linking_fold_detector_cold_path_perf.md). Paper: [arxiv 2606.31856](https://arxiv.org/abs/2606.31856).
+
 ### 🔀 MUX-Latent: Zero-Training Context Compression (Plan 238)
 
 Compresses long context 4×–16× at prefill time using MUX superposition — **zero training, zero parameters, deterministic**.
