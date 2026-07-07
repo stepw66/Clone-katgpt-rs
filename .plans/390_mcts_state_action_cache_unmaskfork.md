@@ -127,7 +127,7 @@ This domain is chosen because:
 - [x] **T3.1** Implement `benches/bench_390_mcts_state_action_cache_goat.rs` (`harness = false`, `required-features = ["mcts_state_action_cache"]`):
   - [x] Build the synthetic dLLM-like domain (16-token sequences, 7 depth levels, 3 actions, deterministic transitions, terminal reward)
   - [x] **G1 — cache hit rate vs NFE**: sweep NFE ∈ {256, 512, 1024, 2048, 4096, 8192}, measure cache hit rate. Target: ≥30% hit rate at NFE ≥ 1024. **RESULT: PASS — 42.1% at NFE=1024.**
-  - [x] **G2 — effective-budget expansion at matched reward**: at fixed target reward, measure NFE required for cached vs no-cache. Target: ≥1.4×. **RESULT: FAIL — 1.00×.** The synthetic domain converges at NFE=256 in both arms (the domain is too small to show the budget-expansion benefit; a real dLLM PoC or larger domain is needed to re-test G2).
+  - [x] **G2 — effective-budget expansion at matched reward**: at fixed target reward, measure NFE required for cached vs no-cache. Target: ≥1.4×. **RESULT: FAIL — re-gated 2026-07-07 (Issue 044) with three fixes (scaled domain 48/12/5, true no-cache baseline via `StateActionCache::disabled()`, direct NFE-savings metric via `total_rollout_steps`). G2a reward-convergence: 0/6 strict wins (both arms converge to 1.000 at NFE=256). G2b NFE-savings: 1.01–1.03× expansion (avg_rollout_depth=0.6–0.7; rollouts are short because the tree itself reaches terminal depth). The synthetic domain's `apply` is too cheap (4-token array write ~ns) for cache hits to translate to meaningful NFE savings. Only a real dLLM PoC (Plan 5) where each `apply` is a full forward pass can show the budget-expansion benefit.**
   - [x] **G3 — no-regression**: cached reward ≥ no-cache reward at every NFE. **RESULT: PASS — identical at every NFE.**
   - [-] **G4 — zero-alloc hot path**: deferred to a separate CountingAllocator binary (the SearchScratch struct is pre-allocated; the full alloc gate is non-blocking for the opt-in-forever verdict).
   - [x] **G5 — cache size bound**: report `cache.len()` at end of search for each NFE. **RESULT: PASS — 107 entries at NFE=8192 (0.013× NFE).** Bounded by the domain's state space × actions.
@@ -153,10 +153,10 @@ Goal: decide whether to promote `mcts_state_action_cache` to the `default` featu
 
 ### Tasks
 
-- [ ] **T4.1** If Phase 3 GOAT gate PASSES with strong margins (G2 ≥1.4×, G1 ≥30%, G4 zero-alloc), promote to default:
-  - NOT REACHED — G2 FAILED.
-- [ ] **T4.2** If Phase 3 GOAT gate PASSES with weak margins (G2 ~1.4× borderline, or G1 ~30% borderline), keep opt-in:
-  - NOT REACHED — G2 FAILED (not borderline).
+- [-] **T4.1** If Phase 3 GOAT gate PASSES with strong margins (G2 ≥1.4×, G1 ≥30%, G4 zero-alloc), promote to default:
+  - NOT REACHED — G2 FAILED (opt-in-forever).
+- [-] **T4.2** If Phase 3 GOAT gate PASSES with weak margins (G2 ~1.4× borderline, or G1 ~30% borderline), keep opt-in:
+  - NOT REACHED — G2 FAILED (not borderline, opt-in-forever).
 - [x] **T4.3** If Phase 3 GOAT gate FAILS:
   - [x] Revise Research 386 §3 verdict from GOAT to Gain
   - [x] Keep the feature opt-in as a diagnostic primitive (the cache is still correct, just not a perf win on this domain)
@@ -173,13 +173,13 @@ Goal: if the primitive promotes to default, wire it into the existing D2F infere
 
 ### Tasks (sketch only — not started)
 
-- [ ] **T5.1** Define `D2fInferenceActionSpace` impl of `InferenceActionSpace<D2fBlockState>`:
+- [-] **T5.1** Define `D2fInferenceActionSpace` impl of `InferenceActionSpace<D2fBlockState>`:
   - Actions = `(SolverKind, RemaskingStrategy)` tuples (3 solvers × 2 strategies = 6 actions, matching UMF's small action space)
   - `apply` = one D2F denoising step with the given config
   - `reward` = terminal reconstruction quality (proportion of correctly-denosed tokens)
   - `state_hash` = BLAKE3 of the partially-unmasked token sequence
-- [ ] **T5.2** Wire `mcts_search_with_state_action_cache` into `D2fPipeline` as an alternative decode strategy (alongside the existing sequential `D2fDecodeConfig`).
-- [ ] **T5.3** Benchmark on the existing micro-GPT domain (Plan 066 test fixtures) — measure cache hit rate and effective-budget expansion on a real (small) dLLM.
+- [-] **T5.2** Wire `mcts_search_with_state_action_cache` into `D2fPipeline` as an alternative decode strategy (alongside the existing sequential `D2fDecodeConfig`).
+- [-] **T5.3** Benchmark on the existing micro-GPT domain (Plan 066 test fixtures) — measure cache hit rate and effective-budget expansion on a real (small) dLLM.
 
 ---
 

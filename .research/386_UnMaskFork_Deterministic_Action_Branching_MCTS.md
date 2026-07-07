@@ -21,7 +21,7 @@ The transferable primitive is **state-action pair caching for MCTS over a discre
 2. **`StateActionCache`** — `papaya::HashMap<(StateHash, ActionId), (NextState, Reward)>`. Distinct from our shipped `TranspositionTable` (Plan 061) and `ProofGoalCache` (Plan 388), which key on **state only**. UMF's key insight is that the same state under *different* actions yields *different* deterministic transitions; caching the pair captures both axes.
 3. **Determinism enables Var[R] ≈ 0** — single rollout per (state, action) is exact. No averaging, no variance penalty. Cache hit probability → 1 on revisits. This is the budget-efficiency argument that distinguishes UMF from stochastic TTS baselines (DTS*, BoN at high temperature).
 
-**Verdict: GOAT (pending benchmark).** Novel state-action caching primitive with **no prior art** in the codebase (3-layer check: notes + code + vocabulary translation; closest cousins `TranspositionTable`/`ProofGoalCache` are state-only; `dllm_solver.rs` is single-axis decode-step switching, not tree-level; `BranchRouter` routes at token/sample level, not MCTS-node level). Not Super-GOAT because Q3 (product selling point) is a perf claim ("cache reuse under fixed NFE"), not a new capability class — you cannot finish "our NPCs do X that no competitor can" with a *caching* primitive. Touches ≥2 pillars (foundation MCTS + dLLM inference substrate + neuron-db shard-as-model potential), so Q4 (force multiplier) holds. Theoretical guarantee (Eq. 1) is the genuine novel insight — provably better than static config selection under any diverse kernel set.
+**Verdict: Gain (revised from GOAT-pending-benchmark after Plan 390 Phase 3 G2 FAIL; re-gate 2026-07-07 confirmed Gain — see §3).** Novel state-action caching primitive with **no prior art** in the codebase (3-layer check: notes + code + vocabulary translation; closest cousins `TranspositionTable`/`ProofGoalCache` are state-only; `dllm_solver.rs` is single-axis decode-step switching, not tree-level; `BranchRouter` routes at token/sample level, not MCTS-node level). Not Super-GOAT because Q3 (product selling point) is a perf claim ("cache reuse under fixed NFE"), not a new capability class — you cannot finish "our NPCs do X that no competitor can" with a *caching* primitive. Touches ≥2 pillars (foundation MCTS + dLLM inference substrate + neuron-db shard-as-model potential), so Q4 (force multiplier) holds. Theoretical guarantee (Eq. 1) is the genuine novel insight — provably better than static config selection under any diverse kernel set. **GOAT gate FAILED on G2** (budget-expansion 1.01–1.03× vs 1.4× target): the cache works (G1 65–71% hit rate, G3 no-regression, G5 bounded) but the synthetic domain's `apply` is too cheap for cache hits to translate to meaningful NFE savings. Only a real dLLM PoC (Plan 5) can show the budget-expansion benefit. Stays opt-in behind `mcts_state_action_cache` feature flag.
 
 ---
 
@@ -193,18 +193,30 @@ Re-cast UMF's "action = inference configuration" as a discrete selection over ea
 
 ## 3. Verdict
 
-**Tier: Gain (revised from GOAT-pending-benchmark, 2026-07-07).**
+**Tier: Gain (revised from GOAT-pending-benchmark, 2026-07-07; re-gate 2026-07-07 confirmed Gain).**
 
 **Revision rationale (Plan 390 Phase 3 GOAT gate, 2026-07-07):** The G2
 budget-expansion gate FAILED on the synthetic domain (1.00× vs 1.4×
 target) because the domain was too small for the cache's cumulative
 savings to manifest as reward-convergence speedup. The cache works
 (G1 42% hit rate, G3 no-regression, G5 bounded), but the headline GOAT
-metric could not be validated. See `.issues/044_*` for the full gap
-analysis and re-gate conditions. Verdict revised GOAT → Gain: the
-primitive is a correct modelless caching improvement, but does not
-meet the GOAT threshold on the available benchmark. Re-gate contingent
-on a larger domain or real dLLM PoC (Plan 5).
+metric could not be validated.
+
+**Re-gate (Issue 044, 2026-07-07, since resolved-and-removed):** Options
+A (scaled domain 48/12/5) and C (direct NFE-savings metric via
+`total_rollout_steps` + true no-cache baseline via
+`StateActionCache::disabled()`) were both implemented. G2 still FAILS:
+G1 hit rate improved to 65–71% (strong), but G2b NFE-savings is only
+1.01–1.03× expansion. The deeper root cause: the synthetic domain's
+`apply` is a 4-token array write (~ns), so cache hits (113 at NFE=8192)
+save only ~68 ns-equivalent. The cache's real value requires expensive
+`apply` calls (full neural-network forward passes on a real dLLM), which
+is Plan 5's domain. Options A and C are now exhausted; the only remaining
+path to GOAT promotion is a real dLLM PoC (Plan 5).
+
+Verdict stays **Gain**: the primitive is a correct modelless caching
+improvement, but does not meet the GOAT threshold on any synthetic domain
+where `apply` is cheap.
 
 | Question | Answer |
 |---|---|
@@ -278,4 +290,4 @@ State-action pair caching for MCTS over a discrete inference-configuration actio
 
 ## TL;DR
 
-**Pre-flight done.** UMF is modelless (MCTS + caching + multi-config routing, no training). Verdict **GOAT** — novel state-action pair caching primitive for MCTS over discrete inference-configuration actions, with a provable dominance guarantee (Eq. 1: sum-of-mins ≤ min-of-sums → state-dependent switching policy beats any single static kernel). Lands in `katgpt-rs` (generic search/caching math, no game/chain/shard semantics). Plan 390 opens the GOAT gate benchmark. Not Super-GOAT (Q3 selling point is perf, not capability). No UQ-bearing floor check (UMF produces a single best trajectory, not a probability distribution). No §3.5 modelless-unblock needed (no riir-train deferral contemplated). No §3.6 PoC needed pre-gate (the benchmark IS the gate).
+**Pre-flight done.** UMF is modelless (MCTS + caching + multi-config routing, no training). Verdict **Gain** (revised from GOAT-pending-benchmark after Plan 390 Phase 3 G2 FAIL; re-gate 2026-07-07 confirmed Gain) — novel state-action pair caching primitive for MCTS over discrete inference-configuration actions, with a provable dominance guarantee (Eq. 1: sum-of-mins ≤ min-of-sums → state-dependent switching policy beats any single static kernel). Lands in `katgpt-rs` (generic search/caching math, no game/chain/shard semantics) behind the `mcts_state_action_cache` feature flag (opt-in-forever). Plan 390's GOAT gate FAILED on G2 (1.01–1.03× budget-expansion vs 1.4× target): the cache works (G1 65–71% hit rate, G3/G5 pass) but the synthetic domain's `apply` is too cheap for hits to translate to meaningful NFE savings; only a real dLLM PoC (Plan 5) can show the budget-expansion benefit. Not Super-GOAT (Q3 selling point is perf, not capability). No UQ-bearing floor check (UMF produces a single best trajectory, not a probability distribution). No §3.5 modelless-unblock needed (no riir-train deferral contemplated).

@@ -67,6 +67,7 @@
 
 use arrayvec::ArrayVec;
 use papaya::HashMap as PapayaHashMap;
+use std::sync::atomic::AtomicBool;
 
 /// UCB1 exploration constant. Mirrors [`crate::mcts`]'s value (sqrt(2)).
 const UCB1_C: f32 = 1.414;
@@ -147,6 +148,12 @@ pub struct StateActionKey {
 /// allow richer reward payloads (e.g. `(f32, u32)` for reward + depth).
 pub struct StateActionCache<R> {
     inner: PapayaHashMap<StateActionKey, (blake3::Hash, R)>,
+    /// When false, `get` always returns `None` and `insert` is a no-op.
+    /// Used by the G2 no-cache baseline (Issue 044) to measure the cache's
+    /// true benefit without duplicating the search implementation. The flag
+    /// is checked with a relaxed atomic load — negligible vs the BLAKE3 hash
+    /// that dominates each lookup.
+    disabled: AtomicBool,
 }
 
 impl<R: Copy> StateActionCache<R> {
@@ -155,6 +162,7 @@ impl<R: Copy> StateActionCache<R> {
     pub fn new() -> Self {
         Self {
             inner: PapayaHashMap::new(),
+            disabled: AtomicBool::new(false),
         }
     }
 
@@ -165,6 +173,20 @@ impl<R: Copy> StateActionCache<R> {
     pub fn with_capacity(cap: usize) -> Self {
         Self {
             inner: PapayaHashMap::with_capacity(cap),
+            disabled: AtomicBool::new(false),
+        }
+    }
+
+    /// Create a **disabled** cache: `get` always returns `None`, `insert` is a
+    /// no-op. Used by the G2 no-cache baseline (Issue 044) to measure the
+    /// cache's true benefit through the same search code path, without
+    /// duplicating the search implementation. The capacity is zero because no
+    /// entries are ever stored.
+    #[must_use]
+    pub fn disabled() -> Self {
+        Self {
+            inner: PapayaHashMap::new(),
+            disabled: AtomicBool::new(true),
         }
     }
 
@@ -176,6 +198,9 @@ impl<R: Copy> StateActionCache<R> {
     /// still yields the same `next_state`.
     #[inline]
     pub fn get(&self, state: blake3::Hash, action: InferenceAction) -> Option<(blake3::Hash, R)> {
+        if self.disabled.load(std::sync::atomic::Ordering::Relaxed) {
+            return None;
+        }
         let key = StateActionKey { state, action };
         // `get` acquires a pin; the closure runs under the pin. Returning the
         // copied value out of the pin is fine because (blake3::Hash, R) is Copy.
@@ -192,6 +217,9 @@ impl<R: Copy> StateActionCache<R> {
     /// DeterministicTransition contract since both observations are equal).
     #[inline]
     pub fn insert(&self, state: blake3::Hash, action: InferenceAction, next: blake3::Hash, reward: R) {
+        if self.disabled.load(std::sync::atomic::Ordering::Relaxed) {
+            return;
+        }
         let key = StateActionKey { state, action };
         self.inner.pin().insert(key, (next, reward));
     }
@@ -275,7 +303,10 @@ impl<R: Copy> StateActionCache<R> {
 
 impl<R: Copy> Default for StateActionCache<R> {
     fn default() -> Self {
-        Self::new()
+        Self {
+            inner: PapayaHashMap::new(),
+            disabled: AtomicBool::new(false),
+        }
     }
 }
 
@@ -480,6 +511,11 @@ pub struct SearchResult {
     pub cache_misses: usize,
     /// Total tree nodes at search end.
     pub tree_size: usize,
+    /// Total forward steps taken across all rollouts (each `apply` inside
+    /// `rollout_to_terminal` counts as one step; cache-hit shortcircuits count
+    /// as zero steps because the remaining trajectory was skipped). Used by
+    /// the G2 NFE-savings metric: `nfe_saved ≈ cache_hits × (total_rollout_steps / (hits + misses))`.
+    pub total_rollout_steps: usize,
 }
 
 /// Run MCTS over `space` starting from `root`, consulting `cache` at Expand
@@ -544,6 +580,7 @@ where
             cache_hits: 0,
             cache_misses: 0,
             tree_size: 0,
+            total_rollout_steps: 0,
         };
     }
 
@@ -551,6 +588,7 @@ where
 
     let mut cache_hits = 0usize;
     let mut cache_misses = 0usize;
+    let mut total_rollout_steps = 0usize;
 
     for _ in 0..budget {
         if scratch.nodes.len() >= MAX_TREE_SIZE {
@@ -608,7 +646,7 @@ where
             }
         }
 
-        // ── 2. Expand + (Cache-hit-or-Rollout) ─────────────────────
+        // ── 2. Expand + (Cache-hit-or-Rollout) ──
         let leaf_hash = scratch.nodes[leaf_idx].state_hash;
         let reward = if space.is_terminal(&current_state) {
             // Terminal leaf: reward comes from the space (or 0 if unset).
@@ -622,17 +660,21 @@ where
                 // reward (or 0) — no further exploration possible here.
                 None => space.reward(&current_state).unwrap_or(0.0),
                 // Normal Expand: consult the cache for (leaf_hash, action).
-                Some(action) => expand_one(
-                    space,
-                    &current_state,
-                    leaf_hash,
-                    leaf_idx,
-                    action,
-                    cache,
-                    scratch,
-                    &mut cache_hits,
-                    &mut cache_misses,
-                ),
+                Some(action) => {
+                    let (r, steps) = expand_one(
+                        space,
+                        &current_state,
+                        leaf_hash,
+                        leaf_idx,
+                        action,
+                        cache,
+                        scratch,
+                        &mut cache_hits,
+                        &mut cache_misses,
+                    );
+                    total_rollout_steps += steps;
+                    r
+                }
             }
         };
 
@@ -657,6 +699,7 @@ where
         cache_hits,
         cache_misses,
         tree_size: scratch.nodes.len(),
+        total_rollout_steps,
     }
 }
 
@@ -675,7 +718,7 @@ fn expand_one<S, A>(
     scratch: &mut SearchScratch,
     cache_hits: &mut usize,
     cache_misses: &mut usize,
-) -> f32
+) -> (f32, usize)
 where
     S: Clone,
     A: InferenceActionSpace<S>,
@@ -700,13 +743,14 @@ where
             unexpanded: ArrayVec::new(),
         });
         scratch.nodes[leaf_idx].children.push(child_idx);
-        cached_reward
+        // Cache hit skips the entire rollout: 0 rollout steps.
+        (cached_reward, 0)
     } else {
         // ── Cache MISS: apply + rollout ──
         *cache_misses += 1;
         let next_state = space.apply(leaf_state, action);
         let next_hash = space.state_hash(&next_state);
-        let rollout_reward = rollout_to_terminal(space, &next_state, cache);
+        let (rollout_reward, rollout_steps) = rollout_to_terminal(space, &next_state, cache);
         // Cache the transition (DeterministicTransition contract: re-applying
         // yields the identical result, so this entry stays valid).
         cache.insert(leaf_hash, action, next_hash, rollout_reward);
@@ -722,7 +766,7 @@ where
             .nodes
             .push(SearchNode::new_child(next_hash, action, leaf_idx, next_actions));
         scratch.nodes[leaf_idx].children.push(child_idx);
-        rollout_reward
+        (rollout_reward, rollout_steps)
     }
 }
 
@@ -733,7 +777,7 @@ where
 ///
 /// Consults the cache at each step: a hit returns the cached reward for the
 /// remainder of the rollout, saving NFE. Inserts each observed transition.
-fn rollout_to_terminal<S, A>(space: &A, state: &S, cache: &StateActionCache<f32>) -> f32
+fn rollout_to_terminal<S, A>(space: &A, state: &S, cache: &StateActionCache<f32>) -> (f32, usize)
 where
     S: Clone,
     A: InferenceActionSpace<S>,
@@ -741,17 +785,18 @@ where
     const MAX_ROLLOUT_DEPTH: usize = 64;
     let mut current = state.clone();
     let mut current_hash = space.state_hash(state);
+    let mut steps = 0usize;
 
     for _ in 0..MAX_ROLLOUT_DEPTH {
         if let Some(r) = space.reward(&current) {
-            return r;
+            return (r, steps);
         }
         if space.is_terminal(&current) {
-            return 0.0;
+            return (0.0, steps);
         }
         let actions = space.actions_at(&current);
         if actions.is_empty() {
-            return space.reward(&current).unwrap_or(0.0);
+            return (space.reward(&current).unwrap_or(0.0), steps);
         }
         // First-available-action policy (deterministic). A richer policy
         // (epsilon-greedy, UCB1 within rollout) is a Phase 3+ tuning knob;
@@ -760,8 +805,9 @@ where
         if let Some((_cached_next_hash, cached_reward)) = cache.get(current_hash, action) {
             // Cache hit mid-rollout: return the cached reward for the rest of
             // the trajectory. This is the compounding benefit — one hit can
-            // short-circuit the entire remaining rollout.
-            return cached_reward;
+            // short-circuit the entire remaining rollout. Steps are NOT
+            // incremented because the remaining trajectory was skipped.
+            return (cached_reward, steps);
         }
         let next = space.apply(&current, action);
         let next_hash = space.state_hash(&next);
@@ -773,12 +819,13 @@ where
         cache.insert(current_hash, action, next_hash, reward);
         current_hash = next_hash;
         current = next;
+        steps += 1;
     }
     // Hit the depth cap without a terminal — return the last state's reward
     // (or 0 if none). This is a graceful degradation, not a panic: real domains
     // may have long trajectories and the search still benefits from the
     // partial reward signal.
-    space.reward(&current).unwrap_or(0.0)
+    (space.reward(&current).unwrap_or(0.0), steps)
 }
 
 
@@ -859,5 +906,20 @@ mod tests {
         assert!((g0.1 - 0.1).abs() < 1e-6);
         assert!((g1.1 - 0.9).abs() < 1e-6);
         assert_ne!(g0.0, g1.0, "different actions must lead to different next states");
+    }
+
+    #[test]
+    fn cache_disabled_never_stores_or_returns() {
+        // Issue 044: the disabled() constructor is the true no-cache baseline.
+        // get() always returns None; insert() is a no-op; len() stays 0.
+        let cache: StateActionCache<f32> = StateActionCache::disabled();
+        let s = blake3::hash(b"state");
+        let a = InferenceAction::new(0, 0);
+        // Insert should be a no-op.
+        cache.insert(s, a, blake3::hash(b"next"), 0.5);
+        assert!(cache.is_empty(), "disabled cache must not store entries");
+        assert_eq!(cache.len(), 0);
+        // Get must always miss.
+        assert!(cache.get(s, a).is_none(), "disabled cache must always miss");
     }
 }
