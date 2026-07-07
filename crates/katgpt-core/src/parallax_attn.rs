@@ -1961,7 +1961,7 @@ mod ssmax_composition_tests {
 #[cfg(all(test, feature = "parallax_attn", feature = "sink_aware_attn", feature = "ssmax_temperature"))]
 mod ssmax_sink_aware_tests {
     use super::*;
-    use crate::data_probe::{SinkAwarePolicy, SinkClassifierConfig, SinkKind};
+    use crate::data_probe::{SinkAwarePolicy, SinkClassifierConfig};
     use crate::ssmax::SsmaxMode;
 
     /// The 3-way entry point with ssmax_mode=None must produce identical
