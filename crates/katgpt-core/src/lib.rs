@@ -1197,6 +1197,19 @@ pub use karc::{
     forecast_low_rank_apply, higher_order_feature_count, low_rank_fit,
 };
 
+// KarcShard DP Output Perturbation (Issue 370 T4) — post-hoc Gaussian noise
+// on a fitted ridge Wout matrix to provide formal (ε,δ)-DP for the committed
+// KarcShard parameters. Defends PARAMETER-INSPECTION MI (attacker reads Wout
+// to detect memorized patterns). Does NOT defend Yeom loss-threshold MI —
+// see karc_dp module docs and riir-ai/.benchmarks/399 for the structural
+// insufficiency analysis. Modelless (post-hoc noise on a closed-form solve).
+// Gated on karc_forecaster since it operates on the Wout produced by
+// KarcForecaster::fit_ridge.
+#[cfg(feature = "karc_forecaster")]
+pub mod karc_dp;
+#[cfg(feature = "karc_forecaster")]
+pub use karc_dp::{apply_dp_noise_to_wout, KarcDpNoiseConfig};
+
 // ARG Protocol Primitives — open half of the ARG × Latent Substrate Super-GOAT
 // fusion (Plan 327 Phases 1-3, Research 309, Guide 160 private). Five generic
 // protocol primitives distilled from the ARG Standard
