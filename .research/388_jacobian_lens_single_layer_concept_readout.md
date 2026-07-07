@@ -20,6 +20,37 @@ Anthropic's "Jacobian Lens" (J-lens) reads off the principal directions of `J_â„
 
 ---
 
+## Verdict map
+
+```mermaid
+flowchart TD
+    Paper["J-lens paper<br/>corpus-averaged per-layer Jacobian J_l"]
+    Collapse["Single-layer collapse (key insight)<br/>J_0 = instantaneous Jacobian at x"]
+    Machinery["Already ships<br/>jacobian_svd_at_into - Plan 301<br/>~455ns SVD-only on trivial f"]
+
+    Paper --> Collapse
+    Collapse --> Machinery
+
+    Machinery --> FusionA["Fusion A<br/>FaithfulnessProbe pre-filter"]
+    Machinery --> FusionB["Fusion B<br/>Percepta weight verification"]
+    Machinery --> FusionC["Fusion C<br/>Adaptive HLA readout"]
+
+    FusionA --> PoC["Plan 409 defend-wrong PoC"]
+    PoC --> P1["Phase 1 - wiring confirmed"]
+    P1 --> P2["Phase 2 - latency gate"]
+    P2 --> Fail["FAILED: prefilter 10-70x slower than probe"]
+    Fail --> Refuted["VERDICT: REFUTED<br/>structural - n+1 evals + SVD vs 5 evals"]
+    Refuted --> Issue43["Issue 043 RESOLVED<br/>docstring + rank-deficient SVD fix shipped"]
+
+    FusionB --> Deferred["DEFERRED<br/>waits on Percepta P4-P6"]
+    FusionC --> NotPursued["NOT PURSUED<br/>violates sync-boundary bridge rule"]
+
+    Surviving["UNEXPLORED follow-up<br/>ICT-gated throttling<br/>collision_purity gates domain_latent<br/>= separate research, not this note"]
+    Refuted -.->|surviving angle from paper| Surviving
+```
+
+---
+
 ## 1. Paper Core Findings
 
 ### 1.1 The Jacobian Lens (J-lens)
