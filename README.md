@@ -616,6 +616,48 @@ Feature gate: `sink_aware_attn` (**opt-in** — per-call G3 latency target struc
 
 📖 Plan: [`.plans/287_sink_aware_attention.md`](.plans/287_sink_aware_attention.md) + [`.plans/288_sink_aware_flat_layout.md`](.plans/288_sink_aware_flat_layout.md) + [`.plans/289_sink_aware_forward_path_wiring.md`](.plans/289_sink_aware_forward_path_wiring.md). Research: [`.research/258_Attention_Sink_Dual_Mechanism_NOP_Broadcast.md`](.research/258_Attention_Sink_Dual_Mechanism_NOP_Broadcast.md). Paper: [arxiv 2606.08105](https://arxiv.org/abs/2606.08105).
 
+### 🌡️ SSMax + GoldShare: Attention Dilution at Million-Token Scale (Plan 411, arxiv 2607.01538)
+
+Two modelless primitives distilled from Gollapudi et al. *Can Language Models Actually Retrieve In-Context? Drowning in Documents at Million Token Scale* (UC Berkeley / UT Austin, 2026). The paper's headline finding is the **recall–generation gap**: a head's pre-softmax retrieval signal (`R^any_L = 1.0` — at least one head ranks the gold document first by MaxSim) persists across corpus sizes N ∈ {500…10k}, but the post-normalization mass on gold collapses. The attention output is *rewritten* from a gold-token average to a non-gold-token average at comparable magnitude.
+
+**SSMax** (length-aware log-N attention temperature) is the fix at the logit level: a multiplicative pre-attention rescale `s̃ = s_L · log(N) · s` that cancels the `(N−1)` denominator growth in the dilution bound `α_gold ≈ 1/(1 + (N−1)·N^{−s·Δ})`. Default `s_L = 1.0` is **truly modelless** (zero training, zero new parameters); the `Adaptive` mode ships `s_L = 1/Δ_typical` analytically (derived from the bound, not learned). Composes with sigmoid parallax (`ParallaxConfig.ssmax` field), standard SDPA (`tiled_attention_forward_ssmax`), and sink-aware (field-on-config makes the 3-way composition automatic); does NOT apply to `funcattn` (Research 261 closed negative: basis-mode structure has no `(n,n)` attention matrix, so dilution is structurally absent).
+
+**GoldShare** (`‖a^G_L‖ / ‖a_L‖`) is the diagnostic that proves the dilution regime is real: it decomposes a layer's attention output into gold-derived and distractor-derived fractions and detects when the output has been rewritten from gold-content to aggregate-noise at comparable magnitude. Complements `effective_rank` (content-agnostic aggregate) and `stable_rank_update` (per-sink degeneracy). The joint reading with `sink_classify`: a sink classifier hit on the gold position with low `gold_share` is a **broadcast that failed** — the signal was in the head per the classifier, but didn't survive normalization into the residual.
+
+```text
+   pre-softmax logits s        attention output a_L = (Σ_t α_t · v_t)·W_O
+        │                          │
+        ▼                          ▼
+  ┌─────────────────┐    ┌─────────────────────────────────────┐
+  │ apply_ssmax     │    │ gold_share(attn, values, gold_mask) │
+  │  s̃ = s_L·log(N)│    │  a^G = (Σ_{t∈G} α_t·v_t)·W_O        │
+  │       ·s        │    │  a   = (Σ_t      α_t·v_t)·W_O       │
+  │                 │    │  share = ‖a^G‖ / ‖a‖ ∈ [0,1]        │
+  │ s_L=1.0 fixed   │    │                                     │
+  │ s_L=1/Δ adaptive│    │ low share + Broadcast classify      │
+  │ (analytical)    │    │  = "broadcast that failed"          │
+  └────────┬────────┘    └─────────────────────────────────────┘
+           │ cancels (N−1)    detects recall→generation gap
+           │ dilution          (content-specific; eff_rank misses)
+           ▼
+     softmax / sigmoid
+```
+
+| Metric | Value |
+|--------|-------|
+| **G1 (correctness)** | SSMax preserves argmax at all N ∈ {64, 1k, 10k, 100k} for both Fixed and Adaptive modes. At N=100k: base gold mass 0.000016 (drowned), SSMax Fixed recovers to 0.003 (185×), Adaptive recovers to 0.47 (29,000×). |
+| **G2 (quality)** | GoldShare differentiating power: gold_share range [0.028, 0.970] (Δ=0.94) across the dilution sweep while `effective_rank` stays flat (Δ=0.00) — the existing content-agnostic diagnostic cannot detect the swap. total_norm ratio 1.17× (paper: ~1.56×). SSMax G2 (RULER-style retrieval recall) **deferred** to consuming runtime — G1 mass-recovery is the modelless proxy. |
+| **G3 (latency)** | `apply_ssmax_inplace` @ n_kv=1024: **66 ns/call** (<0.1% of a typical ~100µs attention forward). |
+| **G4 (alloc-free)** | SSMax: **0 allocs/1000 calls** (in-place logit rescale). GoldShare: **0 allocs/1000 calls** (pre-sized `GoldShareScratch`). |
+| **G5 (no-regression)** | At N=64: base_argmax = ssmax_argmax = gold_index. Identical ranking — SSMax's `log(N)` sharpening is mild at small N. |
+| **G6 (modelless)** | SSMax = closed-form logit rescale (zero training, zero new params, `s_L=1/Δ` derived analytically). GoldShare = read-only norm ratio. Neither has a riir-train dependency. |
+
+**Promotion decision (Plan 411 Phase 5):** `ssmax_temperature` is **DEFAULT-ON** (Plan 411 Phase 5, 2026-07-07). All five GOAT gates pass (G1+G2+G3+G4+G5), satisfying the plan T5.1 promotion criterion. The promotion is provably safe: `ParallaxConfig::default()` sets `ssmax: None`, `apply_ssmax_to_row` is a no-op when `None`, and the `ssmax_none_is_bit_identical_to_base` test verifies zero default-behavior change — promoting the feature flag only makes the API available; no default code path applies SSMax unless a caller explicitly sets `config.ssmax = Some(...)`. GoldShare stays **opt-in** as a diagnostic (G2+G4 PASS; promote only when a downstream consumer depends on it). **Demotion check (T5.3):** no loser to demote — SSMax composes multiplicatively with the base `1/√d` SDPA scale (`1/√d` normalizes for dimension; SSMax normalizes for sequence length); both serve different purposes.
+
+Feature gates: `ssmax_temperature` (**DEFAULT-ON**, composes via `ParallaxConfig.ssmax` + `tiled_attention_forward_ssmax`), `gold_share_probe` (**opt-in** diagnostic, implies `sink_aware_attn` for the `StableRankScratch` convention reuse + joint `SinkDiagnostic.gold_share` field).
+
+📖 Plan: [`.plans/411_ssmax_goldshare.md`](.plans/411_ssmax_goldshare.md). Research: [`.research/392_Attention_Dilution_SSMax_GoldShare.md`](.research/392_Attention_Dilution_SSMax_GoldShare.md). GOAT gate bench: [`.benchmarks/411_ssmax_goldshare_goat.md`](.benchmarks/411_ssmax_goldshare_goat.md). Paper: [arxiv 2607.01538](https://arxiv.org/abs/2607.01538).
+
 ### 🔀 MUX-Latent: Zero-Training Context Compression (Plan 238)
 
 Compresses long context 4×–16× at prefill time using MUX superposition — **zero training, zero parameters, deterministic**.
@@ -2153,7 +2195,7 @@ Default: **Hybrid OCT+PQ** (OCTOPUS triplet encoding + PlanarQuant 2D Givens rot
 | **Motor-Gated DEC Field** (`motor_gated_field`) | Amari-style motor-gated neural-field evolution step unifying `hodge_laplacian` + latent steering; 29µs grid-stencil fast path (Plan 357, arxiv 2602.18690). | Opt-in — G1–G5 ALL PASS (no-teleport 0.0001 cells, 0 allocs/1000 ticks, 29µs vs 100µs target). |
 | **Engram Staging Table** (`engram_staging`) | `StagingEngramTable` — first-class per-slot CREATE/UPDATE/DELETE for engram tables via copy-on-write (vs whole-table rebuild) (Plan 360). | Opt-in (implies `engram`) — Phase 1 DONE; 17/17 staging tests + 112/112 engram tests pass; GOAT gate pending. |
 | **Factorized Action Abstraction** (`factorized_action`) | `EffectCodebook` + state-aware FiLM-gated factorized action latent (k-means codebook, sigmoid relevance gate) (Plan 375, arxiv 2606.30544). | 🪦 GOAT partial-FAIL — G1 PASS (4.9× over monolithic), G2a PASS (63% distractor suppression); **G2b FAIL** (gate at parity with mean) + **G3 FAIL** (k-means overfits source) → trained VQ-VAE + GateNetwork needed (riir-train). |
-| **SSMax** (`ssmax_temperature`) | Length-aware log-N attention temperature: multiplicative pre-attention logit rescale `s̃ = s_L · log(N) · s` canceling the `(N−1)` dilution in `α_gold ≈ 1/(1 + (N−1)·N^{−s·Δ})` (Plan 411, arxiv 2607.01538). Default `s_L = 1.0` is truly modelless; `Adaptive` mode ships `s_L = 1/Δ` analytically. Composes with sigmoid parallax + SDPA + sink-aware; NOT funcattn (no (n,n) matrix). | Opt-in — G1+G3+G4+G5+G6 PASS. G1 argmax preserved at N∈{64,1k,10k,100k}; gold mass recovered 185× (Fixed) / 29,000× (Adaptive) at N=100k. G3 66ns/call. G4 0 allocs. **G2 deferred** (needs RULER-style harness; G1 mass-recovery is the modelless proxy). Large-N safety net; promote when a consuming runtime proves the quality gain. |
+| **SSMax** (`ssmax_temperature`) | Length-aware log-N attention temperature: multiplicative pre-attention logit rescale `s̃ = s_L · log(N) · s` canceling the `(N−1)` dilution in `α_gold ≈ 1/(1 + (N−1)·N^{−s·Δ})` (Plan 411, arxiv 2607.01538). Default `s_L = 1.0` is truly modelless; `Adaptive` mode ships `s_L = 1/Δ` analytically. Composes with sigmoid parallax + SDPA + sink-aware; NOT funcattn (no (n,n) matrix). | **DEFAULT-ON** (Plan 411 Phase 5, 2026-07-07) — G1+G2+G3+G4+G5 ALL PASS. G1 argmax preserved at N∈{64,1k,10k,100k}; G2 cosine recall 0.25→0.97; G3 56ns<1µs; G4 0 allocs; G5 N=64 bit-identical. **Zero runtime cost unless invoked**: `ParallaxConfig.ssmax` defaults `None` → no-op → `ssmax_none_is_bit_identical_to_base` test verifies zero default-behavior change. |
 | **GoldShare** (`gold_share_probe`) | Content-specific output-fraction diagnostic `‖a^G_L‖ / ‖a_L‖` — detects when a layer's attention output has been rewritten from gold-content to aggregate-noise at comparable magnitude (Plan 411, arxiv 2607.01538). Complements `effective_rank` (content-agnostic) and `stable_rank_update` (per-sink). Joint reading with `sink_classify`: Broadcast + low gold_share = "broadcast that failed." | Opt-in diagnostic — G2+G4 PASS (gold_share range 0.94 vs effective_rank 0.00 across the dilution sweep; 0 allocs). Stays opt-in until a downstream consumer depends on it. |
 
 📖 **Full detail for ALL opt-in features + complete feature flag reference:** [`.docs/21_opt_in_features.md`](.docs/21_opt_in_features.md) and [`Cargo.toml`](Cargo.toml).

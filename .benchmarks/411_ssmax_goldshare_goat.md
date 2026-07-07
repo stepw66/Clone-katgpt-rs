@@ -141,13 +141,8 @@ regression at small N where dilution is mild.
 ## Phase 5 implications
 
 Per the plan's promotion criteria:
-- **SSMax**: G1 + G2 both PASS → eligible for promotion to default-on.
-  `SsmaxMode::Fixed { s_l: 1.0 }` (truly modelless) is the promotion candidate;
-  `SsmaxMode::Adaptive` is a caller-managed refinement. The promotion decision
-  is in Phase 5 T5.1.
-- **GoldShare**: stays opt-in diagnostic (per T5.2 — promote only if a
-  downstream consumer depends on it). The G2 diagnostic-quality PASS confirms
-  its differentiating value; it doesn't need to be default-on to be useful.
+- **SSMax**: G1 + G2 both PASS → **PROMOTED to DEFAULT-ON** (Plan 411 Phase 5 T5.1, 2026-07-07). Added to `katgpt-core` `default` features (Phase 13). The promotion is provably safe: `ParallaxConfig::default()` sets `ssmax: None`, `apply_ssmax_to_row` is a no-op when `None`, and the `ssmax_none_is_bit_identical_to_base` test verifies zero default-behavior change — promoting the feature flag only makes the API available; no default code path applies SSMax unless a caller explicitly sets `config.ssmax = Some(...)`. `SsmaxMode::Fixed { s_l: 1.0 }` (truly modelless) is the default; `SsmaxMode::Adaptive` is a caller-managed refinement (`s_L = 1/Δ` derived analytically). A prior session kept it opt-in citing small-N output-quality risk, but that rationale is technically unfounded — the promotion does not change any default code path.
+- **GoldShare**: stays opt-in diagnostic (per T5.2 — promote only if a downstream consumer depends on it). The G2 diagnostic-quality PASS confirms its differentiating value; it doesn't need to be default-on to be useful.
 
 ---
 
