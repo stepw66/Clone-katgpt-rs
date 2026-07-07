@@ -59,10 +59,8 @@ impl SortedRing {
     pub fn push(&mut self, value: f32, tick: u64) {
         if self.len < self.capacity {
             // Insert into the sorted position.
-            let pos = self
-                .values
-                .binary_search_by(|v| v.partial_cmp(&value).unwrap_or(core::cmp::Ordering::Equal));
-            let pos = match pos {
+            // `total_cmp` is branch-free and NaN-deterministic vs `partial_cmp().unwrap_or(Equal)`.
+            let pos = match self.values.binary_search_by(|v| v.total_cmp(&value)) {
                 Ok(p) | Err(p) => p,
             };
             self.values.insert(pos, value);
@@ -73,10 +71,7 @@ impl SortedRing {
             if let Some(evict_idx) = self.oldest_tick_index() {
                 self.values.remove(evict_idx);
                 self.ticks.remove(evict_idx);
-                let pos = self.values.binary_search_by(|v| {
-                    v.partial_cmp(&value).unwrap_or(core::cmp::Ordering::Equal)
-                });
-                let pos = match pos {
+                let pos = match self.values.binary_search_by(|v| v.total_cmp(&value)) {
                     Ok(p) | Err(p) => p,
                 };
                 self.values.insert(pos, value);

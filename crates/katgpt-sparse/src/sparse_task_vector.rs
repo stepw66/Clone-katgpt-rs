@@ -266,9 +266,7 @@ impl SparseTaskVector {
     /// Mostly for diagnostics and GOAT proofs. The hot path should use `apply_to`.
     pub fn to_dense_into(&self, out: &mut [f32]) {
         debug_assert_eq!(out.len(), self.dense_len());
-        for x in out.iter_mut() {
-            *x = 0.0;
-        }
+        out.fill(0.0);
         self.apply_to(out);
     }
 }

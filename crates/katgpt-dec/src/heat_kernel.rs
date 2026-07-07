@@ -309,10 +309,10 @@ pub fn heat_kernel_trajectory_linear_into(
     out.dim = dim;
     out.rank = h0.rank;
 
-    // Zero the output (we accumulate into it).
-    for v in &mut out.data[..len] {
-        *v = 0.0;
-    }
+    // Zero the output (we accumulate into it). Slice::fill auto-vectorizes
+    // to a wide memset — faster than the per-element scalar loop for the
+    // common n·dim ≥ 1024 case.
+    out.data[..len].fill(0.0);
 
     // Stack-allocated projection buffer (k ≤ K_MAX = 64 → ≤ 256 bytes).
     // Holds the projections (v_kᵀ · h_d) for the current channel d.
@@ -528,6 +528,18 @@ pub fn heat_kernel_trajectory_krylov_into(
     out.dim = dim;
     out.rank = rank;
 
+    // Precompute `motor_d - 1.0` per channel once (the cell loop below used to
+    // re-fetch `motor_vec.get(d).copied().unwrap_or(0.0)` for every cell).
+    let mut motor_shift = vec![0.0f32; dim];
+    for d in 0..dim {
+        let motor_d = if d < motor_dim {
+            motor_vec.get(d).copied().unwrap_or(0.0)
+        } else {
+            0.0
+        };
+        motor_shift[d] = motor_d - 1.0;
+    }
+
     let mut v_field = CochainField::zeros(rank, n, dim);
     let mut lap_field = CochainField::zeros(rank, n, dim);
 
@@ -539,20 +551,13 @@ pub fn heat_kernel_trajectory_krylov_into(
             let lap = hodge_laplacian(cx, &v_field);
             let m = lap.data.len().min(len);
             lap_field.data[..m].copy_from_slice(&lap.data[..m]);
-            for slot in &mut lap_field.data[m..] {
-                *slot = 0.0;
-            }
+            lap_field.data[m..].fill(0.0);
         }
         for cell in 0..n {
             let base = cell * dim;
             for d in 0..dim {
                 let idx = base + d;
-                let motor_d = if d < motor_dim {
-                    motor_vec.get(d).copied().unwrap_or(0.0)
-                } else {
-                    0.0
-                };
-                out_buf[idx] = lap_field.data[idx] + (motor_d - 1.0) * v[idx];
+                out_buf[idx] = lap_field.data[idx] + motor_shift[d] * v[idx];
             }
         }
     };

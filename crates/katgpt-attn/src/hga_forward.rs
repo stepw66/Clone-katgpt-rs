@@ -118,7 +118,7 @@ pub fn forward_hga(
         .filter(|(_, p)| **p > 0.0)
         .map(|(i, p)| (i, *p))
         .collect();
-    chunk_indices_scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+    chunk_indices_scored.sort_by(|a, b| b.1.total_cmp(&a.1));
 
     let max_chunks = budget.k_c.min(n_chunks);
     let selected_chunks: Vec<usize> = chunk_indices_scored

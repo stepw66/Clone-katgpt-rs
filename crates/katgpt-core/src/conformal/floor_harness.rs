@@ -152,7 +152,8 @@ pub fn empirical_quantile_interval(samples: &[f32], alpha: f32) -> PredictiveInt
         "alpha must be in [0, 0.5] for a two-tailed interval"
     );
     let mut sorted: Vec<f32> = samples.to_vec();
-    sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(Ordering::Equal));
+    // `total_cmp` is branch-free and NaN-deterministic vs `partial_cmp().unwrap_or(Equal)`.
+    sorted.sort_by(|a, b| a.total_cmp(b));
     let n = sorted.len();
     // Linear interpolation between order statistics (type 7, R default).
     let lo_idx = ((alpha * 0.5 * (n as f32 - 1.0)) as usize).min(n - 1);

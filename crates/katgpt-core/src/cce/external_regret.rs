@@ -116,7 +116,8 @@ impl ExternalRegret {
         let gamma = p.gamma(rho);
         let mut values: Vec<f32> = devs.iter().map(|k| gamma - p.gamma_dev(rho, k)).collect();
         // Sort descending so values[0] is the max.
-        values.sort_by(|a, b| b.partial_cmp(a).unwrap_or(core::cmp::Ordering::Equal));
+        // `total_cmp` is branch-free and NaN-deterministic vs `partial_cmp().unwrap_or(Equal)`.
+        values.sort_by(|a, b| b.total_cmp(a));
         (values[0] - values[1]) > eps
     }
 

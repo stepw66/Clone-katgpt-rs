@@ -153,8 +153,7 @@ pub fn ndcg_at_into(
     for i in 0..n {
         ideal_rels_buf[i] = ground_truth[i] as f64;
     }
-    ideal_rels_buf[..n]
-        .sort_unstable_by(|a, b| b.partial_cmp(a).unwrap_or(std::cmp::Ordering::Equal));
+    ideal_rels_buf[..n].sort_unstable_by(|a, b| b.total_cmp(a));
     let idcg: f64 = (0..k.min(n))
         .map(|i| (2.0f64.powf(ideal_rels_buf[i]) - 1.0) / (i as f64 + 2.0).log2())
         .sum();

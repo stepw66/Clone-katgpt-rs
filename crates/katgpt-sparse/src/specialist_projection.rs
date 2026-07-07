@@ -144,17 +144,17 @@ impl JacobianSupportEstimator {
             let base = dot_truncated(row, task_emb);
             for i in 0..d_hidden {
                 // Central finite difference on coordinate i.
-                let mut hp = row[i];
-                let mut hm = row[i];
-                hp += eps;
-                hm -= eps;
+                // Hoist the four repeated `task_emb.get(i).copied().unwrap_or(0.0)`
+                // and the two `row[i]` reads out of the arithmetic.
+                let t_i = task_emb.get(i).copied().unwrap_or(0.0);
+                let h_i = row[i];
+                let hp = h_i + eps;
+                let hm = h_i - eps;
                 // Re-evaluate the readout with coordinate i perturbed.
                 // We use a single-coordinate linear readout (the diagonal of
                 // the Jacobian): this is the modelless approximation.
-                let fp = base + hp * task_emb.get(i).copied().unwrap_or(0.0)
-                    - row[i] * task_emb.get(i).copied().unwrap_or(0.0);
-                let fm = base + hm * task_emb.get(i).copied().unwrap_or(0.0)
-                    - row[i] * task_emb.get(i).copied().unwrap_or(0.0);
+                let fp = base + (hp - h_i) * t_i;
+                let fm = base + (hm - h_i) * t_i;
                 let jv_i = (fp - fm) / two_eps;
                 mag[i] += jv_i.abs();
             }
@@ -264,87 +264,46 @@ impl SpecialistMask {
     /// the support. Paper Theorem 2: `h_specialist = h · M_sparse`.
     ///
     /// - `hidden`: `n_rows * d_hidden` flattened hidden state (mutated).
-    /// - `scratch`: caller-provided buffer, must be `>= d_hidden` long. Used
-    ///   for the per-row keep-set lookup. Currently unused (the projection is
-    ///   a direct zero-out), but reserved for future SIMD gather/scatter.
-    pub fn project(&self, hidden: &mut [f32], scratch: &mut [f32]) {
+    /// - `scratch`: caller-provided buffer. Currently unused — kept for API
+    ///   stability and reserved for future SIMD gather/scatter. The current
+    ///   implementation does gap-fills via `slice::fill` (auto-vectorized
+    ///   memset), which beats a sentinel-bitmap sweep at every density.
+    pub fn project(&self, hidden: &mut [f32], _scratch: &mut [f32]) {
         debug_assert_eq!(hidden.len(), self.inner.dense_len());
-        // Strategy: zero everything, then write back the kept coords.
-        // This is faster than zeroing per-coordinate when density < 0.5.
-        // We use scratch as a keep-set bitmap to avoid O(nnz) repeated writes
-        // when the same coordinate is kept across multiple rows.
+        // Strategy: walk the row-major sorted mask and zero the *gaps* between
+        // consecutive kept coordinates via `slice::fill(0.0)`. Each fill is a
+        // contiguous auto-vectorizable memset, so the per-row work is
+        // `O(d_hidden)` memory writes but done in wide SIMD chunks — strictly
+        // better than the prior `scratch`-bitmap sweep (which did a f32-fill
+        // of `d_hidden`, a per-coord f32 store, and a per-coord f32 compare).
+        //
+        // mask is row-major flat sorted ascending, so per-row kept coords are
+        // a contiguous run; we use a single advancing cursor across rows.
         let d_hidden = self.d_hidden();
-        if scratch.len() < d_hidden {
-            // Fall back to direct zero-out per non-kept coordinate.
-            self.project_fallback(hidden);
-            return;
-        }
-        // Walk row by row, using scratch[0..d_hidden] as a keep-flag buffer.
-        // mask is row-major flat sorted, so per-row coords are a contiguous run.
-        let mut idx = 0usize;
         let mask = &self.inner.mask;
+        let n_mask = mask.len();
+        let mut idx = 0usize;
         for row in 0..self.n_rows() {
             let base = row * d_hidden;
             let row_end = base + d_hidden;
-            // Clear keep flags for this row (bulk fill — one memset, faster
-            // than the per-element scalar loop for the common d_hidden ≥ 64 case).
-            scratch[..d_hidden].fill(0.0);
-            // Advance idx past any coords belonging to earlier rows (already
-            // consumed in prior iterations — mask is sorted ascending).
-            while idx < mask.len() && (mask[idx] as usize) < base {
+            // Advance idx past coords belonging to earlier rows.
+            while idx < n_mask && (mask[idx] as usize) < base {
                 idx += 1;
             }
-            // Set keep flags for coords in this row's support (contiguous run).
-            while idx < mask.len() {
+            // Zero gaps between consecutive kept coords in this row.
+            let mut prev = base;
+            while idx < n_mask {
                 let f = mask[idx] as usize;
                 if f >= row_end {
                     break;
                 }
-                scratch[f - base] = 1.0;
+                // Zero [prev, f) — kept coords in this row are strictly ascending.
+                hidden[prev..f].fill(0.0);
+                prev = f + 1;
                 idx += 1;
             }
-            // Zero non-kept coordinates.
-            for j in 0..d_hidden {
-                if scratch[j] == 0.0 {
-                    hidden[base + j] = 0.0;
-                }
-            }
-        }
-    }
-
-    /// Fallback projection when scratch is too small: zero coordinates not in
-    /// the support by walking the complement. O(d_hidden + nnz) per row total.
-    fn project_fallback(&self, hidden: &mut [f32]) {
-        let d_hidden = self.d_hidden();
-        // mask is row-major flat sorted, so per-row coords form a contiguous run
-        // — single forward sweep with a cursor (no per-row filter realloc).
-        let mut cursor = 0usize;
-        let mask = &self.inner.mask;
-        for row in 0..self.n_rows() {
-            let base = row * d_hidden;
-            let row_end = base + d_hidden;
-            // Advance cursor to the first coord >= base.
-            while cursor < mask.len() && (mask[cursor] as usize) < base {
-                cursor += 1;
-            }
-            // Walk coords and dims together: both advance monotonically.
-            let mut local_cursor = cursor;
-            for j in 0..d_hidden {
-                let global = base + j;
-                // Advance local_cursor past any coords < global.
-                while local_cursor < mask.len()
-                    && (mask[local_cursor] as usize) < global
-                    && (mask[local_cursor] as usize) < row_end
-                {
-                    local_cursor += 1;
-                }
-                let kept = local_cursor < mask.len() && (mask[local_cursor] as usize) == global;
-                if !kept {
-                    hidden[global] = 0.0;
-                }
-            }
-            // Commit the cursor advance for this row.
-            cursor = local_cursor;
+            // Zero the trailing gap [prev, row_end).
+            hidden[prev..row_end].fill(0.0);
         }
     }
 

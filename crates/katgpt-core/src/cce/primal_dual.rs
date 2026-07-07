@@ -351,8 +351,9 @@ fn project_onto_simplex(v: &[f32]) -> Vec<f32> {
         return Vec::new();
     }
     // Sort descending.
+    // `total_cmp` is branch-free and NaN-deterministic vs `partial_cmp().unwrap_or(Equal)`.
     let mut sorted: Vec<f32> = v.to_vec();
-    sorted.sort_by(|a, b| b.partial_cmp(a).unwrap_or(core::cmp::Ordering::Equal));
+    sorted.sort_by(|a, b| b.total_cmp(a));
 
     // Find θ = the last (Σ_{j≤k} v_j - 1) / k for which v_(k) > θ_k.
     let mut cumsum = 0.0_f32;

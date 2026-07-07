@@ -386,9 +386,9 @@ fn cholesky_inplace(a: &mut [f32], dim: usize) -> bool {
             }
             a[i * dim + j] = s * inv_diag;
         }
-        for i in (j + 1)..dim {
-            a[j * dim + i] = 0.0;
-        }
+        // Zero the upper triangle: `slice::fill` auto-vectorizes to a wide
+        // memset, beating the per-element scalar store for dim ≥ 16.
+        a[j * dim + (j + 1)..j * dim + dim].fill(0.0);
     }
     true
 }

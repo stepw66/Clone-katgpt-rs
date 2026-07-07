@@ -198,7 +198,7 @@ mod integration_tests {
         let prios = lp.bandit().priorities();
         let target_p = prios[0];
         let mut sorted: Vec<f32> = prios.to_vec();
-        sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+        sorted.sort_by(|a, b| a.total_cmp(b));
         let median = sorted[sorted.len() / 2];
         assert!(
             target_p >= median,
