@@ -26,7 +26,7 @@
 
 #![cfg(feature = "qgf_drafter")]
 
-use katgpt_core::qgf::{route_for, QgfComputeRoute};
+use katgpt_core::qgf::{QgfComputeRoute, route_for};
 use katgpt_core::traits::{NoGuidanceOracle, QGradientOracle};
 
 // ── Main ────────────────────────────────────────────────────────────────────
@@ -53,21 +53,22 @@ fn main() {
     println!("    batch ≥ 8 && action_space ≥ 1024 → GpuBatch  (amortize kernel launch)");
     println!("    otherwise                      → CpuSimd  (default safe path)");
     println!();
-    println!("  {:<32} {:>14} {:>12} {:>14}",
-        "workload", "action_space", "batch", "route");
+    println!(
+        "  {:<32} {:>14} {:>12} {:>14}",
+        "workload", "action_space", "batch", "route"
+    );
     let workloads = [
-        ("bomber npc (ternary)",        16,    1),
-        ("dungeon npc (HLA D=8)",       64,    1),
-        ("leo_all_goals (mid-game)",    256,   4),
-        ("leo_all_goals (batch)",       256,   16),
-        ("large action head",           1024,  8),
-        ("huge latent (D=4096)",        4096,  1),
-        ("huge latent batch",           4096,  16),
+        ("bomber npc (ternary)", 16, 1),
+        ("dungeon npc (HLA D=8)", 64, 1),
+        ("leo_all_goals (mid-game)", 256, 4),
+        ("leo_all_goals (batch)", 256, 16),
+        ("large action head", 1024, 8),
+        ("huge latent (D=4096)", 4096, 1),
+        ("huge latent batch", 4096, 16),
     ];
     for (name, a, b) in workloads {
         let r = route_for(a, b);
-        println!("  {:<32} {:>14} {:>12} {:>14}",
-            name, a, b, route_str(r));
+        println!("  {:<32} {:>14} {:>12} {:>14}", name, a, b, route_str(r));
     }
     println!();
     println!("  Reading: most game-NPC workloads land on CpuSimd (small action space).");
@@ -77,19 +78,20 @@ fn main() {
     // ── Axis 2: oracle tiers ───────────────────────────────────────────────
     println!("── Axis 2: oracle tier (value-function source) ──");
     println!();
-    println!("  {:<10} {:<32} {:<14} {:<14}",
-        "tier", "oracle struct", "feature", "confidence");
+    println!(
+        "  {:<10} {:<32} {:<14} {:<14}",
+        "tier", "oracle struct", "feature", "confidence"
+    );
     println!("  {}", "─".repeat(72));
     let tiers = [
-        ("Plasma",  "ActionBridgeOracle",  "action_bridge",   "1.0"),
-        ("Plasma",  "FlowFieldOracle",     "flow_field_nav",  "1.0"),
-        ("Hot",     "LeoHeadOracle",       "leo_all_goals",   "1.0"),
-        ("Freeze",  "BfnProxyOracle",      "(always)",        "0.3"),
-        ("Freeze",  "NoGuidanceOracle",    "qgf_oracle",      "0.0"),
+        ("Plasma", "ActionBridgeOracle", "action_bridge", "1.0"),
+        ("Plasma", "FlowFieldOracle", "flow_field_nav", "1.0"),
+        ("Hot", "LeoHeadOracle", "leo_all_goals", "1.0"),
+        ("Freeze", "BfnProxyOracle", "(always)", "0.3"),
+        ("Freeze", "NoGuidanceOracle", "qgf_oracle", "0.0"),
     ];
     for (tier, oracle, feat, conf) in tiers {
-        println!("  {:<10} {:<32} {:<14} {:<14}",
-            tier, oracle, feat, conf);
+        println!("  {:<10} {:<32} {:<14} {:<14}", tier, oracle, feat, conf);
     }
     println!();
     println!("  Latency targets per tier (paper §4, our T9 mapping):");
@@ -121,23 +123,60 @@ fn main() {
     // ── Combinations matrix ────────────────────────────────────────────────
     println!("── (tier × route) combinations for representative workloads ──");
     println!();
-    println!("  {:<28} {:<10} {:<14} {:<32}",
-        "workload", "tier", "route", "expected cost");
+    println!(
+        "  {:<28} {:<10} {:<14} {:<32}",
+        "workload", "tier", "route", "expected cost"
+    );
     println!("  {}", "─".repeat(86));
     let combos = [
-        ("bomber npc 1v1",          "Plasma",  16,    1,  "< 100ns (CpuSimd)"),
-        ("dungeon npc small batch", "Plasma",  64,    4,  "< 100ns (CpuSimd)"),
-        ("leo_all_goals (single)",  "Hot",     256,   1,  "< 1µs   (CpuSimd)"),
-        ("leo_all_goals (batch=8)", "Hot",     256,   8,  "< 1µs   (CpuSimd)"),
-        ("large latent (D=4096)",   "Warm",    4096,  1,  "~ 1ms   (CpuSimd fallback)"),
-        ("large latent (batch=16)", "Warm",    4096,  16, "~ 1ms   (GpuBatch)"),
-        ("episode-end snapshot",    "Cold",    4096,  64, "~ 10ms  (GpuBatch)"),
-        ("engine boot, no critic",  "Freeze",  16,    1,  "0ns     (no-op)"),
+        ("bomber npc 1v1", "Plasma", 16, 1, "< 100ns (CpuSimd)"),
+        (
+            "dungeon npc small batch",
+            "Plasma",
+            64,
+            4,
+            "< 100ns (CpuSimd)",
+        ),
+        ("leo_all_goals (single)", "Hot", 256, 1, "< 1µs   (CpuSimd)"),
+        (
+            "leo_all_goals (batch=8)",
+            "Hot",
+            256,
+            8,
+            "< 1µs   (CpuSimd)",
+        ),
+        (
+            "large latent (D=4096)",
+            "Warm",
+            4096,
+            1,
+            "~ 1ms   (CpuSimd fallback)",
+        ),
+        (
+            "large latent (batch=16)",
+            "Warm",
+            4096,
+            16,
+            "~ 1ms   (GpuBatch)",
+        ),
+        (
+            "episode-end snapshot",
+            "Cold",
+            4096,
+            64,
+            "~ 10ms  (GpuBatch)",
+        ),
+        ("engine boot, no critic", "Freeze", 16, 1, "0ns     (no-op)"),
     ];
     for (name, tier, a, b, cost) in combos {
         let r = route_for(a, b);
-        println!("  {:<28} {:<10} {:<14} {:<32}",
-            name, tier, route_str(r), cost);
+        println!(
+            "  {:<28} {:<10} {:<14} {:<32}",
+            name,
+            tier,
+            route_str(r),
+            cost
+        );
     }
     println!();
     println!("  Reading: Plasma/Hot are hot-path tiers (every step), Cold/Freeze");

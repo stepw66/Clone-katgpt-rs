@@ -204,14 +204,8 @@ fn decide(
 /// Print summary stats for a population of decisions.
 fn summarize(name: &str, decisions: &[RoutingDecision]) {
     let n = decisions.len() as f32;
-    let cpu = decisions
-        .iter()
-        .filter(|d| d.tier == Tier::CpuOnly)
-        .count();
-    let gpu = decisions
-        .iter()
-        .filter(|d| d.tier == Tier::CpuGpu)
-        .count();
+    let cpu = decisions.iter().filter(|d| d.tier == Tier::CpuOnly).count();
+    let gpu = decisions.iter().filter(|d| d.tier == Tier::CpuGpu).count();
     let direct = decisions
         .iter()
         .filter(|d| d.cot_mode == CotMode::Direct)
@@ -234,8 +228,16 @@ fn summarize(name: &str, decisions: &[RoutingDecision]) {
             .filter(|d| d.tier == Tier::CpuGpuAne)
             .count()
     );
-    println!("    cot mode:      {} direct / {} thinking", direct, thinking);
-    println!("    accuracy:      {:.1}% ({}/{})", correct as f32 / n * 100.0, correct, decisions.len());
+    println!(
+        "    cot mode:      {} direct / {} thinking",
+        direct, thinking
+    );
+    println!(
+        "    accuracy:      {:.1}% ({}/{})",
+        correct as f32 / n * 100.0,
+        correct,
+        decisions.len()
+    );
     println!("    total tokens:  {}", tokens);
 }
 
@@ -249,7 +251,11 @@ fn main() {
     let pop = QueryPopulation::synthetic(100, 100);
     let config = TvpConfig::default();
 
-    println!("Generating {} easy + {} hard synthetic queries...", pop.easy.len(), pop.hard.len());
+    println!(
+        "Generating {} easy + {} hard synthetic queries...",
+        pop.easy.len(),
+        pop.hard.len()
+    );
     println!();
 
     // --- Baseline (non-thinking, no TVP) ---
@@ -272,10 +278,7 @@ fn main() {
     let tvp_tokens: u32 = tvp.iter().map(|d| d.tokens_used).sum();
     let baseline_correct = baseline.iter().filter(|d| d.correct).count();
     let tvp_correct = tvp.iter().filter(|d| d.correct).count();
-    let baseline_gpu = baseline
-        .iter()
-        .filter(|d| d.tier != Tier::CpuOnly)
-        .count();
+    let baseline_gpu = baseline.iter().filter(|d| d.tier != Tier::CpuOnly).count();
     let tvp_gpu = tvp.iter().filter(|d| d.tier != Tier::CpuOnly).count();
 
     println!(
@@ -344,7 +347,11 @@ fn main() {
             "  {name}: reasoning={:.3}  format={:.3}  promote={}  (tokens used: {})",
             s.reasoning_disagreement,
             s.format_disagreement,
-            if s.should_promote(config.promote_at) { "YES" } else { "no" },
+            if s.should_promote(config.promote_at) {
+                "YES"
+            } else {
+                "no"
+            },
             probes.len()
         );
     }

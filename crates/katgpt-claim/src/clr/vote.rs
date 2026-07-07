@@ -37,11 +37,11 @@
 
 #![allow(clippy::needless_range_loop)]
 
+use crate::clr::ClrConfig;
 use crate::clr::brevity::brevity_tiebreak;
 use crate::clr::scratch::ClrScratch;
 use crate::clr::traits::{ClaimExtractor, ClaimVerifier};
 use crate::clr::types::{Cluster, ReliabilityScore, Trajectory, VoteResult};
-use crate::clr::ClrConfig;
 use katgpt_core::simd::simd_sum_f32;
 
 /// Run the full CLR vote and return a [`VoteResult`] audit trail.
@@ -359,7 +359,12 @@ fn build_clusters<T: Clone>(
     reliability: &[ReliabilityScore],
 ) -> Vec<Cluster<T>> {
     let k_count = trajectories.len();
-    let n_clusters = cluster_id.iter().copied().max().map(|m| m as usize + 1).unwrap_or(0);
+    let n_clusters = cluster_id
+        .iter()
+        .copied()
+        .max()
+        .map(|m| m as usize + 1)
+        .unwrap_or(0);
     let mut clusters: Vec<Cluster<T>> = (0..n_clusters)
         .map(|_| Cluster {
             outcome: trajectories[0].outcome.clone(), // overwritten below
@@ -434,7 +439,12 @@ mod tests {
     /// claim `m` has embedding `[0,...,v_m,...,0]` so that
     /// `sigmoid(dot(emb, dir_m)) = sigmoid(v_m)`. This gives us full control
     /// over the verdicts without depending on RNG.
-    fn trajectory_with_verdicts(outcome: usize, tokens: usize, raw_verdicts: &[f32], k: usize) -> Trajectory<usize> {
+    fn trajectory_with_verdicts(
+        outcome: usize,
+        tokens: usize,
+        raw_verdicts: &[f32],
+        k: usize,
+    ) -> Trajectory<usize> {
         let m = raw_verdicts.len();
         let claims = (0..m)
             .map(|mi| {
@@ -443,7 +453,10 @@ mod tests {
                 // emb[mi] = logit(raw_verdicts[mi]).
                 let p = raw_verdicts[mi].clamp(1e-6, 1.0 - 1e-6);
                 emb[mi] = (p / (1.0 - p)).ln();
-                Claim { embedding: emb, payload: outcome }
+                Claim {
+                    embedding: emb,
+                    payload: outcome,
+                }
             })
             .collect();
         Trajectory {
@@ -481,7 +494,11 @@ mod tests {
         let verifier = SigmoidProjectionVerifier::new(&dirs, k);
         // Extractor just returns the trajectory's pre-built claims.
         let extractor = FnClaimExtractor::new(m, |t: &Trajectory<usize>| t.claims.clone());
-        let config = ClrConfig { k, m, ..ClrConfig::default() };
+        let config = ClrConfig {
+            k,
+            m,
+            ..ClrConfig::default()
+        };
         let mut scratch = ClrScratch::new(trajs.len(), m);
 
         let result = clr_vote(
@@ -526,7 +543,11 @@ mod tests {
         let dirs = AxisDirections::new(m, k);
         let verifier = SigmoidProjectionVerifier::new(&dirs, k);
         let extractor = FnClaimExtractor::new(m, |t: &Trajectory<usize>| t.claims.clone());
-        let config = ClrConfig { k, m, ..ClrConfig::default() };
+        let config = ClrConfig {
+            k,
+            m,
+            ..ClrConfig::default()
+        };
 
         // Full vote.
         let mut scratch_full = ClrScratch::new(trajs.len(), m);
@@ -592,7 +613,11 @@ mod tests {
         let dirs = AxisDirections::new(m, k);
         let verifier = SigmoidProjectionVerifier::new(&dirs, k);
         let extractor = FnClaimExtractor::new(m, |t: &Trajectory<usize>| t.claims.clone());
-        let config = ClrConfig { k, m, ..ClrConfig::default() };
+        let config = ClrConfig {
+            k,
+            m,
+            ..ClrConfig::default()
+        };
         let mut scratch = ClrScratch::new(trajs.len(), m);
 
         let result = clr_vote(
@@ -638,14 +663,16 @@ mod tests {
         let high = 0.9f32;
         // 5 trajectories, all outcome 42, varying token counts.
         let trajs: Vec<Trajectory<usize>> = (0..5)
-            .map(|i| {
-                trajectory_with_verdicts(42, 100 + i * 10, &[high, high, high, high, high], k)
-            })
+            .map(|i| trajectory_with_verdicts(42, 100 + i * 10, &[high, high, high, high, high], k))
             .collect();
         let dirs = AxisDirections::new(m, k);
         let verifier = SigmoidProjectionVerifier::new(&dirs, k);
         let extractor = FnClaimExtractor::new(m, |t: &Trajectory<usize>| t.claims.clone());
-        let config = ClrConfig { k, m, ..ClrConfig::default() };
+        let config = ClrConfig {
+            k,
+            m,
+            ..ClrConfig::default()
+        };
         let mut scratch = ClrScratch::new(config.k, config.m);
 
         let (winner_idx, reliability) = clr_vote_minimal(
@@ -657,9 +684,20 @@ mod tests {
             &mut scratch,
         );
         // Single cluster → winner is the min-token representative (traj 0).
-        assert_eq!(winner_idx, 0, "winner should be trajectory 0 (fewest tokens)");
-        assert!(reliability > 0.0, "reliability must be positive, got {}", reliability);
+        assert_eq!(
+            winner_idx, 0,
+            "winner should be trajectory 0 (fewest tokens)"
+        );
+        assert!(
+            reliability > 0.0,
+            "reliability must be positive, got {}",
+            reliability
+        );
         // 5 trajectories × 0.9^5 ≈ 0.59049 each → total ≈ 2.95.
-        assert!(reliability > 1.0, "5-member cluster reliability should be > 1.0, got {}", reliability);
+        assert!(
+            reliability > 1.0,
+            "5-member cluster reliability should be > 1.0, got {}",
+            reliability
+        );
     }
 }

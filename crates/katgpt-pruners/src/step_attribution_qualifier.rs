@@ -574,11 +574,8 @@ impl WasmTestGateAdapter {
         baseline_avg_reward: f32,
         candidate_avg_reward: f32,
     ) -> QualificationVerdict {
-        let qualifier = StepAttributionQualifier::new(
-            ScalarStateExecutor,
-            SumAggregator,
-            self.threshold,
-        );
+        let qualifier =
+            StepAttributionQualifier::new(ScalarStateExecutor, SumAggregator, self.threshold);
         qualifier.qualify(
             &baseline_avg_reward,
             &ReplaceScalar(candidate_avg_reward),
@@ -751,7 +748,8 @@ mod tests {
         let scores = vec![0.9, 0.9, 0.9]; // all above tau=0.7
         let directions = vec![vec![1.0]];
 
-        let result = DotProductLocalizer::new().localize_and_link(&deltas, &scores, &directions, 0.7);
+        let result =
+            DotProductLocalizer::new().localize_and_link(&deltas, &scores, &directions, 0.7);
         assert!(result.is_none(), "no fault when all ticks reliable");
     }
 
@@ -916,11 +914,11 @@ mod tests {
         let direct = StepAttributionQualifier::new(ScalarStateExecutor, SumAggregator, 0.0);
         let cases = [
             (1.0_f32, 1.5_f32), // commit (Δ=+0.5)
-            (1.0, 1.0),          // commit (Δ=0, ≥ threshold)
-            (1.0, 0.5),          // rollback (Δ=-0.5)
-            (0.3, 0.3),          // commit (Δ=0)
-            (0.9, 0.8),          // rollback (Δ=-0.1)
-            (2.0, 3.0),          // commit (Δ=+1.0)
+            (1.0, 1.0),         // commit (Δ=0, ≥ threshold)
+            (1.0, 0.5),         // rollback (Δ=-0.5)
+            (0.3, 0.3),         // commit (Δ=0)
+            (0.9, 0.8),         // rollback (Δ=-0.1)
+            (2.0, 3.0),         // commit (Δ=+1.0)
         ];
         for (baseline, candidate) in cases {
             let adapter_verdict = adapter.qualify(baseline, candidate);
@@ -935,7 +933,10 @@ mod tests {
     #[test]
     fn t41_adapter_default_matches_new() {
         // Default trait impl must agree with `new()` (R172 threshold = 0.0).
-        assert_eq!(WasmTestGateAdapter::default().threshold, WasmTestGateAdapter::new().threshold);
+        assert_eq!(
+            WasmTestGateAdapter::default().threshold,
+            WasmTestGateAdapter::new().threshold
+        );
         assert_eq!(WasmTestGateAdapter::default().threshold, 0.0);
     }
 }

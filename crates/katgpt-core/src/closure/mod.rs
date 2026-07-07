@@ -51,9 +51,7 @@ pub use bridge::{
     DEFAULT_MOTIF_DIRS, MotifDirections, motif_embedding_to_tar_score, ptg_to_motif_embedding,
 };
 pub use metrics::{CdgScore, PriScores, compute_tar_score};
-pub use motif::{
-    FixedU32Set, MAX_MOTIF_EDGES, MAX_MOTIF_NODES, Motif, MotifMiner, RING_BUFFER_K,
-};
+pub use motif::{FixedU32Set, MAX_MOTIF_EDGES, MAX_MOTIF_NODES, Motif, MotifMiner, RING_BUFFER_K};
 pub use trace::{NodeId, PtgRecorder};
 
 // Sleep-cycle boundary mining instrument (Plan 290 T4.3). Hoisted from
@@ -67,7 +65,7 @@ pub use trace::{NodeId, PtgRecorder};
 // compute_cdg}` which already live here. The root crate re-exports it as
 // `katgpt_rs::closure_mining` for back-compat — external consumers
 // (riir-engine::closure_bridge) keep the historical API path.
-pub use mining::{fold_cdg_at_sleep_cycle, mine_motifs_at_sleep_cycle, SleepCycleClosureReport};
+pub use mining::{SleepCycleClosureReport, fold_cdg_at_sleep_cycle, mine_motifs_at_sleep_cycle};
 
 #[cfg(feature = "ptg_functor_edges")]
 pub use functor_edge::{FunctorEdgeParams, FunctorPtg, apply_functor_edge_into, functor_edge_gate};
@@ -322,8 +320,8 @@ macro_rules! serde_via_u8 {
     };
 }
 
-pub(crate) use serde_via_u32;
 pub(crate) use serde_via_u8;
+pub(crate) use serde_via_u32;
 
 // ── Tests (T1.4 + T1.5) ────────────────────────────────────────────────────
 
@@ -360,8 +358,16 @@ mod tests {
         let ptg = PrimitiveTransitionGraph {
             nodes: vec![dummy_node(0, 10), dummy_node(1, 20), dummy_node(2, 30)],
             edges: vec![
-                PtgEdge { op: OperatorKind::Sequence, from: 0, to: 1 },
-                PtgEdge { op: OperatorKind::Branch, from: 1, to: 2 },
+                PtgEdge {
+                    op: OperatorKind::Sequence,
+                    from: 0,
+                    to: 1,
+                },
+                PtgEdge {
+                    op: OperatorKind::Branch,
+                    from: 1,
+                    to: 2,
+                },
             ],
             root: 0,
             task_family_id: 42,

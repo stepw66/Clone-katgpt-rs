@@ -131,14 +131,20 @@ mod tests {
     fn commitment_differs_for_different_input() {
         let c1 = BabelCommitment::of(b"hello world");
         let c2 = BabelCommitment::of(b"hello world!");
-        assert_ne!(c1, c2, "different inputs must produce different commitments");
+        assert_ne!(
+            c1, c2,
+            "different inputs must produce different commitments"
+        );
     }
 
     #[test]
     fn commitment_matches_returns_true_for_same_input() {
         let payload = b"some compressed bytes";
         let c = BabelCommitment::of(payload);
-        assert!(c.matches(payload), "matches must return true for the original payload");
+        assert!(
+            c.matches(payload),
+            "matches must return true for the original payload"
+        );
     }
 
     #[test]
@@ -156,7 +162,10 @@ mod tests {
     fn commitment_of_empty_input_is_well_defined_and_nonzero() {
         // BLAKE3 of the empty string is a specific known digest.
         let c = BabelCommitment::of(b"");
-        assert!(!c.is_zero(), "empty-input commitment must be a real BLAKE3 digest, not the zero sentinel");
+        assert!(
+            !c.is_zero(),
+            "empty-input commitment must be a real BLAKE3 digest, not the zero sentinel"
+        );
         // Cross-checked against a fresh computation.
         let expected: [u8; 32] = *blake3::hash(b"").as_bytes();
         assert_eq!(c.as_bytes(), &expected);
@@ -174,14 +183,20 @@ mod tests {
     fn commitment_debug_formats_as_hex() {
         let c = BabelCommitment::of(b"abc");
         let s = format!("{c:?}");
-        assert!(s.starts_with("BabelCommitment("), "debug must start with BabelCommitment(: {s}");
+        assert!(
+            s.starts_with("BabelCommitment("),
+            "debug must start with BabelCommitment(: {s}"
+        );
         assert!(s.ends_with(')'), "debug must end with ): {s}");
         // 64 hex chars + 17 prefix + 1 suffix = 82.
         assert_eq!(s.len(), "BabelCommitment(".len() + 64 + 1);
         // Hex chars only in the middle.
         let hex = &s["BabelCommitment(".len()..s.len() - 1];
         for b in hex.bytes() {
-            assert!(b.is_ascii_hexdigit(), "non-hex char in commitment debug: {hex}");
+            assert!(
+                b.is_ascii_hexdigit(),
+                "non-hex char in commitment debug: {hex}"
+            );
         }
     }
 
@@ -227,7 +242,9 @@ mod tests {
         assert_eq!(c1, c2);
         assert_eq!(c1, c3);
         // Hash: collect into a HashSet to exercise Hash.
-        let set = core::iter::once(c1).chain(core::iter::once(c2)).collect::<std::collections::HashSet<_>>();
+        let set = core::iter::once(c1)
+            .chain(core::iter::once(c2))
+            .collect::<std::collections::HashSet<_>>();
         assert_eq!(set.len(), 1, "Copy + Hash must dedup identical commitments");
     }
 }

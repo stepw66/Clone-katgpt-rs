@@ -8,6 +8,13 @@ use std::collections::HashMap;
 // NoScreeningPruner is constructed inside feature-gated dd-tree wrappers
 // (speculative_generator / belief_drafter) and in tests; gate the import so
 // it doesn't read as unused when all those features are off.
+#[cfg(feature = "and_or_dtree")]
+use katgpt_core::AndOrNode;
+use katgpt_core::speculative::types::{SdeConfig, TreeNode};
+#[cfg(feature = "lodestar")]
+use katgpt_core::traits::CompletionHorizon;
+#[cfg(feature = "domino_correction")]
+use katgpt_core::traits::DominoPruner;
 #[cfg(any(
     test,
     feature = "speculative_generator",
@@ -16,14 +23,7 @@ use std::collections::HashMap;
     feature = "best_buddies",
 ))]
 use katgpt_core::traits::NoScreeningPruner;
-#[cfg(feature = "domino_correction")]
-use katgpt_core::traits::DominoPruner;
-#[cfg(feature = "lodestar")]
-use katgpt_core::traits::CompletionHorizon;
 use katgpt_core::traits::{ConstraintPruner, NoPruner, ScreeningPruner};
-use katgpt_core::speculative::types::{SdeConfig, TreeNode};
-#[cfg(feature = "and_or_dtree")]
-use katgpt_core::AndOrNode;
 use katgpt_types::{InferenceResult, Rng};
 use rayon::prelude::*;
 
@@ -846,11 +846,10 @@ where
     // collection the prior collect-then-par_iter paid even when `find_map_any`
     // short-circuits on the first hit. `find_map_any` returns as soon as any
     // task yields `Some`, so never-examined nodes never allocate.
-    tree.par_iter()
-        .find_map_any(|node| {
-            let seq = extract_parent_tokens(node.parent_path, node.depth + 1);
-            validator(&seq).map(|result| (seq, result))
-        })
+    tree.par_iter().find_map_any(|node| {
+        let seq = extract_parent_tokens(node.parent_path, node.depth + 1);
+        validator(&seq).map(|result| (seq, result))
+    })
 }
 
 /// Parallel search for the **shortest** valid sequence by cost.
@@ -1958,221 +1957,109 @@ impl TreeBuilder {
     // and katgpt_core::speculative::types. Verbatim port with import rewrites.
 
     /// Build DDTree with progressive per-depth budget allocation (Plan 174 Task 3b).
-        ///
-        /// Like [`build_screened`] but distributes `tree_budget` unevenly
-        /// across depths using [`PositionWeightedBudget`]. Early depths get more
-        /// nodes (higher weight), later depths get fewer (exponential decay).
-        ///
-        /// When `budget_config` is `None` or `budget_config.enabled == false`,
-        /// delegates to [`build_screened`] unchanged (zero overhead).
-        ///
-        /// The total node count stays within `config.tree_budget` regardless of
-        /// the per-depth allocation.
-        #[cfg(feature = "dflare_progressive_budget")]
-        pub fn build_screened_progressive(
-            &mut self,
-            marginals: &[&[f32]],
-            config: &katgpt_types::Config,
-            screener: &dyn ScreeningPruner,
-            chain_seed: bool,
-            budget_config: Option<&katgpt_core::speculative::types::PositionWeightedBudget>,
-        ) -> &[TreeNode] {
-            // Delegate to original when feature is not active
-            let Some(bcfg) = budget_config else {
-                return self.build_screened(marginals, config, screener, chain_seed);
-            };
-            if !bcfg.enabled {
-                return self.build_screened(marginals, config, screener, chain_seed);
-            }
+    ///
+    /// Like [`build_screened`] but distributes `tree_budget` unevenly
+    /// across depths using [`PositionWeightedBudget`]. Early depths get more
+    /// nodes (higher weight), later depths get fewer (exponential decay).
+    ///
+    /// When `budget_config` is `None` or `budget_config.enabled == false`,
+    /// delegates to [`build_screened`] unchanged (zero overhead).
+    ///
+    /// The total node count stays within `config.tree_budget` regardless of
+    /// the per-depth allocation.
+    #[cfg(feature = "dflare_progressive_budget")]
+    pub fn build_screened_progressive(
+        &mut self,
+        marginals: &[&[f32]],
+        config: &katgpt_types::Config,
+        screener: &dyn ScreeningPruner,
+        chain_seed: bool,
+        budget_config: Option<&katgpt_core::speculative::types::PositionWeightedBudget>,
+    ) -> &[TreeNode] {
+        // Delegate to original when feature is not active
+        let Some(bcfg) = budget_config else {
+            return self.build_screened(marginals, config, screener, chain_seed);
+        };
+        if !bcfg.enabled {
+            return self.build_screened(marginals, config, screener, chain_seed);
+        }
 
-            // Compute per-depth budget allocation
-            let depth_budgets = bcfg.allocate(config.tree_budget, marginals.len());
-            // Track how many nodes have been added at each depth
-            let mut depth_used: Vec<usize> = vec![0; depth_budgets.len()];
+        // Compute per-depth budget allocation
+        let depth_budgets = bcfg.allocate(config.tree_budget, marginals.len());
+        // Track how many nodes have been added at each depth
+        let mut depth_used: Vec<usize> = vec![0; depth_budgets.len()];
 
-            let threshold = config.screening_threshold;
-            self.heap.clear();
-            self.tree.clear();
-            self.chain_nodes.clear();
-            self.chain_parent_tokens.clear();
+        let threshold = config.screening_threshold;
+        self.heap.clear();
+        self.tree.clear();
+        self.chain_nodes.clear();
+        self.chain_parent_tokens.clear();
 
-            if marginals.is_empty() {
-                return &self.tree;
-            }
+        if marginals.is_empty() {
+            return &self.tree;
+        }
 
-            self.cache_log_marginals(marginals);
+        self.cache_log_marginals(marginals);
 
-            if chain_seed {
-                // ── Phase A: Build greedy chain backbone with progressive budget ──
-                let mut cumulative_score: f32 = 0.0;
-                let mut parent_path: u128 = 0;
+        if chain_seed {
+            // ── Phase A: Build greedy chain backbone with progressive budget ──
+            let mut cumulative_score: f32 = 0.0;
+            let mut parent_path: u128 = 0;
 
-                for (depth, marginal) in marginals.iter().enumerate() {
-                    if self.tree.len() >= config.tree_budget {
-                        break;
-                    }
-                    // Per-depth budget check for chain backbone
-                    if depth_used[depth] >= depth_budgets[depth] {
-                        break;
-                    }
-
-                    let best_token = marginal
-                        .iter()
-                        .enumerate()
-                        .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
-                        .map(|(i, _)| i);
-
-                    let Some(token_idx) = best_token else {
-                        break;
-                    };
-                    let prob = marginal[token_idx];
-
-                    if prob <= 0.0 {
-                        break;
-                    }
-
-                    let relevance = screener.relevance(depth, token_idx, &self.chain_parent_tokens);
-                    if relevance <= threshold {
-                        break;
-                    }
-
-                    // Blended score: ln(P_llm) + ln(R)
-                    cumulative_score += prob.ln() + relevance.ln();
-                    let node_path = if depth == 0 {
-                        token_idx as u128
-                    } else {
-                        (parent_path << 16) | (token_idx as u128)
-                    };
-
-                    let node = TreeNode {
-                        score: cumulative_score,
-                        depth,
-                        token_idx,
-                        parent_path: node_path,
-                    };
-
-                    self.tree.push(node);
-                    depth_used[depth] += 1;
-                    self.chain_nodes.push(node);
-                    parent_path = node_path;
-                    self.chain_parent_tokens.push(token_idx);
+            for (depth, marginal) in marginals.iter().enumerate() {
+                if self.tree.len() >= config.tree_budget {
+                    break;
+                }
+                // Per-depth budget check for chain backbone
+                if depth_used[depth] >= depth_budgets[depth] {
+                    break;
                 }
 
-                // ── Phase B: Seed heap with siblings + last chain children ──
-                if self.chain_nodes.is_empty() {
-                    // Seed depth 0 — only add tokens within depth 0 budget
-                    let budget_d0 = depth_budgets.first().copied().unwrap_or(config.tree_budget);
-                    if config.vocab_size > 256 {
-                        let mut nodes: Vec<TreeNode> = marginals[0]
-                            .par_iter()
-                            .enumerate()
-                            .filter_map(|(i, &prob)| {
-                                if prob <= 0.0 {
-                                    return None;
-                                }
-                                let relevance = screener.relevance(0, i, &[]);
-                                if relevance <= threshold {
-                                    return None;
-                                }
-                                Some(TreeNode {
-                                    score: prob.ln() + relevance.ln(),
-                                    depth: 0,
-                                    token_idx: i,
-                                    parent_path: i as u128,
-                                })
-                            })
-                            .collect();
-                        nodes.truncate(budget_d0);
-                        self.heap.extend(nodes);
-                    } else {
-                        for (i, &prob) in marginals[0].iter().enumerate() {
-                            if depth_used[0] >= budget_d0 {
-                                break;
-                            }
-                            if prob <= 0.0 {
-                                continue;
-                            }
-                            let relevance = screener.relevance(0, i, &[]);
-                            if relevance <= threshold {
-                                continue;
-                            }
-                            self.heap.push(TreeNode {
-                                score: prob.ln() + relevance.ln(),
-                                depth: 0,
-                                token_idx: i,
-                                parent_path: i as u128,
-                            });
-                        }
-                    }
+                let best_token = marginal
+                    .iter()
+                    .enumerate()
+                    .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
+                    .map(|(i, _)| i);
+
+                let Some(token_idx) = best_token else {
+                    break;
+                };
+                let prob = marginal[token_idx];
+
+                if prob <= 0.0 {
+                    break;
+                }
+
+                let relevance = screener.relevance(depth, token_idx, &self.chain_parent_tokens);
+                if relevance <= threshold {
+                    break;
+                }
+
+                // Blended score: ln(P_llm) + ln(R)
+                cumulative_score += prob.ln() + relevance.ln();
+                let node_path = if depth == 0 {
+                    token_idx as u128
                 } else {
-                    for chain_node in &self.chain_nodes {
-                        let depth = chain_node.depth;
-                        let parent_chain_score = if depth == 0 {
-                            0.0f32
-                        } else {
-                            self.chain_nodes[depth - 1].score
-                        };
+                    (parent_path << 16) | (token_idx as u128)
+                };
 
-                        let sibling_parent_tokens = extract_parent_tokens_into(
-                            chain_node.parent_path >> 16,
-                            depth,
-                            &mut self.parent_tokens_buf,
-                        );
+                let node = TreeNode {
+                    score: cumulative_score,
+                    depth,
+                    token_idx,
+                    parent_path: node_path,
+                };
 
-                        for (i, &prob) in marginals[depth].iter().enumerate() {
-                            if i == chain_node.token_idx {
-                                continue;
-                            }
-                            if prob <= 0.0 {
-                                continue;
-                            }
-                            let relevance = screener.relevance(depth, i, sibling_parent_tokens);
-                            if relevance <= threshold {
-                                continue;
-                            }
-                            let sibling_path = if depth == 0 {
-                                i as u128
-                            } else {
-                                let ancestor_path = chain_node.parent_path >> 16;
-                                (ancestor_path << 16) | (i as u128)
-                            };
+                self.tree.push(node);
+                depth_used[depth] += 1;
+                self.chain_nodes.push(node);
+                parent_path = node_path;
+                self.chain_parent_tokens.push(token_idx);
+            }
 
-                            self.heap.push(TreeNode {
-                                score: parent_chain_score + prob.ln() + relevance.ln(),
-                                depth,
-                                token_idx: i,
-                                parent_path: sibling_path,
-                            });
-                        }
-                    }
-
-                    let last = self.chain_nodes.last().unwrap();
-                    if last.depth + 1 < marginals.len() {
-                        let next_depth = last.depth + 1;
-                        let parent_tokens = extract_parent_tokens_into(
-                            last.parent_path,
-                            last.depth + 1,
-                            &mut self.parent_tokens_buf,
-                        );
-                        for (i, &prob) in marginals[next_depth].iter().enumerate() {
-                            if prob <= 0.0 {
-                                continue;
-                            }
-                            let relevance = screener.relevance(next_depth, i, parent_tokens);
-                            if relevance <= threshold {
-                                continue;
-                            }
-                            self.heap.push(TreeNode {
-                                score: last.score + prob.ln() + relevance.ln(),
-                                depth: next_depth,
-                                token_idx: i,
-                                parent_path: (last.parent_path << 16) | (i as u128),
-                            });
-                        }
-                    }
-                }
-            } else {
-                // Original seeding with progressive budget for depth 0
+            // ── Phase B: Seed heap with siblings + last chain children ──
+            if self.chain_nodes.is_empty() {
+                // Seed depth 0 — only add tokens within depth 0 budget
                 let budget_d0 = depth_budgets.first().copied().unwrap_or(config.tree_budget);
                 if config.vocab_size > 256 {
                     let mut nodes: Vec<TreeNode> = marginals[0]
@@ -2216,70 +2103,56 @@ impl TreeBuilder {
                         });
                     }
                 }
-            }
+            } else {
+                for chain_node in &self.chain_nodes {
+                    let depth = chain_node.depth;
+                    let parent_chain_score = if depth == 0 {
+                        0.0f32
+                    } else {
+                        self.chain_nodes[depth - 1].score
+                    };
 
-            // ── Phase C: Best-first expansion with progressive per-depth budget ──
-            let mut best_score: Option<f32> = None;
-            let mut second_best_score: Option<f32> = None;
-            let mut consecutive_dominant: usize = 0;
-            while self.tree.len() < config.tree_budget {
-                let Some(best) = self.heap.pop() else {
-                    break;
-                };
-
-                // Per-depth budget check: skip nodes whose depth is exhausted
-                if best.depth < depth_budgets.len()
-                    && depth_used[best.depth] >= depth_budgets[best.depth]
-                {
-                    continue;
-                }
-
-                self.tree.push(best);
-                depth_used[best.depth] += 1;
-
-                // Confidence-gap early exit (Plan 026: AutoTTS)
-                let score = best.score;
-                match best_score {
-                    None => {
-                        best_score = Some(score);
-                    }
-                    Some(bs) if score > bs => {
-                        second_best_score = Some(bs);
-                        best_score = Some(score);
-                        consecutive_dominant = 1;
-                    }
-                    Some(bs) => {
-                        second_best_score = Some(score);
-                        if bs - score > config.early_exit_gap {
-                            consecutive_dominant += 1;
-                        } else {
-                            consecutive_dominant = 0;
-                        }
-                    }
-                }
-                if config.early_exit_patience > 0
-                    && config.early_exit_gap > 0.0
-                    && consecutive_dominant >= config.early_exit_patience
-                    && best_score.unwrap_or(0.0) - second_best_score.unwrap_or(0.0)
-                        > config.early_exit_gap
-                {
-                    break;
-                }
-
-                if best.depth + 1 < marginals.len() {
-                    let next_depth = best.depth + 1;
-                    // Skip expanding children into a depth that has exhausted its budget
-                    if next_depth < depth_budgets.len()
-                        && depth_used[next_depth] >= depth_budgets[next_depth]
-                    {
-                        continue;
-                    }
-                    let parent_tokens = extract_parent_tokens_into(
-                        best.parent_path,
-                        best.depth + 1,
+                    let sibling_parent_tokens = extract_parent_tokens_into(
+                        chain_node.parent_path >> 16,
+                        depth,
                         &mut self.parent_tokens_buf,
                     );
-                    let log_m = &self.log_marginals[next_depth];
+
+                    for (i, &prob) in marginals[depth].iter().enumerate() {
+                        if i == chain_node.token_idx {
+                            continue;
+                        }
+                        if prob <= 0.0 {
+                            continue;
+                        }
+                        let relevance = screener.relevance(depth, i, sibling_parent_tokens);
+                        if relevance <= threshold {
+                            continue;
+                        }
+                        let sibling_path = if depth == 0 {
+                            i as u128
+                        } else {
+                            let ancestor_path = chain_node.parent_path >> 16;
+                            (ancestor_path << 16) | (i as u128)
+                        };
+
+                        self.heap.push(TreeNode {
+                            score: parent_chain_score + prob.ln() + relevance.ln(),
+                            depth,
+                            token_idx: i,
+                            parent_path: sibling_path,
+                        });
+                    }
+                }
+
+                let last = self.chain_nodes.last().unwrap();
+                if last.depth + 1 < marginals.len() {
+                    let next_depth = last.depth + 1;
+                    let parent_tokens = extract_parent_tokens_into(
+                        last.parent_path,
+                        last.depth + 1,
+                        &mut self.parent_tokens_buf,
+                    );
                     for (i, &prob) in marginals[next_depth].iter().enumerate() {
                         if prob <= 0.0 {
                             continue;
@@ -2289,195 +2162,40 @@ impl TreeBuilder {
                             continue;
                         }
                         self.heap.push(TreeNode {
-                            score: best.score + log_m[i] + relevance.ln(),
+                            score: last.score + prob.ln() + relevance.ln(),
                             depth: next_depth,
                             token_idx: i,
-                            parent_path: (best.parent_path << 16) | (i as u128),
+                            parent_path: (last.parent_path << 16) | (i as u128),
                         });
                     }
                 }
             }
-
-            &self.tree
-        }
-
-        /// Build DDTree with externally-provided per-depth budget caps (Plan 200).
-        ///
-        /// Identical to [`build_screened_progressive`] but accepts pre-computed
-        /// `depth_budgets` directly instead of computing them from [`PositionWeightedBudget`].
-        ///
-        /// This is the integration point for `CorrelationBudgetAllocator` — the allocator
-        /// produces `depth_budgets` from EMA-tracked agreement rates, and this method
-        /// enforces them during tree expansion.
-        #[cfg(any(feature = "corr_budget", feature = "nf_flow_budget"))]
-        pub fn build_screened_with_depth_budgets(
-            &mut self,
-            marginals: &[&[f32]],
-            config: &katgpt_types::Config,
-            screener: &dyn ScreeningPruner,
-            chain_seed: bool,
-            depth_budgets: &[usize],
-        ) -> &[TreeNode] {
-            if depth_budgets.is_empty() {
-                return self.build_screened(marginals, config, screener, chain_seed);
-            }
-
-            let mut depth_used: Vec<usize> = vec![0; depth_budgets.len()];
-            let threshold = config.screening_threshold;
-            self.heap.clear();
-            self.tree.clear();
-            self.chain_nodes.clear();
-            self.chain_parent_tokens.clear();
-
-            if marginals.is_empty() {
-                return &self.tree;
-            }
-
-            self.cache_log_marginals(marginals);
-
-            if chain_seed {
-                let mut cumulative_score: f32 = 0.0;
-                let mut parent_path: u128 = 0;
-
-                for (depth, marginal) in marginals.iter().enumerate() {
-                    if self.tree.len() >= config.tree_budget {
-                        break;
-                    }
-                    if depth >= depth_budgets.len() || depth_used[depth] >= depth_budgets[depth] {
-                        break;
-                    }
-
-                    let best_token = marginal
-                        .iter()
-                        .enumerate()
-                        .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
-                        .map(|(i, _)| i);
-
-                    let Some(token_idx) = best_token else {
-                        break;
-                    };
-                    let prob = marginal[token_idx];
-
-                    if prob <= 0.0 {
-                        break;
-                    }
-
-                    let relevance = screener.relevance(depth, token_idx, &self.chain_parent_tokens);
-                    if relevance <= threshold {
-                        break;
-                    }
-
-                    cumulative_score += prob.ln() + relevance.ln();
-                    let node_path = if depth == 0 {
-                        token_idx as u128
-                    } else {
-                        (parent_path << 16) | (token_idx as u128)
-                    };
-
-                    let node = TreeNode {
-                        score: cumulative_score,
-                        depth,
-                        token_idx,
-                        parent_path: node_path,
-                    };
-
-                    self.tree.push(node);
-                    depth_used[depth] += 1;
-                    self.chain_nodes.push(node);
-                    parent_path = node_path;
-                    self.chain_parent_tokens.push(token_idx);
-                }
-
-                // Seed heap with siblings
-                if self.chain_nodes.is_empty() {
-                    let budget_d0 = depth_budgets.first().copied().unwrap_or(config.tree_budget);
-                    for (i, &prob) in marginals[0].iter().enumerate() {
-                        if depth_used[0] >= budget_d0 {
-                            break;
-                        }
+        } else {
+            // Original seeding with progressive budget for depth 0
+            let budget_d0 = depth_budgets.first().copied().unwrap_or(config.tree_budget);
+            if config.vocab_size > 256 {
+                let mut nodes: Vec<TreeNode> = marginals[0]
+                    .par_iter()
+                    .enumerate()
+                    .filter_map(|(i, &prob)| {
                         if prob <= 0.0 {
-                            continue;
+                            return None;
                         }
                         let relevance = screener.relevance(0, i, &[]);
                         if relevance <= threshold {
-                            continue;
+                            return None;
                         }
-                        self.heap.push(TreeNode {
+                        Some(TreeNode {
                             score: prob.ln() + relevance.ln(),
                             depth: 0,
                             token_idx: i,
                             parent_path: i as u128,
-                        });
-                    }
-                } else {
-                    for chain_node in &self.chain_nodes {
-                        let depth = chain_node.depth;
-                        let parent_chain_score = if depth == 0 {
-                            0.0f32
-                        } else {
-                            self.chain_nodes[depth - 1].score
-                        };
-
-                        let sibling_parent_tokens = extract_parent_tokens_into(
-                            chain_node.parent_path >> 16,
-                            depth,
-                            &mut self.parent_tokens_buf,
-                        );
-
-                        for (i, &prob) in marginals[depth].iter().enumerate() {
-                            if i == chain_node.token_idx {
-                                continue;
-                            }
-                            if prob <= 0.0 {
-                                continue;
-                            }
-                            let relevance = screener.relevance(depth, i, sibling_parent_tokens);
-                            if relevance <= threshold {
-                                continue;
-                            }
-                            let sibling_path = if depth == 0 {
-                                i as u128
-                            } else {
-                                let ancestor_path = chain_node.parent_path >> 16;
-                                (ancestor_path << 16) | (i as u128)
-                            };
-
-                            self.heap.push(TreeNode {
-                                score: parent_chain_score + prob.ln() + relevance.ln(),
-                                depth,
-                                token_idx: i,
-                                parent_path: sibling_path,
-                            });
-                        }
-                    }
-
-                    let last = self.chain_nodes.last().unwrap();
-                    if last.depth + 1 < marginals.len() {
-                        let next_depth = last.depth + 1;
-                        let parent_tokens = extract_parent_tokens_into(
-                            last.parent_path,
-                            last.depth + 1,
-                            &mut self.parent_tokens_buf,
-                        );
-                        for (i, &prob) in marginals[next_depth].iter().enumerate() {
-                            if prob <= 0.0 {
-                                continue;
-                            }
-                            let relevance = screener.relevance(next_depth, i, parent_tokens);
-                            if relevance <= threshold {
-                                continue;
-                            }
-                            self.heap.push(TreeNode {
-                                score: last.score + prob.ln() + relevance.ln(),
-                                depth: next_depth,
-                                token_idx: i,
-                                parent_path: (last.parent_path << 16) | (i as u128),
-                            });
-                        }
-                    }
-                }
+                        })
+                    })
+                    .collect();
+                nodes.truncate(budget_d0);
+                self.heap.extend(nodes);
             } else {
-                let budget_d0 = depth_budgets.first().copied().unwrap_or(config.tree_budget);
                 for (i, &prob) in marginals[0].iter().enumerate() {
                     if depth_used[0] >= budget_d0 {
                         break;
@@ -2497,57 +2215,67 @@ impl TreeBuilder {
                     });
                 }
             }
+        }
 
-            // Best-first expansion with per-depth budget caps
-            let mut best_score: Option<f32> = None;
-            let mut _second_best_score: Option<f32> = None;
-            let mut consecutive_dominant: usize = 0;
-            while self.tree.len() < config.tree_budget {
-                let Some(best) = self.heap.pop() else {
-                    break;
-                };
+        // ── Phase C: Best-first expansion with progressive per-depth budget ──
+        let mut best_score: Option<f32> = None;
+        let mut second_best_score: Option<f32> = None;
+        let mut consecutive_dominant: usize = 0;
+        while self.tree.len() < config.tree_budget {
+            let Some(best) = self.heap.pop() else {
+                break;
+            };
 
-                if best.depth < depth_budgets.len()
-                    && depth_used[best.depth] >= depth_budgets[best.depth]
-                {
-                    continue;
+            // Per-depth budget check: skip nodes whose depth is exhausted
+            if best.depth < depth_budgets.len()
+                && depth_used[best.depth] >= depth_budgets[best.depth]
+            {
+                continue;
+            }
+
+            self.tree.push(best);
+            depth_used[best.depth] += 1;
+
+            // Confidence-gap early exit (Plan 026: AutoTTS)
+            let score = best.score;
+            match best_score {
+                None => {
+                    best_score = Some(score);
                 }
-
-                self.tree.push(best);
-                depth_used[best.depth] += 1;
-
-                let score = best.score;
-                match best_score {
-                    None => {
-                        best_score = Some(score);
-                        consecutive_dominant = 1;
+                Some(bs) if score > bs => {
+                    second_best_score = Some(bs);
+                    best_score = Some(score);
+                    consecutive_dominant = 1;
+                }
+                Some(bs) => {
+                    second_best_score = Some(score);
+                    if bs - score > config.early_exit_gap {
+                        consecutive_dominant += 1;
+                    } else {
+                        consecutive_dominant = 0;
                     }
-                    Some(bs) => {
-                        let gap = bs - score;
-                        if gap > config.early_exit_gap {
-                            consecutive_dominant += 1;
-                        } else {
-                            consecutive_dominant = 0;
-                            _second_best_score = Some(score);
-                        }
-                    }
                 }
+            }
+            if config.early_exit_patience > 0
+                && config.early_exit_gap > 0.0
+                && consecutive_dominant >= config.early_exit_patience
+                && best_score.unwrap_or(0.0) - second_best_score.unwrap_or(0.0)
+                    > config.early_exit_gap
+            {
+                break;
+            }
 
-                if config.early_exit_patience > 0
-                    && config.early_exit_gap > 0.0
-                    && consecutive_dominant >= config.early_exit_patience
-                {
-                    break;
-                }
-
-                // Expand children
+            if best.depth + 1 < marginals.len() {
                 let next_depth = best.depth + 1;
-                if next_depth >= marginals.len() {
+                // Skip expanding children into a depth that has exhausted its budget
+                if next_depth < depth_budgets.len()
+                    && depth_used[next_depth] >= depth_budgets[next_depth]
+                {
                     continue;
                 }
                 let parent_tokens = extract_parent_tokens_into(
                     best.parent_path,
-                    next_depth,
+                    best.depth + 1,
                     &mut self.parent_tokens_buf,
                 );
                 let log_m = &self.log_marginals[next_depth];
@@ -2560,232 +2288,396 @@ impl TreeBuilder {
                         continue;
                     }
                     self.heap.push(TreeNode {
-                        score: score + log_m[i] + relevance.ln(),
+                        score: best.score + log_m[i] + relevance.ln(),
                         depth: next_depth,
                         token_idx: i,
                         parent_path: (best.parent_path << 16) | (i as u128),
                     });
                 }
             }
-
-            &self.tree
         }
 
-        /// Build DDTree with graded relevance screening AND RecFM cross-scale consistency.
-        ///
-        /// Identical to [`build_screened`] but additionally filters branches whose
-        /// probability velocity violates cross-scale consistency (RecFM Theorem 3.1).
-        ///
-        /// Branches are pruned when `|v₂ − α·v₁| > threshold`, where:
-        /// - `v₁` = velocity at parent depth (change in top-1 probability)
-        /// - `v₂` = velocity at current depth
-        /// - `α` = scale factor from [`CrossScaleConfig::scale_alpha`]
-        ///
-        /// When `recfm_config.enable == false`, delegates to [`build_screened`] (zero overhead).
-        #[cfg(feature = "recfm")]
-        pub fn build_screened_recfm(
-            &mut self,
-            marginals: &[&[f32]],
-            config: &katgpt_types::Config,
-            screener: &dyn ScreeningPruner,
-            chain_seed: bool,
-            recfm_config: &CrossScaleConfig,
-        ) -> &[TreeNode] {
-            if !recfm_config.enable {
-                return self.build_screened(marginals, config, screener, chain_seed);
-            }
+        &self.tree
+    }
 
-            let threshold = config.screening_threshold;
-            self.heap.clear();
-            self.tree.clear();
-            self.chain_nodes.clear();
-            self.chain_parent_tokens.clear();
+    /// Build DDTree with externally-provided per-depth budget caps (Plan 200).
+    ///
+    /// Identical to [`build_screened_progressive`] but accepts pre-computed
+    /// `depth_budgets` directly instead of computing them from [`PositionWeightedBudget`].
+    ///
+    /// This is the integration point for `CorrelationBudgetAllocator` — the allocator
+    /// produces `depth_budgets` from EMA-tracked agreement rates, and this method
+    /// enforces them during tree expansion.
+    #[cfg(any(feature = "corr_budget", feature = "nf_flow_budget"))]
+    pub fn build_screened_with_depth_budgets(
+        &mut self,
+        marginals: &[&[f32]],
+        config: &katgpt_types::Config,
+        screener: &dyn ScreeningPruner,
+        chain_seed: bool,
+        depth_budgets: &[usize],
+    ) -> &[TreeNode] {
+        if depth_budgets.is_empty() {
+            return self.build_screened(marginals, config, screener, chain_seed);
+        }
 
-            if marginals.is_empty() {
-                return &self.tree;
-            }
+        let mut depth_used: Vec<usize> = vec![0; depth_budgets.len()];
+        let threshold = config.screening_threshold;
+        self.heap.clear();
+        self.tree.clear();
+        self.chain_nodes.clear();
+        self.chain_parent_tokens.clear();
 
-            self.cache_log_marginals(marginals);
+        if marginals.is_empty() {
+            return &self.tree;
+        }
 
-            // Track velocity at each depth for cross-scale consistency checks
-            let mut prev_velocity: f32 = 0.0;
+        self.cache_log_marginals(marginals);
 
-            if chain_seed {
-                // ── Phase A: Build greedy chain backbone with screening + RecFM ──
-                let mut cumulative_score: f32 = 0.0;
-                let mut parent_path: u128 = 0;
+        if chain_seed {
+            let mut cumulative_score: f32 = 0.0;
+            let mut parent_path: u128 = 0;
 
-                for (depth, marginal) in marginals.iter().enumerate() {
-                    if self.tree.len() >= config.tree_budget {
-                        break;
-                    }
-
-                    let best_token = marginal
-                        .iter()
-                        .enumerate()
-                        .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
-                        .map(|(i, _)| i);
-
-                    let Some(token_idx) = best_token else {
-                        break;
-                    };
-                    let prob = marginal[token_idx];
-
-                    if prob <= 0.0 {
-                        break;
-                    }
-
-                    let relevance = screener.relevance(depth, token_idx, &self.chain_parent_tokens);
-                    if relevance <= threshold {
-                        break;
-                    }
-
-                    // RecFM cross-scale consistency check
-                    let marginal_prev = if depth > 0 { marginals[depth - 1] } else { &[] };
-                    let velocity = branch_velocity_at(depth, marginal, marginal_prev);
-                    if depth > 0
-                        && !cross_scale_consistent(
-                            prev_velocity,
-                            velocity,
-                            recfm_config.scale_alpha,
-                            recfm_config.consistency_threshold,
-                        )
-                    {
-                        // Branch violates cross-scale consistency — prune
-                        break;
-                    }
-                    prev_velocity = velocity;
-
-                    // Blended score: ln(P_llm) + ln(R)
-                    cumulative_score += prob.ln() + relevance.ln();
-                    let node_path = if depth == 0 {
-                        token_idx as u128
-                    } else {
-                        (parent_path << 16) | (token_idx as u128)
-                    };
-
-                    let node = TreeNode {
-                        score: cumulative_score,
-                        depth,
-                        token_idx,
-                        parent_path: node_path,
-                    };
-
-                    self.tree.push(node);
-                    self.chain_nodes.push(node);
-                    parent_path = node_path;
-                    self.chain_parent_tokens.push(token_idx);
+            for (depth, marginal) in marginals.iter().enumerate() {
+                if self.tree.len() >= config.tree_budget {
+                    break;
+                }
+                if depth >= depth_budgets.len() || depth_used[depth] >= depth_budgets[depth] {
+                    break;
                 }
 
-                // ── Phase B: Seed heap with siblings + last chain children ──
-                if self.chain_nodes.is_empty() {
-                    if config.vocab_size > 256 {
-                        let nodes: Vec<TreeNode> = marginals[0]
-                            .par_iter()
-                            .enumerate()
-                            .filter_map(|(i, &prob)| {
-                                if prob <= 0.0 {
-                                    return None;
-                                }
-                                let relevance = screener.relevance(0, i, &[]);
-                                if relevance <= threshold {
-                                    return None;
-                                }
-                                Some(TreeNode {
-                                    score: prob.ln() + relevance.ln(),
-                                    depth: 0,
-                                    token_idx: i,
-                                    parent_path: i as u128,
-                                })
-                            })
-                            .collect();
-                        self.heap.extend(nodes);
-                    } else {
-                        for (i, &prob) in marginals[0].iter().enumerate() {
-                            if prob <= 0.0 {
-                                continue;
-                            }
-                            let relevance = screener.relevance(0, i, &[]);
-                            if relevance <= threshold {
-                                continue;
-                            }
-                            self.heap.push(TreeNode {
-                                score: prob.ln() + relevance.ln(),
-                                depth: 0,
-                                token_idx: i,
-                                parent_path: i as u128,
-                            });
-                        }
-                    }
+                let best_token = marginal
+                    .iter()
+                    .enumerate()
+                    .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
+                    .map(|(i, _)| i);
+
+                let Some(token_idx) = best_token else {
+                    break;
+                };
+                let prob = marginal[token_idx];
+
+                if prob <= 0.0 {
+                    break;
+                }
+
+                let relevance = screener.relevance(depth, token_idx, &self.chain_parent_tokens);
+                if relevance <= threshold {
+                    break;
+                }
+
+                cumulative_score += prob.ln() + relevance.ln();
+                let node_path = if depth == 0 {
+                    token_idx as u128
                 } else {
-                    for chain_node in &self.chain_nodes {
-                        let depth = chain_node.depth;
-                        let parent_chain_score = if depth == 0 {
-                            0.0f32
-                        } else {
-                            self.chain_nodes[depth - 1].score
-                        };
+                    (parent_path << 16) | (token_idx as u128)
+                };
 
-                        let sibling_parent_tokens = extract_parent_tokens_into(
-                            chain_node.parent_path >> 16,
-                            depth,
-                            &mut self.parent_tokens_buf,
-                        );
+                let node = TreeNode {
+                    score: cumulative_score,
+                    depth,
+                    token_idx,
+                    parent_path: node_path,
+                };
 
-                        for (i, &prob) in marginals[depth].iter().enumerate() {
-                            if i == chain_node.token_idx {
-                                continue;
-                            }
-                            if prob <= 0.0 {
-                                continue;
-                            }
-                            let relevance = screener.relevance(depth, i, sibling_parent_tokens);
-                            if relevance <= threshold {
-                                continue;
-                            }
-                            let sibling_path = if depth == 0 {
-                                i as u128
-                            } else {
-                                let ancestor_path = chain_node.parent_path >> 16;
-                                (ancestor_path << 16) | (i as u128)
-                            };
+                self.tree.push(node);
+                depth_used[depth] += 1;
+                self.chain_nodes.push(node);
+                parent_path = node_path;
+                self.chain_parent_tokens.push(token_idx);
+            }
 
-                            self.heap.push(TreeNode {
-                                score: parent_chain_score + prob.ln() + relevance.ln(),
-                                depth,
-                                token_idx: i,
-                                parent_path: sibling_path,
-                            });
-                        }
+            // Seed heap with siblings
+            if self.chain_nodes.is_empty() {
+                let budget_d0 = depth_budgets.first().copied().unwrap_or(config.tree_budget);
+                for (i, &prob) in marginals[0].iter().enumerate() {
+                    if depth_used[0] >= budget_d0 {
+                        break;
                     }
-
-                    let last = self.chain_nodes.last().unwrap();
-                    if last.depth + 1 < marginals.len() {
-                        let next_depth = last.depth + 1;
-                        let parent_tokens = extract_parent_tokens_into(
-                            last.parent_path,
-                            last.depth + 1,
-                            &mut self.parent_tokens_buf,
-                        );
-                        for (i, &prob) in marginals[next_depth].iter().enumerate() {
-                            if prob <= 0.0 {
-                                continue;
-                            }
-                            let relevance = screener.relevance(next_depth, i, parent_tokens);
-                            if relevance <= threshold {
-                                continue;
-                            }
-                            self.heap.push(TreeNode {
-                                score: last.score + prob.ln() + relevance.ln(),
-                                depth: next_depth,
-                                token_idx: i,
-                                parent_path: (last.parent_path << 16) | (i as u128),
-                            });
-                        }
+                    if prob <= 0.0 {
+                        continue;
                     }
+                    let relevance = screener.relevance(0, i, &[]);
+                    if relevance <= threshold {
+                        continue;
+                    }
+                    self.heap.push(TreeNode {
+                        score: prob.ln() + relevance.ln(),
+                        depth: 0,
+                        token_idx: i,
+                        parent_path: i as u128,
+                    });
                 }
             } else {
-                // Original seeding with screening (no chain seed)
+                for chain_node in &self.chain_nodes {
+                    let depth = chain_node.depth;
+                    let parent_chain_score = if depth == 0 {
+                        0.0f32
+                    } else {
+                        self.chain_nodes[depth - 1].score
+                    };
+
+                    let sibling_parent_tokens = extract_parent_tokens_into(
+                        chain_node.parent_path >> 16,
+                        depth,
+                        &mut self.parent_tokens_buf,
+                    );
+
+                    for (i, &prob) in marginals[depth].iter().enumerate() {
+                        if i == chain_node.token_idx {
+                            continue;
+                        }
+                        if prob <= 0.0 {
+                            continue;
+                        }
+                        let relevance = screener.relevance(depth, i, sibling_parent_tokens);
+                        if relevance <= threshold {
+                            continue;
+                        }
+                        let sibling_path = if depth == 0 {
+                            i as u128
+                        } else {
+                            let ancestor_path = chain_node.parent_path >> 16;
+                            (ancestor_path << 16) | (i as u128)
+                        };
+
+                        self.heap.push(TreeNode {
+                            score: parent_chain_score + prob.ln() + relevance.ln(),
+                            depth,
+                            token_idx: i,
+                            parent_path: sibling_path,
+                        });
+                    }
+                }
+
+                let last = self.chain_nodes.last().unwrap();
+                if last.depth + 1 < marginals.len() {
+                    let next_depth = last.depth + 1;
+                    let parent_tokens = extract_parent_tokens_into(
+                        last.parent_path,
+                        last.depth + 1,
+                        &mut self.parent_tokens_buf,
+                    );
+                    for (i, &prob) in marginals[next_depth].iter().enumerate() {
+                        if prob <= 0.0 {
+                            continue;
+                        }
+                        let relevance = screener.relevance(next_depth, i, parent_tokens);
+                        if relevance <= threshold {
+                            continue;
+                        }
+                        self.heap.push(TreeNode {
+                            score: last.score + prob.ln() + relevance.ln(),
+                            depth: next_depth,
+                            token_idx: i,
+                            parent_path: (last.parent_path << 16) | (i as u128),
+                        });
+                    }
+                }
+            }
+        } else {
+            let budget_d0 = depth_budgets.first().copied().unwrap_or(config.tree_budget);
+            for (i, &prob) in marginals[0].iter().enumerate() {
+                if depth_used[0] >= budget_d0 {
+                    break;
+                }
+                if prob <= 0.0 {
+                    continue;
+                }
+                let relevance = screener.relevance(0, i, &[]);
+                if relevance <= threshold {
+                    continue;
+                }
+                self.heap.push(TreeNode {
+                    score: prob.ln() + relevance.ln(),
+                    depth: 0,
+                    token_idx: i,
+                    parent_path: i as u128,
+                });
+            }
+        }
+
+        // Best-first expansion with per-depth budget caps
+        let mut best_score: Option<f32> = None;
+        let mut _second_best_score: Option<f32> = None;
+        let mut consecutive_dominant: usize = 0;
+        while self.tree.len() < config.tree_budget {
+            let Some(best) = self.heap.pop() else {
+                break;
+            };
+
+            if best.depth < depth_budgets.len()
+                && depth_used[best.depth] >= depth_budgets[best.depth]
+            {
+                continue;
+            }
+
+            self.tree.push(best);
+            depth_used[best.depth] += 1;
+
+            let score = best.score;
+            match best_score {
+                None => {
+                    best_score = Some(score);
+                    consecutive_dominant = 1;
+                }
+                Some(bs) => {
+                    let gap = bs - score;
+                    if gap > config.early_exit_gap {
+                        consecutive_dominant += 1;
+                    } else {
+                        consecutive_dominant = 0;
+                        _second_best_score = Some(score);
+                    }
+                }
+            }
+
+            if config.early_exit_patience > 0
+                && config.early_exit_gap > 0.0
+                && consecutive_dominant >= config.early_exit_patience
+            {
+                break;
+            }
+
+            // Expand children
+            let next_depth = best.depth + 1;
+            if next_depth >= marginals.len() {
+                continue;
+            }
+            let parent_tokens = extract_parent_tokens_into(
+                best.parent_path,
+                next_depth,
+                &mut self.parent_tokens_buf,
+            );
+            let log_m = &self.log_marginals[next_depth];
+            for (i, &prob) in marginals[next_depth].iter().enumerate() {
+                if prob <= 0.0 {
+                    continue;
+                }
+                let relevance = screener.relevance(next_depth, i, parent_tokens);
+                if relevance <= threshold {
+                    continue;
+                }
+                self.heap.push(TreeNode {
+                    score: score + log_m[i] + relevance.ln(),
+                    depth: next_depth,
+                    token_idx: i,
+                    parent_path: (best.parent_path << 16) | (i as u128),
+                });
+            }
+        }
+
+        &self.tree
+    }
+
+    /// Build DDTree with graded relevance screening AND RecFM cross-scale consistency.
+    ///
+    /// Identical to [`build_screened`] but additionally filters branches whose
+    /// probability velocity violates cross-scale consistency (RecFM Theorem 3.1).
+    ///
+    /// Branches are pruned when `|v₂ − α·v₁| > threshold`, where:
+    /// - `v₁` = velocity at parent depth (change in top-1 probability)
+    /// - `v₂` = velocity at current depth
+    /// - `α` = scale factor from [`CrossScaleConfig::scale_alpha`]
+    ///
+    /// When `recfm_config.enable == false`, delegates to [`build_screened`] (zero overhead).
+    #[cfg(feature = "recfm")]
+    pub fn build_screened_recfm(
+        &mut self,
+        marginals: &[&[f32]],
+        config: &katgpt_types::Config,
+        screener: &dyn ScreeningPruner,
+        chain_seed: bool,
+        recfm_config: &CrossScaleConfig,
+    ) -> &[TreeNode] {
+        if !recfm_config.enable {
+            return self.build_screened(marginals, config, screener, chain_seed);
+        }
+
+        let threshold = config.screening_threshold;
+        self.heap.clear();
+        self.tree.clear();
+        self.chain_nodes.clear();
+        self.chain_parent_tokens.clear();
+
+        if marginals.is_empty() {
+            return &self.tree;
+        }
+
+        self.cache_log_marginals(marginals);
+
+        // Track velocity at each depth for cross-scale consistency checks
+        let mut prev_velocity: f32 = 0.0;
+
+        if chain_seed {
+            // ── Phase A: Build greedy chain backbone with screening + RecFM ──
+            let mut cumulative_score: f32 = 0.0;
+            let mut parent_path: u128 = 0;
+
+            for (depth, marginal) in marginals.iter().enumerate() {
+                if self.tree.len() >= config.tree_budget {
+                    break;
+                }
+
+                let best_token = marginal
+                    .iter()
+                    .enumerate()
+                    .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
+                    .map(|(i, _)| i);
+
+                let Some(token_idx) = best_token else {
+                    break;
+                };
+                let prob = marginal[token_idx];
+
+                if prob <= 0.0 {
+                    break;
+                }
+
+                let relevance = screener.relevance(depth, token_idx, &self.chain_parent_tokens);
+                if relevance <= threshold {
+                    break;
+                }
+
+                // RecFM cross-scale consistency check
+                let marginal_prev = if depth > 0 { marginals[depth - 1] } else { &[] };
+                let velocity = branch_velocity_at(depth, marginal, marginal_prev);
+                if depth > 0
+                    && !cross_scale_consistent(
+                        prev_velocity,
+                        velocity,
+                        recfm_config.scale_alpha,
+                        recfm_config.consistency_threshold,
+                    )
+                {
+                    // Branch violates cross-scale consistency — prune
+                    break;
+                }
+                prev_velocity = velocity;
+
+                // Blended score: ln(P_llm) + ln(R)
+                cumulative_score += prob.ln() + relevance.ln();
+                let node_path = if depth == 0 {
+                    token_idx as u128
+                } else {
+                    (parent_path << 16) | (token_idx as u128)
+                };
+
+                let node = TreeNode {
+                    score: cumulative_score,
+                    depth,
+                    token_idx,
+                    parent_path: node_path,
+                };
+
+                self.tree.push(node);
+                self.chain_nodes.push(node);
+                parent_path = node_path;
+                self.chain_parent_tokens.push(token_idx);
+            }
+
+            // ── Phase B: Seed heap with siblings + last chain children ──
+            if self.chain_nodes.is_empty() {
                 if config.vocab_size > 256 {
                     let nodes: Vec<TreeNode> = marginals[0]
                         .par_iter()
@@ -2824,87 +2716,57 @@ impl TreeBuilder {
                         });
                     }
                 }
-            }
+            } else {
+                for chain_node in &self.chain_nodes {
+                    let depth = chain_node.depth;
+                    let parent_chain_score = if depth == 0 {
+                        0.0f32
+                    } else {
+                        self.chain_nodes[depth - 1].score
+                    };
 
-            // ── Phase C: Best-first expansion with screening + RecFM ─────
-            let mut best_score: Option<f32> = None;
-            let mut second_best_score: Option<f32> = None;
-            let mut consecutive_dominant: usize = 0;
-            while self.tree.len() < config.tree_budget {
-                let Some(best) = self.heap.pop() else {
-                    break;
-                };
-                self.tree.push(best);
-
-                // Confidence-gap early exit (Plan 026: AutoTTS)
-                let score = best.score;
-                match best_score {
-                    None => {
-                        best_score = Some(score);
-                    }
-                    Some(bs) if score > bs => {
-                        second_best_score = Some(bs);
-                        best_score = Some(score);
-                        consecutive_dominant = 1;
-                    }
-                    Some(bs) => {
-                        second_best_score = Some(score);
-                        if bs - score > config.early_exit_gap {
-                            consecutive_dominant += 1;
-                        } else {
-                            consecutive_dominant = 0;
-                        }
-                    }
-                }
-                if config.early_exit_patience > 0
-                    && config.early_exit_gap > 0.0
-                    && consecutive_dominant >= config.early_exit_patience
-                    && best_score.unwrap_or(0.0) - second_best_score.unwrap_or(0.0)
-                        > config.early_exit_gap
-                {
-                    break;
-                }
-
-                if best.depth + 1 < marginals.len() {
-                    let next_depth = best.depth + 1;
-                    let parent_tokens = extract_parent_tokens_into(
-                        best.parent_path,
-                        best.depth + 1,
+                    let sibling_parent_tokens = extract_parent_tokens_into(
+                        chain_node.parent_path >> 16,
+                        depth,
                         &mut self.parent_tokens_buf,
                     );
 
-                    // RecFM: child velocity does not depend on token index `i` —
-                    // it's a property of the (parent_depth, child_depth) marginal
-                    // transition. Compute once, was per-token (O(V²) per expansion).
-                    let child_marginal = marginals[next_depth];
-                    let parent_marginal = marginals[best.depth];
-                    let parent_velocity = branch_velocity_at(
-                        best.depth,
-                        parent_marginal,
-                        if best.depth > 0 {
-                            marginals[best.depth - 1]
+                    for (i, &prob) in marginals[depth].iter().enumerate() {
+                        if i == chain_node.token_idx {
+                            continue;
+                        }
+                        if prob <= 0.0 {
+                            continue;
+                        }
+                        let relevance = screener.relevance(depth, i, sibling_parent_tokens);
+                        if relevance <= threshold {
+                            continue;
+                        }
+                        let sibling_path = if depth == 0 {
+                            i as u128
                         } else {
-                            &[]
-                        },
-                    );
-                    let child_velocity =
-                        branch_velocity_at(next_depth, child_marginal, parent_marginal);
+                            let ancestor_path = chain_node.parent_path >> 16;
+                            (ancestor_path << 16) | (i as u128)
+                        };
 
-                    // Hoist cross_scale_consistent: its inputs (parent_velocity,
-                    // child_velocity, recfm_config) are loop-invariant — the result
-                    // is identical for every token `i`. If inconsistent, skip the
-                    // entire inner loop (no children added at this depth).
-                    if !cross_scale_consistent(
-                        parent_velocity,
-                        child_velocity,
-                        recfm_config.scale_alpha,
-                        recfm_config.consistency_threshold,
-                    ) {
-                        continue;
+                        self.heap.push(TreeNode {
+                            score: parent_chain_score + prob.ln() + relevance.ln(),
+                            depth,
+                            token_idx: i,
+                            parent_path: sibling_path,
+                        });
                     }
+                }
 
-                    let log_m = &self.log_marginals[next_depth];
-                    for (i, &prob) in child_marginal.iter().enumerate() {
+                let last = self.chain_nodes.last().unwrap();
+                if last.depth + 1 < marginals.len() {
+                    let next_depth = last.depth + 1;
+                    let parent_tokens = extract_parent_tokens_into(
+                        last.parent_path,
+                        last.depth + 1,
+                        &mut self.parent_tokens_buf,
+                    );
+                    for (i, &prob) in marginals[next_depth].iter().enumerate() {
                         if prob <= 0.0 {
                             continue;
                         }
@@ -2912,22 +2774,159 @@ impl TreeBuilder {
                         if relevance <= threshold {
                             continue;
                         }
-
                         self.heap.push(TreeNode {
-                            score: best.score + log_m[i] + relevance.ln(),
+                            score: last.score + prob.ln() + relevance.ln(),
                             depth: next_depth,
                             token_idx: i,
-                            parent_path: (best.parent_path << 16) | (i as u128),
+                            parent_path: (last.parent_path << 16) | (i as u128),
                         });
                     }
                 }
             }
-
-            &self.tree
+        } else {
+            // Original seeding with screening (no chain seed)
+            if config.vocab_size > 256 {
+                let nodes: Vec<TreeNode> = marginals[0]
+                    .par_iter()
+                    .enumerate()
+                    .filter_map(|(i, &prob)| {
+                        if prob <= 0.0 {
+                            return None;
+                        }
+                        let relevance = screener.relevance(0, i, &[]);
+                        if relevance <= threshold {
+                            return None;
+                        }
+                        Some(TreeNode {
+                            score: prob.ln() + relevance.ln(),
+                            depth: 0,
+                            token_idx: i,
+                            parent_path: i as u128,
+                        })
+                    })
+                    .collect();
+                self.heap.extend(nodes);
+            } else {
+                for (i, &prob) in marginals[0].iter().enumerate() {
+                    if prob <= 0.0 {
+                        continue;
+                    }
+                    let relevance = screener.relevance(0, i, &[]);
+                    if relevance <= threshold {
+                        continue;
+                    }
+                    self.heap.push(TreeNode {
+                        score: prob.ln() + relevance.ln(),
+                        depth: 0,
+                        token_idx: i,
+                        parent_path: i as u128,
+                    });
+                }
+            }
         }
-    }
 
-    // ── SDE-Aware DDTree Builders (ELF Plan 079) ────────────────────
+        // ── Phase C: Best-first expansion with screening + RecFM ─────
+        let mut best_score: Option<f32> = None;
+        let mut second_best_score: Option<f32> = None;
+        let mut consecutive_dominant: usize = 0;
+        while self.tree.len() < config.tree_budget {
+            let Some(best) = self.heap.pop() else {
+                break;
+            };
+            self.tree.push(best);
+
+            // Confidence-gap early exit (Plan 026: AutoTTS)
+            let score = best.score;
+            match best_score {
+                None => {
+                    best_score = Some(score);
+                }
+                Some(bs) if score > bs => {
+                    second_best_score = Some(bs);
+                    best_score = Some(score);
+                    consecutive_dominant = 1;
+                }
+                Some(bs) => {
+                    second_best_score = Some(score);
+                    if bs - score > config.early_exit_gap {
+                        consecutive_dominant += 1;
+                    } else {
+                        consecutive_dominant = 0;
+                    }
+                }
+            }
+            if config.early_exit_patience > 0
+                && config.early_exit_gap > 0.0
+                && consecutive_dominant >= config.early_exit_patience
+                && best_score.unwrap_or(0.0) - second_best_score.unwrap_or(0.0)
+                    > config.early_exit_gap
+            {
+                break;
+            }
+
+            if best.depth + 1 < marginals.len() {
+                let next_depth = best.depth + 1;
+                let parent_tokens = extract_parent_tokens_into(
+                    best.parent_path,
+                    best.depth + 1,
+                    &mut self.parent_tokens_buf,
+                );
+
+                // RecFM: child velocity does not depend on token index `i` —
+                // it's a property of the (parent_depth, child_depth) marginal
+                // transition. Compute once, was per-token (O(V²) per expansion).
+                let child_marginal = marginals[next_depth];
+                let parent_marginal = marginals[best.depth];
+                let parent_velocity = branch_velocity_at(
+                    best.depth,
+                    parent_marginal,
+                    if best.depth > 0 {
+                        marginals[best.depth - 1]
+                    } else {
+                        &[]
+                    },
+                );
+                let child_velocity =
+                    branch_velocity_at(next_depth, child_marginal, parent_marginal);
+
+                // Hoist cross_scale_consistent: its inputs (parent_velocity,
+                // child_velocity, recfm_config) are loop-invariant — the result
+                // is identical for every token `i`. If inconsistent, skip the
+                // entire inner loop (no children added at this depth).
+                if !cross_scale_consistent(
+                    parent_velocity,
+                    child_velocity,
+                    recfm_config.scale_alpha,
+                    recfm_config.consistency_threshold,
+                ) {
+                    continue;
+                }
+
+                let log_m = &self.log_marginals[next_depth];
+                for (i, &prob) in child_marginal.iter().enumerate() {
+                    if prob <= 0.0 {
+                        continue;
+                    }
+                    let relevance = screener.relevance(next_depth, i, parent_tokens);
+                    if relevance <= threshold {
+                        continue;
+                    }
+
+                    self.heap.push(TreeNode {
+                        score: best.score + log_m[i] + relevance.ln(),
+                        depth: next_depth,
+                        token_idx: i,
+                        parent_path: (best.parent_path << 16) | (i as u128),
+                    });
+                }
+            }
+        }
+
+        &self.tree
+    }
+}
+
+// ── SDE-Aware DDTree Builders (ELF Plan 079) ────────────────────
 //
 // Plan 391 (2026-07-05): moved from `katgpt-rs/src/speculative/dd_tree.rs`
 // because they only compose leaf-resident primitives (`inject_sde_noise_into`,
@@ -3803,7 +3802,10 @@ pub fn build_dd_tree_speculative_kurtosis<P>(
     config: &katgpt_types::Config,
     rng: &mut fastrand::Rng,
     kurtosis_threshold: f32,
-) -> (Vec<TreeNode>, Vec<katgpt_core::speculative::types::RejectionReason>)
+) -> (
+    Vec<TreeNode>,
+    Vec<katgpt_core::speculative::types::RejectionReason>,
+)
 where
     P: ConstraintPruner + Send + Sync,
 {
@@ -3817,10 +3819,12 @@ where
         // ── Kurtosis gate: reject flat positions before candidate generation ──
         let kurtosis = crate::kurtosis_gate::excess_kurtosis(marginal);
         if kurtosis <= kurtosis_threshold {
-            rejections.push(katgpt_core::speculative::types::RejectionReason::KurtosisRejection {
-                kurtosis,
-                threshold: kurtosis_threshold,
-            });
+            rejections.push(
+                katgpt_core::speculative::types::RejectionReason::KurtosisRejection {
+                    kurtosis,
+                    threshold: kurtosis_threshold,
+                },
+            );
             // Skip this position entirely — tree will not expand here
             continue;
         }
@@ -4133,7 +4137,6 @@ fn path_to_tree_nodes(path: &[Vec<usize>]) -> Vec<TreeNode> {
 
     nodes
 }
-
 
 #[cfg(test)]
 #[path = "dd_tree_tests.rs"]

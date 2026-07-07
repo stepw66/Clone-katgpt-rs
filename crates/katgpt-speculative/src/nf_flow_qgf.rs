@@ -30,8 +30,8 @@
 //! reduces to vanilla `NfFlowScore::score`. The fusion adds zero overhead in
 //! the unguided regime.
 
-use katgpt_core::qgf::QGuidedDrafter;
 use katgpt_core::SpeculativeGenerator;
+use katgpt_core::qgf::QGuidedDrafter;
 
 use crate::nf_flow::NfFlowScore;
 use crate::nf_flow_generator::{FlowScoredError, ScoredToken};
@@ -98,10 +98,10 @@ impl<G, O> NfQgfDrafter<G, O> {
 impl<G, O> NfQgfDrafter<G, O>
 where
     G: SpeculativeGenerator<
-        Condition = TokenCondition,
-        Output = TokenOutput,
-        Error = TokenGenError,
-    >,
+            Condition = TokenCondition,
+            Output = TokenOutput,
+            Error = TokenGenError,
+        >,
     O: katgpt_core::QGradientOracle<State = TokenCondition, Action = TokenOutput>,
 {
     /// Construct from raw generator + oracle, with zero guidance weight.
@@ -193,9 +193,9 @@ where
                     selected.clear();
                     selected.extend_from_slice(&condition.parent_tokens);
                     selected.push(token.token_idx);
-                    let fs = self
-                        .scorer
-                        .score_with_qgf(marginals_history, &selected, &gradient, weight);
+                    let fs =
+                        self.scorer
+                            .score_with_qgf(marginals_history, &selected, &gradient, weight);
                     ScoredToken {
                         token,
                         flow_score: fs,
@@ -254,10 +254,10 @@ where
 impl<G, O> SpeculativeGenerator for NfQgfDrafter<G, O>
 where
     G: SpeculativeGenerator<
-        Condition = TokenCondition,
-        Output = TokenOutput,
-        Error = TokenGenError,
-    >,
+            Condition = TokenCondition,
+            Output = TokenOutput,
+            Error = TokenGenError,
+        >,
     O: katgpt_core::QGradientOracle<State = TokenCondition, Action = TokenOutput>,
 {
     type Condition = TokenCondition;
@@ -340,12 +340,7 @@ mod tests {
             self.gradient.clone()
         }
 
-        fn q_gradient_into(
-            &self,
-            _state: &Self::State,
-            _action: &Self::Action,
-            out: &mut [f32],
-        ) {
+        fn q_gradient_into(&self, _state: &Self::State, _action: &Self::Action, out: &mut [f32]) {
             let n = out.len().min(self.gradient.len());
             out[..n].copy_from_slice(&self.gradient[..n]);
         }
@@ -381,7 +376,10 @@ mod tests {
         assert_eq!(scored.len(), 3);
         // With weight = 0, the top candidate should match NFCoT-only ranking.
         // NFCoT favors token 0 (peaked marginal at position 0).
-        assert_eq!(scored[0].token.token_idx, 0, "zero-weight top should match NFCoT");
+        assert_eq!(
+            scored[0].token.token_idx, 0,
+            "zero-weight top should match NFCoT"
+        );
     }
 
     // ── Tests: QGF + NFCoT > NFCoT alone (ranking flips) ───────────
@@ -557,7 +555,11 @@ mod tests {
         let mut rng = fastrand::Rng::new();
 
         let result = fusion.generate(&make_condition(&[]), &mut rng).unwrap();
-        assert_eq!(result.len(), 3, "trait delegation should return all candidates");
+        assert_eq!(
+            result.len(),
+            3,
+            "trait delegation should return all candidates"
+        );
     }
 
     // ── Tests: Sudoku-like scenario (the unblock) ──────────────────

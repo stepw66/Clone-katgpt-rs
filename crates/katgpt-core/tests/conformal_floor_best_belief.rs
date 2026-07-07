@@ -111,11 +111,7 @@ fn select_mle_floor(candidates: &[(u32, u32)]) -> usize {
 fn rate(sf: (u32, u32)) -> f32 {
     let (s, f) = sf;
     let n = s + f;
-    if n == 0 {
-        0.5
-    } else {
-        s as f32 / n as f32
-    }
+    if n == 0 { 0.5 } else { s as f32 / n as f32 }
 }
 
 // ===== Selection-regret simulation =====
@@ -196,11 +192,9 @@ enum ObsMode {
 fn draw_obs_counts(mode: ObsMode, k: usize, rng: &mut SplitMix64) -> Vec<u32> {
     match mode {
         ObsMode::Uniform { n_mean } => vec![n_mean; k],
-        ObsMode::Variable { n_mean } => {
-            (0..k)
-                .map(|_| 2 + (rng.next_unit() * (2.0 * n_mean as f32 - 1.0)) as u32)
-                .collect()
-        }
+        ObsMode::Variable { n_mean } => (0..k)
+            .map(|_| 2 + (rng.next_unit() * (2.0 * n_mean as f32 - 1.0)) as u32)
+            .collect(),
         ObsMode::OneLowData { n_mean, n_lo } => {
             let low_idx = (rng.next_unit() * k as f32) as usize % k;
             (0..k)
@@ -250,27 +244,50 @@ fn uniform_n_produces_identical_selections_baseline() {
     let epsilon = 0.05;
     let n_trials = 5000;
 
-    println!("\n=== T5 baseline: uniform n (K={}, ε={}, {} trials) ===", k, epsilon, n_trials);
-    println!("{:>6} | {:>14} | {:>14} | verdict", "n", "regret_beta", "regret_mle");
+    println!(
+        "\n=== T5 baseline: uniform n (K={}, ε={}, {} trials) ===",
+        k, epsilon, n_trials
+    );
+    println!(
+        "{:>6} | {:>14} | {:>14} | verdict",
+        "n", "regret_beta", "regret_mle"
+    );
     println!("{}", "-".repeat(54));
 
     for &n in &[4u32, 8, 16, 32, 64] {
         let (rb, rm) = run_experiment(
-            k, ObsMode::Uniform { n_mean: n }, epsilon, n_trials, 0x1111, 0.3, 0.9,
+            k,
+            ObsMode::Uniform { n_mean: n },
+            epsilon,
+            n_trials,
+            0x1111,
+            0.3,
+            0.9,
         );
-        let verdict = if (rb - rm).abs() < 1e-6 { "TIE (expected)" } else { "DIFF (unexpected!)" };
+        let verdict = if (rb - rm).abs() < 1e-6 {
+            "TIE (expected)"
+        } else {
+            "DIFF (unexpected!)"
+        };
         println!("{:>6} | {:>14.6} | {:>14.6} | {}", n, rb, rm, verdict);
     }
 
     // Assert the baseline: at uniform n, regrets are identical (within float
     // noise). This confirms the monotonicity argument empirically.
     let (rb, rm) = run_experiment(
-        k, ObsMode::Uniform { n_mean: 8 }, epsilon, n_trials, 0x1111, 0.3, 0.9,
+        k,
+        ObsMode::Uniform { n_mean: 8 },
+        epsilon,
+        n_trials,
+        0x1111,
+        0.3,
+        0.9,
     );
     assert!(
         (rb - rm).abs() < 1e-6,
         "uniform n must produce identical selections (got beta={:.6} vs mle={:.6})",
-        rb, rm
+        rb,
+        rm
     );
 }
 
@@ -283,7 +300,10 @@ fn beta_beats_mle_with_variable_observation_counts() {
     let epsilon = 0.05;
     let n_trials = 5000;
 
-    println!("\n=== T5: variable n (K={}, ε={}, {} trials) ===", k, epsilon, n_trials);
+    println!(
+        "\n=== T5: variable n (K={}, ε={}, {} trials) ===",
+        k, epsilon, n_trials
+    );
     println!(
         "{:>8} | {:>14} | {:>14} | {:>12} | verdict",
         "n_mean", "regret_beta", "regret_mle", "improvement"
@@ -293,7 +313,13 @@ fn beta_beats_mle_with_variable_observation_counts() {
     let mut beta_wins = 0;
     for &n_mean in &[4u32, 8, 16, 32, 64, 128] {
         let (rb, rm) = run_experiment(
-            k, ObsMode::Variable { n_mean }, epsilon, n_trials, 0xDEAD_BEEF, 0.3, 0.9,
+            k,
+            ObsMode::Variable { n_mean },
+            epsilon,
+            n_trials,
+            0xDEAD_BEEF,
+            0.3,
+            0.9,
         );
         let improvement = (rm - rb) / rm.max(1e-9);
         let verdict = if rb < rm - 1e-6 {
@@ -306,7 +332,11 @@ fn beta_beats_mle_with_variable_observation_counts() {
         };
         println!(
             "{:>8} | {:>14.6} | {:>14.6} | {:>11.2}% | {}",
-            n_mean, rb, rm, improvement * 100.0, verdict
+            n_mean,
+            rb,
+            rm,
+            improvement * 100.0,
+            verdict
         );
     }
 
@@ -314,12 +344,19 @@ fn beta_beats_mle_with_variable_observation_counts() {
     // The honest expectation: Beta wins with variable n. We assert it wins
     // at low mean n (most heteroscedastic noise).
     let (rb_low, rm_low) = run_experiment(
-        k, ObsMode::Variable { n_mean: 4 }, epsilon, n_trials, 0xDEAD_BEEF, 0.3, 0.9,
+        k,
+        ObsMode::Variable { n_mean: 4 },
+        epsilon,
+        n_trials,
+        0xDEAD_BEEF,
+        0.3,
+        0.9,
     );
     assert!(
         rb_low < rm_low,
         "Beta must beat MLE at variable n_mean=4 (got beta={:.6} vs mle={:.6})",
-        rb_low, rm_low
+        rb_low,
+        rm_low
     );
 }
 
@@ -333,7 +370,10 @@ fn beta_beats_mle_on_low_data_stress_test() {
     let epsilon = 0.05;
     let n_trials = 5000;
 
-    println!("\n=== T5: one-low-data stress (K={}, ε={}, {} trials) ===", k, epsilon, n_trials);
+    println!(
+        "\n=== T5: one-low-data stress (K={}, ε={}, {} trials) ===",
+        k, epsilon, n_trials
+    );
     println!(
         "{:>6} {:>4} | {:>14} | {:>14} | {:>12} | verdict",
         "n_mean", "n_lo", "regret_beta", "regret_mle", "improvement"
@@ -342,26 +382,51 @@ fn beta_beats_mle_on_low_data_stress_test() {
 
     for &(n_mean, n_lo) in &[(32u32, 2u32), (64, 2), (32, 4), (64, 4), (128, 2)] {
         let (rb, rm) = run_experiment(
-            k, ObsMode::OneLowData { n_mean, n_lo }, epsilon, n_trials, 0xCAFE_F00D, 0.3, 0.9,
+            k,
+            ObsMode::OneLowData { n_mean, n_lo },
+            epsilon,
+            n_trials,
+            0xCAFE_F00D,
+            0.3,
+            0.9,
         );
         let improvement = (rm - rb) / rm.max(1e-9);
-        let verdict = if rb < rm - 1e-6 { "BETA WINS" }
-                      else if (rb - rm).abs() < 1e-6 { "tie" }
-                      else { "MLE wins" };
+        let verdict = if rb < rm - 1e-6 {
+            "BETA WINS"
+        } else if (rb - rm).abs() < 1e-6 {
+            "tie"
+        } else {
+            "MLE wins"
+        };
         println!(
             "{:>6} {:>4} | {:>14.6} | {:>14.6} | {:>11.2}% | {}",
-            n_mean, n_lo, rb, rm, improvement * 100.0, verdict
+            n_mean,
+            n_lo,
+            rb,
+            rm,
+            improvement * 100.0,
+            verdict
         );
     }
 
     // The n_lo=2 case is the sharpest test: a 2/2 lucky streak is pure noise.
     let (rb, rm) = run_experiment(
-        k, ObsMode::OneLowData { n_mean: 32, n_lo: 2 }, epsilon, n_trials, 0xCAFE_F00D, 0.3, 0.9,
+        k,
+        ObsMode::OneLowData {
+            n_mean: 32,
+            n_lo: 2,
+        },
+        epsilon,
+        n_trials,
+        0xCAFE_F00D,
+        0.3,
+        0.9,
     );
     assert!(
         rb < rm,
         "Beta must beat MLE on the n_lo=2 stress test (got beta={:.6} vs mle={:.6})",
-        rb, rm
+        rb,
+        rm
     );
 }
 
@@ -374,16 +439,33 @@ fn beta_and_mle_converge_at_high_observation_count() {
     let n_trials = 3000;
 
     let (rb, rm) = run_experiment(
-        k, ObsMode::Variable { n_mean: 512 }, epsilon, n_trials, 0xCAFE_F00D, 0.3, 0.9,
+        k,
+        ObsMode::Variable { n_mean: 512 },
+        epsilon,
+        n_trials,
+        0xCAFE_F00D,
+        0.3,
+        0.9,
     );
 
-    println!("\n=== T5 convergence (K={}, Variable n_mean=512, ε={}, {} trials) ===", k, epsilon, n_trials);
+    println!(
+        "\n=== T5 convergence (K={}, Variable n_mean=512, ε={}, {} trials) ===",
+        k, epsilon, n_trials
+    );
     println!("  regret_beta = {:.6}", rb);
     println!("  regret_mle  = {:.6}", rm);
 
     // Both should be small (enough data on average).
-    assert!(rb < 0.05, "Beta regret should be small at n_mean=512 (got {:.4})", rb);
-    assert!(rm < 0.05, "MLE regret should be small at n_mean=512 (got {:.4})", rm);
+    assert!(
+        rb < 0.05,
+        "Beta regret should be small at n_mean=512 (got {:.4})",
+        rb
+    );
+    assert!(
+        rm < 0.05,
+        "MLE regret should be small at n_mean=512 (got {:.4})",
+        rm
+    );
 }
 
 #[test]
@@ -394,17 +476,33 @@ fn beta_conservatism_sweep_variable_n() {
     let n_mean = 8;
     let n_trials = 3000;
 
-    println!("\n=== T5: ε sweep (K={}, Variable n_mean={}, {} trials) ===", k, n_mean, n_trials);
-    println!("{:>8} | {:>14} | {:>14} | verdict", "ε", "regret_beta", "regret_mle");
+    println!(
+        "\n=== T5: ε sweep (K={}, Variable n_mean={}, {} trials) ===",
+        k, n_mean, n_trials
+    );
+    println!(
+        "{:>8} | {:>14} | {:>14} | verdict",
+        "ε", "regret_beta", "regret_mle"
+    );
     println!("{}", "-".repeat(58));
 
     for &eps in &[0.01_f32, 0.05, 0.10, 0.20, 0.50] {
         let (rb, rm) = run_experiment(
-            k, ObsMode::Variable { n_mean }, eps, n_trials, 0xFEED_FACE, 0.3, 0.9,
+            k,
+            ObsMode::Variable { n_mean },
+            eps,
+            n_trials,
+            0xFEED_FACE,
+            0.3,
+            0.9,
         );
-        let verdict = if rb < rm - 1e-6 { "BETA WINS" }
-                      else if (rb - rm).abs() < 1e-6 { "tie" }
-                      else { "MLE wins" };
+        let verdict = if rb < rm - 1e-6 {
+            "BETA WINS"
+        } else if (rb - rm).abs() < 1e-6 {
+            "tie"
+        } else {
+            "MLE wins"
+        };
         println!("{:>8.2} | {:>14.6} | {:>14.6} | {}", eps, rb, rm, verdict);
     }
     // Descriptive only — no threshold assertion.
@@ -423,16 +521,32 @@ fn beta_full_report_for_benchmark_doc() {
     let k = 8;
 
     println!("## Selection regret (θ_best − θ_selected), lower is better\n");
-    println!("### K={} candidates, θ ∈ [0.3, 0.9], {} trials\n", k, n_trials);
+    println!(
+        "### K={} candidates, θ ∈ [0.3, 0.9], {} trials\n",
+        k, n_trials
+    );
 
     println!("\n--- Uniform n (baseline: Beta should TIE MLE) ---\n");
-    println!("{:>6} | {:>14} | {:>14} | verdict", "n", "regret_beta", "regret_mle");
+    println!(
+        "{:>6} | {:>14} | {:>14} | verdict",
+        "n", "regret_beta", "regret_mle"
+    );
     println!("{}", "-".repeat(54));
     for &n in &[4u32, 8, 16, 32, 64] {
         let (rb, rm) = run_experiment(
-            k, ObsMode::Uniform { n_mean: n }, epsilon, n_trials, 0x1111, 0.3, 0.9,
+            k,
+            ObsMode::Uniform { n_mean: n },
+            epsilon,
+            n_trials,
+            0x1111,
+            0.3,
+            0.9,
         );
-        let verdict = if (rb - rm).abs() < 1e-6 { "TIE" } else { "DIFF" };
+        let verdict = if (rb - rm).abs() < 1e-6 {
+            "TIE"
+        } else {
+            "DIFF"
+        };
         println!("{:>6} | {:>14.6} | {:>14.6} | {}", n, rb, rm, verdict);
     }
 
@@ -444,15 +558,29 @@ fn beta_full_report_for_benchmark_doc() {
     println!("{}", "-".repeat(70));
     for &n_mean in &[4u32, 8, 16, 32, 64, 128, 256] {
         let (rb, rm) = run_experiment(
-            k, ObsMode::Variable { n_mean }, epsilon, n_trials, 0xDEAD_BEEF, 0.3, 0.9,
+            k,
+            ObsMode::Variable { n_mean },
+            epsilon,
+            n_trials,
+            0xDEAD_BEEF,
+            0.3,
+            0.9,
         );
         let improvement = (rm - rb) / rm.max(1e-9);
-        let verdict = if rb < rm - 1e-6 { "BETA WINS" }
-                      else if (rb - rm).abs() < 1e-6 { "tie" }
-                      else { "MLE wins" };
+        let verdict = if rb < rm - 1e-6 {
+            "BETA WINS"
+        } else if (rb - rm).abs() < 1e-6 {
+            "tie"
+        } else {
+            "MLE wins"
+        };
         println!(
             "{:>8} | {:>14.6} | {:>14.6} | {:>11.2}% | {}",
-            n_mean, rb, rm, improvement * 100.0, verdict
+            n_mean,
+            rb,
+            rm,
+            improvement * 100.0,
+            verdict
         );
     }
 }

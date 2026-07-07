@@ -175,11 +175,7 @@ impl StrategyUtilization {
             }
         }
         let log_n = (ChiaroscuroKvStrategy::NUM_VARIANTS as f32).ln();
-        if log_n <= 0.0 {
-            0.0
-        } else {
-            u / log_n
-        }
+        if log_n <= 0.0 { 0.0 } else { u / log_n }
     }
 
     /// Fraction of tokens routed to the given strategy.
@@ -314,21 +310,30 @@ mod tests {
         let r = s.compression_ratio(256, DEFAULT_DCT_TRUNCATED_COEFFS);
         assert!(r > 1.0, "DCT-truncated must compress, got ratio {r}");
         // For d=256, K=32: ratio = (256*2)/(32*4+4) = 512/132 ≈ 3.88
-        assert!(r > 3.0 && r < 5.0, "expected ~3.9× compression for d=256 K=32, got {r}");
+        assert!(
+            r > 3.0 && r < 5.0,
+            "expected ~3.9× compression for d=256 K=32, got {r}"
+        );
     }
 
     #[test]
     fn test_compression_ratio_quantized() {
         let s = ChiaroscuroKvStrategy::Quantized;
         let r = s.compression_ratio(256, 0);
-        assert!((r - 4.0).abs() < 1e-6, "Quantized ratio should be 4.0, got {r}");
+        assert!(
+            (r - 4.0).abs() < 1e-6,
+            "Quantized ratio should be 4.0, got {r}"
+        );
     }
 
     #[test]
     fn test_compression_ratio_full_precision() {
         let s = ChiaroscuroKvStrategy::FullPrecision;
         let r = s.compression_ratio(256, 0);
-        assert!((r - 1.0).abs() < 1e-6, "FullPrecision ratio should be 1.0, got {r}");
+        assert!(
+            (r - 1.0).abs() < 1e-6,
+            "FullPrecision ratio should be 1.0, got {r}"
+        );
     }
 
     #[test]
@@ -347,7 +352,10 @@ mod tests {
             u.observe(ChiaroscuroKvStrategy::FullPrecision);
         }
         let e = u.utilization_entropy();
-        assert!((e - 1.0).abs() < 1e-3, "uniform routing U should be ≈ 1.0, got {e}");
+        assert!(
+            (e - 1.0).abs() < 1e-3,
+            "uniform routing U should be ≈ 1.0, got {e}"
+        );
     }
 
     #[test]
@@ -380,8 +388,14 @@ mod tests {
         let mut d = ChiaroscuroKvDispatcher::default();
         let _ = d.dispatch(&[1.0f32; 64], 0.85, 0.87); // → DctTruncated
         let _ = d.dispatch(&[1.0f32; 64], 0.85, 0.87);
-        assert_eq!(d.utilization.counts[ChiaroscuroKvStrategy::DctTruncated.as_index()], 2);
-        assert_eq!(d.utilization.counts[ChiaroscuroKvStrategy::Quantized.as_index()], 0);
+        assert_eq!(
+            d.utilization.counts[ChiaroscuroKvStrategy::DctTruncated.as_index()],
+            2
+        );
+        assert_eq!(
+            d.utilization.counts[ChiaroscuroKvStrategy::Quantized.as_index()],
+            0
+        );
     }
 
     #[test]
@@ -389,7 +403,10 @@ mod tests {
         let mut d = ChiaroscuroKvDispatcher::default();
         let s = d.dispatch_from_h(0.95, 0.85, 0.87);
         assert_eq!(s, ChiaroscuroKvStrategy::FullPrecision);
-        assert_eq!(d.utilization.counts[ChiaroscuroKvStrategy::FullPrecision.as_index()], 1);
+        assert_eq!(
+            d.utilization.counts[ChiaroscuroKvStrategy::FullPrecision.as_index()],
+            1
+        );
     }
 
     #[test]

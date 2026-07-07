@@ -194,7 +194,11 @@ mod tests {
         let mut optimal_reward = 0.0f32;
         for _ in 0..horizon {
             let arm = bandit.sample();
-            let r = if rng.f32() < true_rates[arm] { 1.0 } else { 0.0 };
+            let r = if rng.f32() < true_rates[arm] {
+                1.0
+            } else {
+                0.0
+            };
             bandit.update(arm, r);
             optimal_reward += true_rates.iter().cloned().fold(0.0f32, f32::max);
         }

@@ -35,14 +35,14 @@
 //! existing in-module tests (Phase 1–3) enforce the strict thresholds.
 
 use katgpt_rs::attn_match::{
-    beta_fitter::{fit_beta_nnls, BetaFitConfig},
+    beta_fitter::{BetaFitConfig, fit_beta_nnls},
     compact::compact,
     key_selection::{omp::mass_coverage, select_highest_attn_keys, select_omp_keys},
-    router::{pick_backend, SolverRouterConfig},
+    router::{SolverRouterConfig, pick_backend},
     score_matrix::compute_score_matrix,
     score_matrix_simd::compute_score_matrix_simd,
     types::{AmConfig, KeySelector, ScoreMethod},
-    value_fitter::{fit_cv_least_squares, ValueFitConfig},
+    value_fitter::{ValueFitConfig, fit_cv_least_squares},
 };
 
 // ─── Synthetic data helpers ────────────────────────────────────────────────
@@ -130,10 +130,7 @@ fn g1_beta_recovery() {
         }
     }
     println!("  max ‖β − β_ref‖_∞ = {:.6}  (threshold: 0.2)", max_err);
-    assert!(
-        max_err < 0.2,
-        "G1 FAIL: β recovery error {max_err} > 0.2"
-    );
+    assert!(max_err < 0.2, "G1 FAIL: β recovery error {max_err} > 0.2");
     println!("  G1: PASS");
 }
 
@@ -308,10 +305,7 @@ fn g4_highest_attn_coverage() {
         t_len,
         coverage
     );
-    assert!(
-        coverage > 0.50,
-        "G4 FAIL: RMS coverage {coverage} < 0.50"
-    );
+    assert!(coverage > 0.50, "G4 FAIL: RMS coverage {coverage} < 0.50");
     println!("  G4: PASS");
 }
 
@@ -483,7 +477,11 @@ fn g8_simd_vs_scalar() {
             max_val = abs_val;
         }
     }
-    let rel_err = if max_val > 0.0 { max_diff / max_val } else { 0.0 };
+    let rel_err = if max_val > 0.0 {
+        max_diff / max_val
+    } else {
+        0.0
+    };
     println!(
         "  correctness: max |scalar − simd| = {:.6} (rel {:.4e})",
         max_diff, rel_err
@@ -553,7 +551,12 @@ fn z_full_pipeline_smoke_all_selectors() {
         for &b in &result.beta {
             assert!(b.is_finite(), "β non-finite for {:?}", selector);
         }
-        println!("  {:?}: compact_len={}, ratio={:.1}×", selector, result.compact_len, result.compression_ratio());
+        println!(
+            "  {:?}: compact_len={}, ratio={:.1}×",
+            selector,
+            result.compact_len,
+            result.compression_ratio()
+        );
     }
     println!("  Smoke: PASS");
 }

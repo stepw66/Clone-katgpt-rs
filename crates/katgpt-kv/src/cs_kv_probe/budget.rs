@@ -35,7 +35,7 @@ impl DensityBudget {
         // i64 round-trip lets us clamp into [1, d_total] without overflow at the
         // usize boundary on extreme inputs (already guarded by clamp above, but
         // belt-and-braces).
-        
+
         k.max(1).min(self.d_total as i64) as usize
     }
 }
@@ -53,10 +53,7 @@ mod tests {
         for i in 0..=steps {
             let ca = i as f32 / steps as f32;
             let k = b.k_for(ca);
-            assert!(
-                k >= prev,
-                "non-monotone at ca={ca}: k={k} < prev={prev}"
-            );
+            assert!(k >= prev, "non-monotone at ca={ca}: k={k} < prev={prev}");
             assert!(k >= 1, "below floor of 1 at ca={ca}");
             assert!(k <= b.d_total, "above d_total at ca={ca}");
             prev = k;

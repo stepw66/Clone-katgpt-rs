@@ -256,9 +256,12 @@ where
     F: Fn(&mut Ctx, &Weights, &mut Cache, usize, usize, &Config),
 {
     cache.reset();
-    let max_steps = draft_config
-        .draft_lookahead
-        .min(draft_config.block_size.saturating_sub(pos).saturating_sub(1));
+    let max_steps = draft_config.draft_lookahead.min(
+        draft_config
+            .block_size
+            .saturating_sub(pos)
+            .saturating_sub(1),
+    );
 
     // Seed draft KV cache with target hidden state (Option C).
     let draft_kv_dim = kv_dim(draft_config);

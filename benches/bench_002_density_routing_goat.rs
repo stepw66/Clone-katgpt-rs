@@ -193,8 +193,7 @@ fn g5a_entropy_gain() -> (f64, f64, f64, bool) {
     let baseline_probs = event_weights(mean_mob);
 
     // Candidate B: per-zone mobility — each zone uses its own sigmoid mobility.
-    let candidate_probs: Vec<[f32; EVENT_TYPES]> =
-        mob.iter().map(|&m| event_weights(m)).collect();
+    let candidate_probs: Vec<[f32; EVENT_TYPES]> = mob.iter().map(|&m| event_weights(m)).collect();
 
     // Simulate SIM_TICKS ticks. Each tick, each zone emits population[i] events
     // (rounded). Baseline draws all from baseline_probs; candidate draws from
@@ -372,11 +371,7 @@ fn g5b_compute_saved() -> (f64, f64, bool) {
         "   [G5b workload] dense={}/{}, trans={}/{}, sparse={}/{}",
         n_dense, N_ZONES, n_trans, N_ZONES, n_sparse, N_ZONES
     );
-    (
-        saving,
-        hit_rate,
-        pass,
-    )
+    (saving, hit_rate, pass)
 }
 
 /// G5b stampede stress test: inject a 10× density spike at tick STAMPDE_TICK in
@@ -497,7 +492,13 @@ fn g5c_stampede_correctness() -> (u64, bool) {
                 "density 150 should be Dense"
             );
             // Re-insert with new tier after stampede.
-            cache.insert(5, current_density_zone5, current_tier_zone5, tick as u64, 200);
+            cache.insert(
+                5,
+                current_density_zone5,
+                current_tier_zone5,
+                tick as u64,
+                200,
+            );
         }
 
         // Read zone 5 every tick.
@@ -536,11 +537,7 @@ fn g5c_stampede_correctness() -> (u64, bool) {
 // ─── Main ───────────────────────────────────────────────────────────────────
 
 fn pass_str(pass: bool) -> &'static str {
-    if pass {
-        "✅ PASS"
-    } else {
-        "❌ FAIL"
-    }
+    if pass { "✅ PASS" } else { "❌ FAIL" }
 }
 
 fn main() {
@@ -550,7 +547,10 @@ fn main() {
     println!("│ G5a (entropy) + G5b (compute saved) + G5c (stampede correctness)│");
     println!("└──────────────────────────────────────────────────────────────────┘");
     println!();
-    println!("Sim: {} zones, {} NPCs, {} ticks (60s @ 20Hz)", N_ZONES, N_NPCS, SIM_TICKS);
+    println!(
+        "Sim: {} zones, {} NPCs, {} ticks (60s @ 20Hz)",
+        N_ZONES, N_NPCS, SIM_TICKS
+    );
     println!();
 
     // ── G5a: Routing quality ──
@@ -558,7 +558,10 @@ fn main() {
     let (h_a, h_b, gain, g5a_pass) = g5a_entropy_gain();
     println!(
         "   Baseline H = {:.4} nats | Candidate H = {:.4} nats | gain = {:.1}% (target ≥ {:.0}%)",
-        h_a, h_b, gain * 100.0, G5A_TARGET * 100.0
+        h_a,
+        h_b,
+        gain * 100.0,
+        G5A_TARGET * 100.0
     );
     println!("   Verdict: {}", pass_str(g5a_pass));
     println!();
@@ -568,14 +571,18 @@ fn main() {
     let (saving, hit_rate, g5b_pass) = g5b_compute_saved();
     println!(
         "   Compute saved = {:.1}% (target ≥ {:.0}%) | steady-state hit rate = {:.1}%",
-        saving * 100.0, G5B_TARGET * 100.0, hit_rate * 100.0
+        saving * 100.0,
+        G5B_TARGET * 100.0,
+        hit_rate * 100.0
     );
 
     // Stampede stress sub-test.
     let (pre, during, post) = g5b_stampede_stress();
     println!(
         "   Stampede stress: pre-stampede hit rate = {:.1}%, during = {:.1}%, post-recovery = {:.1}%",
-        pre * 100.0, during * 100.0, post * 100.0
+        pre * 100.0,
+        during * 100.0,
+        post * 100.0
     );
     println!("   Verdict: {}", pass_str(g5b_pass));
     println!();
@@ -592,7 +599,10 @@ fn main() {
 
     // ── Overall verdict ──
     let all_pass = g5a_pass && g5b_pass && g5c_pass;
-    let n_pass = [g5a_pass, g5b_pass, g5c_pass].iter().filter(|&&p| p).count();
+    let n_pass = [g5a_pass, g5b_pass, g5c_pass]
+        .iter()
+        .filter(|&&p| p)
+        .count();
 
     println!("┌──────────────────────────────────────────────────────────────────┐");
     println!("│ GOAT VERDICT — Plan 351 Phase 3                                 │");

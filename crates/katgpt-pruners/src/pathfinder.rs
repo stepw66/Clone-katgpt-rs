@@ -174,7 +174,11 @@ pub fn find_path(
             let g = current.g + terrain_cost(grid, nr, nc);
             let f = g + manhattan((nr, nc), to);
             came_from[next_flat] = (cur_flat, action as u8);
-            open.push(Node { pos: (nr, nc), g, f });
+            open.push(Node {
+                pos: (nr, nc),
+                g,
+                f,
+            });
         }
     }
 
@@ -246,7 +250,11 @@ pub fn find_distance(
             visited[next_flat] = true;
             let g = current.g + terrain_cost(grid, nr, nc);
             let f = g + manhattan((nr, nc), to);
-            open.push(Node { pos: (nr, nc), g, f });
+            open.push(Node {
+                pos: (nr, nc),
+                g,
+                f,
+            });
         }
     }
 

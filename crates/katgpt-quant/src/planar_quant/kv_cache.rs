@@ -6,8 +6,8 @@
 
 use super::rotation::{apply_inverse_rotation, apply_rotation, generate_givens_rotations};
 use super::types::{PlanarQuantConfig, PlanarQuantLayer};
-use katgpt_core::simd::simd_scale_inplace;
 use crate::turboquant::codebook::compute_codebook;
+use katgpt_core::simd::simd_scale_inplace;
 
 /// Compressed KV cache using PlanarQuant 2D Givens rotation quantization.
 ///

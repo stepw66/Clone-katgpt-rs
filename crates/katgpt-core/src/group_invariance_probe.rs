@@ -622,7 +622,10 @@ mod tests {
         for k in 0..20 {
             let d = k as f32 * 0.05;
             let s = invariance_score(d, beta);
-            assert!(s <= prev + 1e-6, "score not monotone at d={d}: {s} > {prev}");
+            assert!(
+                s <= prev + 1e-6,
+                "score not monotone at d={d}: {s} > {prev}"
+            );
             prev = s;
         }
     }
@@ -645,7 +648,10 @@ mod tests {
             *s = 1.0;
         }
         let v = score_variance(&scores);
-        assert!((v - 0.25).abs() < 1e-5, "50/50 bimodal should give v≈0.25, got {v}");
+        assert!(
+            (v - 0.25).abs() < 1e-5,
+            "50/50 bimodal should give v≈0.25, got {v}"
+        );
     }
 
     // ── score_concentration ───────────────────────────────────────────────
@@ -655,7 +661,10 @@ mod tests {
         // All scores equal → concentration = 1.0 (perfect spread).
         let scores = [0.5_f32; 64];
         let c = score_concentration(&scores);
-        assert!((c - 1.0).abs() < 1e-5, "uniform scores should give c≈1, got {c}");
+        assert!(
+            (c - 1.0).abs() < 1e-5,
+            "uniform scores should give c≈1, got {c}"
+        );
     }
 
     #[test]
@@ -664,10 +673,7 @@ mod tests {
         let mut scores = [0.0_f32; 64];
         scores[0] = 1.0;
         let c = score_concentration(&scores);
-        assert!(
-            c < 0.05,
-            "single-peak scores should give c<0.05, got {c}"
-        );
+        assert!(c < 0.05, "single-peak scores should give c<0.05, got {c}");
     }
 
     #[test]

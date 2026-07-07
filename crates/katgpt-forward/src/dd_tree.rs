@@ -39,19 +39,15 @@ use katgpt_core::traits::NoPruner;
 // below. Gate the import so it doesn't read as unused when both features
 // are off (no-default-features).
 #[cfg(any(test, feature = "thinking_prune", feature = "gdsd_distill"))]
-use katgpt_core::traits::ScreeningPruner;
-#[cfg(any(test, feature = "thinking_prune", feature = "gdsd_distill"))]
 use katgpt_core::speculative::types::TreeNode;
 #[cfg(test)]
 use katgpt_core::traits::ConstraintPruner;
+#[cfg(any(test, feature = "thinking_prune", feature = "gdsd_distill"))]
+use katgpt_core::traits::ScreeningPruner;
 // NoScreeningPruner is only constructed inside feature-gated dd-tree wrappers
 // (thinking_prune / gdsd_distill) and in tests; gate the import so it doesn't
 // read as unused when all those features are off.
-#[cfg(any(
-    test,
-    feature = "thinking_prune",
-    feature = "gdsd_distill",
-))]
+#[cfg(any(test, feature = "thinking_prune", feature = "gdsd_distill",))]
 use katgpt_core::traits::NoScreeningPruner;
 
 // Core DDTree algorithm now lives in katgpt-speculative (Issue 013 Phase A.5).
@@ -118,7 +114,6 @@ pub fn build_dd_tree_screened_with_schedule(
     }
 }
 
-
 // ── GDSD Advantage-Guided DDTree Builder (Plan 169) ─────────────
 
 /// DDTree with GDSD advantage-guided self-distillation (Plan 169).
@@ -139,8 +134,8 @@ pub fn build_dd_tree_gdsd(
     chain_seed: bool,
     _gdsd_config: &katgpt_pruners::GdsdConfig,
 ) -> Vec<TreeNode> {
-    use katgpt_pruners::{GdsdPruner, identity_advantage};
     use katgpt_core::traits::NoScreeningPruner;
+    use katgpt_pruners::{GdsdPruner, identity_advantage};
 
     let _screener = screener; // Used for future integration with dynamic dispatch
 
@@ -160,7 +155,6 @@ pub fn build_dd_tree_gdsd(
     // with a real inner pruner (e.g., SdarBanditPruner).
     build_dd_tree_screened(marginals, config, &gdsd_pruner, chain_seed)
 }
-
 
 // ── Plan 391 (2026-07-05): SDE-Aware DDTree Builders, PTRM Width Scaling,
 // EqR Convergence Selection, RecFM Cross-Scale Consistency, best_of_k_rollouts,
@@ -1423,7 +1417,10 @@ mod tests {
         let mut buf = Vec::new();
         inject_sde_noise_into(&marginals, &config, &mut rng_b, &mut buf);
 
-        assert_eq!(buf, expected, "_into must match allocating variant (disabled path)");
+        assert_eq!(
+            buf, expected,
+            "_into must match allocating variant (disabled path)"
+        );
     }
 
     #[test]
@@ -1456,7 +1453,11 @@ mod tests {
                     "mismatch at marginal[{i}][{j}]: _into={g}, allocating={w}"
                 );
             }
-            assert_eq!(got.len(), want.len(), "inner length mismatch at marginal {i}");
+            assert_eq!(
+                got.len(),
+                want.len(),
+                "inner length mismatch at marginal {i}"
+            );
         }
     }
 
@@ -1482,7 +1483,10 @@ mod tests {
         // Second call with same seed + same input MUST be byte-identical.
         let mut rng_b = Rng::new(7);
         inject_sde_noise_into(&m3, &config, &mut rng_b, &mut buf);
-        assert_eq!(buf, first_pass, "second call must match first (buffer reuse)");
+        assert_eq!(
+            buf, first_pass,
+            "second call must match first (buffer reuse)"
+        );
 
         // Third call with FEWER marginals MUST truncate the outer Vec.
         let m2: Vec<&[f32]> = vec![&[0.1, 0.3, 0.6], &[0.2, 0.5, 0.3]];
@@ -2007,8 +2011,8 @@ mod tests {
     #[cfg(feature = "speculative_generator")]
     mod speculative_gen {
         use super::*;
-        use katgpt_speculative::spec_generator::{MarginalTokenGenerator, TokenConstraintPruner};
         use katgpt_core::NoPruner;
+        use katgpt_speculative::spec_generator::{MarginalTokenGenerator, TokenConstraintPruner};
 
         #[test]
         fn test_dd_tree_speculative_equivalence_no_pruner() {
@@ -2076,9 +2080,9 @@ mod tests {
     #[cfg(all(feature = "speculative_generator", feature = "best_buddies"))]
     mod best_buddies_integration {
         use super::*;
+        use katgpt_core::NoPruner;
         use katgpt_speculative::best_buddies::MarginalBestBuddyAligner;
         use katgpt_speculative::spec_generator::{MarginalTokenGenerator, TokenConstraintPruner};
-        use katgpt_core::NoPruner;
 
         /// Helper: create normalized descending marginals for `n_depths` positions.
         fn make_marginals(n_depths: usize, n_tokens: usize) -> Vec<Vec<f32>> {
@@ -2313,8 +2317,8 @@ mod tests {
     #[cfg(feature = "domino_correction")]
     mod domino_tree {
         use super::*;
-        use katgpt_speculative::domino::compute_prefix_strength;
         use katgpt_core::traits::DominoPruner;
+        use katgpt_speculative::domino::compute_prefix_strength;
 
         fn make_uniform_marginals(depths: usize, vocab_size: usize) -> Vec<Vec<f32>> {
             let prob = 1.0 / vocab_size as f32;

@@ -127,11 +127,7 @@ impl ManifoldScorer {
                 best = s;
             }
         }
-        if best.is_finite() {
-            best
-        } else {
-            0.0
-        }
+        if best.is_finite() { best } else { 0.0 }
     }
 
     /// Score an entire client trajectory against the manifold.

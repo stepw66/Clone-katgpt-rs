@@ -142,9 +142,7 @@ impl PairedLossGap {
         let mut count = 0u32;
         for i in 0..len {
             // Safety: debug_assert above ensures equal lengths.
-            let (d, cls) = unsafe {
-                (*self.deltas.get_unchecked(i), *classes.get_unchecked(i))
-            };
+            let (d, cls) = unsafe { (*self.deltas.get_unchecked(i), *classes.get_unchecked(i)) };
             let m = u32::from(cls == target);
             sum += d * (m as f32);
             count += m;
@@ -312,9 +310,7 @@ impl PairedLossGap {
         let mut count = 0u32;
         for i in 0..len {
             // Safety: callers ensure classes.len() == deltas.len().
-            let (d, cls) = unsafe {
-                (*self.deltas.get_unchecked(i), *classes.get_unchecked(i))
-            };
+            let (d, cls) = unsafe { (*self.deltas.get_unchecked(i), *classes.get_unchecked(i)) };
             let m = u32::from(cls == target);
             sum += d * (m as f32);
             count += m;
@@ -374,9 +370,7 @@ impl PairedLossGap {
         let mut acc: std::collections::HashMap<TokenClass, (f32, u32)> =
             std::collections::HashMap::new();
         for i in 0..self.deltas.len() {
-            let (d, cls) = unsafe {
-                (*self.deltas.get_unchecked(i), *classes.get_unchecked(i))
-            };
+            let (d, cls) = unsafe { (*self.deltas.get_unchecked(i), *classes.get_unchecked(i)) };
             let entry = acc.entry(cls).or_insert((0.0f32, 0u32));
             entry.0 += d;
             entry.1 += 1;
@@ -384,7 +378,11 @@ impl PairedLossGap {
         // Build rows. Look up each class's bound; NaN if not provided.
         let mut rows: Vec<ClassGapRow> = Vec::with_capacity(acc.len());
         for (cls, (sum, count)) in acc {
-            let mean_gap = if count == 0 { 0.0 } else { sum / (count as f32) };
+            let mean_gap = if count == 0 {
+                0.0
+            } else {
+                sum / (count as f32)
+            };
             let (log_v_tau, ratio) = match bounds.get(&cls) {
                 Some(b) => {
                     let lv = b.log_v_tau;
@@ -422,9 +420,7 @@ impl PairedLossGap {
                 (false, true) => std::cmp::Ordering::Less,
                 // Both finite: descending = reverse natural order
                 // (rb.partial_cmp(ra) returns Less when ra > rb).
-                (false, false) => rb
-                    .partial_cmp(&ra)
-                    .unwrap_or(std::cmp::Ordering::Equal),
+                (false, false) => rb.partial_cmp(&ra).unwrap_or(std::cmp::Ordering::Equal),
             }
         });
         ClassGapReport { rows }

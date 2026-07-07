@@ -35,8 +35,8 @@
 #![cfg(feature = "arg_protocol")]
 
 use katgpt_core::{
-    LabelId, LabelSet, PolicyConstraints, PolicyEnvelope, PolicyState, ResponseMode,
-    TaxonomyKind, TaxonomyNode, TaxonomyValidator, ValidationScratch,
+    LabelId, LabelSet, PolicyConstraints, PolicyEnvelope, PolicyState, ResponseMode, TaxonomyKind,
+    TaxonomyNode, TaxonomyValidator, ValidationScratch,
 };
 use std::hint::black_box;
 use std::time::Instant;
@@ -83,17 +83,19 @@ fn taxonomy_256() -> Vec<TaxonomyNode<'static>> {
     let mut nodes: Vec<TaxonomyNode<'static>> = Vec::with_capacity(256);
     let mut next_id: u32 = 1;
     // 8 clusters (roots).
-    let cluster_ids: Vec<u32> = (0..8).map(|_| {
-        let id = next_id;
-        next_id += 1;
-        nodes.push(TaxonomyNode {
-            id: lbl(id),
-            kind: TaxonomyKind::Cluster,
-            parent_id: None,
-            incompatible_with: &[],
-        });
-        id
-    }).collect();
+    let cluster_ids: Vec<u32> = (0..8)
+        .map(|_| {
+            let id = next_id;
+            next_id += 1;
+            nodes.push(TaxonomyNode {
+                id: lbl(id),
+                kind: TaxonomyKind::Cluster,
+                parent_id: None,
+                incompatible_with: &[],
+            });
+            id
+        })
+        .collect();
     // Each cluster has 8 labels.
     let mut label_ids: Vec<u32> = Vec::new();
     for &cluster in &cluster_ids {
@@ -185,12 +187,16 @@ fn gate_g2a_policy_envelope_perf() -> GateResult {
     if mean_ns <= TARGET_NS {
         GateResult::pass(
             "G2a",
-            format!("PolicyEnvelope::evaluate median ~{mean_ns:.1}ns (≤ {TARGET_NS}ns target) over {ITERS} iters"),
+            format!(
+                "PolicyEnvelope::evaluate median ~{mean_ns:.1}ns (≤ {TARGET_NS}ns target) over {ITERS} iters"
+            ),
         )
     } else {
         GateResult::fail(
             "G2a",
-            format!("PolicyEnvelope::evaluate median ~{mean_ns:.1}ns > {TARGET_NS}ns target over {ITERS} iters"),
+            format!(
+                "PolicyEnvelope::evaluate median ~{mean_ns:.1}ns > {TARGET_NS}ns target over {ITERS} iters"
+            ),
         )
     }
 }
@@ -225,12 +231,16 @@ fn gate_g2b_taxonomy_validate_perf() -> GateResult {
     if mean_ns <= TARGET_NS {
         GateResult::pass(
             "G2b",
-            format!("TaxonomyValidator::validate_label_set median ~{mean_ns:.1}ns (≤ {TARGET_NS}ns target) over {ITERS} iters, taxonomy={n_nodes} nodes, |candidates|=8"),
+            format!(
+                "TaxonomyValidator::validate_label_set median ~{mean_ns:.1}ns (≤ {TARGET_NS}ns target) over {ITERS} iters, taxonomy={n_nodes} nodes, |candidates|=8"
+            ),
         )
     } else {
         GateResult::fail(
             "G2b",
-            format!("TaxonomyValidator::validate_label_set median ~{mean_ns:.1}ns > {TARGET_NS}ns target over {ITERS} iters"),
+            format!(
+                "TaxonomyValidator::validate_label_set median ~{mean_ns:.1}ns > {TARGET_NS}ns target over {ITERS} iters"
+            ),
         )
     }
 }
@@ -279,12 +289,16 @@ fn gate_g4_alloc_free_hot_path() -> GateResult {
     if allocs_policy == 0 && allocs_tax == 0 {
         GateResult::pass(
             "G4",
-            format!("PolicyEnvelope::evaluate: 0 allocs / {ITERS} calls; TaxonomyValidator::validate_label_set: 0 allocs / {ITERS} calls"),
+            format!(
+                "PolicyEnvelope::evaluate: 0 allocs / {ITERS} calls; TaxonomyValidator::validate_label_set: 0 allocs / {ITERS} calls"
+            ),
         )
     } else {
         GateResult::fail(
             "G4",
-            format!("PolicyEnvelope allocs={allocs_policy}/{ITERS}, TaxonomyValidator allocs={allocs_tax}/{ITERS} (expected 0/0)"),
+            format!(
+                "PolicyEnvelope allocs={allocs_policy}/{ITERS}, TaxonomyValidator allocs={allocs_tax}/{ITERS} (expected 0/0)"
+            ),
         )
     }
 }
@@ -314,7 +328,9 @@ fn main() {
     println!("by the 61 unit tests in arg::* (cargo test --features arg_protocol --lib arg::).");
     println!();
     if all_pass {
-        println!("=== ALL PERF+ALLOC GATES PASS - G1-G5 complete, eligible for default promotion ===");
+        println!(
+            "=== ALL PERF+ALLOC GATES PASS - G1-G5 complete, eligible for default promotion ==="
+        );
         std::process::exit(0);
     } else {
         println!("=== ONE OR MORE GATES FAILED - keep opt-in, investigate ===");

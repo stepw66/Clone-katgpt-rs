@@ -49,7 +49,7 @@
 #![cfg(feature = "linking_fold")]
 
 use katgpt_core::linking_fold::{
-    detect_linking, fold_gelu_into, fold_projection_into, LinkingDetectorConfig,
+    LinkingDetectorConfig, detect_linking, fold_gelu_into, fold_projection_into,
 };
 use std::hint::black_box;
 use std::time::Instant;
@@ -143,8 +143,10 @@ fn unlinked_circles_d(n_per_circle: usize, d: usize) -> (Vec<f32>, Vec<f32>) {
 fn main() {
     println!("══════════════════════════════════════════════════════════════════");
     println!("  Plan 410 — Linking-Fold GOAT gate (G1 smoke / G2 perf / G5 det)");
-    println!("  D_HLA={}, D_SHARD={}, N_DETECTOR={}, FOLD_ITERS={}",
-             D_HLA, D_SHARD, N_DETECTOR, FOLD_ITERS);
+    println!(
+        "  D_HLA={}, D_SHARD={}, N_DETECTOR={}, FOLD_ITERS={}",
+        D_HLA, D_SHARD, N_DETECTOR, FOLD_ITERS
+    );
     println!("══════════════════════════════════════════════════════════════════\n");
 
     let g1 = gate_g1_correctness_smoke();
@@ -157,21 +159,53 @@ fn main() {
     println!("──────────────────────────────────────────────────────────────────");
     println!("  VERDICT");
     println!("──────────────────────────────────────────────────────────────────");
-    println!("  G1 correctness smoke:         {}  (Hopf=±1, unlinked=0, fold unlinks)", verdict(g1));
-    println!("  G2 detector cold-path:        {}  ({:.2} ms; audit budget {:.0} ms {} @ n=2×{}, d={}; orig budget {:.0} ms {} — historical, unreachable w/o Option B)",
-             verdict(g2_detector.pass_audit), g2_detector.ms,
-             DETECTOR_AUDIT_BUDGET_MS, verdict(g2_detector.pass_audit),
-             N_DETECTOR, D_HLA,
-             DETECTOR_ORIG_BUDGET_MS, verdict(g2_detector.ms <= DETECTOR_ORIG_BUDGET_MS));
-    println!("  G2 fold hot-path (Abs, D={}):  {}  ({:.2} ns ≤ {:.0} ns)",
-             D_HLA, verdict(g2_fold_hla_abs.pass), g2_fold_hla_abs.ns, FOLD_HLA_BUDGET_NS);
-    println!("  G2 fold hot-path (Gelu, D={}): {}  ({:.2} ns ≤ {:.0} ns)",
-             D_HLA, verdict(g2_fold_hla_gelu.pass), g2_fold_hla_gelu.ns, FOLD_HLA_BUDGET_NS);
-    println!("  G2 fold hot-path (Abs, D={}):  {}  ({:.2} ns ≤ {:.0} ns)",
-             D_SHARD, verdict(g2_fold_shard_abs.pass), g2_fold_shard_abs.ns, FOLD_SHARD_BUDGET_NS);
-    println!("  G2 fold hot-path (Gelu, D={}): {}  ({:.2} ns ≤ {:.0} ns)",
-             D_SHARD, verdict(g2_fold_shard_gelu.pass), g2_fold_shard_gelu.ns, FOLD_SHARD_BUDGET_NS);
-    println!("  G5 determinism:               {}  (detector + fold bit-identical)", verdict(g5));
+    println!(
+        "  G1 correctness smoke:         {}  (Hopf=±1, unlinked=0, fold unlinks)",
+        verdict(g1)
+    );
+    println!(
+        "  G2 detector cold-path:        {}  ({:.2} ms; audit budget {:.0} ms {} @ n=2×{}, d={}; orig budget {:.0} ms {} — historical, unreachable w/o Option B)",
+        verdict(g2_detector.pass_audit),
+        g2_detector.ms,
+        DETECTOR_AUDIT_BUDGET_MS,
+        verdict(g2_detector.pass_audit),
+        N_DETECTOR,
+        D_HLA,
+        DETECTOR_ORIG_BUDGET_MS,
+        verdict(g2_detector.ms <= DETECTOR_ORIG_BUDGET_MS)
+    );
+    println!(
+        "  G2 fold hot-path (Abs, D={}):  {}  ({:.2} ns ≤ {:.0} ns)",
+        D_HLA,
+        verdict(g2_fold_hla_abs.pass),
+        g2_fold_hla_abs.ns,
+        FOLD_HLA_BUDGET_NS
+    );
+    println!(
+        "  G2 fold hot-path (Gelu, D={}): {}  ({:.2} ns ≤ {:.0} ns)",
+        D_HLA,
+        verdict(g2_fold_hla_gelu.pass),
+        g2_fold_hla_gelu.ns,
+        FOLD_HLA_BUDGET_NS
+    );
+    println!(
+        "  G2 fold hot-path (Abs, D={}):  {}  ({:.2} ns ≤ {:.0} ns)",
+        D_SHARD,
+        verdict(g2_fold_shard_abs.pass),
+        g2_fold_shard_abs.ns,
+        FOLD_SHARD_BUDGET_NS
+    );
+    println!(
+        "  G2 fold hot-path (Gelu, D={}): {}  ({:.2} ns ≤ {:.0} ns)",
+        D_SHARD,
+        verdict(g2_fold_shard_gelu.pass),
+        g2_fold_shard_gelu.ns,
+        FOLD_SHARD_BUDGET_NS
+    );
+    println!(
+        "  G5 determinism:               {}  (detector + fold bit-identical)",
+        verdict(g5)
+    );
     println!();
     println!("  NOTE: G4 (alloc-free hot path) lives in tests/linking_fold_alloc_check.rs.");
     println!("  NOTE: G3 (no-regression) is the feature-flag build matrix.");
@@ -192,13 +226,19 @@ fn gate_g1_correctness_smoke() -> bool {
     let (x, y) = thickened_hopf_link_d(N_DETECTOR, 0.05, D_HLA);
     let v_hopf = detect_linking(&x, &y, D_HLA, &cfg);
     let hopf_ok = v_hopf.linked && v_hopf.link.abs() == 1;
-    println!("   Hopf link:    linked={}, link={}  (expect linked=true, |link|=1)", v_hopf.linked, v_hopf.link);
+    println!(
+        "   Hopf link:    linked={}, link={}  (expect linked=true, |link|=1)",
+        v_hopf.linked, v_hopf.link
+    );
 
     // Unlinked circles → link = 0.
     let (xu, yu) = unlinked_circles_d(N_DETECTOR, D_HLA);
     let v_unlinked = detect_linking(&xu, &yu, D_HLA, &cfg);
     let unlinked_ok = !v_unlinked.linked && v_unlinked.link == 0;
-    println!("   Unlinked:     linked={}, link={}  (expect linked=false, link=0)", v_unlinked.linked, v_unlinked.link);
+    println!(
+        "   Unlinked:     linked={}, link={}  (expect linked=false, link=0)",
+        v_unlinked.linked, v_unlinked.link
+    );
 
     // Fold unlinks the Hopf link: apply one coordinate-fold pass per axis
     // reflecting onto the positive orthant (paper Fig. 9).
@@ -213,7 +253,10 @@ fn gate_g1_correctness_smoke() -> bool {
     }
     let v_after = detect_linking(&xf, &yf, D_HLA, &cfg);
     let fold_ok = !v_after.linked && v_after.link == 0;
-    println!("   After fold:   linked={}, link={}  (expect linked=false, link=0)", v_after.linked, v_after.link);
+    println!(
+        "   After fold:   linked={}, link={}  (expect linked=false, link=0)",
+        v_after.linked, v_after.link
+    );
 
     hopf_ok && unlinked_ok && fold_ok
 }
@@ -227,17 +270,28 @@ struct DetectorResult {
 }
 
 fn gate_g2_detector_cold_path() -> DetectorResult {
-    println!("\n── G2: detector cold-path (n=2×{}, d={}, {} runs, median) ──",
-             N_DETECTOR, D_HLA, DETECTOR_ITERS);
-    println!("   audit-cadence budget: {:.0}ms @ n=2×{}, d={}",
-             DETECTOR_AUDIT_BUDGET_MS, N_DETECTOR, D_HLA);
-    println!("   (orig plan budget {:.0}ms @ n=2×1000 was unreachable; the detector is O(β²).)",
-             DETECTOR_ORIG_BUDGET_MS);
+    println!(
+        "\n── G2: detector cold-path (n=2×{}, d={}, {} runs, median) ──",
+        N_DETECTOR, D_HLA, DETECTOR_ITERS
+    );
+    println!(
+        "   audit-cadence budget: {:.0}ms @ n=2×{}, d={}",
+        DETECTOR_AUDIT_BUDGET_MS, N_DETECTOR, D_HLA
+    );
+    println!(
+        "   (orig plan budget {:.0}ms @ n=2×1000 was unreachable; the detector is O(β²).)",
+        DETECTOR_ORIG_BUDGET_MS
+    );
     let (x, y) = thickened_hopf_link_d(N_DETECTOR, 0.05, D_HLA);
     let cfg = LinkingDetectorConfig::default();
 
     // Warm-up (one run, not timed — fills caches, JIT-style first-call effects).
-    let _ = black_box(detect_linking(black_box(&x), black_box(&y), black_box(D_HLA), &cfg));
+    let _ = black_box(detect_linking(
+        black_box(&x),
+        black_box(&y),
+        black_box(D_HLA),
+        &cfg,
+    ));
 
     let mut samples_ms: Vec<f64> = Vec::with_capacity(DETECTOR_ITERS);
     for _ in 0..DETECTOR_ITERS {
@@ -251,40 +305,70 @@ fn gate_g2_detector_cold_path() -> DetectorResult {
     samples_ms.sort_by(|a, b| a.partial_cmp(&b).unwrap());
     let median_ms = samples_ms[samples_ms.len() / 2];
     let pass_audit = median_ms <= DETECTOR_AUDIT_BUDGET_MS;
-    println!("   median = {:.3} ms  (min {:.3}, max {:.3})",
-             median_ms, samples_ms[0], *samples_ms.last().unwrap());
-    DetectorResult { pass_audit, ms: median_ms }
+    println!(
+        "   median = {:.3} ms  (min {:.3}, max {:.3})",
+        median_ms,
+        samples_ms[0],
+        *samples_ms.last().unwrap()
+    );
+    DetectorResult {
+        pass_audit,
+        ms: median_ms,
+    }
 }
 
 // ── G2: fold hot-path latency ──────────────────────────────────────────────
 
-struct FoldResult { pass: bool, ns: f64 }
+struct FoldResult {
+    pass: bool,
+    ns: f64,
+}
 
 #[allow(clippy::type_complexity)]
 fn gate_g2_fold_hot_path() -> (FoldResult, FoldResult, FoldResult, FoldResult) {
-    println!("\n── G2: fold hot-path ({} iters/case, median of last 80%) ──", FOLD_ITERS);
+    println!(
+        "\n── G2: fold hot-path ({} iters/case, median of last 80%) ──",
+        FOLD_ITERS
+    );
 
     let r_hla_abs = bench_fold(D_HLA, FoldVariant::Abs);
     let r_hla_gelu = bench_fold(D_HLA, FoldVariant::Gelu);
     let r_shard_abs = bench_fold(D_SHARD, FoldVariant::Abs);
     let r_shard_gelu = bench_fold(D_SHARD, FoldVariant::Gelu);
 
-    println!("   Abs  D={:<3}: {:>8.2} ns  (budget {:.0} ns)", D_HLA, r_hla_abs.ns, FOLD_HLA_BUDGET_NS);
-    println!("   Gelu D={:<3}: {:>8.2} ns  (budget {:.0} ns)", D_HLA, r_hla_gelu.ns, FOLD_HLA_BUDGET_NS);
-    println!("   Abs  D={:<3}: {:>8.2} ns  (budget {:.0} ns)", D_SHARD, r_shard_abs.ns, FOLD_SHARD_BUDGET_NS);
-    println!("   Gelu D={:<3}: {:>8.2} ns  (budget {:.0} ns)", D_SHARD, r_shard_gelu.ns, FOLD_SHARD_BUDGET_NS);
+    println!(
+        "   Abs  D={:<3}: {:>8.2} ns  (budget {:.0} ns)",
+        D_HLA, r_hla_abs.ns, FOLD_HLA_BUDGET_NS
+    );
+    println!(
+        "   Gelu D={:<3}: {:>8.2} ns  (budget {:.0} ns)",
+        D_HLA, r_hla_gelu.ns, FOLD_HLA_BUDGET_NS
+    );
+    println!(
+        "   Abs  D={:<3}: {:>8.2} ns  (budget {:.0} ns)",
+        D_SHARD, r_shard_abs.ns, FOLD_SHARD_BUDGET_NS
+    );
+    println!(
+        "   Gelu D={:<3}: {:>8.2} ns  (budget {:.0} ns)",
+        D_SHARD, r_shard_gelu.ns, FOLD_SHARD_BUDGET_NS
+    );
 
     (r_hla_abs, r_hla_gelu, r_shard_abs, r_shard_gelu)
 }
 
 #[derive(Clone, Copy)]
-enum FoldVariant { Abs, Gelu }
+enum FoldVariant {
+    Abs,
+    Gelu,
+}
 
 fn bench_fold(d: usize, variant: FoldVariant) -> FoldResult {
     // Deterministic input — vary slightly each iter to defeat const-folding,
     // but keep it cheap (no alloc in the timing loop).
     let mut state = vec![0.0_f32; d];
-    for i in 0..d { state[i] = (i as f32) * 0.01 - 0.3; }
+    for i in 0..d {
+        state[i] = (i as f32) * 0.01 - 0.3;
+    }
     let center = vec![0.0_f32; d];
     let alpha = 10.0_f32;
 
@@ -292,7 +376,9 @@ fn bench_fold(d: usize, variant: FoldVariant) -> FoldResult {
     for _ in 0..1_000 {
         match variant {
             FoldVariant::Abs => fold_projection_into(black_box(&mut state), black_box(&center)),
-            FoldVariant::Gelu => fold_gelu_into(black_box(&mut state), black_box(&center), black_box(alpha)),
+            FoldVariant::Gelu => {
+                fold_gelu_into(black_box(&mut state), black_box(&center), black_box(alpha))
+            }
         }
     }
 
@@ -306,11 +392,15 @@ fn bench_fold(d: usize, variant: FoldVariant) -> FoldResult {
         // Re-seed state each iter so the fold always does real work (the
         // negative-half-line reflection). Vary by a tiny deterministic amount.
         let tweak = (k as f32) * 1e-6;
-        for i in 0..d { state[i] = base[i] + tweak; }
+        for i in 0..d {
+            state[i] = base[i] + tweak;
+        }
         let t0 = Instant::now();
         match variant {
             FoldVariant::Abs => fold_projection_into(black_box(&mut state), black_box(&center)),
-            FoldVariant::Gelu => fold_gelu_into(black_box(&mut state), black_box(&center), black_box(alpha)),
+            FoldVariant::Gelu => {
+                fold_gelu_into(black_box(&mut state), black_box(&center), black_box(alpha))
+            }
         }
         samples_ns.push(t0.elapsed().as_nanos() as f64);
     }
@@ -322,8 +412,15 @@ fn bench_fold(d: usize, variant: FoldVariant) -> FoldResult {
     let trimmed = &samples_ns[trim..FOLD_ITERS - trim];
     let ns = trimmed.iter().sum::<f64>() / trimmed.len() as f64;
 
-    let budget = if d <= D_HLA { FOLD_HLA_BUDGET_NS } else { FOLD_SHARD_BUDGET_NS };
-    FoldResult { pass: ns <= budget, ns }
+    let budget = if d <= D_HLA {
+        FOLD_HLA_BUDGET_NS
+    } else {
+        FOLD_SHARD_BUDGET_NS
+    };
+    FoldResult {
+        pass: ns <= budget,
+        ns,
+    }
 }
 
 // ── G5: determinism ────────────────────────────────────────────────────────
@@ -338,7 +435,10 @@ fn gate_g5_determinism() -> bool {
     let v2 = detect_linking(&x, &y, D_HLA, &cfg);
     let v3 = detect_linking(&x, &y, D_HLA, &cfg);
     let det_ok = v1 == v2 && v2 == v3;
-    println!("   detector: link={} ×3, verdict equal = {}", v1.link, det_ok);
+    println!(
+        "   detector: link={} ×3, verdict equal = {}",
+        v1.link, det_ok
+    );
 
     // Fold: bit-identical across 100 runs (closed-form, no state).
     let base: Vec<f32> = (0..D_HLA).map(|i| (i as f32) * 0.1 - 0.4).collect();
@@ -349,9 +449,15 @@ fn gate_g5_determinism() -> bool {
     for _ in 0..100 {
         let mut s = base.clone();
         fold_projection_into(&mut s, &center);
-        if s != reference { fold_ok = false; break; }
+        if s != reference {
+            fold_ok = false;
+            break;
+        }
     }
-    println!("   fold_projection_into: bit-identical across 100 runs = {}", fold_ok);
+    println!(
+        "   fold_projection_into: bit-identical across 100 runs = {}",
+        fold_ok
+    );
 
     det_ok && fold_ok
 }

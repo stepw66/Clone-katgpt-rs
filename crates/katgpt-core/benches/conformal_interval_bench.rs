@@ -12,9 +12,12 @@ use katgpt_core::{
 
 /// Build a calibrator with `n_channels × n_buckets` rings, each filled with
 /// `capacity` residuals.
-fn make_fitted_calibrator(n_channels: usize, max_h: usize, m: usize, capacity: usize) ->
-    ConformalIntervalCalibrator<SeasonalPoolForecaster>
-{
+fn make_fitted_calibrator(
+    n_channels: usize,
+    max_h: usize,
+    m: usize,
+    capacity: usize,
+) -> ConformalIntervalCalibrator<SeasonalPoolForecaster> {
     let forecaster = SeasonalPoolForecaster::new(capacity.max(m) * 2, m, 0.0, 0.0);
     let mut cal = ConformalIntervalCalibrator::new(
         forecaster,
@@ -49,11 +52,7 @@ fn bench_interval_into(c: &mut Criterion) {
     //   H=1 (1 channel, 1 horizon)  — target ≤ 1µs
     //   H=8 (1 channel, 8 horizons) — target ≤ 10µs
     //   H=8×8 (8 channels, 8 horizons) — target ≤ 100µs
-    let configs: &[(&str, usize, usize)] = &[
-        ("h1_1ch", 1, 1),
-        ("h8_1ch", 1, 8),
-        ("h8_8ch", 8, 8),
-    ];
+    let configs: &[(&str, usize, usize)] = &[("h1_1ch", 1, 1), ("h8_1ch", 1, 8), ("h8_8ch", 8, 8)];
 
     for &(label, n_channels, max_h) in configs {
         let m = 12;
@@ -82,10 +81,7 @@ fn bench_update_residual(c: &mut Criterion) {
     let mut group = c.benchmark_group("conformal_update_residual");
     group.throughput(Throughput::Elements(1));
 
-    let configs: &[(&str, usize, usize)] = &[
-        ("h1_1ch", 1, 1),
-        ("h8_8ch", 8, 8),
-    ];
+    let configs: &[(&str, usize, usize)] = &[("h1_1ch", 1, 1), ("h8_8ch", 8, 8)];
 
     for &(label, n_channels, max_h) in configs {
         let m = 12;
@@ -98,7 +94,12 @@ fn bench_update_residual(c: &mut Criterion) {
                 let r = (i as f32) * 0.001;
                 for ch in 0..n_channels {
                     for h in 1..=max_h {
-                        cal.update_residual(black_box(r), black_box(0.0), black_box(ch), black_box(h));
+                        cal.update_residual(
+                            black_box(r),
+                            black_box(0.0),
+                            black_box(ch),
+                            black_box(h),
+                        );
                     }
                 }
                 i = i.wrapping_add(1);

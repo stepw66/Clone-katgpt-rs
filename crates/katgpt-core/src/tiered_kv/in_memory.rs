@@ -61,12 +61,7 @@ impl<F: Fn(&[f32], &[usize], usize, usize) -> Vec<f32>> InMemoryTieredKvStore<F>
     /// - `group_summarizer` — computes a group summary from raw keys + positions.
     ///   Signature: `(keys_flat: &[f32], positions: &[usize], group_start_token: usize, n_tokens: usize) -> Vec<f32>`.
     ///   Returns a D-length summary vector.
-    pub fn new(
-        head_dim: usize,
-        chunk_size: usize,
-        group_size: usize,
-        group_summarizer: F,
-    ) -> Self {
+    pub fn new(head_dim: usize, chunk_size: usize, group_size: usize, group_summarizer: F) -> Self {
         assert!(chunk_size > 0, "chunk_size must be > 0");
         assert!(
             chunk_size.is_multiple_of(group_size),
@@ -135,9 +130,7 @@ impl<F: Fn(&[f32], &[usize], usize, usize) -> Vec<f32>> InMemoryTieredKvStore<F>
     }
 }
 
-impl<F: Fn(&[f32], &[usize], usize, usize) -> Vec<f32>> TieredKvStore
-    for InMemoryTieredKvStore<F>
-{
+impl<F: Fn(&[f32], &[usize], usize, usize) -> Vec<f32>> TieredKvStore for InMemoryTieredKvStore<F> {
     fn head_dim(&self) -> usize {
         self.head_dim
     }
@@ -154,12 +147,7 @@ impl<F: Fn(&[f32], &[usize], usize, usize) -> Vec<f32>> TieredKvStore
         self.cold.len()
     }
 
-    fn append_chunk(
-        &mut self,
-        keys: &[f32],
-        values: &[f32],
-        positions: &[usize],
-    ) {
+    fn append_chunk(&mut self, keys: &[f32], values: &[f32], positions: &[usize]) {
         debug_assert_eq!(keys.len(), self.chunk_size * self.head_dim);
         debug_assert_eq!(values.len(), self.chunk_size * self.head_dim);
         debug_assert_eq!(positions.len(), self.chunk_size);

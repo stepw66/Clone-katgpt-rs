@@ -310,15 +310,8 @@ fn run_tolerant<P: ConstraintPruner, R: RelaxationStrategy>(
     let mut stats = DecisionStats::default();
     let mut scratch = [0u8; 32];
     for c in corpus {
-        let accepted = soft_reject_with_relax(
-            pruner,
-            relaxer,
-            cfg,
-            0,
-            c.evidence,
-            &[],
-            &mut scratch,
-        );
+        let accepted =
+            soft_reject_with_relax(pruner, relaxer, cfg, 0, c.evidence, &[], &mut scratch);
         stats.record(c.would_succeed, accepted);
     }
     stats
@@ -470,15 +463,25 @@ fn gate_g3_accepted_output_quality(agg: AggregateStats) -> bool {
         "  Tolerant precision:       {:.4}  (true accepts / all accepts)",
         tolerant_prec
     );
-    let ratio = if strict_prec > 0.0 { tolerant_prec / strict_prec } else { 1.0 };
+    let ratio = if strict_prec > 0.0 {
+        tolerant_prec / strict_prec
+    } else {
+        1.0
+    };
     println!("  Precision ratio (tolerant/strict): {:.4}", ratio);
     // ±15% noise band — matches the plan's "unchanged (±noise)" wording.
     const PRECISION_RATIO_FLOOR: f64 = 0.85;
     if ratio >= PRECISION_RATIO_FLOOR {
-        println!("  ✅ G3-T1.1 PASS: precision ratio >= {:.2} (within ±15% noise band)", PRECISION_RATIO_FLOOR);
+        println!(
+            "  ✅ G3-T1.1 PASS: precision ratio >= {:.2} (within ±15% noise band)",
+            PRECISION_RATIO_FLOOR
+        );
         true
     } else {
-        println!("  ❌ G3-T1.1 FAIL: precision ratio < {:.2} (accepted-output quality collapsed)", PRECISION_RATIO_FLOOR);
+        println!(
+            "  ❌ G3-T1.1 FAIL: precision ratio < {:.2} (accepted-output quality collapsed)",
+            PRECISION_RATIO_FLOOR
+        );
         false
     }
 }
@@ -502,15 +505,8 @@ fn gate_g4_backward_compat() -> bool {
     let mut scratch = [0u8; 32];
     for c in &corpus {
         let strict_accepted = bin.is_valid(0, c.evidence, &[]);
-        let tolerant_accepted = soft_reject_with_relax(
-            &bin,
-            &mut relaxer,
-            &cfg,
-            0,
-            c.evidence,
-            &[],
-            &mut scratch,
-        );
+        let tolerant_accepted =
+            soft_reject_with_relax(&bin, &mut relaxer, &cfg, 0, c.evidence, &[], &mut scratch);
         if strict_accepted != tolerant_accepted {
             mismatches += 1;
         }
@@ -541,15 +537,13 @@ fn gate_g5_determinism() -> bool {
                 || agg.tolerant.true_rejects != prev.tolerant.true_rejects
                 || agg.tolerant.false_accepts != prev.tolerant.false_accepts
                 || agg.tolerant.false_rejects != prev.tolerant.false_rejects)
-            {
-                println!("  ❌ G5-T1.1 FAIL: non-deterministic across reps");
-                return false;
-            }
+        {
+            println!("  ❌ G5-T1.1 FAIL: non-deterministic across reps");
+            return false;
+        }
         last = Some(agg);
     }
-    println!(
-        "  ✅ G5-T1.1 PASS: bit-identical stats across {DETERMINISM_REPS} reps",
-    );
+    println!("  ✅ G5-T1.1 PASS: bit-identical stats across {DETERMINISM_REPS} reps",);
     true
 }
 
@@ -561,8 +555,10 @@ fn main() {
     println!("  HarnessBridge Table 7: tolerant > strict under cost asymmetry");
     println!("═══════════════════════════════════════════════════════════════");
     println!();
-    println!("  Corpus: {CORPUS_N} candidates × {CORPUS_VARIANTS} variants = {} samples",
-        CORPUS_N * CORPUS_VARIANTS);
+    println!(
+        "  Corpus: {CORPUS_N} candidates × {CORPUS_VARIANTS} variants = {} samples",
+        CORPUS_N * CORPUS_VARIANTS
+    );
     println!(
         "  Cost:   false_reject={FALSE_REJECT_COST}, false_pass={FALSE_PASS_COST}, true_accept={TRUE_ACCEPT_REWARD}, true_reject={TRUE_REJECT_REWARD}"
     );
@@ -598,20 +594,32 @@ fn main() {
     println!("═══════════════════════════════════════════════════════════════");
     println!("| Gate | Test | Verdict |");
     println!("|------|------|---------|");
-    println!("| G1-T1.1 | false-reject rate (tolerant < strict) | {} |",
-        if g1 { "✅ PASS" } else { "❌ FAIL" });
-    println!("| G2-T1.1 | net reward (tolerant > strict) | {} |",
-        if g2 { "✅ PASS" } else { "❌ FAIL" });
-    println!("| G3-T1.1 | accepted-output quality (precision ratio >= 0.85) | {} |",
-        if g3 { "✅ PASS" } else { "❌ FAIL" });
-    println!("| G4-T1.1 | backward-compat (binary strict == tolerant) | {} |",
-        if g4 { "✅ PASS" } else { "❌ FAIL" });
-    println!("| G5-T1.1 | determinism | {} |",
-        if g5 { "✅ PASS" } else { "❌ FAIL" });
+    println!(
+        "| G1-T1.1 | false-reject rate (tolerant < strict) | {} |",
+        if g1 { "✅ PASS" } else { "❌ FAIL" }
+    );
+    println!(
+        "| G2-T1.1 | net reward (tolerant > strict) | {} |",
+        if g2 { "✅ PASS" } else { "❌ FAIL" }
+    );
+    println!(
+        "| G3-T1.1 | accepted-output quality (precision ratio >= 0.85) | {} |",
+        if g3 { "✅ PASS" } else { "❌ FAIL" }
+    );
+    println!(
+        "| G4-T1.1 | backward-compat (binary strict == tolerant) | {} |",
+        if g4 { "✅ PASS" } else { "❌ FAIL" }
+    );
+    println!(
+        "| G5-T1.1 | determinism | {} |",
+        if g5 { "✅ PASS" } else { "❌ FAIL" }
+    );
     println!();
 
     if all_pass {
-        println!("  ✅ T1 QUALITY GOAT PASSED — both T1 halves (T3.2 perf + T3.1 quality) now pass.");
+        println!(
+            "  ✅ T1 QUALITY GOAT PASSED — both T1 halves (T3.2 perf + T3.1 quality) now pass."
+        );
         println!("     `sigmoid_graded_reject` is a T4.1 promotion candidate.");
     } else {
         println!("  ❌ T1 QUALITY GOAT FAILED — one or more gates failed.");
@@ -624,27 +632,42 @@ fn main() {
     println!();
     println!("| Gate | Measurement | Verdict |");
     println!("|------|-------------|---------|");
-    println!("| G1-T1.1 false-reject | strict FR={:.4}, tolerant FR={:.4} (Δ {:.2}pp) | {} |",
+    println!(
+        "| G1-T1.1 false-reject | strict FR={:.4}, tolerant FR={:.4} (Δ {:.2}pp) | {} |",
         agg.strict.false_reject_rate(),
         agg.tolerant.false_reject_rate(),
         (agg.strict.false_reject_rate() - agg.tolerant.false_reject_rate()) * 100.0,
-        if g1 { "✅" } else { "❌" });
-    println!("| G2-T1.1 net reward | strict={:.1}, tolerant={:.1} (Δ {:+.1}) | {} |",
+        if g1 { "✅" } else { "❌" }
+    );
+    println!(
+        "| G2-T1.1 net reward | strict={:.1}, tolerant={:.1} (Δ {:+.1}) | {} |",
         agg.strict.net_reward(),
         agg.tolerant.net_reward(),
         agg.tolerant.net_reward() - agg.strict.net_reward(),
-        if g2 { "✅" } else { "❌" });
-    println!("| G3-T1.1 accepted-output quality | strict prec={:.4}, tolerant prec={:.4} (ratio {:.4}) | {} |",
+        if g2 { "✅" } else { "❌" }
+    );
+    println!(
+        "| G3-T1.1 accepted-output quality | strict prec={:.4}, tolerant prec={:.4} (ratio {:.4}) | {} |",
         agg.strict.precision(),
         agg.tolerant.precision(),
-        if agg.strict.precision() > 0.0 { agg.tolerant.precision() / agg.strict.precision() } else { 1.0 },
-        if g3 { "✅" } else { "❌" });
-    println!("| G4-T1.1 backward-compat | binary strict == tolerant | {} |",
-        if g4 { "✅" } else { "❌" });
-    println!("| G5-T1.1 determinism | bit-identical across {DETERMINISM_REPS} reps | {} |",
-        if g5 { "✅" } else { "❌" });
+        if agg.strict.precision() > 0.0 {
+            agg.tolerant.precision() / agg.strict.precision()
+        } else {
+            1.0
+        },
+        if g3 { "✅" } else { "❌" }
+    );
+    println!(
+        "| G4-T1.1 backward-compat | binary strict == tolerant | {} |",
+        if g4 { "✅" } else { "❌" }
+    );
+    println!(
+        "| G5-T1.1 determinism | bit-identical across {DETERMINISM_REPS} reps | {} |",
+        if g5 { "✅" } else { "❌" }
+    );
     println!();
-    println!("Cost model: false_reject={FALSE_REJECT_COST}, false_pass={FALSE_PASS_COST}, corpus={CORPUS_N}×{CORPUS_VARIANTS}.",
+    println!(
+        "Cost model: false_reject={FALSE_REJECT_COST}, false_pass={FALSE_PASS_COST}, corpus={CORPUS_N}×{CORPUS_VARIANTS}.",
     );
     println!("```");
 

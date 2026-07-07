@@ -285,9 +285,7 @@ pub fn simd_sigmoid_tanh_clamp_inplace(out: &mut [f32], a: &[f32], q: &[f32], cl
     }
     #[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
     {
-        unsafe {
-            wasm32_sigmoid_tanh_clamp(&mut out[..len], &a[..len], &q[..len], clamp)
-        }
+        unsafe { wasm32_sigmoid_tanh_clamp(&mut out[..len], &a[..len], &q[..len], clamp) }
     }
     #[cfg(not(any(
         target_arch = "aarch64",
@@ -783,12 +781,12 @@ unsafe fn neon_exp_inplace(x: &mut [f32]) {
             // (Issue 027: the previous add-nested form g·(0.5 + g·(1/3 + ...)) produced
             // coefficients 1/k instead of 1/k!, giving up to 5% error on exp(2). This
             // form matches the scalar fallback bit-for-bit and is algebraically exact.)
-            let p6 = vaddq_f32(v_one, vmulq_f32(vg, v_sixth));        // 1 + g/6
-            let p5 = vaddq_f32(v_one, vmulq_f32(vmulq_f32(vg, v_fifth), p6));   // 1 + g/5·p6
+            let p6 = vaddq_f32(v_one, vmulq_f32(vg, v_sixth)); // 1 + g/6
+            let p5 = vaddq_f32(v_one, vmulq_f32(vmulq_f32(vg, v_fifth), p6)); // 1 + g/5·p6
             let p4 = vaddq_f32(v_one, vmulq_f32(vmulq_f32(vg, v_quarter), p5)); // 1 + g/4·p5
-            let p3 = vaddq_f32(v_one, vmulq_f32(vmulq_f32(vg, v_third), p4));   // 1 + g/3·p4
-            let p2 = vaddq_f32(v_one, vmulq_f32(vmulq_f32(vg, v_half), p3));    // 1 + g/2·p3
-            let q = vaddq_f32(v_one, vmulq_f32(vg, p2));              // 1 + g·p2
+            let p3 = vaddq_f32(v_one, vmulq_f32(vmulq_f32(vg, v_third), p4)); // 1 + g/3·p4
+            let p2 = vaddq_f32(v_one, vmulq_f32(vmulq_f32(vg, v_half), p3)); // 1 + g/2·p3
+            let q = vaddq_f32(v_one, vmulq_f32(vg, p2)); // 1 + g·p2
 
             // 2^n via branchless NEON bit manipulation
             // Clamp n to [-126, 127] to avoid IEEE overflow/underflow
@@ -877,16 +875,16 @@ unsafe fn neon_sigmoid_tanh_clamp(out: &mut [f32], a: &[f32], q: &[f32], clamp: 
             // an add-nested form which overestimates for |g| > 0.1. The sigmoid
             // path sees wider g ranges, so we use the mathematically exact form.)
             let gc_sixth = vmulq_f32(vg, v_sixth);
-            let p6 = vaddq_f32(v_one, gc_sixth);              // 1 + g/6
+            let p6 = vaddq_f32(v_one, gc_sixth); // 1 + g/6
             let gc_fifth = vmulq_f32(vg, v_fifth);
-            let p5 = vaddq_f32(v_one, vmulq_f32(gc_fifth, p6));   // 1 + g/5*p6
+            let p5 = vaddq_f32(v_one, vmulq_f32(gc_fifth, p6)); // 1 + g/5*p6
             let gc_quarter = vmulq_f32(vg, v_quarter);
             let p4 = vaddq_f32(v_one, vmulq_f32(gc_quarter, p5)); // 1 + g/4*p5
             let gc_third = vmulq_f32(vg, v_third);
-            let p3 = vaddq_f32(v_one, vmulq_f32(gc_third, p4));   // 1 + g/3*p4
+            let p3 = vaddq_f32(v_one, vmulq_f32(gc_third, p4)); // 1 + g/3*p4
             let gc_half = vmulq_f32(vg, v_half);
-            let p2 = vaddq_f32(v_one, vmulq_f32(gc_half, p3));    // 1 + g/2*p3
-            let qpoly = vaddq_f32(v_one, vmulq_f32(vg, p2));      // 1 + g*p2
+            let p2 = vaddq_f32(v_one, vmulq_f32(gc_half, p3)); // 1 + g/2*p3
+            let qpoly = vaddq_f32(v_one, vmulq_f32(vg, p2)); // 1 + g*p2
 
             // 2^n via branchless NEON bit manipulation. Clamp n to [-126, 127]
             // — also folds the |x| > 40 early-exit: exp(-y) for large positive
@@ -896,8 +894,7 @@ unsafe fn neon_sigmoid_tanh_clamp(out: &mut [f32], a: &[f32], q: &[f32], clamp: 
             let vneg126 = vdupq_n_s32(-126);
             let vn_clamped = vmaxq_s32(vminq_s32(vn_i, v127), vneg126);
             let v_bias = vdupq_n_s32(127);
-            let v_shifted =
-                vreinterpretq_f32_s32(vshlq_n_s32::<23>(vaddq_s32(vn_clamped, v_bias)));
+            let v_shifted = vreinterpretq_f32_s32(vshlq_n_s32::<23>(vaddq_s32(vn_clamped, v_bias)));
             let exp_neg_y = vmulq_f32(v_shifted, qpoly);
 
             // σ(y) = 1 / (1 + exp(-y)). vdivq gives ~1 ULP.
@@ -937,8 +934,8 @@ unsafe fn neon_sigmoid_tanh_clamp(out: &mut [f32], a: &[f32], q: &[f32], clamp: 
 unsafe fn neon_sigmoid_inplace(x: &mut [f32]) {
     use core::arch::aarch64::{
         vaddq_f32, vaddq_s32, vcvtq_s32_f32, vdivq_f32, vdupq_n_f32, vdupq_n_s32, vld1q_f32,
-        vmaxq_s32, vminq_s32, vmulq_f32, vnegq_f32, vreinterpretq_f32_s32, vrndq_f32,
-        vshlq_n_s32, vst1q_f32, vsubq_f32,
+        vmaxq_s32, vminq_s32, vmulq_f32, vnegq_f32, vreinterpretq_f32_s32, vrndq_f32, vshlq_n_s32,
+        vst1q_f32, vsubq_f32,
     };
     unsafe {
         let v_inv_ln2 = vdupq_n_f32(CEPHES_INV_LN2);
@@ -986,8 +983,7 @@ unsafe fn neon_sigmoid_inplace(x: &mut [f32]) {
             // — folds the |x| > 40 early-exit: large positive x → exp(-x) → 0
             // (σ → 1), large negative x → exp(-x) → inf (σ → 0). Both correct.
             let vn_clamped = vmaxq_s32(vminq_s32(vn_i, v127), vneg126);
-            let v_shifted =
-                vreinterpretq_f32_s32(vshlq_n_s32::<23>(vaddq_s32(vn_clamped, v_bias)));
+            let v_shifted = vreinterpretq_f32_s32(vshlq_n_s32::<23>(vaddq_s32(vn_clamped, v_bias)));
             let exp_neg_x = vmulq_f32(v_shifted, qpoly);
 
             // σ = 1 / (1 + exp(-x)). vdivq gives ~1 ULP.
@@ -1243,8 +1239,7 @@ unsafe fn wasm32_exp_inplace(x: &mut [f32]) {
 unsafe fn wasm32_exp_sum_inplace(x: &mut [f32]) -> f32 {
     use core::arch::wasm32::{
         f32x4_add, f32x4_extract_lane, f32x4_mul, f32x4_nearest, f32x4_splat, f32x4_sub, i32x4_add,
-        i32x4_max, i32x4_min, i32x4_shl, i32x4_splat, i32x4_trunc_sat_f32x4, v128_load,
-        v128_store,
+        i32x4_max, i32x4_min, i32x4_shl, i32x4_splat, i32x4_trunc_sat_f32x4, v128_load, v128_store,
     };
 
     unsafe {
@@ -1361,8 +1356,8 @@ unsafe fn wasm32_exp_sum_inplace(x: &mut [f32]) -> f32 {
 unsafe fn wasm32_sigmoid_inplace(x: &mut [f32]) {
     use core::arch::wasm32::{
         f32x4_add, f32x4_div, f32x4_mul, f32x4_nearest, f32x4_neg, f32x4_splat, f32x4_sub,
-        i32x4_add, i32x4_max, i32x4_min, i32x4_shl, i32x4_splat, i32x4_trunc_sat_f32x4,
-        v128_load, v128_store,
+        i32x4_add, i32x4_max, i32x4_min, i32x4_shl, i32x4_splat, i32x4_trunc_sat_f32x4, v128_load,
+        v128_store,
     };
 
     unsafe {

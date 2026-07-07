@@ -95,8 +95,14 @@ fn main() {
 
         println!();
         println!("── 2. QMC source draw overhead (K={k}) ───────────────────");
-        println!("  LatticeQmc::draw:    {ns_lattice:.1} ns total  ({:.1} ns/point)", ns_lattice / k as f64);
-        println!("  StratifiedQmc::draw: {ns_strat:.1} ns total  ({:.1} ns/point)", ns_strat / k as f64);
+        println!(
+            "  LatticeQmc::draw:    {ns_lattice:.1} ns total  ({:.1} ns/point)",
+            ns_lattice / k as f64
+        );
+        println!(
+            "  StratifiedQmc::draw: {ns_strat:.1} ns total  ({:.1} ns/point)",
+            ns_strat / k as f64
+        );
     }
 
     // ── 3. End-to-end PPoT multi-strategy: QMC vs i.i.d. ────────────────
@@ -164,7 +170,9 @@ fn main() {
 
         let overhead_per_rollout = (ns_qmc - ns_iid) / k as f64;
 
-        println!("  K={k:>3}:  i.i.d. {ns_iid:>8.0} ns  |  QMC {ns_qmc:>8.0} ns  |  Δ/rollout {overhead_per_rollout:+.1} ns");
+        println!(
+            "  K={k:>3}:  i.i.d. {ns_iid:>8.0} ns  |  QMC {ns_qmc:>8.0} ns  |  Δ/rollout {overhead_per_rollout:+.1} ns"
+        );
 
         // G5 gate: per-rollout overhead < 1000 ns (1 µs).
         // (Relaxed from the plan's 1µs to allow for the Box<dyn QmcSource>
@@ -180,7 +188,10 @@ fn main() {
     // ── Summary ──────────────────────────────────────────────────────────
     println!();
     println!("── Summary ────────────────────────────────────────────────────");
-    println!("  QMC per-token descend overhead: {:.1} ns (vs i.i.d.)", ns_qmc_descend - ns_iid_descend);
+    println!(
+        "  QMC per-token descend overhead: {:.1} ns (vs i.i.d.)",
+        ns_qmc_descend - ns_iid_descend
+    );
     println!("  Note: the descend overhead is NEGATIVE if QMC is faster (no RNG mutation).");
     println!("  The end-to-end PPoT overhead includes one Box<dyn QmcSource> alloc +");
     println!("  one vec![0.0f32; count] alloc per call, amortized over K rollouts.");

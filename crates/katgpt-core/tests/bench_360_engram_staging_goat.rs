@@ -50,10 +50,18 @@ struct GateResult {
 
 impl GateResult {
     fn pass(name: &'static str, detail: impl Into<String>) -> Self {
-        Self { name, passed: true, detail: detail.into() }
+        Self {
+            name,
+            passed: true,
+            detail: detail.into(),
+        }
     }
     fn fail(name: &'static str, detail: impl Into<String>) -> Self {
-        Self { name, passed: false, detail: detail.into() }
+        Self {
+            name,
+            passed: false,
+            detail: detail.into(),
+        }
     }
 }
 
@@ -140,8 +148,10 @@ fn gate_g1_mutation_isolation() -> GateResult {
     let delete_slots: Vec<usize> = (0..2).map(|_| rng.next_u32(N as u32) as usize).collect();
 
     // New patterns for the 5 updates — distinct values not in the original table.
-    let new_patterns: Vec<Vec<f32>> =
-        update_slots.iter().map(|&i| vec![1000.0 + i as f32; D]).collect();
+    let new_patterns: Vec<Vec<f32>> = update_slots
+        .iter()
+        .map(|&i| vec![1000.0 + i as f32; D])
+        .collect();
 
     // Stage + commit.
     let mut staging = StagingEngramTable::from_table(&source);
@@ -187,7 +197,11 @@ fn gate_g1_mutation_isolation() -> GateResult {
     }
 
     // ── Sub-check (d): unaffected slots match source bit-for-bit ─────────
-    let mutated: Vec<usize> = update_slots.iter().chain(delete_slots.iter()).copied().collect();
+    let mutated: Vec<usize> = update_slots
+        .iter()
+        .chain(delete_slots.iter())
+        .copied()
+        .collect();
     let mut unaffected_ok = true;
     let mut checked = 0usize;
     for i in 0..N {
@@ -355,7 +369,11 @@ fn gate_g2_surgical_vs_rebuild() -> GateResult {
     let passed = a_over_c < 0.1; // ≥10× faster than realistic rebuild
 
     if passed {
-        let bar = if stretch { "≥100× STRETCH" } else { "≥10× bar" };
+        let bar = if stretch {
+            "≥100× STRETCH"
+        } else {
+            "≥10× bar"
+        };
         GateResult::pass(
             "G2",
             format!(
@@ -393,7 +411,9 @@ fn gate_g4_allocation_accounting() -> GateResult {
     let mut s_update = StagingEngramTable::with_capacity(&table, ITERS);
     let (_, update_allocs) = alloc_delta(|| {
         for _ in 0..ITERS {
-            s_update.update_slot(0, black_box(&pattern)).expect("slot 0 in bounds");
+            s_update
+                .update_slot(0, black_box(&pattern))
+                .expect("slot 0 in bounds");
         }
     });
     let _ = black_box(&s_update);

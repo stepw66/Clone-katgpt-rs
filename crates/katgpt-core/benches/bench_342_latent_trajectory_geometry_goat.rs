@@ -226,7 +226,11 @@ fn main() {
     println!(
         "G2 bifurcation_ratio (HLA 100x8 <= {}): {}",
         format_duration(Duration::from_nanos(G2_TARGET_NS)),
-        if g2_bifurcation_passes { "PASS" } else { "FAIL" }
+        if g2_bifurcation_passes {
+            "PASS"
+        } else {
+            "FAIL"
+        }
     );
     println!();
 

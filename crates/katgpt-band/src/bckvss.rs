@@ -87,22 +87,14 @@ impl KvSegment {
     #[inline]
     pub fn d_k(&self) -> usize {
         let n = self.seg_len();
-        if n == 0 {
-            0
-        } else {
-            self.keys.len() / n
-        }
+        if n == 0 { 0 } else { self.keys.len() / n }
     }
 
     /// Value dimensionality `d_v`.
     #[inline]
     pub fn d_v(&self) -> usize {
         let n = self.seg_len();
-        if n == 0 {
-            0
-        } else {
-            self.values.len() / n
-        }
+        if n == 0 { 0 } else { self.values.len() / n }
     }
 
     /// The paper's `s_{vL}` representative: the **last** key row of this
@@ -191,10 +183,7 @@ impl BandConditionerSelectorConfig {
     /// Smaller L → finer retention granularity; larger L → more amortization.
     #[must_use]
     pub fn with_segment_len(mut self, l: usize) -> Self {
-        debug_assert!(
-            l >= 2,
-            "segment_len must be >= 2 (paper Thm 1), got {l}"
-        );
+        debug_assert!(l >= 2, "segment_len must be >= 2 (paper Thm 1), got {l}");
         self.segment_len = l;
         self
     }
@@ -219,12 +208,10 @@ impl BandConditionerSelectorConfig {
 ///
 /// Hot path: `select_batch` accepts caller-provided scratch and performs
 /// **zero** heap allocations beyond the returned index `Vec`.
-#[derive(Clone, Copy, Debug)]
-#[derive(Default)]
+#[derive(Clone, Copy, Debug, Default)]
 pub struct BandConditionerSelector {
     cfg: BandConditionerSelectorConfig,
 }
-
 
 impl BandConditionerSelector {
     /// Construct from config.
@@ -271,13 +258,8 @@ impl BandConditionerSelector {
         // Build the band conditioning set Z_band(k, v, i) for documentation
         // and to validate the segment geometry (paper eq. 4).
         let total = cand.token_range.1.max(anchor.token_range.1);
-        let _band = BandConditioningSet::from_segments(
-            k,
-            v,
-            query.task_id,
-            self.cfg.segment_len,
-            total,
-        );
+        let _band =
+            BandConditioningSet::from_segments(k, v, query.task_id, self.cfg.segment_len, total);
 
         let x = anchor.representative_key();
         let y = cand.representative_key();
@@ -640,7 +622,8 @@ pub fn matthews_corr(y_true: &[f32], y_pred: &[f32]) -> f32 {
         }
     }
     let num = (tp as f32) * (tn as f32) - (fp as f32) * (fn_ as f32);
-    let denom = ((tp + fp) as f32 * (tp + fn_) as f32 * (tn + fp) as f32 * (tn + fn_) as f32).sqrt();
+    let denom =
+        ((tp + fp) as f32 * (tp + fn_) as f32 * (tn + fp) as f32 * (tn + fn_) as f32).sqrt();
     if denom <= f32::MIN_POSITIVE {
         return 0.0;
     }

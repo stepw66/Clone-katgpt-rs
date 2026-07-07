@@ -556,7 +556,7 @@ mod tests {
         // Force a Latent→Explicit switch at step 0.
         c.step(5.0, 0); // Latent, ref=5
         c.step(2.0, 1); // Latent→Explicit at step 1
-                        // should_mix_signal now armed with ExplicitExit.
+        // should_mix_signal now armed with ExplicitExit.
         let mix = c.should_mix_signal();
         assert!(mix.is_some(), "mix must fire on step after switch");
         let (kind, ratio) = mix.unwrap();
@@ -597,7 +597,11 @@ mod tests {
         // Step 1: even though entropy is equal (no entropy-drop signal), the
         // escape hatch forces Latent→Explicit.
         let a1 = c.step(5.0, 1);
-        assert_eq!(c.mode(), ThinkMode::Explicit, "G6 escape must force Explicit");
+        assert_eq!(
+            c.mode(),
+            ThinkMode::Explicit,
+            "G6 escape must force Explicit"
+        );
         assert!(matches!(a1, StepAction::EmitToken(_)));
     }
 
@@ -618,7 +622,11 @@ mod tests {
         // Explicit→Latent after w_e_to_l=1 dwell. Keep kurtosis high.
         c.observe_kurtosis(10.0);
         let a = c.step(10.0, 2); // entropy > ref (5)
-        assert_eq!(c.mode(), ThinkMode::Explicit, "high kurtosis must block Latent re-entry");
+        assert_eq!(
+            c.mode(),
+            ThinkMode::Explicit,
+            "high kurtosis must block Latent re-entry"
+        );
         assert!(matches!(a, StepAction::EmitToken(_)));
     }
 
@@ -665,7 +673,11 @@ mod tests {
         c.observe_kurtosis(1.0);
         // Now rising entropy should allow Explicit→Latent.
         let a = c.step(10.0, 2); // entropy > ref (5), dwell >= w_e_to_l (1)
-        assert_eq!(c.mode(), ThinkMode::Latent, "escape released → Latent re-entry allowed");
+        assert_eq!(
+            c.mode(),
+            ThinkMode::Latent,
+            "escape released → Latent re-entry allowed"
+        );
         assert!(matches!(a, StepAction::EmitSoftEmbedding));
     }
 }

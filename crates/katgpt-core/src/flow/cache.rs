@@ -586,6 +586,9 @@ mod tests {
 
         // Same tick but new topology → should recompute
         let f2 = cache.get_or_compute(1, &head, &[0.0], 0, 4, 4, 0, 5);
-        assert!(f2.is_some(), "should return a field even after topology change");
+        assert!(
+            f2.is_some(),
+            "should return a field even after topology change"
+        );
     }
 }

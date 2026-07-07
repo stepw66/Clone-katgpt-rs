@@ -88,7 +88,7 @@ use crate::simd::simd_dot_f32;
 // (which would allocate when fields have different k values).
 #[cfg(feature = "velocity_field_ensemble_heterogeneous")]
 use crate::cross_resolution::{
-    project_to_spectral_into, reconstruct_from_spectral_into, CrossResolutionBases,
+    CrossResolutionBases, project_to_spectral_into, reconstruct_from_spectral_into,
 };
 
 // ── Trait ─────────────────────────────────────────────────────────────────
@@ -648,11 +648,7 @@ pub fn stochastic_interpolant_step_into<R>(
     assert!(t >= 0.0, "time t must be >= 0");
     let d = x_t.len();
     assert_eq!(x_out.len(), d, "x_out length must match x_t");
-    assert_eq!(
-        drift_at_t.len(),
-        d,
-        "drift_at_t length must match x_t"
-    );
+    assert_eq!(drift_at_t.len(), d, "drift_at_t length must match x_t");
 
     let t_plus_h = t + h;
     let (alpha_t, beta_t) = schedule.alpha_beta(t);
@@ -712,12 +708,7 @@ mod tests {
         // True η*. The combined drift is İ_t = 0.5·b1 + 0.3·b2 + 0.2·b3.
         let eta_star = [0.5f32, 0.3, 0.2];
         // İ_t is the same for all pairs (constant fields → constant target).
-        let dot_i_t = [
-            eta_star[0] * 1.0,
-            eta_star[1] * 1.0,
-            eta_star[2] * 1.0,
-            0.0,
-        ];
+        let dot_i_t = [eta_star[0] * 1.0, eta_star[1] * 1.0, eta_star[2] * 1.0, 0.0];
         // I_t can be anything (fields ignore it); use zeros.
         let i_t = [0.0f32; D];
 
@@ -823,7 +814,16 @@ mod tests {
                 assert!(
                     (ij - ji).abs() < 1e-6,
                     "gram asymmetric: gram[{}*{}+{}={}] = {} != gram[{}*{}+{}={}] = {}",
-                    i, P, j, i * P + j, ij, j, P, i, j * P + i, ji
+                    i,
+                    P,
+                    j,
+                    i * P + j,
+                    ij,
+                    j,
+                    P,
+                    i,
+                    j * P + i,
+                    ji
                 );
             }
         }
@@ -894,8 +894,7 @@ mod tests {
         ];
         let x_batch_refs: Vec<&[f32]> = x_vals.iter().map(|v| &v[..]).collect();
         let mut out_batch_arr: [[f32; D]; 5] = [[0.0; D]; 5];
-        let mut out_batch_refs: Vec<&mut [f32; D]> =
-            out_batch_arr.iter_mut().collect();
+        let mut out_batch_refs: Vec<&mut [f32; D]> = out_batch_arr.iter_mut().collect();
         let mut scratch_b = [0.0f32; D];
 
         ensemble.eval_batch_into(&x_batch_refs, &mut out_batch_refs, &mut scratch_b);
@@ -914,12 +913,7 @@ mod tests {
                 n,
                 out[1]
             );
-            assert!(
-                out[2].abs() < 1e-6,
-                "batch[{}][2] = {} != 0.0",
-                n,
-                out[2]
-            );
+            assert!(out[2].abs() < 1e-6, "batch[{}][2] = {} != 0.0", n, out[2]);
         }
     }
 
@@ -1151,7 +1145,8 @@ impl HeterogeneousEntry {
     /// [`HeterogeneousEnsemble::new`] against the ensemble's `D`.
     pub fn new(field: Box<dyn HeterogeneousVelocityField>, bases: CrossResolutionBases) -> Self {
         assert_eq!(
-            bases.d_src, field.native_dim(),
+            bases.d_src,
+            field.native_dim(),
             "HeterogeneousEntry: bases.d_src ({}) != field.native_dim () ({})",
             bases.d_src,
             field.native_dim()
@@ -1236,8 +1231,22 @@ impl<const P: usize, const D: usize> HeterogeneousEnsemble<P, D> {
         for k in 0..n {
             let i_t = i_t_samples[k];
             let dot_i_t = dot_i_t_samples[k];
-            assert_eq!(i_t.len(), D, "i_t_samples[{}] length {} != D = {}", k, i_t.len(), D);
-            assert_eq!(dot_i_t.len(), D, "dot_i_t_samples[{}] length {} != D = {}", k, dot_i_t.len(), D);
+            assert_eq!(
+                i_t.len(),
+                D,
+                "i_t_samples[{}] length {} != D = {}",
+                k,
+                i_t.len(),
+                D
+            );
+            assert_eq!(
+                dot_i_t.len(),
+                D,
+                "dot_i_t_samples[{}] length {} != D = {}",
+                k,
+                dot_i_t.len(),
+                D
+            );
             self.accumulate_pair_heterogeneous_into(i_t, dot_i_t, scratch);
         }
 
@@ -1324,7 +1333,11 @@ impl<const P: usize, const D: usize> HeterogeneousEnsemble<P, D> {
                     let spectral_j = &mut scratch.spectral_buf[..k_j];
                     self.entries[j].field.eval_native_into(i_t, native_buf_j);
                     project_to_spectral_into(native_buf_j, &self.entries[j].bases, spectral_j);
-                    reconstruct_from_spectral_into(spectral_j, &self.entries[j].bases, &mut scratch.b_at_d_j);
+                    reconstruct_from_spectral_into(
+                        spectral_j,
+                        &self.entries[j].bases,
+                        &mut scratch.b_at_d_j,
+                    );
                     simd_dot_f32(&scratch.b_at_d_i, &scratch.b_at_d_j, D)
                 };
                 scratch.gram[i * P + j] += dot;
@@ -1440,7 +1453,7 @@ mod heterogeneous_tests {
     /// Linear native field: `b(x) = W · x` where W is `native_dim × input_dim`.
     /// Stored row-major. Used as a controlled-basis test fixture.
     struct LinearNativeField {
-        w: Vec<f32>,      // native_dim × input_dim, row-major
+        w: Vec<f32>, // native_dim × input_dim, row-major
         input_dim: usize,
         native_dim: usize,
         id: u64,
@@ -1483,15 +1496,27 @@ mod heterogeneous_tests {
             0.0, 0.0, 1.0, 0.0, // row 2
         ]; // 3×4
         let w2 = vec![
-            0.5, 0.0, 0.0, 0.0,
-            0.0, 0.5, 0.0, 0.0,
-            0.0, 0.0, 0.5, 0.0,
-            0.0, 0.0, 0.0, 0.5,
+            0.5, 0.0, 0.0, 0.0, 0.0, 0.5, 0.0, 0.0, 0.0, 0.0, 0.5, 0.0, 0.0, 0.0, 0.0, 0.5,
         ]; // 4×4 (scaled identity)
 
-        let f0 = LinearNativeField { w: w0, input_dim: INPUT_DIM, native_dim: 2, id: 100 };
-        let f1 = LinearNativeField { w: w1, input_dim: INPUT_DIM, native_dim: 3, id: 101 };
-        let f2 = LinearNativeField { w: w2, input_dim: INPUT_DIM, native_dim: 4, id: 102 };
+        let f0 = LinearNativeField {
+            w: w0,
+            input_dim: INPUT_DIM,
+            native_dim: 2,
+            id: 100,
+        };
+        let f1 = LinearNativeField {
+            w: w1,
+            input_dim: INPUT_DIM,
+            native_dim: 3,
+            id: 101,
+        };
+        let f2 = LinearNativeField {
+            w: w2,
+            input_dim: INPUT_DIM,
+            native_dim: 4,
+            id: 102,
+        };
 
         let b0 = pad_bases(2, D);
         let b1 = pad_bases(3, D);
@@ -1573,10 +1598,20 @@ mod heterogeneous_tests {
 
         // Field 0: native dim 2, identity: b(x) = x.
         let w0 = vec![1.0, 0.0, 0.0, 1.0]; // 2×2 identity
-        let f0 = LinearNativeField { w: w0, input_dim: INPUT_DIM, native_dim: 2, id: 300 };
+        let f0 = LinearNativeField {
+            w: w0,
+            input_dim: INPUT_DIM,
+            native_dim: 2,
+            id: 300,
+        };
         // Field 1: native dim 2, scaled identity ×2.
         let w1 = vec![2.0, 0.0, 0.0, 2.0];
-        let f1 = LinearNativeField { w: w1, input_dim: INPUT_DIM, native_dim: 2, id: 301 };
+        let f1 = LinearNativeField {
+            w: w1,
+            input_dim: INPUT_DIM,
+            native_dim: 2,
+            id: 301,
+        };
 
         let b = pad_bases(2, D);
         let entries = [
@@ -1598,7 +1633,13 @@ mod heterogeneous_tests {
         // 0.5 * b0 + 0.5 * b1 = [1.5, 3.0, 0, 0].
         let expected = [1.5f32, 3.0, 0.0, 0.0];
         for k in 0..D {
-            assert!((out[k] - expected[k]).abs() < 1e-6, "out[{}] = {} != {}", k, out[k], expected[k]);
+            assert!(
+                (out[k] - expected[k]).abs() < 1e-6,
+                "out[{}] = {} != {}",
+                k,
+                out[k],
+                expected[k]
+            );
         }
     }
 }

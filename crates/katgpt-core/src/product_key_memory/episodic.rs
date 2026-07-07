@@ -87,9 +87,7 @@
 //! - FwPKM paper: [arXiv:2601.00671](https://arxiv.org/abs/2601.00671) — the
 //!   `L_mem` GD half is forbidden; this is the modelless δ-rule analog.
 
-use crate::product_key_memory::{
-    FrozenProductKeyMemory, PkmScratch, ProductKeyMemory, ScoreFn,
-};
+use crate::product_key_memory::{FrozenProductKeyMemory, PkmScratch, ProductKeyMemory, ScoreFn};
 
 /// Clamp `gate` into `[0, 1]`. NaN → 0.0 (no-op).
 #[inline]
@@ -148,9 +146,7 @@ pub struct PkmEpisodicStore<const SQRT_N: usize, const D_K: usize, const D_V: us
     gate_sum: f64,
 }
 
-impl<const SQRT_N: usize, const D_K: usize, const D_V: usize>
-    PkmEpisodicStore<SQRT_N, D_K, D_V>
-{
+impl<const SQRT_N: usize, const D_K: usize, const D_V: usize> PkmEpisodicStore<SQRT_N, D_K, D_V> {
     /// Construct an episodic store pre-loaded with `table`.
     ///
     /// `table` becomes both the working copy (the write target) and version-0
@@ -202,6 +198,10 @@ impl<const SQRT_N: usize, const D_K: usize, const D_V: usize>
     ///
     /// Debug builds delegate to [`ProductKeyMemory::query_into`] which asserts
     /// `k <= K * K`, `k <= out.len()`, `K <= SQRT_N`.
+    // Each parameter is independently meaningful on this hot path (see the
+    // per-argument docs above); bundling them into a struct would obscure
+    // call sites without reducing complexity, so the lint is allowed here.
+    #[allow(clippy::too_many_arguments)]
     pub fn write<const K: usize>(
         &mut self,
         q: &[f32; D_K],
@@ -255,6 +255,9 @@ impl<const SQRT_N: usize, const D_K: usize, const D_V: usize>
     ///
     /// See [`write`](Self::write) for the argument contract. Returns the
     /// number of top-k entries written; `0` if `gate <= 0`.
+    // See `write` above: each argument is independently meaningful on this
+    // hot path, so bundling into a struct would not improve clarity.
+    #[allow(clippy::too_many_arguments)]
     pub fn write_weighted<const K: usize>(
         &mut self,
         q: &[f32; D_K],
@@ -381,7 +384,8 @@ mod tests {
         // gate=0 → write suppressed, no retrieval performed.
         assert_eq!(n, 0, "gate=0 should suppress the write");
         assert_eq!(
-            store.writes_total(), 1,
+            store.writes_total(),
+            1,
             "writes_total should still count the suppressed call"
         );
         assert_eq!(
@@ -405,7 +409,15 @@ mod tests {
         let mut out = [(0usize, 0.0f32); 4];
 
         let before: Vec<f32> = store.working().values_flat().to_vec();
-        let n = store.write(&q, &target, f32::NAN, ScoreFn::Dot, 4, &mut out, &mut scratch);
+        let n = store.write(
+            &q,
+            &target,
+            f32::NAN,
+            ScoreFn::Dot,
+            4,
+            &mut out,
+            &mut scratch,
+        );
 
         assert_eq!(n, 0, "NaN gate should be treated as 0 (no-op)");
         assert_eq!(
@@ -565,15 +577,8 @@ mod tests {
             if touched.contains(&idx) {
                 // Touched slots should differ (unless target happened to equal
                 // the original — extremely unlikely with from_random).
-                let any_diff = row_before
-                    .iter()
-                    .zip(row_after.iter())
-                    .any(|(a, b)| a != b);
-                assert!(
-                    any_diff,
-                    "touched slot {} should have been mutated",
-                    idx
-                );
+                let any_diff = row_before.iter().zip(row_after.iter()).any(|(a, b)| a != b);
+                assert!(any_diff, "touched slot {} should have been mutated", idx);
             } else {
                 // Untouched slots should be byte-identical.
                 assert_eq!(
@@ -598,14 +603,29 @@ mod tests {
         let mut store_u = store_from_seed(42);
         let mut scratch_u = PkmScratch::<16, 4>::new();
         let mut out_u = [(0usize, 0.0f32); 4];
-        let n_u = store_u.write(&q, &target, gate, ScoreFn::Dot, 4, &mut out_u, &mut scratch_u);
+        let n_u = store_u.write(
+            &q,
+            &target,
+            gate,
+            ScoreFn::Dot,
+            4,
+            &mut out_u,
+            &mut scratch_u,
+        );
 
         // Weighted.
         let mut store_w = store_from_seed(42);
         let mut scratch_w = PkmScratch::<16, 4>::new();
         let mut out_w = [(0usize, 0.0f32); 4];
-        let n_w =
-            store_w.write_weighted(&q, &target, gate, ScoreFn::Dot, 4, &mut out_w, &mut scratch_w);
+        let n_w = store_w.write_weighted(
+            &q,
+            &target,
+            gate,
+            ScoreFn::Dot,
+            4,
+            &mut out_w,
+            &mut scratch_w,
+        );
 
         // Same top-k set.
         assert_eq!(n_u, n_w);
@@ -682,7 +702,10 @@ mod tests {
 
         // Publish.
         let commit_v1 = store.publish();
-        assert_ne!(commit_v1, commit_v0, "publish should produce a new commitment");
+        assert_ne!(
+            commit_v1, commit_v0,
+            "publish should produce a new commitment"
+        );
         assert_eq!(
             store.slot().current_commitment().unwrap(),
             commit_v1,
@@ -744,7 +767,15 @@ mod tests {
         store.write(&q, &target, 1.0, ScoreFn::Dot, 4, &mut out, &mut scratch);
         store.write(&q, &target, 0.25, ScoreFn::Dot, 4, &mut out, &mut scratch);
         store.write(&q, &target, 0.0, ScoreFn::Dot, 4, &mut out, &mut scratch); // suppressed
-        store.write(&q, &target, f32::NAN, ScoreFn::Dot, 4, &mut out, &mut scratch); // suppressed
+        store.write(
+            &q,
+            &target,
+            f32::NAN,
+            ScoreFn::Dot,
+            4,
+            &mut out,
+            &mut scratch,
+        ); // suppressed
 
         assert_eq!(store.writes_total(), 5);
         assert_eq!(store.writes_applied(), 3);
@@ -775,8 +806,24 @@ mod tests {
         let mut out_a = [(0usize, 0.0f32); 4];
         let mut out_b = [(0usize, 0.0f32); 4];
 
-        let n_a = store_a.write(&q, &target, gate, ScoreFn::Dot, 4, &mut out_a, &mut scratch_a);
-        let n_b = store_b.write(&q, &target, gate, ScoreFn::Dot, 4, &mut out_b, &mut scratch_b);
+        let n_a = store_a.write(
+            &q,
+            &target,
+            gate,
+            ScoreFn::Dot,
+            4,
+            &mut out_a,
+            &mut scratch_a,
+        );
+        let n_b = store_b.write(
+            &q,
+            &target,
+            gate,
+            ScoreFn::Dot,
+            4,
+            &mut out_b,
+            &mut scratch_b,
+        );
 
         // Same top-k set + weights.
         assert_eq!(n_a, n_b);
@@ -823,7 +870,15 @@ mod tests {
         let mut store_dot = store_from_seed(1);
         let mut scratch_dot = PkmScratch::<16, 4>::new();
         let mut out_dot = [(0usize, 0.0f32); 4];
-        let n_dot = store_dot.write(&q, &target, 0.5, ScoreFn::Dot, 4, &mut out_dot, &mut scratch_dot);
+        let n_dot = store_dot.write(
+            &q,
+            &target,
+            0.5,
+            ScoreFn::Dot,
+            4,
+            &mut out_dot,
+            &mut scratch_dot,
+        );
 
         // The two top-k sets may or may not overlap (depends on the table).
         // The contract here is just that both write paths run without panic

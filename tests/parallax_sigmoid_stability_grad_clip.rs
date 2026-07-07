@@ -49,7 +49,7 @@
 #![cfg(feature = "parallax_attn")]
 
 use katgpt_core::parallax_attn::{
-    tiled_attention_parallax_forward, ParallaxActivation, ParallaxConfig, ParallaxScratch,
+    ParallaxActivation, ParallaxConfig, ParallaxScratch, tiled_attention_parallax_forward,
 };
 use katgpt_core::simd;
 
@@ -81,7 +81,11 @@ struct Rng {
 impl Rng {
     fn new(seed: u64) -> Self {
         Self {
-            s: if seed == 0 { 0x9E37_79B9_7F4A_7C15 } else { seed },
+            s: if seed == 0 {
+                0x9E37_79B9_7F4A_7C15
+            } else {
+                seed
+            },
         }
     }
     fn next_u64(&mut self) -> u64 {
@@ -219,6 +223,7 @@ impl ParallaxBuffers {
                 gate_scale: 1.0,
                 zero_init: false,
                 activation,
+                ..Default::default()
             },
         }
     }
@@ -476,14 +481,20 @@ fn t1_sigmoid_parallax_stays_stable_unclipped() {
 
     let mut last_mse = init_mse;
     for step in 0..STEPS {
-        last_mse = parallax_fd_sgd_step_unclipped(&x, &y, &mut w_q, &mut w_k, &mut w_v, &mut w_r, &mut buf);
+        last_mse = parallax_fd_sgd_step_unclipped(
+            &x, &y, &mut w_q, &mut w_k, &mut w_v, &mut w_r, &mut buf,
+        );
         if step == 0 || (step + 1) % 50 == 0 || step + 1 == STEPS {
             eprintln!(
                 "[t1] step {:>4}/{:<4}  mse = {:.6}{}",
                 step + 1,
                 STEPS,
                 last_mse,
-                if !last_mse.is_finite() { "  ← DIVERGED" } else { "" },
+                if !last_mse.is_finite() {
+                    "  ← DIVERGED"
+                } else {
+                    ""
+                },
             );
         }
         if !last_mse.is_finite() {
@@ -494,17 +505,23 @@ fn t1_sigmoid_parallax_stays_stable_unclipped() {
                  Issue 002 re-investigation: the original 2026-06-18 divergence \
                  pattern is now reproducing again. Investigate the forward path \
                  before assuming this is benign.",
-                step + 1, last_mse,
+                step + 1,
+                last_mse,
             );
         }
     }
 
-    eprintln!("T1 verdict: final mse = {:.6} (init {:.6})", last_mse, init_mse);
+    eprintln!(
+        "T1 verdict: final mse = {:.6} (init {:.6})",
+        last_mse, init_mse
+    );
     assert!(
         last_mse < init_mse,
         "T1 regression: sigmoid Parallax did not improve over {} steps \
          (init={:.6}, final={:.6}). Expected monotonic descent on a learnable target.",
-        STEPS, init_mse, last_mse,
+        STEPS,
+        init_mse,
+        last_mse,
     );
 }
 
@@ -546,13 +563,17 @@ fn t2_softmax_parallax_diverges_unclipped() {
     let mut buf = ParallaxBuffers::new(ParallaxActivation::Softmax);
 
     let init_mse = parallax_forward_mse(&x, &y, &w_q, &w_k, &w_v, &w_r, &mut buf);
-    eprintln!("\n=== T2: softmax Parallax, NO mitigation (regression anchor — expect divergence ~step 325-350) ===");
+    eprintln!(
+        "\n=== T2: softmax Parallax, NO mitigation (regression anchor — expect divergence ~step 325-350) ==="
+    );
     eprintln!("init mse = {:.6}", init_mse);
 
     let mut diverged_at: Option<usize> = None;
     let mut last_mse = init_mse;
     for step in 0..STEPS {
-        last_mse = parallax_fd_sgd_step_unclipped(&x, &y, &mut w_q, &mut w_k, &mut w_v, &mut w_r, &mut buf);
+        last_mse = parallax_fd_sgd_step_unclipped(
+            &x, &y, &mut w_q, &mut w_k, &mut w_v, &mut w_r, &mut buf,
+        );
         if !last_mse.is_finite() && diverged_at.is_none() {
             diverged_at = Some(step + 1);
         }
@@ -562,7 +583,11 @@ fn t2_softmax_parallax_diverges_unclipped() {
                 step + 1,
                 STEPS,
                 last_mse,
-                if !last_mse.is_finite() { "  ← DIVERGED" } else { "" },
+                if !last_mse.is_finite() {
+                    "  ← DIVERGED"
+                } else {
+                    ""
+                },
             );
         }
     }
@@ -576,7 +601,8 @@ fn t2_softmax_parallax_diverges_unclipped() {
         "T2 regression anchor broken: softmax Parallax stayed finite for {} steps \
          (final mse = {:.6}). The 2026-06-19 inverted divergence pattern no longer \
          reproduces — investigate whether the forward path changed.",
-        STEPS, last_mse,
+        STEPS,
+        last_mse,
     );
     assert!(
         diverged_at.is_some(),
@@ -623,12 +649,17 @@ fn t3b_sigmoid_parallax_stabilized_by_wr_grad_clip() {
         if step == 0 || (step + 1) % 50 == 0 || step + 1 == STEPS {
             eprintln!(
                 "[t3b] step {:>4}/{:<4}  mse = {:.6}",
-                step + 1, STEPS, last_mse,
+                step + 1,
+                STEPS,
+                last_mse,
             );
         }
     }
 
-    eprintln!("T3b verdict: final mse = {:.6} (init {:.6})", last_mse, init_mse);
+    eprintln!(
+        "T3b verdict: final mse = {:.6} (init {:.6})",
+        last_mse, init_mse
+    );
     assert!(
         last_mse.is_finite(),
         "T3b mitigation failed: sigmoid Parallax diverged even with W_R gradient \
@@ -639,6 +670,7 @@ fn t3b_sigmoid_parallax_stabilized_by_wr_grad_clip() {
         last_mse < init_mse,
         "T3b mitigation: training did not improve (init={:.6}, final={:.6}). \
          Stability without progress is not a useful mitigation.",
-        init_mse, last_mse,
+        init_mse,
+        last_mse,
     );
 }

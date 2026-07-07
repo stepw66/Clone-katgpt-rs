@@ -1,7 +1,7 @@
 //! KernelScreeningPruner — kernel-tricked relevance for ScreeningPruner (Plan 234).
 
-use katgpt_core::traits::ScreeningPruner;
 use super::kernel_scoring::KernelKind;
+use katgpt_core::traits::ScreeningPruner;
 
 /// Wraps a ScreeningPruner and applies kernel transformation to relevance scores.
 pub struct KernelScreeningPruner<P> {
@@ -45,8 +45,7 @@ mod tests {
     #[test]
     fn gaussian_kernel_perfect_relevance() {
         let inner = ConstantScreener { val: 1.0 };
-        let kernel =
-            KernelScreeningPruner::new(inner, KernelKind::Gaussian { sigma: 1.0 });
+        let kernel = KernelScreeningPruner::new(inner, KernelKind::Gaussian { sigma: 1.0 });
         let score = kernel.relevance(0, 0, &[]);
         assert!(
             (score - 1.0).abs() < 1e-5,
@@ -58,8 +57,7 @@ mod tests {
     #[test]
     fn gaussian_kernel_distant_relevance() {
         let inner = ConstantScreener { val: 0.0 };
-        let kernel =
-            KernelScreeningPruner::new(inner, KernelKind::Gaussian { sigma: 1.0 });
+        let kernel = KernelScreeningPruner::new(inner, KernelKind::Gaussian { sigma: 1.0 });
         let score = kernel.relevance(0, 0, &[]);
         assert!(
             score < 0.5,

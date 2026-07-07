@@ -69,8 +69,7 @@ impl Default for ColliderConstraintConfig {
 ///   which segment boundaries `s_{kL}` occur. Must be sorted ascending.
 /// - `active_task_colliders`: 1-indexed task ids whose colliders must be
 ///   preserved by any accepted branch. Empty = no constraint (fast path).
-#[derive(Clone, Debug)]
-#[derive(Default)]
+#[derive(Clone, Debug, Default)]
 pub struct ColliderConstraint {
     /// Sorted ascending 1-indexed token positions of segment boundaries.
     pub segment_boundaries: Vec<usize>,
@@ -79,7 +78,6 @@ pub struct ColliderConstraint {
     /// Tunable config.
     pub config: ColliderConstraintConfig,
 }
-
 
 impl ColliderConstraint {
     /// Construct with explicit boundaries + colliders.
@@ -518,7 +516,8 @@ mod tests {
         // Boundaries are at positions 4, 8, 12, 16, 20 (1-indexed).
         assert!(!bench.boundaries.is_empty());
 
-        let parent_hidden: Vec<&[f32]> = bench.boundary_hidden.iter().map(|v| v.as_slice()).collect();
+        let parent_hidden: Vec<&[f32]> =
+            bench.boundary_hidden.iter().map(|v| v.as_slice()).collect();
         let constraint = ColliderConstraint::new(
             bench.boundaries.clone(),
             (1..=bench.n_tasks).collect(),
@@ -574,7 +573,8 @@ mod tests {
     #[test]
     fn g8_ddtree_expansion_reduction() {
         let bench = InterleavedTaskBenchmark::generate(20, 5, 4, 20);
-        let parent_hidden: Vec<&[f32]> = bench.boundary_hidden.iter().map(|v| v.as_slice()).collect();
+        let parent_hidden: Vec<&[f32]> =
+            bench.boundary_hidden.iter().map(|v| v.as_slice()).collect();
         let constraint = ColliderConstraint::new(
             bench.boundaries.clone(),
             (1..=bench.n_tasks).collect(),
@@ -684,11 +684,8 @@ mod tests {
     /// hits_boundary detects segment boundary positions.
     #[test]
     fn hits_boundary_correct() {
-        let constraint = ColliderConstraint::new(
-            vec![4, 8, 12],
-            vec![1],
-            ColliderConstraintConfig::default(),
-        );
+        let constraint =
+            ColliderConstraint::new(vec![4, 8, 12], vec![1], ColliderConstraintConfig::default());
         // depth is 0-indexed; boundary at pos=4 → depth=3.
         assert!(constraint.hits_boundary(3));
         assert!(constraint.hits_boundary(7));
@@ -721,16 +718,14 @@ mod tests {
         let constraint = ColliderConstraint::default();
         let parent: Vec<&[f32]> = vec![];
         // Through the trait.
-        let trait_score = PreservationScorer::preservation_score(
-            &constraint,
-            5,
-            &parent,
-            &[],
-        );
+        let trait_score = PreservationScorer::preservation_score(&constraint, 5, &parent, &[]);
         // Through the inherent method.
         let inherent_score = constraint.collider_preservation_score(5, &parent, &[]);
         assert!((trait_score - inherent_score).abs() < 1e-6);
-        assert!((trait_score - 1.0).abs() < 1e-6, "noop should be 1.0 through trait");
+        assert!(
+            (trait_score - 1.0).abs() < 1e-6,
+            "noop should be 1.0 through trait"
+        );
     }
 
     /// `ColliderRouterAdapter::new(constraint, depth)` compiles and routes —

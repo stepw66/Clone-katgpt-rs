@@ -22,8 +22,8 @@
 //!     - D=8 full pipeline (`spherical_steering_into`): `< 100 ns`/call.
 //!     - D=8 mix-only (`slerp_steering_into` with precomputed t): `< 80 ns`.
 //!     - D=64 full pipeline: `< 1500 ns`/call (matches Plan 322 D=64 budget).
-//!   Also reports the Plan 322 vs Plan 405 latency ratio at D=8 (Slerp is
-//!   arccos + 2 sin + div vs cos + sin; expect 3–5× slower).
+//!       Also reports the Plan 322 vs Plan 405 latency ratio at D=8 (Slerp is
+//!       arccos + 2 sin + div vs cos + sin; expect 3–5× slower).
 //!
 //! - **G4 (alloc-free hot path)**: After scratch warmup, 100 steady-state
 //!   calls through `spherical_steering_into` allocate 0 times (counted via
@@ -55,7 +55,9 @@
 
 #![cfg(feature = "spherical_steering")]
 
-use katgpt_core::{slerp_steering_into, spherical_steering_into, vmf_confidence_gate, SlerpScratch};
+use katgpt_core::{
+    SlerpScratch, slerp_steering_into, spherical_steering_into, vmf_confidence_gate,
+};
 use std::hint::black_box;
 use std::time::Instant;
 
@@ -338,7 +340,9 @@ fn gate_g3_latency() -> GateResult {
     let mut out8 = vec![0.0f32; 8];
     let mut scratch8 = SlerpScratch::new(8);
     // Pick a non-aligned, non-antipodal configuration so the Slerp path is exercised.
-    h8.iter_mut().enumerate().for_each(|(i, x)| *x = (i as f32) * 0.3 - 0.7);
+    h8.iter_mut()
+        .enumerate()
+        .for_each(|(i, x)| *x = (i as f32) * 0.3 - 0.7);
     mu8[0] = 1.0; // unit, non-parallel
     let d8_full_ns = timed_median_ns(ITERS, BATCHES, || {
         let _ = bb(spherical_steering_into(
@@ -370,7 +374,9 @@ fn gate_g3_latency() -> GateResult {
     let mut mu64 = vec![0.0f32; 64];
     let mut out64 = vec![0.0f32; 64];
     let mut scratch64 = SlerpScratch::new(64);
-    h64.iter_mut().enumerate().for_each(|(i, x)| *x = (i as f32) * 0.1 - 3.0);
+    h64.iter_mut()
+        .enumerate()
+        .for_each(|(i, x)| *x = (i as f32) * 0.1 - 3.0);
     mu64[0] = 1.0;
     let d64_full_ns = timed_median_ns(ITERS, BATCHES, || {
         let _ = bb(spherical_steering_into(
@@ -413,7 +419,9 @@ fn gate_g4_zero_alloc() -> GateResult {
     let mut mu_t = vec![0.0f32; d];
     let mut out = vec![0.0f32; d];
     let mut scratch = SlerpScratch::new(d);
-    h.iter_mut().enumerate().for_each(|(i, x)| *x = (i as f32) * 0.1 - 3.0);
+    h.iter_mut()
+        .enumerate()
+        .for_each(|(i, x)| *x = (i as f32) * 0.1 - 3.0);
     mu_t[0] = 1.0;
 
     // Warmup.
@@ -463,7 +471,9 @@ fn gate_g5_no_regression() -> GateResult {
     let mut out1 = vec![0.0f32; 8];
     let mut out2 = vec![0.0f32; 8];
     let mut scratch = SlerpScratch::new(8);
-    h.iter_mut().enumerate().for_each(|(i, x)| *x = (i as f32) * 0.3 - 0.7);
+    h.iter_mut()
+        .enumerate()
+        .for_each(|(i, x)| *x = (i as f32) * 0.3 - 0.7);
     mu_t[0] = 1.0;
     normalize_inplace(&mut mu_t);
 
@@ -557,9 +567,7 @@ fn main() {
 
     println!();
     if all_pass {
-        println!(
-            "=== ALL GATES PASS — modelless gain proven, eligible for default promotion ==="
-        );
+        println!("=== ALL GATES PASS — modelless gain proven, eligible for default promotion ===");
         std::process::exit(0);
     } else {
         println!("=== ONE OR MORE GATES FAILED — keep opt-in, investigate ===");

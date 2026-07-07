@@ -265,9 +265,13 @@ fn gate_g1_marginal_exactness() -> bool {
 // ─── G2: Sample efficiency (pass@k reduction) ───────────────────────────────
 
 fn gate_g2_sample_efficiency() -> bool {
-    println!("\n\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}");
+    println!(
+        "\n\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}"
+    );
     println!("G2 \u{2014} Sample efficiency (K_qmc / K_iid at matched pass@k \u{2265} 0.5)");
-    println!("\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}");
+    println!(
+        "\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}"
+    );
 
     // Task design: the target sequence occupies a single interval of size
     // p_target in [0,1) under arithmetic coding. QMC's K evenly-spaced points
@@ -300,7 +304,9 @@ fn gate_g2_sample_efficiency() -> bool {
             }
             // Boost target so it dominates: target raw weight = sum of all
             // other weights (so post-normalize target ~= 0.5).
-            let other_sum: f32 = probs.iter().enumerate()
+            let other_sum: f32 = probs
+                .iter()
+                .enumerate()
                 .filter(|(i, _)| *i != TARGET[t])
                 .map(|(_, &p)| p)
                 .sum();
@@ -324,15 +330,8 @@ fn gate_g2_sample_efficiency() -> bool {
         for batch in 0..N_BATCHES {
             let mut src = make_source(src_idx, 8000 + src_idx as u64 * 1000 + batch as u64);
             let mut uniforms = vec![0.0f32; k];
-            let mut rollouts: Vec<Vec<usize>> =
-                (0..k).map(|_| Vec::with_capacity(T)).collect();
-            sample_k_from_distribution_qmc(
-                &probs_refs,
-                &mut *src,
-                k,
-                &mut uniforms,
-                &mut rollouts,
-            );
+            let mut rollouts: Vec<Vec<usize>> = (0..k).map(|_| Vec::with_capacity(T)).collect();
+            sample_k_from_distribution_qmc(&probs_refs, &mut *src, k, &mut uniforms, &mut rollouts);
             if rollouts
                 .iter()
                 .any(|r| r.iter().zip(TARGET.iter()).all(|(&a, &b)| a == b))
@@ -381,7 +380,10 @@ fn gate_g2_sample_efficiency() -> bool {
     println!(
         "  pass@k (i.i.d.): K@>=0.5 = {}  (pass@k at K={:?})",
         k_iid,
-        iid_pak.iter().map(|(k, p)| format!("{}={:.4}", k, p)).collect::<Vec<_>>(),
+        iid_pak
+            .iter()
+            .map(|(k, p)| format!("{}={:.4}", k, p))
+            .collect::<Vec<_>>(),
     );
 
     let mut all_pass = true;
@@ -401,7 +403,11 @@ fn gate_g2_sample_efficiency() -> bool {
             1.0
         };
         let pass = ratio <= TARGET_RATIO;
-        let verdict = if pass { "\u{2705} PASS" } else { "\u{274c} FAIL" };
+        let verdict = if pass {
+            "\u{2705} PASS"
+        } else {
+            "\u{274c} FAIL"
+        };
         println!(
             "  [{}] K@>=0.5 = {}, ratio K_qmc/K_iid = {:.3} (target <= {:.2}) {}  (pass@k at K={:?})",
             source_name(src_idx),
@@ -409,10 +415,12 @@ fn gate_g2_sample_efficiency() -> bool {
             ratio,
             TARGET_RATIO,
             verdict,
-            pak.iter().map(|(k, p)| format!("{}={:.4}", k, p)).collect::<Vec<_>>(),
+            pak.iter()
+                .map(|(k, p)| format!("{}={:.4}", k, p))
+                .collect::<Vec<_>>(),
         );
-        all_pass |= pass;  // ANY source passing means the primitive delivers
-                            // the claim (paper: Lattice dominates pass@k).
+        all_pass |= pass; // ANY source passing means the primitive delivers
+        // the claim (paper: Lattice dominates pass@k).
     }
 
     // Gate semantics: G2 tests the pass@k claim. The paper states Lattice
@@ -421,7 +429,11 @@ fn gate_g2_sample_efficiency() -> bool {
     // PASSES if any source achieves the sample-reduction target.
     println!(
         "\n  G2 verdict: {}  (pass@k champion: Lattice; Stratified/Sobol optimized for other metrics)",
-        if all_pass { "\u{2705} PASS" } else { "\u{274c} FAIL" },
+        if all_pass {
+            "\u{2705} PASS"
+        } else {
+            "\u{274c} FAIL"
+        },
     );
     all_pass
 }
@@ -539,13 +551,7 @@ fn gate_g4_zero_alloc() -> bool {
     sample_k_from_distribution_qmc(&probs_refs, &mut src, K, &mut uniforms, &mut rollouts);
     let (_, alloc_a) = alloc_delta(|| {
         for _ in 0..N_CALLS {
-            sample_k_from_distribution_qmc(
-                &probs_refs,
-                &mut src,
-                K,
-                &mut uniforms,
-                &mut rollouts,
-            );
+            sample_k_from_distribution_qmc(&probs_refs, &mut src, K, &mut uniforms, &mut rollouts);
         }
     });
     let pass_a = alloc_a == 0;
@@ -621,11 +627,7 @@ fn gate_g5_sub_us_overhead() -> bool {
         let verdict = if pass { "✅" } else { "❌" };
         println!(
             "  K={:>3}  total={:>8.1} ns  per-rollout={:>7.2} ns  (target < {:.0} ns)  {}",
-            k,
-            elapsed_ns,
-            per_rollout_ns,
-            TARGET_NS,
-            verdict,
+            k, elapsed_ns, per_rollout_ns, TARGET_NS, verdict,
         );
         all_pass &= pass;
     }
@@ -660,11 +662,7 @@ fn gate_g5_sub_us_overhead() -> bool {
 // ─── Main ───────────────────────────────────────────────────────────────────
 
 fn verdict_str(pass: bool) -> &'static str {
-    if pass {
-        "✅ PASS"
-    } else {
-        "❌ FAIL"
-    }
+    if pass { "✅ PASS" } else { "❌ FAIL" }
 }
 
 fn main() {

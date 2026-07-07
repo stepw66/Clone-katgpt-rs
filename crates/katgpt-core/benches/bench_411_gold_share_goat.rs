@@ -19,7 +19,7 @@
 
 #![cfg(feature = "gold_share_probe")]
 
-use katgpt_core::data_probe::{gold_share_flat, GoldShareScratch};
+use katgpt_core::data_probe::{GoldShareScratch, gold_share_flat};
 
 // ── Synthetic Table 1 sweep ─────────────────────────────────────────────────
 
@@ -56,7 +56,9 @@ fn build_table1_inputs(
     for _ in 0..n_kv {
         let mut v = vec![0.0_f32; d_head];
         for slot in &mut v {
-            state = state.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            state = state
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
             let z = state;
             *slot = ((z >> 11) as f32 / (1u64 << 53) as f32) * 2.0 - 1.0;
         }
@@ -82,8 +84,16 @@ fn build_table1_inputs(
     gold_val[0] = 1.0;
     let mut a = vec![0.0_f32; d_head];
     for t in 0..n_kv {
-        let alpha = if gold_mask[t] { alpha_gold } else { alpha_noise };
-        let val = if gold_mask[t] { &gold_val } else { &noise_vecs[t] };
+        let alpha = if gold_mask[t] {
+            alpha_gold
+        } else {
+            alpha_noise
+        };
+        let val = if gold_mask[t] {
+            &gold_val
+        } else {
+            &noise_vecs[t]
+        };
         for (ai, &vi) in a.iter_mut().zip(val.iter()) {
             *ai += alpha * vi;
         }
@@ -95,14 +105,22 @@ fn build_table1_inputs(
     let mut attn_flat = vec![0.0_f32; n_heads * n_kv];
     for h in 0..n_heads {
         for t in 0..n_kv {
-            attn_flat[h * n_kv + t] = if gold_mask[t] { alpha_gold } else { alpha_noise };
+            attn_flat[h * n_kv + t] = if gold_mask[t] {
+                alpha_gold
+            } else {
+                alpha_noise
+            };
         }
     }
 
     // Build flat values.
     let mut values_flat = vec![0.0_f32; n_kv * d_head];
     for t in 0..n_kv {
-        let val = if gold_mask[t] { &gold_val } else { &noise_vecs[t] };
+        let val = if gold_mask[t] {
+            &gold_val
+        } else {
+            &noise_vecs[t]
+        };
         for (k, &vi) in val.iter().enumerate() {
             values_flat[t * d_head + k] = vi * value_scale;
         }
@@ -149,7 +167,15 @@ fn main() {
             build_table1_inputs(n_heads, n_kv, d_head, d_model, n_gold, gm, 42);
 
         let report = gold_share_flat(
-            &attn, &values, &mask, &w_o, n_heads, n_kv, d_head, d_model, &mut scratch,
+            &attn,
+            &values,
+            &mask,
+            &w_o,
+            n_heads,
+            n_kv,
+            d_head,
+            d_model,
+            &mut scratch,
         );
 
         if first_norm == 0.0 {
@@ -163,7 +189,9 @@ fn main() {
 
         println!(
             "{:>12.4}  {:>10.4}  {:>12.6}  {:>14}",
-            gm, report.total_norm, report.gold_share,
+            gm,
+            report.total_norm,
+            report.gold_share,
             if swap_detected { "✓ YES" } else { "  no" }
         );
     }
@@ -189,7 +217,9 @@ fn main() {
     println!(
         "  gold_share collapses:      {} (first={:.4}, last={:.4}, ratio={:.1}×)",
         if gs_collapses { "✓" } else { "✗" },
-        first_gs, last_gs, first_gs / last_gs.max(1e-10)
+        first_gs,
+        last_gs,
+        first_gs / last_gs.max(1e-10)
     );
 
     let g2_pass = norms_stable && gs_collapses;
@@ -213,7 +243,13 @@ fn main() {
     // ── Summary ───────────────────────────────────────────────────────────
     println!("\n══════════════════════════════════════════════════════════════════");
     println!("  GoldShare GOAT gate summary");
-    println!("  G2 (diagnostic quality): {}", if g2_pass { "✅ PASS" } else { "❌ FAIL" });
-    println!("  G4 (alloc-free):         {}", if g4_pass { "✅ PASS" } else { "❌ FAIL" });
+    println!(
+        "  G2 (diagnostic quality): {}",
+        if g2_pass { "✅ PASS" } else { "❌ FAIL" }
+    );
+    println!(
+        "  G4 (alloc-free):         {}",
+        if g4_pass { "✅ PASS" } else { "❌ FAIL" }
+    );
     println!("══════════════════════════════════════════════════════════════════\n");
 }

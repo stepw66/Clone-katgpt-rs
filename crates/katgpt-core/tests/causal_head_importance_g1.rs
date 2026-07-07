@@ -17,9 +17,7 @@
 //! So load-bearing heads (p_h=1) get `IE = 1/K_LOAD_BEARING` and bystanders
 //! (p_h=0) get `IE = 0` — perfect, exactly-computable separation.
 
-use katgpt_core::causal_head_importance::{
-    direct_effect_importance, partition_by_causal_score,
-};
+use katgpt_core::causal_head_importance::{direct_effect_importance, partition_by_causal_score};
 
 const N_HEADS: usize = 32;
 const K_LOAD_BEARING: usize = 4;
@@ -106,17 +104,18 @@ fn ie_discriminates_load_bearing_from_bystanders() {
         );
     }
     // Every bystander head (indices K..N) has IE = 0 < threshold.
-    for (h, ie) in ies.iter().enumerate().skip(K_LOAD_BEARING).take(N_HEADS - K_LOAD_BEARING) {
+    for (h, ie) in ies
+        .iter()
+        .enumerate()
+        .skip(K_LOAD_BEARING)
+        .take(N_HEADS - K_LOAD_BEARING)
+    {
         assert!(
             *ie < THRESHOLD,
             "bystander head {h} has IE {} >= threshold {THRESHOLD}",
             ie
         );
-        assert!(
-            ie.abs() < 1e-6,
-            "bystander head {h} IE {} != 0",
-            ie
-        );
+        assert!(ie.abs() < 1e-6, "bystander head {h} IE {} != 0", ie);
     }
 }
 
@@ -152,7 +151,8 @@ fn ranking_load_bearing_all_above_bystanders() {
 
     // Equivalent Spearman-ρ=1.0 statement on this clean synthetic: the IE-based
     // partition's top-K set is *exactly* the load-bearing set (Jaccard = 1.0).
-    let (critical, _) = partition_by_causal_score(&ies, K_LOAD_BEARING as f32 / N_HEADS as f32, None, false);
+    let (critical, _) =
+        partition_by_causal_score(&ies, K_LOAD_BEARING as f32 / N_HEADS as f32, None, false);
     let load_bearing_set: std::collections::HashSet<usize> = (0..K_LOAD_BEARING).collect();
     let critical_set: std::collections::HashSet<usize> = critical.iter().copied().collect();
     assert_eq!(
@@ -256,7 +256,10 @@ fn partition_matches_load_bearing_set_on_harness() {
     let expected_critical: Vec<usize> = (0..K_LOAD_BEARING).collect();
     let expected_convertible: Vec<usize> = (K_LOAD_BEARING..N_HEADS).collect();
     assert_eq!(critical, expected_critical, "critical set mismatch");
-    assert_eq!(convertible, expected_convertible, "convertible set mismatch");
+    assert_eq!(
+        convertible, expected_convertible,
+        "convertible set mismatch"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -280,10 +283,7 @@ fn readout_feeds_ie_pipeline() {
 
     assert!(m_clean > m_corrupt, "clean must exceed corrupt");
     let ie = direct_effect_importance(m_clean, m_corrupt, m_patched);
-    assert!(
-        (0.0..=1.0).contains(&ie),
-        "IE {ie} outside [0,1]"
-    );
+    assert!((0.0..=1.0).contains(&ie), "IE {ie} outside [0,1]");
     // The patch moved the first position to corrupt → substantial but partial drop.
     assert!(ie > 0.0, "IE should be positive for a contributing head");
 }

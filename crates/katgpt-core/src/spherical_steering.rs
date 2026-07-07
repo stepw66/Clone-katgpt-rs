@@ -327,8 +327,8 @@ pub fn slerp_steering_into(
 /// exact even in the fallback branch.
 #[inline]
 fn slerp_aligned_lerp_fallback(
-    unit_h: &[f32],  // ĥ, length d (already populated by the caller)
-    mu_t: &[f32],    // length d
+    unit_h: &[f32], // ĥ, length d (already populated by the caller)
+    mu_t: &[f32],   // length d
     t: f32,
     h_out: &mut [f32], // length d
     norm: f32,

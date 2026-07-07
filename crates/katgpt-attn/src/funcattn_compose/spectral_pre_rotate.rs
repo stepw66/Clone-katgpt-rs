@@ -83,7 +83,12 @@ pub fn calibrate_and_pre_rotate_basis(
 ///
 /// # Panics
 /// Debug-asserts `cal.head_dim == d`.
-pub fn pre_rotate_from_calibration(w_basis: &mut [f32], cal: &CalibrationResult, k: usize, d: usize) {
+pub fn pre_rotate_from_calibration(
+    w_basis: &mut [f32],
+    cal: &CalibrationResult,
+    k: usize,
+    d: usize,
+) {
     debug_assert_eq!(
         cal.head_dim, d,
         "calibration head_dim ({}) must match basis dim d ({})",
@@ -165,7 +170,10 @@ mod tests {
                     m[i * d + c] -= dot * m[j * d + c];
                 }
             }
-            let nrm = (0..d).map(|c| m[i * d + c] * m[i * d + c]).sum::<f32>().sqrt();
+            let nrm = (0..d)
+                .map(|c| m[i * d + c] * m[i * d + c])
+                .sum::<f32>()
+                .sqrt();
             let nrm = if nrm < 1e-12 { 1.0 } else { nrm };
             for c in 0..d {
                 m[i * d + c] /= nrm;
@@ -185,11 +193,13 @@ mod tests {
 
         // Calibration samples: random vectors in R^d. The resulting eigenbasis
         // is essentially a random rotation (not identity) for generic data.
-        let samples: Vec<Vec<f32>> = (0..32).map(|i| {
-            let mut v = vec![0.0f32; d];
-            lcg_fill(&mut v, 100 + i);
-            v
-        }).collect();
+        let samples: Vec<Vec<f32>> = (0..32)
+            .map(|i| {
+                let mut v = vec![0.0f32; d];
+                lcg_fill(&mut v, 100 + i);
+                v
+            })
+            .collect();
 
         let cal = calibrate_and_pre_rotate_basis(&mut w_basis, &samples, k, d);
         assert_eq!(cal.head_dim, d);
@@ -219,22 +229,41 @@ mod tests {
         let w_k = random_orthogonal_matrix(d, 12);
         let w_v = random_orthogonal_matrix(d, 13);
 
-        let samples: Vec<Vec<f32>> = (0..24).map(|i| {
-            let mut v = vec![0.0f32; d];
-            lcg_fill(&mut v, 200 + i);
-            v
-        }).collect();
+        let samples: Vec<Vec<f32>> = (0..24)
+            .map(|i| {
+                let mut v = vec![0.0f32; d];
+                lcg_fill(&mut v, 200 + i);
+                v
+            })
+            .collect();
         let _cal = calibrate_and_pre_rotate_basis(&mut w_basis, &samples, k, d);
 
         let mut x = vec![0.0f32; n * d];
         lcg_fill(&mut x, 300);
         // Sigmoid basis needs a sharp temperature for small-magnitude inputs
         // (see funcattn.rs module doc "Temperature requirement for sigmoid").
-        let cfg = FuncAttnConfig { d, k, basis: FuncAttnBasis::Sigmoid, alpha: 0.5, temperature: 0.1, cholesky_jitter: 1e-6 };
+        let cfg = FuncAttnConfig {
+            d,
+            k,
+            basis: FuncAttnBasis::Sigmoid,
+            alpha: 0.5,
+            temperature: 0.1,
+            cholesky_jitter: 1e-6,
+        };
         let mut scratch = FuncAttnScratch::new(n, d, k);
         let mut out = vec![0.0f32; n * d];
-        funcattn_forward(&x, &x, &w_basis, &w_q, &w_k, &w_v, &cfg, &mut scratch, &mut out)
-            .expect("forward must succeed after rotation");
+        funcattn_forward(
+            &x,
+            &x,
+            &w_basis,
+            &w_q,
+            &w_k,
+            &w_v,
+            &cfg,
+            &mut scratch,
+            &mut out,
+        )
+        .expect("forward must succeed after rotation");
 
         let all_finite = out.iter().all(|v| v.is_finite());
         assert!(all_finite, "output must be finite after eigen-rotation");
@@ -248,11 +277,13 @@ mod tests {
         // when given the same calibration result.
         let k = 4;
         let d = 8;
-        let samples: Vec<Vec<f32>> = (0..16).map(|i| {
-            let mut v = vec![0.0f32; d];
-            lcg_fill(&mut v, 400 + i);
-            v
-        }).collect();
+        let samples: Vec<Vec<f32>> = (0..16)
+            .map(|i| {
+                let mut v = vec![0.0f32; d];
+                lcg_fill(&mut v, 400 + i);
+                v
+            })
+            .collect();
 
         let mut w1 = random_orthogonal_matrix_rows(k, d, 5);
         let mut w2 = w1.clone();

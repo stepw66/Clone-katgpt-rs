@@ -13,12 +13,13 @@
 use std::hint::black_box;
 use std::time::Instant;
 
-#[allow(deprecated)] // `sample_token` is imported for bench_03_math_utilities, which benchmarks its allocator overhead by design
-use katgpt_core::{
-    Config, Rng, SimdLevel, matmul, matmul_relu, rmsnorm, sample_token, softmax, softmax_scaled,
-};
 use katgpt_core::simd::{
     simd_add_inplace, simd_add_into, simd_dot_f32, simd_max_f32, simd_scale_inplace,
+};
+#[allow(deprecated)]
+// `sample_token` is imported for bench_03_math_utilities, which benchmarks its allocator overhead by design
+use katgpt_core::{
+    Config, Rng, SimdLevel, matmul, matmul_relu, rmsnorm, sample_token, softmax, softmax_scaled,
 };
 use katgpt_rs::transformer::{ForwardContext, MultiLayerKVCache, TransformerWeights, forward};
 use katgpt_rs::types::{gegelu, gegelu_tanh, matmul_parallel, rmsnorm_with_gamma};
@@ -55,7 +56,6 @@ fn bench_mut(label: &str, warmup: usize, iters: usize, mut f: impl FnMut()) -> f
 // ── Section 1: SIMD Level Detection ─────────────────────────
 
 #[test]
-
 #[ignore = "pure measurement benchmark (no assertions), slow in debug; run with --release --ignored"]
 fn bench_01_simd_detection() {
     let level = katgpt_core::simd::simd_level();
@@ -85,7 +85,6 @@ fn bench_01_simd_detection() {
 // ── Section 2: Core SIMD Primitives ─────────────────────────
 
 #[test]
-
 #[ignore = "pure measurement benchmark (no assertions), slow in debug; run with --release --ignored"]
 fn bench_02_simd_primitives() {
     println!();
@@ -248,7 +247,6 @@ fn bench_03_math_utilities() {
 // ── Section 4: Matmul Kernels ────────────────────────────────
 
 #[test]
-
 #[ignore = "pure measurement benchmark (no assertions), slow in debug; run with --release --ignored"]
 fn bench_04_matmul_kernels() {
     println!();
@@ -407,7 +405,6 @@ fn bench_04_matmul_kernels() {
 // ── Section 5: GeGLU Activation ──────────────────────────────
 
 #[test]
-
 #[ignore = "pure measurement benchmark (no assertions), slow in debug; run with --release --ignored"]
 fn bench_05_gegelu() {
     println!();
@@ -451,7 +448,6 @@ fn bench_05_gegelu() {
 // ── Section 6: E2E Transformer Forward ───────────────────────
 
 #[test]
-
 #[ignore = "pure measurement benchmark (no assertions), slow in debug; run with --release --ignored"]
 fn bench_06_e2e_forward() {
     println!();
@@ -615,7 +611,6 @@ fn bench_06_e2e_forward() {
 // ── Section 7: Forward Pass Component Breakdown ──────────────
 
 #[test]
-
 #[ignore = "pure measurement benchmark (no assertions), slow in debug; run with --release --ignored"]
 fn bench_07_component_breakdown() {
     println!();
@@ -848,7 +843,6 @@ fn bench_07_component_breakdown() {
 // ── Section 8: Parallel Matmul Threshold ─────────────────────
 
 #[test]
-
 #[ignore = "pure measurement benchmark (no assertions), slow in debug; run with --release --ignored"]
 fn bench_08_parallel_threshold() {
     println!();
@@ -913,7 +907,6 @@ fn bench_08_parallel_threshold() {
 // ── Section 9: Summary ───────────────────────────────────────
 
 #[test]
-
 #[ignore = "pure measurement benchmark (no assertions), slow in debug; run with --release --ignored"]
 fn bench_09_summary() {
     println!();

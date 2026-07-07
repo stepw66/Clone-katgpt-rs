@@ -12,7 +12,7 @@ mod cat0;
 mod nerve;
 mod poset;
 
-pub use cache::{NerveCache, NerveFlowField, NavigationHint};
+pub use cache::{NavigationHint, NerveCache, NerveFlowField};
 pub use cat0::{GeodesicPath, cat0_geodesic, is_cat0};
 pub use nerve::{CubicalComplex, CubicalCube, cubical_nerve, cubical_nerve_with_threshold};
 pub use poset::{DistributiveMeetSemilattice, ZoneId, ZonePoset};

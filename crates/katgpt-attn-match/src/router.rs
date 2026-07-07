@@ -231,8 +231,13 @@ mod tests {
     fn test_router_determinism() {
         let cfg = SolverRouterConfig::default();
         // Two fresh routers must agree on the same (t, T, gpu_available).
-        for &(t, gpu) in &[(16usize, true), (100, true), (100, false), (5000, true), (5000, false)]
-        {
+        for &(t, gpu) in &[
+            (16usize, true),
+            (100, true),
+            (100, false),
+            (5000, true),
+            (5000, false),
+        ] {
             let b1 = pick_backend(t, 8192, gpu, &cfg);
             let b2 = pick_backend(t, 8192, gpu, &cfg);
             assert_eq!(
@@ -259,17 +264,26 @@ mod tests {
         let mut router = SolverRouter::new(cfg);
         // t=100 → CpuScalar (first call, no hysteresis).
         let b1 = router.pick_backend(100, 1024, false);
-        assert_eq!(b1, SolverBackend::CpuScalar, "t=100 → scalar (ane disabled)");
+        assert_eq!(
+            b1,
+            SolverBackend::CpuScalar,
+            "t=100 → scalar (ane disabled)"
+        );
         // t=105 is within 10% of 100 (5% relative). Target would be CpuSimd
         // (105 > 100, 105 <= 500), but hysteresis keeps scalar.
         let b2 = router.pick_backend(105, 1024, false);
         assert_eq!(
-            b2, SolverBackend::CpuScalar,
+            b2,
+            SolverBackend::CpuScalar,
             "hysteresis should keep scalar for t=105 (within 10% of last_t=100)"
         );
         // t=120 is >10% away from last_t=105 (15/105 ≈ 14.3%) → switch to target.
         let b3 = router.pick_backend(120, 1024, false);
-        assert_eq!(b3, SolverBackend::CpuSimd, "t=120 > 10% away → switch to simd");
+        assert_eq!(
+            b3,
+            SolverBackend::CpuSimd,
+            "t=120 > 10% away → switch to simd"
+        );
     }
 
     /// Hysteresis: large jump always follows the target.
@@ -286,7 +300,11 @@ mod tests {
         let _ = router.pick_backend(50, 1024, false); // scalar
         // Jump way past the 10% band → new target.
         let b = router.pick_backend(1000, 1024, false);
-        assert_eq!(b, SolverBackend::CpuRayon, "large jump → rayon (t≥simd_max_t, no gpu)");
+        assert_eq!(
+            b,
+            SolverBackend::CpuRayon,
+            "large jump → rayon (t≥simd_max_t, no gpu)"
+        );
     }
 
     /// `pick_backend` allocates nothing on the heap. We verify this by
@@ -329,7 +347,10 @@ mod tests {
         // Above simd_max_t with GPU → Gpu.
         assert_eq!(pick_backend(4096, 8192, true, &cfg), SolverBackend::Gpu);
         // Above simd_max_t without GPU → CpuRayon.
-        assert_eq!(pick_backend(4096, 8192, false, &cfg), SolverBackend::CpuRayon);
+        assert_eq!(
+            pick_backend(4096, 8192, false, &cfg),
+            SolverBackend::CpuRayon
+        );
     }
 
     /// `reset()` clears history so the next pick is the pure target.

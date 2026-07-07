@@ -498,7 +498,10 @@ impl ThinkingController {
     /// [`ThinkingConfig::min_blocks`, `ThinkingConfig::max_blocks`].
     pub fn adaptive_budget(&self, decay_factors: &[f32], beta: f32) -> usize {
         let freshness = katgpt_core::cumprodsum::context_freshness(decay_factors);
-        let range = self.config.max_blocks.saturating_sub(self.config.min_blocks);
+        let range = self
+            .config
+            .max_blocks
+            .saturating_sub(self.config.min_blocks);
         let scale = Self::sigmoid(beta * (freshness - 0.5));
         self.config.min_blocks + (range as f32 * scale).round() as usize
     }

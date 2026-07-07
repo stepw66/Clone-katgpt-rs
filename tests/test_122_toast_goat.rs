@@ -151,12 +151,7 @@ mod tests {
         ids: &[usize],
     ) -> usize {
         ids.iter()
-            .filter(|&&id| {
-                tokenizer
-                    .id_to_vocab
-                    .get(id)
-                    .is_some_and(|v| v.len() == 1)
-            })
+            .filter(|&&id| tokenizer.id_to_vocab.get(id).is_some_and(|v| v.len() == 1))
             .count()
     }
 

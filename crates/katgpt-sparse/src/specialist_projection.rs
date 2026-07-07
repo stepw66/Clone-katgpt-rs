@@ -40,9 +40,9 @@
 //! (Plan 264 Phase 2, owned by a separate subagent); it only needs the
 //! storage type, which is already shipped.
 
+use crate::sparse_task_vector::SparseTaskVector;
 use katgpt_band::band_conditioner::ComputeTarget;
 use katgpt_core::sigmoid; // Hoisted from band_conditioner (Proposal 003 Phase 0.1)
-use crate::sparse_task_vector::SparseTaskVector;
 
 // ── JacobianSupportEstimator ────────────────────────────────────────────────
 
@@ -338,8 +338,7 @@ impl SpecialistMask {
                 {
                     local_cursor += 1;
                 }
-                let kept = local_cursor < mask.len()
-                    && (mask[local_cursor] as usize) == global;
+                let kept = local_cursor < mask.len() && (mask[local_cursor] as usize) == global;
                 if !kept {
                     hidden[global] = 0.0;
                 }
@@ -573,7 +572,9 @@ mod tests {
         let d_hidden = 32_usize;
         let n_keys = 8_usize;
         // Construct keys where the first half dominates the dot product.
-        let query: Vec<f32> = (0..d_hidden).map(|i| if i < d_hidden / 2 { 1.0 } else { 0.0 }).collect();
+        let query: Vec<f32> = (0..d_hidden)
+            .map(|i| if i < d_hidden / 2 { 1.0 } else { 0.0 })
+            .collect();
         let mut keys: Vec<f32> = vec![0.0; n_keys * d_hidden];
         for k in 0..n_keys {
             for j in 0..d_hidden / 2 {
@@ -689,7 +690,10 @@ mod tests {
         let mut hidden_misaligned = vec![0.0; d_hidden];
         hidden_misaligned[4..8].fill(1.0);
         let score2 = specialist_score(&mask, &hidden_misaligned);
-        assert!(score2 < 0.1, "no-alignment score {score2:.3} should be < 0.1");
+        assert!(
+            score2 < 0.1,
+            "no-alignment score {score2:.3} should be < 0.1"
+        );
     }
 
     /// Project zeros out non-kept coordinates only.

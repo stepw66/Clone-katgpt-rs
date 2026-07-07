@@ -28,8 +28,8 @@
 #![cfg(feature = "conformal_predictive_intervals")]
 
 use katgpt_core::{
-    FloorAdapter, OverallVerdict, PredictiveInterval, PredictiveOutput,
-    TrajectoryCorpus, UqPrimitiveUnderTest, run_floor_comparison,
+    FloorAdapter, OverallVerdict, PredictiveInterval, PredictiveOutput, TrajectoryCorpus,
+    UqPrimitiveUnderTest, run_floor_comparison,
 };
 
 // ===== Test primitives (mirror the unit-test helpers, but exposed here as the
@@ -44,15 +44,22 @@ pub struct TrueOracle<'a> {
 }
 
 impl<'a> UqPrimitiveUnderTest for TrueOracle<'a> {
-    fn name(&self) -> &str { "true-oracle" }
+    fn name(&self) -> &str {
+        "true-oracle"
+    }
     fn predict_next(&mut self) -> PredictiveOutput {
         let next_y = self.corpus.get(self.step).copied().unwrap_or(0.0);
         let eps = 1e-6;
         PredictiveOutput::from_interval(PredictiveInterval::new(
-            next_y - eps, next_y, next_y + eps, 0.05,
+            next_y - eps,
+            next_y,
+            next_y + eps,
+            0.05,
         ))
     }
-    fn observe(&mut self, _y: f32) { self.step += 1; }
+    fn observe(&mut self, _y: f32) {
+        self.step += 1;
+    }
 }
 
 /// An over-wide primitive — always predicts ±10. Decisively loses to the
@@ -60,7 +67,9 @@ impl<'a> UqPrimitiveUnderTest for TrueOracle<'a> {
 pub struct OverWide;
 
 impl UqPrimitiveUnderTest for OverWide {
-    fn name(&self) -> &str { "over-wide (±10)" }
+    fn name(&self) -> &str {
+        "over-wide (±10)"
+    }
     fn predict_next(&mut self) -> PredictiveOutput {
         PredictiveOutput::from_interval(PredictiveInterval::new(-10.0, 0.0, 10.0, 0.05))
     }
@@ -84,11 +93,19 @@ impl Default for MeanTracker {
 }
 
 impl MeanTracker {
-    pub fn new() -> Self { Self { n: 0.0, mean: 0.0, m2: 0.0 } }
+    pub fn new() -> Self {
+        Self {
+            n: 0.0,
+            mean: 0.0,
+            m2: 0.0,
+        }
+    }
 }
 
 impl UqPrimitiveUnderTest for MeanTracker {
-    fn name(&self) -> &str { "mean-tracker (running mean ± 2σ)" }
+    fn name(&self) -> &str {
+        "mean-tracker (running mean ± 2σ)"
+    }
     fn predict_next(&mut self) -> PredictiveOutput {
         let sigma = if self.n > 1.0 {
             (self.m2 / (self.n - 1.0)).sqrt()
@@ -120,7 +137,9 @@ pub struct SamplesAroundLast {
 }
 
 impl UqPrimitiveUnderTest for SamplesAroundLast {
-    fn name(&self) -> &str { "samples-around-last" }
+    fn name(&self) -> &str {
+        "samples-around-last"
+    }
     fn predict_next(&mut self) -> PredictiveOutput {
         let mut samples = Vec::with_capacity(41);
         for i in 0..41u32 {
@@ -129,15 +148,21 @@ impl UqPrimitiveUnderTest for SamplesAroundLast {
         }
         PredictiveOutput::from_samples(samples)
     }
-    fn observe(&mut self, y: f32) { self.last_y = y; }
+    fn observe(&mut self, y: f32) {
+        self.last_y = y;
+    }
 }
 
 /// An empty primitive — produces nothing. Excluded via NotApplicable.
 pub struct Empty;
 
 impl UqPrimitiveUnderTest for Empty {
-    fn name(&self) -> &str { "empty" }
-    fn predict_next(&mut self) -> PredictiveOutput { PredictiveOutput::empty() }
+    fn name(&self) -> &str {
+        "empty"
+    }
+    fn predict_next(&mut self) -> PredictiveOutput {
+        PredictiveOutput::empty()
+    }
     fn observe(&mut self, _y: f32) {}
 }
 
@@ -162,7 +187,10 @@ fn floor_vs_floor_ties_on_seasonal() {
     );
     // Floor-vs-floor should tie (or trivially beat itself by RNG noise).
     assert!(
-        matches!(report.overall, OverallVerdict::TiesFloor | OverallVerdict::BeatsFloor),
+        matches!(
+            report.overall,
+            OverallVerdict::TiesFloor | OverallVerdict::BeatsFloor
+        ),
         "floor-vs-floor should tie or beat, got {:?}",
         report.overall
     );
@@ -171,7 +199,10 @@ fn floor_vs_floor_ties_on_seasonal() {
 #[test]
 fn true_oracle_beats_floor_on_seasonal() {
     let corpus = TrajectoryCorpus::stationary_seasonal(12, 0.5, 300, 0xFACE_CAFE);
-    let mut oracle = TrueOracle { corpus: &corpus.values, step: 0 };
+    let mut oracle = TrueOracle {
+        corpus: &corpus.values,
+        step: 0,
+    };
     let report = run_floor_comparison(
         &mut oracle,
         &corpus.values,
@@ -200,7 +231,11 @@ fn overwide_loses_to_floor_on_seasonal() {
         corpus.recommended_warmup,
         &corpus.name,
     );
-    assert!(report.crps_ratio > 5.0, "over-wide crps_ratio {}", report.crps_ratio);
+    assert!(
+        report.crps_ratio > 5.0,
+        "over-wide crps_ratio {}",
+        report.crps_ratio
+    );
     assert_eq!(report.overall, OverallVerdict::LosesToFloor);
 }
 
@@ -230,13 +265,7 @@ fn samples_only_primitive_is_scorable_on_seasonal() {
 fn empty_primitive_is_not_applicable() {
     let corpus = TrajectoryCorpus::white_noise(1.0, 100, 0x1234_5678);
     let mut empty = Empty;
-    let report = run_floor_comparison(
-        &mut empty,
-        &corpus.values,
-        0.05,
-        10,
-        &corpus.name,
-    );
+    let report = run_floor_comparison(&mut empty, &corpus.values, 0.05, 10, &corpus.name);
     assert_eq!(report.n_scored, 0);
     assert!(report.is_not_applicable());
 }
@@ -264,7 +293,10 @@ fn mean_tracker_beats_floor_on_white_noise() {
         report.crps_ratio
     );
     assert!(
-        matches!(report.overall, OverallVerdict::BeatsFloor | OverallVerdict::Mixed),
+        matches!(
+            report.overall,
+            OverallVerdict::BeatsFloor | OverallVerdict::Mixed
+        ),
         "mean-tracker should beat or mix on white noise, got {:?}",
         report.overall
     );
@@ -327,7 +359,10 @@ fn multi_corpus_sweep_reports_consistent_verdicts() {
     }
     // Mean-tracker beats on white noise, loses on seasonal. Expect at least
     // one win and at least one loss across the sweep.
-    assert!(wins >= 1, "should beat on at least one corpus (white noise)");
+    assert!(
+        wins >= 1,
+        "should beat on at least one corpus (white noise)"
+    );
     assert!(losses >= 1, "should lose on at least one corpus (seasonal)");
 }
 
@@ -341,14 +376,29 @@ fn report_pretty_print_survives_all_verdict_types() {
 
     // Oracle → BeatsFloor
     let corpus = &corpora[0];
-    let mut oracle = TrueOracle { corpus: &corpus.values, step: 0 };
-    let r1 = run_floor_comparison(&mut oracle, &corpus.values, 0.05, corpus.recommended_warmup, &corpus.name);
+    let mut oracle = TrueOracle {
+        corpus: &corpus.values,
+        step: 0,
+    };
+    let r1 = run_floor_comparison(
+        &mut oracle,
+        &corpus.values,
+        0.05,
+        corpus.recommended_warmup,
+        &corpus.name,
+    );
     r1.pretty_print();
     assert_eq!(r1.overall, OverallVerdict::BeatsFloor);
 
     // Over-wide → LosesToFloor
     let mut wide = OverWide;
-    let r2 = run_floor_comparison(&mut wide, &corpus.values, 0.05, corpus.recommended_warmup, &corpus.name);
+    let r2 = run_floor_comparison(
+        &mut wide,
+        &corpus.values,
+        0.05,
+        corpus.recommended_warmup,
+        &corpus.name,
+    );
     r2.pretty_print();
     assert_eq!(r2.overall, OverallVerdict::LosesToFloor);
 

@@ -72,14 +72,21 @@ impl LatticeQmc {
     /// Construct from a 64-bit seed (SplitMix64-mixed per [`Rng::new`]).
     #[inline]
     pub fn new(seed: u64) -> Self {
-        Self { rng: Rng::new(seed) }
+        Self {
+            rng: Rng::new(seed),
+        }
     }
 }
 
 impl QmcSource for LatticeQmc {
     #[inline]
     fn draw(&mut self, k: usize, out: &mut [f32]) {
-        assert!(out.len() >= k, "LatticeQmc::draw: out.len() {} < k {}", out.len(), k);
+        assert!(
+            out.len() >= k,
+            "LatticeQmc::draw: out.len() {} < k {}",
+            out.len(),
+            k
+        );
         if k == 0 {
             return;
         }
@@ -114,14 +121,21 @@ impl StratifiedQmc {
     /// Construct from a 64-bit seed.
     #[inline]
     pub fn new(seed: u64) -> Self {
-        Self { rng: Rng::new(seed) }
+        Self {
+            rng: Rng::new(seed),
+        }
     }
 }
 
 impl QmcSource for StratifiedQmc {
     #[inline]
     fn draw(&mut self, k: usize, out: &mut [f32]) {
-        assert!(out.len() >= k, "StratifiedQmc::draw: out.len() {} < k {}", out.len(), k);
+        assert!(
+            out.len() >= k,
+            "StratifiedQmc::draw: out.len() {} < k {}",
+            out.len(),
+            k
+        );
         if k == 0 {
             return;
         }
@@ -295,7 +309,12 @@ impl SobolQmc {
 impl QmcSource for SobolQmc {
     #[inline]
     fn draw(&mut self, k: usize, out: &mut [f32]) {
-        assert!(out.len() >= k, "SobolQmc::draw: out.len() {} < k {}", out.len(), k);
+        assert!(
+            out.len() >= k,
+            "SobolQmc::draw: out.len() {} < k {}",
+            out.len(),
+            k
+        );
         for slot in out.iter_mut().take(k) {
             self.advance();
             // Output dimension 0 with scramble.
@@ -450,14 +469,7 @@ fn find_primitive_poly(dim_index: u32) -> (u64, u32) {
     // s=5: φ(31)/5 = 6  → cumulative 11
     // s=6: φ(63)/6 = 6  → cumulative 17
     // s=7: φ(127)/7 = 18 → cumulative 35
-    const DEGREE_CUMULATIVE: &[(u32, u32)] = &[
-        (2, 0),
-        (3, 1),
-        (4, 3),
-        (5, 5),
-        (6, 11),
-        (7, 17),
-    ];
+    const DEGREE_CUMULATIVE: &[(u32, u32)] = &[(2, 0), (3, 1), (4, 3), (5, 5), (6, 11), (7, 17)];
 
     // Find the degree for this dimension index (1-based).
     let mut degree = 2u32;
@@ -631,11 +643,7 @@ pub fn inverse_normal_cdf(u: f32) -> f32 {
     let x0 = t - numerator / denominator;
 
     // Sign: positive for u > 0.5, negative for u < 0.5.
-    if u > 0.5 {
-        x0 as f32
-    } else {
-        -(x0 as f32)
-    }
+    if u > 0.5 { x0 as f32 } else { -(x0 as f32) }
 }
 
 /// Apply `σ · Φ⁻¹(u)` in-place to a buffer of uniforms, producing Gaussian
@@ -1182,7 +1190,10 @@ mod tests {
         let mut buf = [0.0f32; 8];
         qmc.draw(8, &mut buf);
         for &v in &buf {
-            assert!((0.0..1.0).contains(&v), "stratified value out of [0,1): {v}");
+            assert!(
+                (0.0..1.0).contains(&v),
+                "stratified value out of [0,1): {v}"
+            );
         }
         // Each stratum [i/8, (i+1)/8) should contain exactly one point.
         let mut strata = [false; 8];
@@ -1610,9 +1621,7 @@ mod tests {
         let sign = if z < 0.0 { -1.0 } else { 1.0 };
         let az = z.abs();
         let t = 1.0 / (1.0 + P * az);
-        let erf_abs = 1.0
-            - (((((A5 * t + A4) * t + A3) * t + A2) * t + A1) * t)
-                * (-az * az).exp();
+        let erf_abs = 1.0 - (((((A5 * t + A4) * t + A3) * t + A2) * t + A1) * t) * (-az * az).exp();
         0.5 * (1.0 + sign * erf_abs)
     }
 
@@ -1638,8 +1647,7 @@ mod tests {
         let mut q = 0.0f64;
         for j in 1..=100 {
             let sign = if j % 2 == 1 { 1.0 } else { -1.0 };
-            let term =
-                sign * (-2.0 * (j as f64) * (j as f64) * lambda * lambda).exp();
+            let term = sign * (-2.0 * (j as f64) * (j as f64) * lambda * lambda).exp();
             q += term;
             if term.abs() < 1e-12 {
                 break;
@@ -1697,8 +1705,12 @@ mod tests {
 
     #[test]
     fn test_inverse_normal_cdf_edge_cases() {
-        assert!(inverse_normal_cdf(0.0).is_infinite() && inverse_normal_cdf(0.0).is_sign_negative());
-        assert!(inverse_normal_cdf(1.0).is_infinite() && inverse_normal_cdf(1.0).is_sign_positive());
+        assert!(
+            inverse_normal_cdf(0.0).is_infinite() && inverse_normal_cdf(0.0).is_sign_negative()
+        );
+        assert!(
+            inverse_normal_cdf(1.0).is_infinite() && inverse_normal_cdf(1.0).is_sign_positive()
+        );
         // u slightly inside (0,1) should be finite.
         assert!(inverse_normal_cdf(1e-6).is_finite());
         assert!(inverse_normal_cdf(1.0 - 1e-6).is_finite());
@@ -1927,7 +1939,13 @@ mod tests {
         let mut out = vec![0.0f32; k * dim];
 
         sample_k_states_qmc(
-            &kernel, &s_prev, &x, &mut source, &cfg, &mut queries, &mut out,
+            &kernel,
+            &s_prev,
+            &x,
+            &mut source,
+            &cfg,
+            &mut queries,
+            &mut out,
         );
 
         // Output must be valid (in [-1, 1] after AttractorKernel's clamp).
@@ -1953,7 +1971,10 @@ mod tests {
                 }
             }
         }
-        assert!(any_distinct, "QMC BoM should produce at least one distinct pair");
+        assert!(
+            any_distinct,
+            "QMC BoM should produce at least one distinct pair"
+        );
     }
 
     #[cfg(feature = "bom_sampling")]
@@ -1975,10 +1996,30 @@ mod tests {
 
         let mut src_a = LatticeQmc::new(123);
         let mut src_b = LatticeQmc::new(123);
-        sample_k_states_qmc(&kernel, &s_prev, &x, &mut src_a, &cfg, &mut queries_a, &mut out_a);
-        sample_k_states_qmc(&kernel, &s_prev, &x, &mut src_b, &cfg, &mut queries_b, &mut out_b);
+        sample_k_states_qmc(
+            &kernel,
+            &s_prev,
+            &x,
+            &mut src_a,
+            &cfg,
+            &mut queries_a,
+            &mut out_a,
+        );
+        sample_k_states_qmc(
+            &kernel,
+            &s_prev,
+            &x,
+            &mut src_b,
+            &cfg,
+            &mut queries_b,
+            &mut out_b,
+        );
 
-        assert_eq!(out_a, out_b, "same QMC seed must produce bit-identical hypotheses");    }
+        assert_eq!(
+            out_a, out_b,
+            "same QMC seed must produce bit-identical hypotheses"
+        );
+    }
 
     // ── Plan 370 T2.3: fill_noise_queries_gaussian_qmc_by_method ────────────
 
@@ -1990,19 +2031,39 @@ mod tests {
         let sigma = 0.1;
         let mut queries = vec![0.0f32; k * dim];
 
-        for method in [crate::QmcMethod::Lattice, crate::QmcMethod::Stratified, crate::QmcMethod::Sobol] {
+        for method in [
+            crate::QmcMethod::Lattice,
+            crate::QmcMethod::Stratified,
+            crate::QmcMethod::Sobol,
+        ] {
             fill_noise_queries_gaussian_qmc_by_method(method, 42, k, dim, sigma, &mut queries);
             // All values finite.
             for &q in &queries {
-                assert!(q.is_finite(), "{:?} produced non-finite query {}", method, q);
+                assert!(
+                    q.is_finite(),
+                    "{:?} produced non-finite query {}",
+                    method,
+                    q
+                );
             }
             // Empirical mean ≈ 0 (Gaussian, σ=0.1 → mean in [-0.05, 0.05] for k*dim=32 samples).
             let mean = queries.iter().sum::<f32>() / queries.len() as f32;
-            assert!(mean.abs() < 0.1, "{:?} mean {} too far from 0", method, mean);
+            assert!(
+                mean.abs() < 0.1,
+                "{:?} mean {} too far from 0",
+                method,
+                mean
+            );
             // Empirical stddev ≈ σ (in [0.05, 0.2] for 32 samples from N(0,0.1²)).
-            let var = queries.iter().map(|q| (q - mean).powi(2)).sum::<f32>() / queries.len() as f32;
+            let var =
+                queries.iter().map(|q| (q - mean).powi(2)).sum::<f32>() / queries.len() as f32;
             let std = var.sqrt();
-            assert!(std > 0.05 && std < 0.2, "{:?} stddev {} outside [0.05, 0.2]", method, std);
+            assert!(
+                std > 0.05 && std < 0.2,
+                "{:?} stddev {} outside [0.05, 0.2]",
+                method,
+                std
+            );
         }
     }
 
@@ -2015,7 +2076,11 @@ mod tests {
         let mut a = vec![0.0f32; k * dim];
         let mut b = vec![0.0f32; k * dim];
 
-        for method in [crate::QmcMethod::Lattice, crate::QmcMethod::Stratified, crate::QmcMethod::Sobol] {
+        for method in [
+            crate::QmcMethod::Lattice,
+            crate::QmcMethod::Stratified,
+            crate::QmcMethod::Sobol,
+        ] {
             fill_noise_queries_gaussian_qmc_by_method(method, 99, k, dim, sigma, &mut a);
             fill_noise_queries_gaussian_qmc_by_method(method, 99, k, dim, sigma, &mut b);
             assert_eq!(a, b, "{:?} must be bit-identical for same seed", method);
@@ -2067,8 +2132,11 @@ mod tests {
         assert_eq!(est.n_resamples, 2);
         // Sample variance of {0, 1} with n=2: ((1-0.5)^2 + (0-0.5)^2)/(n-1)
         // = (0.25 + 0.25)/1 = 0.5.
-        assert!((est.sample_variance - 0.5).abs() < 1e-12,
-            "sample_variance = {}", est.sample_variance);
+        assert!(
+            (est.sample_variance - 0.5).abs() < 1e-12,
+            "sample_variance = {}",
+            est.sample_variance
+        );
     }
 
     #[test]
@@ -2096,19 +2164,26 @@ mod tests {
         // rollout is just the rollout's outcome indicator. Mean = empirical
         // pass rate.
         let outcomes = [
-            true, false, true, true, false, true, false, true,
-            true, false, true, true, false, true, false, true,
+            true, false, true, true, false, true, false, true, true, false, true, true, false,
+            true, false, true,
         ];
         // 10 trues / 16 = 0.625.
         let est = dyadic_bootstrap_pass_at_m_lattice(&outcomes, 1);
-        assert!((est.point_estimate - 0.625).abs() < 1e-12,
-            "point_estimate = {}", est.point_estimate);
+        assert!(
+            (est.point_estimate - 0.625).abs() < 1e-12,
+            "point_estimate = {}",
+            est.point_estimate
+        );
         assert_eq!(est.n_resamples, 16);
         // Variance of a Bernoulli(0.625) with n=16: p(1-p) = 0.625*0.375
         // = 0.234375. Sample variance uses (n/(n-1)) correction.
         let expected = (16.0 / 15.0) * 0.625 * 0.375;
-        assert!((est.sample_variance - expected).abs() < 1e-10,
-            "sample_variance {} expected {}", est.sample_variance, expected);
+        assert!(
+            (est.sample_variance - expected).abs() < 1e-10,
+            "sample_variance {} expected {}",
+            est.sample_variance,
+            expected
+        );
     }
 
     #[test]
@@ -2129,9 +2204,7 @@ mod tests {
     fn test_dyadic_bootstrap_wilson_ci_known_values() {
         // Wilson 95% CI for 7/8 successes, n=8: well-tabulated value
         // (~0.473, ~0.997) per standard references. Verify roughly.
-        let outcomes = [
-            true, true, true, true, true, true, true, false,
-        ];
+        let outcomes = [true, true, true, true, true, true, true, false];
         let est = dyadic_bootstrap_pass_at_m_lattice(&outcomes, 1);
         // m=1, k=8 -> 8 sub-lattices of size 1. pass@1 of [T]=1, [F]=0.
         // 7 passes / 8 = 0.875.
@@ -2144,14 +2217,22 @@ mod tests {
     #[test]
     fn test_dyadic_bootstrap_wilson_ci_at_extremes() {
         // n=1, k=1, m=1, single pass -> Wilson CI is degenerate but well-defined.
-        let est = BootstrapEstimate { point_estimate: 1.0, sample_variance: 0.0, n_resamples: 1 };
+        let est = BootstrapEstimate {
+            point_estimate: 1.0,
+            sample_variance: 0.0,
+            n_resamples: 1,
+        };
         let (lo, hi) = est.wilson_ci_95();
         // Wilson at 1/1, z=1.96: center ~ 1/(1+3.84) = 0.206, margin tiny
         assert!(hi <= 1.0 && hi > 0.9, "hi={hi}");
         assert!(lo > 0.0 && lo < 0.5, "lo={lo}");
 
         // n=0 -> uninformative.
-        let est_empty = BootstrapEstimate { point_estimate: 0.0, sample_variance: 0.0, n_resamples: 0 };
+        let est_empty = BootstrapEstimate {
+            point_estimate: 0.0,
+            sample_variance: 0.0,
+            n_resamples: 0,
+        };
         assert_eq!(est_empty.wilson_ci_95(), (0.0, 1.0));
     }
 
@@ -2274,7 +2355,10 @@ mod tests {
                 max_gap_dev = max_gap_dev.max((g - expected).abs());
             }
         }
-        assert!(max_gap_dev < 1e-5, "sub-lattice equispacing: max gap dev = {max_gap_dev}");
+        assert!(
+            max_gap_dev < 1e-5,
+            "sub-lattice equispacing: max gap dev = {max_gap_dev}"
+        );
     }
 
     // ── Block bootstrap (Sobol/Stratified) ────────────────────────────────
@@ -2301,8 +2385,8 @@ mod tests {
     #[test]
     fn test_block_bootstrap_deterministic_given_seed() {
         let outcomes = [
-            true, false, true, false, true, true, false, false,
-            true, true, true, false, false, true, false, true,
+            true, false, true, false, true, true, false, false, true, true, true, false, false,
+            true, false, true,
         ];
         let mut r1 = crate::types::Rng::new(7);
         let mut r2 = crate::types::Rng::new(7);
@@ -2328,16 +2412,21 @@ mod tests {
         // For random Bernoulli outcomes, the bootstrap estimate should be
         // in [0, 1] and the Wilson CI should bracket it.
         let outcomes = [
-            true, false, true, false, true, true, false, false,
-            true, false, false, true, true, false, true, false,
+            true, false, true, false, true, true, false, false, true, false, false, true, true,
+            false, true, false,
         ];
         let mut rng = crate::types::Rng::new(0xBEEF);
         let est = contiguous_block_bootstrap_pass_at_m(&outcomes, 4, 1000, &mut rng);
         assert!(est.point_estimate >= 0.0 && est.point_estimate <= 1.0);
         assert!(est.sample_variance >= 0.0);
         let (lo, hi) = est.wilson_ci_95();
-        assert!(lo <= est.point_estimate && est.point_estimate <= hi,
-            "point {} not in CI [{}, {}]", est.point_estimate, lo, hi);
+        assert!(
+            lo <= est.point_estimate && est.point_estimate <= hi,
+            "point {} not in CI [{}, {}]",
+            est.point_estimate,
+            lo,
+            hi
+        );
     }
 
     #[test]

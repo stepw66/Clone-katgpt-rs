@@ -37,7 +37,9 @@ impl CoherenceScorer<f32> for DotCoherence {
 /// T1.7: `rank_empty_returns_empty`
 #[test]
 fn rank_empty_returns_empty() {
-    let coh = DotCoherence { direction: vec![1.0, 0.0] };
+    let coh = DotCoherence {
+        direction: vec![1.0, 0.0],
+    };
     let avail = MedianTopMAvailability::new(vec![], 10);
     let sampler = AlienSampler::new(coh, avail, AlienConfig::paper_default());
     let sc: &mut [f32] = &mut [];
@@ -49,7 +51,9 @@ fn rank_empty_returns_empty() {
 /// T1.7: `rank_single_returns_one`
 #[test]
 fn rank_single_returns_one() {
-    let coh = DotCoherence { direction: vec![1.0, 0.0] };
+    let coh = DotCoherence {
+        direction: vec![1.0, 0.0],
+    };
     let avail = MedianTopMAvailability::new(vec![vec![1.0, 0.0]], 10);
     let sampler = AlienSampler::new(coh, avail, AlienConfig::paper_default());
     let candidates = vec![vec![0.5, 0.5]];
@@ -80,9 +84,9 @@ fn beta_zero_is_coherence_only() {
 
     // Candidates: A is high-coherence, B is low-coherence, C is mid.
     let candidates = vec![
-        vec![2.0, 0.0, 0.0],   // coh=2.0 (highest)
-        vec![0.0, 2.0, 0.0],   // coh=0.0 (lowest)
-        vec![1.0, 0.0, 0.0],   // coh=1.0 (middle)
+        vec![2.0, 0.0, 0.0], // coh=2.0 (highest)
+        vec![0.0, 2.0, 0.0], // coh=0.0 (lowest)
+        vec![1.0, 0.0, 0.0], // coh=1.0 (middle)
     ];
     let mut sc = [0.0; 3];
     let mut sa = [0.0; 3];
@@ -109,9 +113,9 @@ fn beta_one_is_unavailability_only() {
     let sampler = AlienSampler::new(coh, avail, AlienConfig::availability_only());
 
     let candidates = vec![
-        vec![1.0, 0.0],   // cosine with bank = 1.0 (high availability → low alien)
-        vec![0.0, 1.0],   // cosine with bank = 0.0 (low availability → high alien)
-        vec![0.6, 0.8],   // cosine with bank = 0.6 (mid)
+        vec![1.0, 0.0], // cosine with bank = 1.0 (high availability → low alien)
+        vec![0.0, 1.0], // cosine with bank = 0.0 (low availability → high alien)
+        vec![0.6, 0.8], // cosine with bank = 0.6 (mid)
     ];
     let mut sc = [0.0; 3];
     let mut sa = [0.0; 3];
@@ -153,7 +157,10 @@ fn median_top_m_paper_default_m10() {
     cosines.sort_by(|a, b| a.partial_cmp(b).unwrap());
     let top10 = &cosines[40..];
     let expected = (top10[4] + top10[5]) * 0.5; // even-count median
-    assert!((got - expected).abs() < 1e-5, "got {got}, expected {expected}");
+    assert!(
+        (got - expected).abs() < 1e-5,
+        "got {got}, expected {expected}"
+    );
 }
 
 /// T1.7: `z_score_handles_zero_variance` — all-equal scores → z=0, no NaN.
@@ -167,16 +174,16 @@ fn z_score_handles_zero_variance() {
     let avail = MedianTopMAvailability::new(bank, 1);
     let sampler = AlienSampler::new(coh, avail, AlienConfig::paper_default());
 
-    let candidates = vec![
-        vec![0.5, 0.5],
-        vec![0.5, 0.5],
-        vec![0.5, 0.5],
-    ];
+    let candidates = vec![vec![0.5, 0.5], vec![0.5, 0.5], vec![0.5, 0.5]];
     let mut sc = [0.0; 3];
     let mut sa = [0.0; 3];
     let out = sampler.rank(&candidates, &mut sc, &mut sa).unwrap();
     for s in &out {
-        assert!(s.score.abs() < 1e-6, "zero-variance pool: score should be 0, got {}", s.score);
+        assert!(
+            s.score.abs() < 1e-6,
+            "zero-variance pool: score should be 0, got {}",
+            s.score
+        );
         assert!(s.score.is_finite(), "score must not be NaN/inf");
     }
 }
@@ -199,7 +206,9 @@ fn determinism_same_seed_same_order() {
         vec![0.0, 0.0, 1.0],
     ];
     let mk = || {
-        let coh = DotCoherence { direction: direction.clone() };
+        let coh = DotCoherence {
+            direction: direction.clone(),
+        };
         let avail = MedianTopMAvailability::new(bank.clone(), 2);
         AlienSampler::new(coh, avail, AlienConfig::paper_default())
     };
@@ -237,9 +246,7 @@ fn rank_is_permutation_of_indices() {
     let n = 50;
     let dim = 4;
     let candidates: Vec<Vec<f32>> = (0..n)
-        .map(|_| {
-            (0..dim).map(|_| rng.next_f32() * 2.0 - 1.0).collect()
-        })
+        .map(|_| (0..dim).map(|_| rng.next_f32() * 2.0 - 1.0).collect())
         .collect();
     let mut sc = vec![0.0; n];
     let mut sa = vec![0.0; n];
@@ -248,7 +255,11 @@ fn rank_is_permutation_of_indices() {
     assert_eq!(out.len(), n);
     let mut idxs: Vec<usize> = out.iter().map(|s| s.idx).collect();
     idxs.sort_unstable();
-    assert_eq!(idxs, (0..n).collect::<Vec<_>>(), "indices must be a permutation");
+    assert_eq!(
+        idxs,
+        (0..n).collect::<Vec<_>>(),
+        "indices must be a permutation"
+    );
 }
 
 /// T2.1: `beta_monotone_in_coherence_when_avail_const` — when availability is
@@ -262,9 +273,13 @@ fn beta_monotone_in_coherence_when_avail_const() {
     // highest-coherence one.
     struct ConstAvail;
     impl AvailabilityScorer<f32> for ConstAvail {
-        fn availability(&self, _atoms: &[f32]) -> f32 { 0.5 }
+        fn availability(&self, _atoms: &[f32]) -> f32 {
+            0.5
+        }
     }
-    let _coh = DotCoherence { direction: vec![1.0, 0.0] };
+    let _coh = DotCoherence {
+        direction: vec![1.0, 0.0],
+    };
     let candidates = vec![
         vec![0.1, 0.9],
         vec![0.9, 0.1],
@@ -274,7 +289,9 @@ fn beta_monotone_in_coherence_when_avail_const() {
 
     for beta in [0.0_f32, 0.1, 0.3, 0.5, 0.7, 0.9] {
         let sampler = AlienSampler::new(
-            DotCoherence { direction: vec![1.0, 0.0] },
+            DotCoherence {
+                direction: vec![1.0, 0.0],
+            },
             ConstAvail,
             AlienConfig { beta, top_m: 10 },
         );
@@ -338,7 +355,7 @@ fn rank_output_carries_no_embedding() {
     // output compiles and runs.
     for s in &out {
         let _score: f32 = s.score; // f32, not Vec<f32>
-        let _idx: usize = s.idx;   // usize, not Vec<f32>
+        let _idx: usize = s.idx; // usize, not Vec<f32>
     }
     // ScoredCandidate is repr(C) + Copy — no heap indirection possible.
     fn _assert_copy<T: Copy>() {}

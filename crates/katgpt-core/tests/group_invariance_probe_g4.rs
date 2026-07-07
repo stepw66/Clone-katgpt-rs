@@ -6,10 +6,8 @@
 //!
 //! Plan 356 Phase 1 T1.7.
 
-use katgpt_core::{
-    GroupAction, SubgroupClass, discover_subgroup_into, invariance_score,
-};
 use katgpt_core::group_invariance_probe::Rng;
+use katgpt_core::{GroupAction, SubgroupClass, discover_subgroup_into, invariance_score};
 use std::sync::atomic::Ordering;
 
 #[path = "common/mod.rs"]

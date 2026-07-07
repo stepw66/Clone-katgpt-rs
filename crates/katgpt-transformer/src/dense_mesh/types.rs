@@ -27,7 +27,9 @@ pub struct DenseHidden {
 impl DenseHidden {
     /// Allocate a zeroed hidden state for `seq_len` positions × `hidden_dim`.
     pub fn zeros(seq_len: usize, hidden_dim: usize) -> Self {
-        let len = seq_len.checked_mul(hidden_dim).expect("hidden size overflow");
+        let len = seq_len
+            .checked_mul(hidden_dim)
+            .expect("hidden size overflow");
         Self {
             data: vec![0.0f32; len].into_boxed_slice(),
             seq_len,
@@ -105,9 +107,7 @@ impl Topology {
     /// Chain topology `[1, 1]` — minimal 2-layer mesh, baseline for gate 1.
     /// One input node, one output node, one edge between them.
     pub fn chain() -> Self {
-        Self {
-            widths: vec![1, 1],
-        }
+        Self { widths: vec![1, 1] }
     }
 
     /// Diamond `[1, 2, 1]`.
@@ -373,10 +373,7 @@ mod tests {
     fn test_topology_edge_count() {
         assert_eq!(Topology::chain().edge_count(), 1);
         assert_eq!(Topology::diamond().edge_count(), 2 + 2);
-        assert_eq!(
-            Topology::wide().edge_count(),
-            4 + 4 * 4 + 4 * 4 + 4
-        );
+        assert_eq!(Topology::wide().edge_count(), 4 + 4 * 4 + 4 * 4 + 4);
     }
 
     #[test]

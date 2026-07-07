@@ -213,10 +213,7 @@ impl<const M: usize> BSplineBasis<M> {
 
     /// Construct on domain `[0,1]`.
     pub fn new() -> Self {
-        assert!(
-            M > Self::DEGREE,
-            "BSplineBasis requires M >= degree+1 = 4"
-        );
+        assert!(M > Self::DEGREE, "BSplineBasis requires M >= degree+1 = 4");
         let d = Self::DEGREE;
         let knot_len = Self::knot_len();
         let mut knots = vec![0.0f32; knot_len];
@@ -2435,15 +2432,7 @@ mod tests {
         let mut b_out = vec![0.0f64; r * d_h];
         let mut scr = LowRankFitScratch::with_capacity(d_h, d_out, r);
         low_rank_fit_b_with_frozen_a(
-            &gram,
-            &cov,
-            d_h,
-            d_out,
-            r,
-            lambda,
-            &a_frozen,
-            &mut b_out,
-            &mut scr,
+            &gram, &cov, d_h, d_out, r, lambda, &a_frozen, &mut b_out, &mut scr,
         );
         // Verify the normal equation: (AᵀA)·B·G + λB == Aᵀ·Covᵀ.
         // Compute AᵀA (r×r).
@@ -2542,7 +2531,11 @@ mod tests {
         }
         // B must be non-trivial (not all zeros — the fit found a solution).
         let b_norm: f32 = f.b_low_rank.iter().map(|v| v * v).sum::<f32>().sqrt();
-        assert!(b_norm > 1e-6, "frozen-A B is all zeros: b_norm={:e}", b_norm);
+        assert!(
+            b_norm > 1e-6,
+            "frozen-A B is all zeros: b_norm={:e}",
+            b_norm
+        );
         // Forecast must produce finite values at several probe points.
         let mut max_abs = 0.0f32;
         for probe_t in 0..10i32 {

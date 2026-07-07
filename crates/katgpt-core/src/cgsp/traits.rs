@@ -306,7 +306,9 @@ mod trait_tests {
 
     #[test]
     fn stub_bandit_satisfies_trait() {
-        let mut b = StubBandit { prios: vec![0.1; 4] };
+        let mut b = StubBandit {
+            prios: vec![0.1; 4],
+        };
         b.absorb(0, 0.5);
         assert!((b.priority(0) - 0.6).abs() < 1e-6);
         assert_eq!(b.num_arms(), 4);

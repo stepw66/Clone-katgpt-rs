@@ -195,7 +195,11 @@ mod tests {
     #[test]
     fn test_write_creates_domain() {
         let mut mem = MultiDomainMemory::new(DeltaMemoryConfig::default());
-        mem.write_domain("coding", &[1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0], &[0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]);
+        mem.write_domain(
+            "coding",
+            &[1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+            &[0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+        );
         assert_eq!(mem.domain_count(), 1);
         assert!(mem.domains().contains(&"coding"));
     }
@@ -216,7 +220,10 @@ mod tests {
 
     #[test]
     fn test_cross_domain_isolation() {
-        let mut mem = MultiDomainMemory::new(DeltaMemoryConfig { rank: 4, ..Default::default() });
+        let mut mem = MultiDomainMemory::new(DeltaMemoryConfig {
+            rank: 4,
+            ..Default::default()
+        });
         let key = vec![1.0, 0.0, 0.0, 0.0];
         let val = vec![0.0, 1.0, 0.0, 0.0];
 
@@ -229,12 +236,18 @@ mod tests {
         // Ensure "math" and check it's independent
         mem.ensure_domain("math");
         let math_readout = mem.read_domain("math", &key).unwrap();
-        assert!(math_readout.iter().all(|&x| x.abs() < 1e-6), "Math domain should start at zero");
+        assert!(
+            math_readout.iter().all(|&x| x.abs() < 1e-6),
+            "Math domain should start at zero"
+        );
     }
 
     #[test]
     fn test_snapshot_all() {
-        let mut mem = MultiDomainMemory::new(DeltaMemoryConfig { rank: 4, ..Default::default() });
+        let mut mem = MultiDomainMemory::new(DeltaMemoryConfig {
+            rank: 4,
+            ..Default::default()
+        });
         let key = vec![1.0, 0.0, 0.0, 0.0];
         let val = vec![0.0, 1.0, 0.0, 0.0];
         mem.write_domain("a", &key, &val);
@@ -248,7 +261,10 @@ mod tests {
 
     #[test]
     fn test_reset_all() {
-        let mut mem = MultiDomainMemory::new(DeltaMemoryConfig { rank: 4, ..Default::default() });
+        let mut mem = MultiDomainMemory::new(DeltaMemoryConfig {
+            rank: 4,
+            ..Default::default()
+        });
         let key = vec![1.0, 0.0, 0.0, 0.0];
         let val = vec![0.0, 1.0, 0.0, 0.0];
         mem.write_domain("a", &key, &val);
@@ -262,7 +278,10 @@ mod tests {
 
     #[test]
     fn test_read_aggregated_routed_only() {
-        let mut mem = MultiDomainMemory::new(DeltaMemoryConfig { rank: 4, ..Default::default() });
+        let mut mem = MultiDomainMemory::new(DeltaMemoryConfig {
+            rank: 4,
+            ..Default::default()
+        });
         let key = vec![1.0, 0.0, 0.0, 0.0];
         let val = vec![0.0, 1.0, 0.0, 0.0];
         mem.write_domain("coding", &key, &val);
@@ -278,8 +297,10 @@ mod tests {
     #[test]
     fn test_read_aggregated_bandit_weighted_matches_naive() {
         let rank = 4;
-        let mut mem =
-            MultiDomainMemory::new(DeltaMemoryConfig { rank, ..Default::default() });
+        let mut mem = MultiDomainMemory::new(DeltaMemoryConfig {
+            rank,
+            ..Default::default()
+        });
         let key = vec![1.0, 0.0, 0.0, 0.0];
         let val = vec![0.0, 1.0, 0.0, 0.0];
         mem.write_domain("a", &key, &val);
@@ -305,7 +326,12 @@ mod tests {
             .expect("domains exist");
         assert_eq!(aggregated.len(), rank);
         for (a, b) in aggregated.iter().zip(weighted.iter()) {
-            assert!((a - b).abs() < 1e-6, "bandit_weighted drift: {} vs {}", a, b);
+            assert!(
+                (a - b).abs() < 1e-6,
+                "bandit_weighted drift: {} vs {}",
+                a,
+                b
+            );
         }
     }
 }

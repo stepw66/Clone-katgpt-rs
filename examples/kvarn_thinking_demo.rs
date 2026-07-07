@@ -41,8 +41,6 @@ impl SeedRng {
         // Use upper 32 bits, map to signed f32 in [-1, 1)
         ((bits >> 32) as i32 as f32) / (1i32 << 31) as f32
     }
-
-
 }
 
 // ---------------------------------------------------------------------------
@@ -159,9 +157,15 @@ fn run_scenario(
 
 fn print_header() {
     println!();
-    println!("╔══════════════════════════════════════════════════════════════════════════════════════╗");
-    println!("║            KVarN T7 — Thinking vs Non-Thinking KV-Cache Quality Demo              ║");
-    println!("╚══════════════════════════════════════════════════════════════════════════════════════╝");
+    println!(
+        "╔══════════════════════════════════════════════════════════════════════════════════════╗"
+    );
+    println!(
+        "║            KVarN T7 — Thinking vs Non-Thinking KV-Cache Quality Demo              ║"
+    );
+    println!(
+        "╚══════════════════════════════════════════════════════════════════════════════════════╝"
+    );
     println!();
     println!("  Compares quantization quality under two simulated distributions:");
     println!("    • Thinking  — diverse magnitudes (reasoning spikes + transitions)");
@@ -171,29 +175,33 @@ fn print_header() {
 
 fn print_table(results: &[ScenarioResult]) {
     // Table header
-    println!("┌─────────────┬──────────────┬──────┬────────────┬──────────┬──────────────┬────────────┐");
-    println!("│ Scenario    │ Context Len  │ Bits │ Avg MSE    │ Cosine   │ Cumul. MSE   │ Max Error  │");
-    println!("├─────────────┼──────────────┼──────┼────────────┼──────────┼──────────────┼────────────┤");
+    println!(
+        "┌─────────────┬──────────────┬──────┬────────────┬──────────┬──────────────┬────────────┐"
+    );
+    println!(
+        "│ Scenario    │ Context Len  │ Bits │ Avg MSE    │ Cosine   │ Cumul. MSE   │ Max Error  │"
+    );
+    println!(
+        "├─────────────┼──────────────┼──────┼────────────┼──────────┼──────────────┼────────────┤"
+    );
 
     for r in results {
         println!(
             "│ {:<11} │ {:>10}   │ {:>4} │ {:>10.6} │ {:>8.6} │ {:>12.6} │ {:>10.6} │",
-            r.scenario,
-            r.ctx_len,
-            r.bits,
-            r.avg_mse,
-            r.avg_cosine,
-            r.cumulative_mse,
-            r.max_error,
+            r.scenario, r.ctx_len, r.bits, r.avg_mse, r.avg_cosine, r.cumulative_mse, r.max_error,
         );
     }
 
-    println!("└─────────────┴──────────────┴──────┴────────────┴──────────┴──────────────┴────────────┘");
+    println!(
+        "└─────────────┴──────────────┴──────┴────────────┴──────────┴──────────────┴────────────┘"
+    );
 }
 
 fn print_analysis(results: &[ScenarioResult]) {
     println!();
-    println!("── Analysis ──────────────────────────────────────────────────────────────────────────");
+    println!(
+        "── Analysis ──────────────────────────────────────────────────────────────────────────"
+    );
     println!();
 
     // Group results by context length and bits for comparison
@@ -205,12 +213,12 @@ fn print_analysis(results: &[ScenarioResult]) {
         println!();
 
         for &ctx_len in &ctx_lens {
-            let thinking = results.iter().find(|r| {
-                r.scenario == "Thinking" && r.ctx_len == ctx_len && r.bits == bits
-            });
-            let regular = results.iter().find(|r| {
-                r.scenario == "Regular" && r.ctx_len == ctx_len && r.bits == bits
-            });
+            let thinking = results
+                .iter()
+                .find(|r| r.scenario == "Thinking" && r.ctx_len == ctx_len && r.bits == bits);
+            let regular = results
+                .iter()
+                .find(|r| r.scenario == "Regular" && r.ctx_len == ctx_len && r.bits == bits);
 
             if let (Some(t), Some(r)) = (thinking, regular) {
                 let mse_ratio = if r.avg_mse > 1e-10 {
@@ -237,10 +245,7 @@ fn print_analysis(results: &[ScenarioResult]) {
                     "    ctx={:>4}: MSE ratio (T/R) = {:.3}  cosine Δ = {:+.6}  cumul. ratio = {:.3}",
                     ctx_len, mse_ratio, cosine_diff, cumul_ratio,
                 );
-                println!(
-                    "             → {}",
-                    verdict,
-                );
+                println!("             → {}", verdict,);
             }
         }
         println!();
@@ -253,9 +258,7 @@ fn print_analysis(results: &[ScenarioResult]) {
         let savings = 32.0 / bits as f32;
         println!(
             "    {}-bit: {:.1}x compression → {:.1} bits/elem (from FP32's 32 bits/elem)",
-            bits,
-            savings,
-            bits as f32,
+            bits, savings, bits as f32,
         );
     }
 }
@@ -277,10 +280,7 @@ fn main() {
 
     for &ctx_len in &context_lengths {
         for &bits in &bit_levels {
-            println!(
-                "  Running: Thinking  ctx={:>5}, {}-bit ...",
-                ctx_len, bits
-            );
+            println!("  Running: Thinking  ctx={:>5}, {}-bit ...", ctx_len, bits);
             results.push(run_scenario(
                 "Thinking",
                 gen_thinking_vector,
@@ -291,10 +291,7 @@ fn main() {
                 seed,
             ));
 
-            println!(
-                "  Running: Regular   ctx={:>5}, {}-bit ...",
-                ctx_len, bits
-            );
+            println!("  Running: Regular   ctx={:>5}, {}-bit ...", ctx_len, bits);
             results.push(run_scenario(
                 "Regular",
                 gen_regular_vector,
@@ -308,7 +305,9 @@ fn main() {
     }
 
     println!();
-    println!("── Results ───────────────────────────────────────────────────────────────────────────");
+    println!(
+        "── Results ───────────────────────────────────────────────────────────────────────────"
+    );
     println!();
     print_table(&results);
     print_analysis(&results);

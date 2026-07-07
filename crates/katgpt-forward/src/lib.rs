@@ -41,18 +41,18 @@ use katgpt_transformer::WallPrefixState;
 pub struct ForwardContext {
     // ── u64-aligned fields first (Vec, usize, arrays) ──────────────
     // Grouped by alignment to eliminate inter-field padding.
-    pub x: Vec<f32>,        // [n_embd] main activation
-    pub xr: Vec<f32>,       // [n_embd] residual
-    pub xr2: Vec<f32>,      // [n_embd] residual 2
-    pub q: Vec<f32>,        // [n_embd] query
-    pub k: Vec<f32>,        // [kv_dim] key (kv_dim = n_kv_head * head_dim)
-    pub v: Vec<f32>,        // [kv_dim] value
-    pub attn_out: Vec<f32>, // [n_embd] attention output
-    pub scores: Vec<f32>,          // [block_size] attention scores (max possible)
-    pub hidden: Vec<f32>,   // [mlp_hidden] MLP hidden
-    pub logits: Vec<f32>,          // [vocab_size] output logits
-    pub cdf: Vec<f32>,      // [vocab_size] pre-allocated CDF for sampling
-    pub hidden_state: Vec<f32>,    // [n_embd] final hidden state (Plan 009 compat)
+    pub x: Vec<f32>,            // [n_embd] main activation
+    pub xr: Vec<f32>,           // [n_embd] residual
+    pub xr2: Vec<f32>,          // [n_embd] residual 2
+    pub q: Vec<f32>,            // [n_embd] query
+    pub k: Vec<f32>,            // [kv_dim] key (kv_dim = n_kv_head * head_dim)
+    pub v: Vec<f32>,            // [kv_dim] value
+    pub attn_out: Vec<f32>,     // [n_embd] attention output
+    pub scores: Vec<f32>,       // [block_size] attention scores (max possible)
+    pub hidden: Vec<f32>,       // [mlp_hidden] MLP hidden
+    pub logits: Vec<f32>,       // [vocab_size] output logits
+    pub cdf: Vec<f32>,          // [vocab_size] pre-allocated CDF for sampling
+    pub hidden_state: Vec<f32>, // [n_embd] final hidden state (Plan 009 compat)
     /// LoRA intermediate buffer [lora_rank]. Pre-allocated, zero alloc in hot path.
     pub lora_buf: Vec<f32>,
     // CNA: contrastive neuron attribution runtime modulator (Plan 087)
@@ -373,7 +373,12 @@ pub fn depth_route_with_indices(args: DepthRouteIndicesArgs<'_>) {
     for (i, &src_idx) in source_indices.iter().enumerate() {
         let src = &block_deltas[src_idx];
         let weight = logits_buf[i] * inv_sum;
-        katgpt_core::simd::simd_fused_scale_acc(&mut residual[..n_embd], &src[..n_embd], weight, n_embd);
+        katgpt_core::simd::simd_fused_scale_acc(
+            &mut residual[..n_embd],
+            &src[..n_embd],
+            weight,
+            n_embd,
+        );
     }
 }
 
@@ -434,13 +439,12 @@ pub use hla_forward::{forward_ahla, forward_hla, generate_ahla_into, generate_hl
 // Root re-exports `forward` (and the helpers) so every historical call site at
 // `katgpt_rs::transformer::forward` continues to resolve.
 pub mod forward;
-pub use forward::{
-    attention_head, cluster_map_from_embeddings, cluster_map_round_robin,
-    clustered_lm_head, forward, forward_base, select_topk_indices,
-    select_topk_indices_into_buf, standard_lm_head,
-};
 #[cfg(feature = "coda_fusion")]
 pub use forward::forward_coda;
+pub use forward::{
+    attention_head, cluster_map_from_embeddings, cluster_map_round_robin, clustered_lm_head,
+    forward, forward_base, select_topk_indices, select_topk_indices_into_buf, standard_lm_head,
+};
 
 // DenseMesh `node_transformer` — Plan 385 (2026-07-05).
 // Moved from root `src/dense_mesh/node_transformer.rs`. The substrate (traits,
@@ -482,16 +486,16 @@ pub use drafter_lora::{
 // wrappers. Root re-exports via `pub use katgpt_forward::dflash;` so all
 // historical `katgpt_rs::speculative::dflash::*` paths resolve.
 pub mod dflash;
+#[cfg(feature = "domino_lora")]
+pub use dflash::dflash_predict_ar_with_domino;
+#[cfg(feature = "dflare_kv_routing")]
+pub use dflash::dflash_predict_conditioned_with_routing;
 pub use dflash::{
     dflash_predict, dflash_predict_ar, dflash_predict_ar_with, dflash_predict_conditioned,
     dflash_predict_conditioned_with, dflash_predict_parallel, dflash_predict_with,
 };
 #[cfg(feature = "dflare_fusion")]
 pub use dflash::{dflash_predict_ar_with_fusion, marginal_fusion_blend};
-#[cfg(feature = "domino_lora")]
-pub use dflash::dflash_predict_ar_with_domino;
-#[cfg(feature = "dflare_kv_routing")]
-pub use dflash::dflash_predict_conditioned_with_routing;
 
 // Speculative verifier composition layer (Plan 394, 2026-07-05).
 // Moved from root `src/speculative/verifier.rs`. Concrete verifier impls
@@ -514,16 +518,16 @@ pub use verifier::{LeviathanVerifier, SimulatedVerifier, SpeculativeVerifier};
 // `extract_ddtree_paths` helper is exported `pub(crate)` so the root-side
 // `step_paged.rs` can call it via `katgpt_forward::step::extract_ddtree_paths`.
 pub mod step;
+#[cfg(feature = "sr2am_configurator")]
+pub use step::speculative_step_with_configurator;
 pub use step::{speculative_step, speculative_step_verifier};
 #[allow(deprecated)]
 pub use step::{
-    speculative_step_conditioned, speculative_step_conditioned_with,
-    speculative_step_rollback, speculative_step_rollback_with,
+    speculative_step_conditioned, speculative_step_conditioned_with, speculative_step_rollback,
+    speculative_step_rollback_with,
 };
 #[cfg(feature = "selectivity_router")]
 pub use step::{speculative_step_conditioned_with_router, speculative_step_rollback_with_router};
-#[cfg(feature = "sr2am_configurator")]
-pub use step::speculative_step_with_configurator;
 
 // Speculative prefill scorers (Plan 394, 2026-07-05).
 // Moved from root `src/speculative/prefill.rs`. Hosts the forward-coupled
@@ -649,8 +653,8 @@ pub use forward_set_causal::forward_set_causal_positions;
 pub mod forward_positions;
 #[cfg(feature = "dllm")]
 pub use forward_positions::{
-    attention_forward_safe, forward_bidirectional_positions, forward_bidirectional_positions_into,
-    forward_block_causal_positions, BidirectionalContext,
+    BidirectionalContext, attention_forward_safe, forward_bidirectional_positions,
+    forward_bidirectional_positions_into, forward_block_causal_positions,
 };
 
 // ── Plan 403 (2026-07-06): denoise-loop cluster ──
@@ -670,14 +674,14 @@ pub use forward_positions::{
 // via the root re-export shim.
 #[cfg(feature = "dllm")]
 pub mod denoise_loops;
-#[cfg(feature = "dllm")]
-pub use denoise_loops::{
-    denoise_loop, denoise_loop_scheduled, DenoiseConstraint, NoConstraint, NoRepeatConstraint,
-};
 #[cfg(all(feature = "dllm", feature = "rcd_residual"))]
 pub use denoise_loops::denoise_loop_rcd;
 #[cfg(all(feature = "dllm", feature = "d2f_3sr_warm_start"))]
 pub use denoise_loops::denoise_loop_rcd_3sr;
+#[cfg(feature = "dllm")]
+pub use denoise_loops::{
+    DenoiseConstraint, NoConstraint, NoRepeatConstraint, denoise_loop, denoise_loop_scheduled,
+};
 
 // ── Plan 401 (2026-07-06): set_diffusion.rs relocation ──
 // The full set-diffusion inference decoder + 23 PURE inference tests moved

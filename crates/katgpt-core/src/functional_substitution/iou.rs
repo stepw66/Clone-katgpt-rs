@@ -182,7 +182,10 @@ mod tests {
         }
         let reference = if s_max > 0.0 { s_min / s_max } else { 0.0 };
 
-        assert!((chunked - reference).abs() < 1e-6, "chunked {chunked} vs ref {reference}");
+        assert!(
+            (chunked - reference).abs() < 1e-6,
+            "chunked {chunked} vs ref {reference}"
+        );
     }
 
     /// Symmetry: `iou(a,b) == iou(b,a)`.

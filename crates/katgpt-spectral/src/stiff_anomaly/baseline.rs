@@ -43,9 +43,7 @@ where
     let mut null_scores: Vec<f32> = Vec::with_capacity(n_iterations);
 
     // Pre-allocate reusable data buffer — cleared and refilled each iteration
-    let mut data: Vec<Vec<f32>> = (0..dim)
-        .map(|_| vec![0.0f32; dim])
-        .collect();
+    let mut data: Vec<Vec<f32>> = (0..dim).map(|_| vec![0.0f32; dim]).collect();
 
     for _ in 0..n_iterations {
         // Refill pre-allocated data buffer with random values

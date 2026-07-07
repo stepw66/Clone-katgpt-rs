@@ -115,17 +115,11 @@ impl TraceInformedFeedbackBandit {
     /// Create a new wrapper around a default `FeedbackBandit` with default
     /// trace config.
     pub fn new() -> Self {
-        Self::with_bandit_and_config(
-            FeedbackBandit::new(),
-            TraceInformedConfig::default(),
-        )
+        Self::with_bandit_and_config(FeedbackBandit::new(), TraceInformedConfig::default())
     }
 
     /// Create a new wrapper around the given `FeedbackBandit` and trace config.
-    pub fn with_bandit_and_config(
-        inner: FeedbackBandit,
-        config: TraceInformedConfig,
-    ) -> Self {
+    pub fn with_bandit_and_config(inner: FeedbackBandit, config: TraceInformedConfig) -> Self {
         Self { inner, config }
     }
 

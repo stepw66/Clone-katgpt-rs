@@ -103,7 +103,10 @@ impl PositionOffsetSchedule {
     /// `w` is clamped to `[MIN_POSITIVE, 1.0]` to stay in the valid range.
     #[inline]
     pub fn new(w: f32) -> Self {
-        Self { w: w.clamp(MIN_POSITIVE, 1.0), k: 1.0 }
+        Self {
+            w: w.clamp(MIN_POSITIVE, 1.0),
+            k: 1.0,
+        }
     }
 
     /// Create a schedule with custom shape parameter.
@@ -125,7 +128,10 @@ impl PositionOffsetSchedule {
     /// small stochastic perturbation.
     #[inline]
     pub fn ar() -> Self {
-        Self { w: MIN_POSITIVE, k: 1.0 }
+        Self {
+            w: MIN_POSITIVE,
+            k: 1.0,
+        }
     }
 
     /// The order-agnostic diffusion endpoint (w=1, k=1) — uniform random orderings.
@@ -258,8 +264,9 @@ impl PositionOffsetSchedule {
             return vec![0];
         }
         // Draw reveal times, sort by (reveal_time, position) for stable tie-break.
-        let mut indexed: Vec<(f32, usize)> =
-            (0..l).map(|ell| (self.reveal_time_from_uniform(uniform(), ell, l), ell)).collect();
+        let mut indexed: Vec<(f32, usize)> = (0..l)
+            .map(|ell| (self.reveal_time_from_uniform(uniform(), ell, l), ell))
+            .collect();
         indexed.sort_by(|a, b| {
             a.0.partial_cmp(&b.0)
                 .unwrap_or(std::cmp::Ordering::Equal)
@@ -293,12 +300,15 @@ impl PositionOffsetSchedule {
             return (Vec::new(), Vec::new());
         }
         if l == 1 {
-            return (vec![0], vec![self.reveal_time_from_uniform(uniform(), 0, 1)]);
+            return (
+                vec![0],
+                vec![self.reveal_time_from_uniform(uniform(), 0, 1)],
+            );
         }
-        let reveal_times: Vec<f32> =
-            (0..l).map(|ell| self.reveal_time_from_uniform(uniform(), ell, l)).collect();
-        let mut indexed: Vec<(f32, usize)> =
-            reveal_times.iter().copied().zip(0..l).collect();
+        let reveal_times: Vec<f32> = (0..l)
+            .map(|ell| self.reveal_time_from_uniform(uniform(), ell, l))
+            .collect();
+        let mut indexed: Vec<(f32, usize)> = reveal_times.iter().copied().zip(0..l).collect();
         indexed.sort_by(|a, b| {
             a.0.partial_cmp(&b.0)
                 .unwrap_or(std::cmp::Ordering::Equal)
@@ -481,7 +491,10 @@ mod tests {
         let s = PositionOffsetSchedule::diffusion();
         let l = 8;
         for ell in 0..l {
-            assert!((s.offset(ell, l) - 0.0).abs() < 1e-6, "diffusion offset should be 0");
+            assert!(
+                (s.offset(ell, l) - 0.0).abs() < 1e-6,
+                "diffusion offset should be 0"
+            );
         }
     }
 
@@ -535,7 +548,10 @@ mod tests {
             for i in 0..=n_steps {
                 let tau = a + s.w * (i as f32 / n_steps as f32);
                 let alpha = s.alpha(tau, ell, l);
-                assert!(alpha >= prev - 1e-6, "alpha not monotone at ell={ell}, tau={tau}");
+                assert!(
+                    alpha >= prev - 1e-6,
+                    "alpha not monotone at ell={ell}, tau={tau}"
+                );
                 prev = alpha;
             }
         }
@@ -577,7 +593,10 @@ mod tests {
             for _ in 0..100 {
                 let mut rng = fastrand::Rng::new();
                 let r = s.reveal_time_from_uniform(rng.f32(), ell, l);
-                assert!(r >= a - 1e-6 && r <= a + s.w + 1e-6, "reveal time {r} out of interval");
+                assert!(
+                    r >= a - 1e-6 && r <= a + s.w + 1e-6,
+                    "reveal time {r} out of interval"
+                );
             }
         }
     }
@@ -591,7 +610,10 @@ mod tests {
             for &u in &[0.1, 0.25, 0.5, 0.75, 0.9] {
                 let r = s.reveal_time_from_uniform(u, ell, l);
                 let recovered = s.alpha(r, ell, l);
-                assert!((recovered - u).abs() < 1e-4, "roundtrip failed: u={u}, recovered={recovered}");
+                assert!(
+                    (recovered - u).abs() < 1e-4,
+                    "roundtrip failed: u={u}, recovered={recovered}"
+                );
             }
         }
     }
@@ -627,7 +649,11 @@ mod tests {
         // w = B · (k+1) / (L · k) = 4 · 2 / (16 · 1) = 0.5.
         let base = PositionOffsetSchedule::new(0.3); // original w doesn't matter
         let matched = base.with_matched_budget(4.0, 16);
-        assert!((matched.w - 0.5).abs() < 1e-5, "w should be 0.5, got {}", matched.w);
+        assert!(
+            (matched.w - 0.5).abs() < 1e-5,
+            "w should be 0.5, got {}",
+            matched.w
+        );
         assert!((matched.k - 1.0).abs() < 1e-5, "k should be preserved");
         // Verify: expected_budget should now be ≈ 4.
         assert!((matched.expected_budget(16) - 4.0).abs() < 1e-4);
@@ -683,7 +709,10 @@ mod tests {
         let order1 = s.sample_order(l, &mut fastrand::Rng::with_seed(1));
         let order2 = s.sample_order(l, &mut fastrand::Rng::with_seed(2));
         // Overwhelmingly likely to differ for l=32.
-        assert_ne!(order1, order2, "different seeds should (almost certainly) differ");
+        assert_ne!(
+            order1, order2,
+            "different seeds should (almost certainly) differ"
+        );
     }
 
     #[test]
@@ -700,7 +729,10 @@ mod tests {
             }
         }
         // With w ≈ 1e-6 and L=16, overlap is negligible → expect ≥95% exact AR.
-        assert!(near_ar_count >= 95, "AR schedule should produce near-AR orderings: {near_ar_count}/100");
+        assert!(
+            near_ar_count >= 95,
+            "AR schedule should produce near-AR orderings: {near_ar_count}/100"
+        );
     }
 
     #[test]
@@ -736,7 +768,10 @@ mod tests {
         for i in 1..l {
             let prev = reveal_times[order[i - 1]];
             let curr = reveal_times[order[i]];
-            assert!(prev <= curr + 1e-6, "reveal times not sorted in order: {prev} > {curr}");
+            assert!(
+                prev <= curr + 1e-6,
+                "reveal times not sorted in order: {prev} > {curr}"
+            );
         }
     }
 

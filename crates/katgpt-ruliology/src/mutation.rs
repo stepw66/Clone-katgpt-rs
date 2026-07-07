@@ -9,12 +9,12 @@
 //!
 //! Plan 188 Phase 5 (feature-gated behind `ruliology`).
 
-#![allow(unexpected_cfgs)]  // root may pass-through aggregate features like `full`
+#![allow(unexpected_cfgs)] // root may pass-through aggregate features like `full`
 
-#[cfg(feature = "ruliology")]
-use katgpt_pruners::g_zero::delta_absorb::DeltaGatedConfig;
 use crate::fsm::{FsmStrategy, MAX_STATES};
 use crate::types::SimpleProgram;
+#[cfg(feature = "ruliology")]
+use katgpt_pruners::g_zero::delta_absorb::DeltaGatedConfig;
 
 // ── FsmTemplateProposer ──────────────────────────────────────────
 

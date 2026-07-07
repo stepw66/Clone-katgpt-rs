@@ -24,7 +24,7 @@
 //! - `macros` — `conditional_proof!` declarative macro (exported at crate
 //!   root via `#[macro_export]`).
 
-#![allow(unexpected_cfgs)]  // root may pass-through aggregate features like `full`
+#![allow(unexpected_cfgs)] // root may pass-through aggregate features like `full`
 
 mod certificate;
 mod chain;

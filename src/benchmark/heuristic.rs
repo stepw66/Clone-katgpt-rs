@@ -1,9 +1,9 @@
 // bench_g_zero has two cfg-gated bodies (the `g_zero` implementation and a
 // `not(g_zero)` stub returning Vec::new()), so BenchResult is always needed.
 // BenchCategory + Instant are only used inside the `g_zero` body.
-use super::BenchResult;
 #[cfg(feature = "g_zero")]
 use super::BenchCategory;
+use super::BenchResult;
 #[cfg(feature = "g_zero")]
 use std::time::Instant;
 

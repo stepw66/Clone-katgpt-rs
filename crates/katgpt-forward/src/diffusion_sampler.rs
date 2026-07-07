@@ -42,8 +42,8 @@
 // `crate::transformer::*` → `katgpt_transformer::*`,
 // `crate::types::*` → `katgpt_types::*`.
 
-use crate::d2f_context::{D2fContext, forward_block_causal_with};
 use crate::d2f::D2fDecodeConfig;
+use crate::d2f_context::{D2fContext, forward_block_causal_with};
 use katgpt_transformer::TransformerWeights;
 use katgpt_types::{Config, Rng};
 

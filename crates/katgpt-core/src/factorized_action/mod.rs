@@ -58,13 +58,11 @@ pub mod codebook;
 pub mod kernel;
 pub mod types;
 
-pub use codebook::{
-    fit_codebook_kmeans_into, motion_input_velocity_into, patchify_1d,
-};
+pub use codebook::{fit_codebook_kmeans_into, motion_input_velocity_into, patchify_1d};
 pub use kernel::{
     aggregate_action_latent_into, factor_token_into, finalize_factors, relevance_score,
 };
 pub use types::{
-    AggregatorType, EffectCodebook, FactorizedActionLatent, FilmProjectionBank, TransitionFactors,
-    MAX_K, MAX_PATCHES,
+    AggregatorType, EffectCodebook, FactorizedActionLatent, FilmProjectionBank, MAX_K, MAX_PATCHES,
+    TransitionFactors,
 };

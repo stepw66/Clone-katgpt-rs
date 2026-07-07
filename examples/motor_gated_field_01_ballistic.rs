@@ -40,7 +40,10 @@ fn main() {
 
     let (cx_f, cy_f) = centroid(&field, 0);
     println!("Final centroid: ({cx_f:.2}, {cy_f:.2}) — started at (16.0, 16.0)");
-    println!("Centroid drift: {:.3} cells (G1 gate: ≤ 2.0)", ((cx_f - 16.0).powi(2) + (cy_f - 16.0).powi(2)).sqrt());
+    println!(
+        "Centroid drift: {:.3} cells (G1 gate: ≤ 2.0)",
+        ((cx_f - 16.0).powi(2) + (cy_f - 16.0).powi(2)).sqrt()
+    );
 }
 
 fn place_bump(field: &mut CochainField, cx: usize, cy: usize, amp: f32, sigma: f32) {

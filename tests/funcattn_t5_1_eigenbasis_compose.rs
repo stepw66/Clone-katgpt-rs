@@ -56,8 +56,7 @@
 #![cfg(all(feature = "funcattn", feature = "spectral_quant"))]
 
 use katgpt_core::funcattn::{
-    funcattn_forward, pre_rotate_basis_weights_into, FuncAttnBasis, FuncAttnConfig,
-    FuncAttnScratch,
+    FuncAttnBasis, FuncAttnConfig, FuncAttnScratch, funcattn_forward, pre_rotate_basis_weights_into,
 };
 use katgpt_rs::spectralquant::calibrate_eigenbasis;
 
@@ -317,7 +316,15 @@ fn train_variant(
     let mut out = vec![0.0f32; N * D];
 
     let mut last_mse = forward_mse(
-        x_basis, x_value, y, &w_basis, &w_q, &w_k, &w_v, &mut scratch, &mut out,
+        x_basis,
+        x_value,
+        y,
+        &w_basis,
+        &w_q,
+        &w_k,
+        &w_v,
+        &mut scratch,
+        &mut out,
     );
     eprintln!("[{}] init mse = {:.6}", label, last_mse);
 
@@ -334,7 +341,13 @@ fn train_variant(
             &mut out,
         );
         if step == 0 || (step + 1) % 25 == 0 || step + 1 == STEPS {
-            eprintln!("[{}] step {:>4}/{:<4}  mse = {:.6}", label, step + 1, STEPS, last_mse);
+            eprintln!(
+                "[{}] step {:>4}/{:<4}  mse = {:.6}",
+                label,
+                step + 1,
+                STEPS,
+                last_mse
+            );
         }
     }
     last_mse
@@ -372,10 +385,7 @@ fn g6_eigenbasis_aligned_beats_vanilla_on_anisotropic() {
         calibration.eigenvalues[D - 1],
         calibration.spectral_gap
     );
-    eprintln!(
-        "eigenvalues: {:?}",
-        calibration.eigenvalues
-    );
+    eprintln!("eigenvalues: {:?}", calibration.eigenvalues);
 
     // Identical orthogonal + identity inits for both variants.
     let init_w_basis = orthogonal_init(K, D, &mut rng);
@@ -390,13 +400,25 @@ fn g6_eigenbasis_aligned_beats_vanilla_on_anisotropic() {
     // Vanilla FUNCATTN.
     let vanilla_mse = train_variant(
         "vanilla  ",
-        &x, &x, &y, &init_w_basis, &init_w_q, &init_w_k, &init_w_v,
+        &x,
+        &x,
+        &y,
+        &init_w_basis,
+        &init_w_q,
+        &init_w_k,
+        &init_w_v,
     );
 
     // Eigen-aligned FUNCATTN.
     let aligned_mse = train_variant(
         "eigen    ",
-        &x, &x, &y, &init_w_basis_aligned, &init_w_q, &init_w_k, &init_w_v,
+        &x,
+        &x,
+        &y,
+        &init_w_basis_aligned,
+        &init_w_q,
+        &init_w_k,
+        &init_w_v,
     );
 
     // ── G6 verdict ───────────────────────────────────────────────────────
@@ -416,8 +438,12 @@ fn g6_eigenbasis_aligned_beats_vanilla_on_anisotropic() {
     // tests; the G6 ratio just tells us whether the composition helps in
     // this particular regime.
     let y_mean: f32 = y.iter().sum::<f32>() / y.len() as f32;
-    let trivial_mse: f32 = y.iter().map(|&v| (v - y_mean) * (v - y_mean)).sum::<f32>() / y.len() as f32;
-    eprintln!("  trivial-predictor mse = {:.6} (variance of y)", trivial_mse);
+    let trivial_mse: f32 =
+        y.iter().map(|&v| (v - y_mean) * (v - y_mean)).sum::<f32>() / y.len() as f32;
+    eprintln!(
+        "  trivial-predictor mse = {:.6} (variance of y)",
+        trivial_mse
+    );
     assert!(
         vanilla_mse.is_finite() && vanilla_mse < trivial_mse,
         "vanilla FUNCATTN did not learn: mse={} vs trivial={}",
@@ -442,8 +468,15 @@ fn g6_eigenbasis_aligned_beats_vanilla_on_anisotropic() {
             .zip(init_w_basis_aligned.iter())
             .map(|(a, b)| (a - b).abs())
             .fold(0.0f32, f32::max);
-        assert!(max_diff < 1e-6, "rotation not deterministic: max_diff = {}", max_diff);
-        eprintln!("  determinism: rotation reproducible (max_diff = {:.2e})", max_diff);
+        assert!(
+            max_diff < 1e-6,
+            "rotation not deterministic: max_diff = {}",
+            max_diff
+        );
+        eprintln!(
+            "  determinism: rotation reproducible (max_diff = {:.2e})",
+            max_diff
+        );
     }
 
     if ratio <= 0.90 {

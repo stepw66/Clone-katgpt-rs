@@ -86,15 +86,13 @@ fn centroid(field: &CochainField, w: usize, h: usize, ch: usize) -> (f32, f32) {
 
 fn field_l1(field: &CochainField, ch: usize) -> f32 {
     let dim = field.dim;
-    field.data.iter().enumerate().fold(0.0, |acc, (i, &v)| {
-        if i % dim == ch {
-            acc + v.abs()
-        } else {
-            acc
-        }
-    })
+    field.data.iter().enumerate().fold(
+        0.0,
+        |acc, (i, &v)| {
+            if i % dim == ch { acc + v.abs() } else { acc }
+        },
+    )
 }
-
 
 // ─── G1: no-teleporting ─────────────────────────────────────────────────────
 
@@ -253,30 +251,12 @@ fn gate_g4_zero_alloc() -> (usize, bool) {
     let mut relu = zero_field(&cx, dim);
 
     // Warmup (one tick — shouldn't allocate, but be safe).
-    evolve_motor_gated_field(
-        &cx,
-        &mut field,
-        &[0.5; 4],
-        4,
-        0.1,
-        0.0,
-        &mut lap,
-        &mut relu,
-    );
+    evolve_motor_gated_field(&cx, &mut field, &[0.5; 4], 4, 0.1, 0.0, &mut lap, &mut relu);
 
     // Measured run: 1000 ticks.
     let (_, allocs) = alloc_delta(|| {
         for _ in 0..1000 {
-            evolve_motor_gated_field(
-                &cx,
-                &mut field,
-                &[0.5; 4],
-                4,
-                0.1,
-                0.0,
-                &mut lap,
-                &mut relu,
-            );
+            evolve_motor_gated_field(&cx, &mut field, &[0.5; 4], 4, 0.1, 0.0, &mut lap, &mut relu);
         }
     });
 
@@ -298,31 +278,13 @@ fn gate_g5_latency() -> (f64, bool) {
 
     // Warmup.
     for _ in 0..100 {
-        evolve_motor_gated_field(
-            &cx,
-            &mut field,
-            &[0.5; 4],
-            4,
-            0.1,
-            0.0,
-            &mut lap,
-            &mut relu,
-        );
+        evolve_motor_gated_field(&cx, &mut field, &[0.5; 4], 4, 0.1, 0.0, &mut lap, &mut relu);
     }
 
     let iters = 10_000usize;
     let start = Instant::now();
     for _ in 0..iters {
-        evolve_motor_gated_field(
-            &cx,
-            &mut field,
-            &[0.5; 4],
-            4,
-            0.1,
-            0.0,
-            &mut lap,
-            &mut relu,
-        );
+        evolve_motor_gated_field(&cx, &mut field, &[0.5; 4], 4, 0.1, 0.0, &mut lap, &mut relu);
     }
     let elapsed = start.elapsed();
     let per_call_us = elapsed.as_secs_f64() * 1e6 / iters as f64;
@@ -343,24 +305,43 @@ fn main() {
     let mut all_pass = true;
 
     let (max_disp, g1) = gate_g1_no_teleporting();
-    println!("G1 no-teleporting     : max centroid disp = {max_disp:.4} cells  (gate ≤ 2.0)  → {}", verdict(g1));
+    println!(
+        "G1 no-teleporting     : max centroid disp = {max_disp:.4} cells  (gate ≤ 2.0)  → {}",
+        verdict(g1)
+    );
     all_pass &= g1;
 
     let (ratio, g2) = gate_g2_motor_gate_locality();
-    let ratio_str = if ratio.is_infinite() { "∞ (no leak)".to_string() } else { format!("{ratio:.1}×") };
-    println!("G2 motor-gate locality: isolation ratio   = {ratio_str}  (gate > 100×)  → {}", verdict(g2));
+    let ratio_str = if ratio.is_infinite() {
+        "∞ (no leak)".to_string()
+    } else {
+        format!("{ratio:.1}×")
+    };
+    println!(
+        "G2 motor-gate locality: isolation ratio   = {ratio_str}  (gate > 100×)  → {}",
+        verdict(g2)
+    );
     all_pass &= g2;
 
     let (drift, g3) = gate_g3_conservation();
-    println!("G3 conservation       : mass drift        = {drift:.4}     (gate < 0.05) → {}", verdict(g3));
+    println!(
+        "G3 conservation       : mass drift        = {drift:.4}     (gate < 0.05) → {}",
+        verdict(g3)
+    );
     all_pass &= g3;
 
     let (allocs, g4) = gate_g4_zero_alloc();
-    println!("G4 zero-alloc         : allocs/1000 ticks = {allocs}          (gate = 0)    → {}", verdict(g4));
+    println!(
+        "G4 zero-alloc         : allocs/1000 ticks = {allocs}          (gate = 0)    → {}",
+        verdict(g4)
+    );
     all_pass &= g4;
 
     let (lat, g5) = gate_g5_latency();
-    println!("G5 latency            : per-call          = {lat:.3} µs   (gate < 100)  → {}", verdict(g5));
+    println!(
+        "G5 latency            : per-call          = {lat:.3} µs   (gate < 100)  → {}",
+        verdict(g5)
+    );
     all_pass &= g5;
 
     println!();
@@ -368,7 +349,9 @@ fn main() {
         println!("══ ALL 5 GATES PASS — motor_gated_field ready for downstream consumption ══");
         println!("   (stays OPT-IN by design — primitive, not default-on capability)");
     } else {
-        println!("══ ONE OR MORE GATES FAILED — motor_gated_field stays opt-in; file follow-up issue ══");
+        println!(
+            "══ ONE OR MORE GATES FAILED — motor_gated_field stays opt-in; file follow-up issue ══"
+        );
     }
     std::process::exit(if all_pass { 0 } else { 1 });
 }

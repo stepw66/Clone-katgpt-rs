@@ -20,7 +20,7 @@
 #![cfg(feature = "funcattn")]
 
 use katgpt_core::funcattn::{
-    compute_basis_into, funcattn_forward, FuncAttnBasis, FuncAttnConfig, FuncAttnScratch,
+    FuncAttnBasis, FuncAttnConfig, FuncAttnScratch, compute_basis_into, funcattn_forward,
 };
 
 /// L2 normalize a vector in place.
@@ -115,7 +115,9 @@ fn make_multiscale_x(seed: u64, n_scales: usize) -> (Vec<f32>, Vec<f32>) {
     // Deterministic LCG for reproducibility.
     let mut s = seed;
     let mut rng = || {
-        s = s.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+        s = s
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
         ((s >> 33) as f32) / (1u64 << 31) as f32 - 0.5
     };
     let freqs: Vec<f32> = (0..n_scales).map(|i| 0.3 + 0.7 * (i as f32)).collect();
@@ -156,7 +158,9 @@ fn random_orthonormal_w(seed: u64) -> Vec<f32> {
 fn random_orthonormal_w_rect(seed: u64, k: usize, d: usize) -> Vec<f32> {
     let mut s = seed;
     let mut rng = || {
-        s = s.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+        s = s
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
         ((s >> 33) as f32) / (1u64 << 31) as f32 - 0.5
     };
     let mut w = vec![0.0f32; k * d];
@@ -178,7 +182,9 @@ fn structured_w(signal_dirs: &[f32], n_scales: usize, seed: u64) -> Vec<f32> {
     // Remaining rows = random.
     let mut s = seed;
     let mut rng = || {
-        s = s.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+        s = s
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
         ((s >> 33) as f32) / (1u64 << 31) as f32 - 0.5
     };
     for w_i in w[(n_scales.min(K)) * D..].iter_mut() {
@@ -207,21 +213,45 @@ fn probe_phi_sensitivity_to_basis_choice() {
     let w_rand = random_orthonormal_w(100);
     let mut phi_rand = vec![0.0f32; N * K];
     compute_basis_into(
-        &x, &w_rand, &[], N, D, K, FuncAttnBasis::Sigmoid, 0.5, &mut phi_rand,
+        &x,
+        &w_rand,
+        &[],
+        N,
+        D,
+        K,
+        FuncAttnBasis::Sigmoid,
+        0.5,
+        &mut phi_rand,
     );
 
     // --- Structured basis (aligned to the 4 signal scales) ---
     let w_struct = structured_w(&signal_dirs, 4, 200);
     let mut phi_struct = vec![0.0f32; N * K];
     compute_basis_into(
-        &x, &w_struct, &[], N, D, K, FuncAttnBasis::Sigmoid, 0.5, &mut phi_struct,
+        &x,
+        &w_struct,
+        &[],
+        N,
+        D,
+        K,
+        FuncAttnBasis::Sigmoid,
+        0.5,
+        &mut phi_struct,
     );
 
     // --- A SECOND random orthogonal basis (to measure the noise floor) ---
     let w_rand2 = random_orthonormal_w(300);
     let mut phi_rand2 = vec![0.0f32; N * K];
     compute_basis_into(
-        &x, &w_rand2, &[], N, D, K, FuncAttnBasis::Sigmoid, 0.5, &mut phi_rand2,
+        &x,
+        &w_rand2,
+        &[],
+        N,
+        D,
+        K,
+        FuncAttnBasis::Sigmoid,
+        0.5,
+        &mut phi_rand2,
     );
 
     let cos_rand_rand = cosine(&phi_rand, &phi_rand2);
@@ -276,9 +306,8 @@ fn probe_transport_quality_structured_vs_random() {
         let prev = if i > 0 { i - 1 } else { 0 };
         let next = if i + 1 < N { i + 1 } else { N - 1 };
         for j in 0..D {
-            y_target[i * D + j] = 0.25 * x[prev * D + j]
-                + 0.5 * x[i * D + j]
-                + 0.25 * x[next * D + j];
+            y_target[i * D + j] =
+                0.25 * x[prev * D + j] + 0.5 * x[i * D + j] + 0.25 * x[next * D + j];
         }
     }
 
@@ -302,8 +331,18 @@ fn probe_transport_quality_structured_vs_random() {
         };
         let mut scratch = FuncAttnScratch::new(N, D, K);
         let mut out = vec![0.0f32; N * D];
-        funcattn_forward(&x, &x, w_basis, &w_q, &w_k, &w_v, &cfg, &mut scratch, &mut out)
-            .expect("forward");
+        funcattn_forward(
+            &x,
+            &x,
+            w_basis,
+            &w_q,
+            &w_k,
+            &w_v,
+            &cfg,
+            &mut scratch,
+            &mut out,
+        )
+        .expect("forward");
         let cos = cosine(&out, &y_target);
         let mse: f32 = (0..N * D)
             .map(|i| {
@@ -340,9 +379,39 @@ fn probe_sharp_temperature_makes_basis_choice_matter() {
         let mut phi_rand = vec![0.0f32; N * K];
         let mut phi_struct = vec![0.0f32; N * K];
         let mut phi_rand2 = vec![0.0f32; N * K];
-        compute_basis_into(&x, &w_rand, &[], N, D, K, FuncAttnBasis::Sigmoid, tau, &mut phi_rand);
-        compute_basis_into(&x, &w_struct, &[], N, D, K, FuncAttnBasis::Sigmoid, tau, &mut phi_struct);
-        compute_basis_into(&x, &w_rand2, &[], N, D, K, FuncAttnBasis::Sigmoid, tau, &mut phi_rand2);
+        compute_basis_into(
+            &x,
+            &w_rand,
+            &[],
+            N,
+            D,
+            K,
+            FuncAttnBasis::Sigmoid,
+            tau,
+            &mut phi_rand,
+        );
+        compute_basis_into(
+            &x,
+            &w_struct,
+            &[],
+            N,
+            D,
+            K,
+            FuncAttnBasis::Sigmoid,
+            tau,
+            &mut phi_struct,
+        );
+        compute_basis_into(
+            &x,
+            &w_rand2,
+            &[],
+            N,
+            D,
+            K,
+            FuncAttnBasis::Sigmoid,
+            tau,
+            &mut phi_rand2,
+        );
 
         let cr = cosine(&phi_rand, &phi_rand2);
         let cs = cosine(&phi_rand, &phi_struct);

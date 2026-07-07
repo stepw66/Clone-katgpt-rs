@@ -36,20 +36,20 @@
 
 #![allow(unexpected_cfgs)]
 
-#[cfg(feature = "kv_share")]
-pub mod kv_share;
-#[cfg(feature = "osc_kv")]
-pub mod osc_kv;
 #[cfg(feature = "cs_kv_probe")]
 pub mod cs_kv_probe;
+#[cfg(feature = "kv_share")]
+pub mod kv_share;
+#[cfg(feature = "kvarn")]
+pub mod kvarn;
+#[cfg(feature = "osc_kv")]
+pub mod osc_kv;
 #[cfg(feature = "shard_kv")]
 pub mod shard_kv;
 #[cfg(feature = "sp_kv")]
 pub mod sp_kv;
 #[cfg(feature = "still_kv")]
 pub mod still_kv;
-#[cfg(feature = "kvarn")]
-pub mod kvarn;
 #[cfg(feature = "targeted_precision")]
 pub mod targeted_precision;
 
@@ -58,9 +58,9 @@ pub mod targeted_precision;
 // `crate::`-external refs) and historically lived as root `pub mod` declarations.
 // Root re-exports (`pub use katgpt_kv::X`) preserve all `katgpt_rs::{cache_prune,
 // segment_checkpoint, async_qdq}` paths.
+#[cfg(feature = "async_qdq_overlap")]
+pub mod async_qdq;
 #[cfg(feature = "cache_prune")]
 pub mod cache_prune;
 #[cfg(feature = "segment_checkpoint")]
 pub mod segment_checkpoint;
-#[cfg(feature = "async_qdq_overlap")]
-pub mod async_qdq;

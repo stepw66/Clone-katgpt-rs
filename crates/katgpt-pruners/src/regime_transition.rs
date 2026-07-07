@@ -358,11 +358,7 @@ impl FailurePatternHash {
     /// `AdversarialBreaker::is_valid`, which is invoked per-candidate per-node
     /// during DDTree construction.
     #[inline]
-    pub fn from_parts_with_token(
-        depth: usize,
-        parent_tokens: &[usize],
-        token: usize,
-    ) -> Self {
+    pub fn from_parts_with_token(depth: usize, parent_tokens: &[usize], token: usize) -> Self {
         let mut hasher = blake3::Hasher::new();
         hasher.update(&(depth as u64).to_le_bytes());
         for &t in parent_tokens {
@@ -472,12 +468,7 @@ impl<P: ConstraintPruner> AdversarialBreaker<P> {
     /// Produces a hash identical to
     /// `FailurePattern { tokens: [..parent_tokens, token_idx], failure_depth: depth }.hash_key()`
     /// so it interoperates with `record_failure` and `hot_patterns` lookups.
-    fn record_failure_from_tokens(
-        &self,
-        depth: usize,
-        token_idx: usize,
-        parent_tokens: &[usize],
-    ) {
+    fn record_failure_from_tokens(&self, depth: usize, token_idx: usize, parent_tokens: &[usize]) {
         let key = FailurePatternHash::from_parts_with_token(depth, parent_tokens, token_idx);
         let reached_threshold = {
             let mut map = self.failure_counts.lock().unwrap();
@@ -532,7 +523,10 @@ impl<P: ConstraintPruner> AdversarialBreaker<P> {
         };
         // failure_counts lock is now dropped — safe to acquire hot_patterns.
         let hot = self.hot_patterns.lock().unwrap();
-        hot_keys.iter().filter_map(|key| hot.get(key).cloned()).collect()
+        hot_keys
+            .iter()
+            .filter_map(|key| hot.get(key).cloned())
+            .collect()
     }
 
     /// Feed synthetic variants through the inner pruner to verify the weakness is genuine.
@@ -1086,7 +1080,11 @@ mod tests {
             "combined counter from fast + owning paths should reach threshold"
         );
         let hot = ab.hot_patterns();
-        assert_eq!(hot.len(), 1, "threshold should have been hit on combined path");
+        assert_eq!(
+            hot.len(),
+            1,
+            "threshold should have been hit on combined path"
+        );
         assert_eq!(hot[0].tokens, vec![3]);
         assert_eq!(hot[0].failure_depth, 0);
     }

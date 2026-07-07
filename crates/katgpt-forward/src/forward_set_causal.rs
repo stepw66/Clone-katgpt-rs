@@ -202,12 +202,7 @@ pub fn forward_set_causal_positions(
                 let s = scores_buf[t];
                 if s > 0.0 {
                     let v_row = &v_cache[t * kvd + kv_off..t * kvd + kv_off + hd];
-                    simd::simd_fused_scale_acc(
-                        &mut attn_out_buf[q_off..q_off + hd],
-                        v_row,
-                        s,
-                        hd,
-                    );
+                    simd::simd_fused_scale_acc(&mut attn_out_buf[q_off..q_off + hd], v_row, s, hd);
                 }
             }
         }
@@ -264,8 +259,7 @@ mod tests {
         // positions 2,3,4 are set 1, positions 5,6,7 are set 2.
         let position_order = vec![0, 0, 1, 1, 1, 2, 2, 2];
 
-        let (_, attn) =
-            forward_set_causal_positions(&weights, &tokens, &config, &position_order);
+        let (_, attn) = forward_set_causal_positions(&weights, &tokens, &config, &position_order);
 
         for q in 0..tokens.len() {
             let q_gen_step = position_order[q];
@@ -299,8 +293,7 @@ mod tests {
         // SW-SetDLM-style random-ish ordering
         let position_order = vec![2, 0, 1, 0, 3, 1, 2, 3];
 
-        let (_, attn) =
-            forward_set_causal_positions(&weights, &tokens, &config, &position_order);
+        let (_, attn) = forward_set_causal_positions(&weights, &tokens, &config, &position_order);
 
         for q in 0..tokens.len() {
             for h in 0..config.n_head {
@@ -330,8 +323,7 @@ mod tests {
         // SW-SetDLM-style: overlapping sets
         let position_order = vec![0, 1, 0, 2, 1, 3, 2, 3];
 
-        let (_, attn) =
-            forward_set_causal_positions(&weights, &tokens, &config, &position_order);
+        let (_, attn) = forward_set_causal_positions(&weights, &tokens, &config, &position_order);
 
         for q in 0..tokens.len() {
             let q_gen_step = position_order[q];
@@ -360,13 +352,12 @@ mod tests {
 
         let position_order: Vec<usize> = (0..tokens.len()).collect();
 
-        let (_, attn) =
-            forward_set_causal_positions(&weights, &tokens, &config, &position_order);
+        let (_, attn) = forward_set_causal_positions(&weights, &tokens, &config, &position_order);
 
-        for q in 0..tokens.len() {
+        for (q, attn_row) in attn.iter().enumerate().take(tokens.len()) {
             for h in 0..config.n_head {
                 for t in 0..tokens.len() {
-                    let w = attn[q][h * tokens.len() + t];
+                    let w = attn_row[h * tokens.len() + t];
                     if t > q {
                         // Future positions must be masked
                         assert_eq!(

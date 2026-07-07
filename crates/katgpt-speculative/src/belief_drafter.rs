@@ -837,7 +837,12 @@ impl BeliefDrafter {
     ) -> katgpt_core::DepthInvarianceDiagnostic {
         // No regularization on the plain audit — the audit is a measurement
         // of the drafter as-shipped, not as-regularized.
-        let chain = self.capture_chain(h_0, token_seq, max_depth, katgpt_core::MagnitudeRegularization::None);
+        let chain = self.capture_chain(
+            h_0,
+            token_seq,
+            max_depth,
+            katgpt_core::MagnitudeRegularization::None,
+        );
         let k_plus_1 = chain.len() / self.mlp.n_embd;
         let mut scratch = katgpt_core::Scratch::with_capacity(k_plus_1, self.mlp.n_embd);
         katgpt_core::classify_chain(&chain, self.mlp.n_embd, cfg, &mut scratch)

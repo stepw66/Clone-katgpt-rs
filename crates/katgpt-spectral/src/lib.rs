@@ -32,14 +32,14 @@ pub mod types;
 // are pure linear-algebra on eigenbases / factor pairs and belong with the
 // spectral substrate, not the root crate.
 
-/// Shared power-iteration + L2 retraction helpers (always-on — consumed by
-/// `gauge_invariant` and `manifold_power_iter_router` which are both
-// default-ON at root).
-pub mod spectral_retract;
 /// River-valley diagnostic metrics — always-on (Plan 152 GOAT 25/25).
 pub mod river_valley;
 /// Spectral concentration adaptive rank — always-on (Plan 264 Phase 3).
 pub mod spectral_concentration;
+/// Shared power-iteration + L2 retraction helpers (always-on — consumed by
+/// `gauge_invariant` and `manifold_power_iter_router` which are both
+// default-ON at root).
+pub mod spectral_retract;
 
 #[cfg(feature = "gauge_invariant")]
 pub mod gauge_invariant;
@@ -47,12 +47,12 @@ pub mod gauge_invariant;
 pub mod manifold_power_iter_router;
 #[cfg(feature = "off_principal_retrieval")]
 pub mod off_principal;
-#[cfg(feature = "spectral_budget")]
-pub mod spectral_budget;
-#[cfg(feature = "orthogonal_procrustes")]
-pub mod procrustes;
 #[cfg(feature = "peira_distill")]
 pub mod peira;
+#[cfg(feature = "orthogonal_procrustes")]
+pub mod procrustes;
+#[cfg(feature = "spectral_budget")]
+pub mod spectral_budget;
 #[cfg(feature = "stiff_anomaly")]
 pub mod stiff_anomaly;
 
@@ -78,7 +78,8 @@ pub use nonuniform_quant::{CompressedVector, NonUniformQuantizer};
 pub use outlier_guard::StiffSoftCrossCheck;
 #[cfg(feature = "outlier_guard")]
 pub use outlier_guard::{
-    ConfidenceLevel, LayerReport, OutlierAction, OutlierGuard, OutlierGuardConfig, OutlierGuardReport,
+    ConfidenceLevel, LayerReport, OutlierAction, OutlierGuard, OutlierGuardConfig,
+    OutlierGuardReport,
 };
 #[cfg(feature = "dual_gram_pca")]
 pub use spectral::calibrate_eigenbasis_dual_gram;

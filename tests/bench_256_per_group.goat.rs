@@ -68,7 +68,12 @@ fn make_queries(centroids: &[Vec<f32>], n_blocks: usize) -> Vec<Vec<f32>> {
 
 /// Ground-truth dense top-k blocks for a query, scored identically to the routers
 /// (dot(query, cache_centroid) * 1/sqrt(hd)). Returns indices sorted by score descending.
-fn dense_topk_cache(query: &[f32], cache: &BlockTopKCache, n_blocks: usize, k: usize) -> Vec<usize> {
+fn dense_topk_cache(
+    query: &[f32],
+    cache: &BlockTopKCache,
+    n_blocks: usize,
+    k: usize,
+) -> Vec<usize> {
     let hd = query.len();
     let scale = 1.0 / (hd as f32).sqrt();
     let mut scored: Vec<(usize, f32)> = (0..n_blocks)
@@ -91,12 +96,24 @@ fn bench_per_group_vs_shared() {
     let top_k_set = [8usize, 16, 32];
 
     println!();
-    println!("╔═════════════════════════════════════════════════════════════════════════════════════════╗");
-    println!("║  Plan 256 Phase 2 — Per-GQA-Group vs Shared TopK (RULER proxy: diversity + coverage)   ║");
-    println!("║  HEAD_DIM=64  BLOCK_SIZE=16  N_QUERIES={N_QUERIES}  ITERS={ITERS}                                 ║");
-    println!("╠════════╦══════════╦═══════╦════════════════╦════════════════╦═══════════════════════════╣");
-    println!("║ n_blk  ║ n_groups ║ top_k ║  shared ns/q   ║  pergrp ns/q   ║  latency ratio (pg/sh)   ║");
-    println!("╠════════╬══════════╬═══════╬════════════════╬════════════════╬═══════════════════════════╣");
+    println!(
+        "╔═════════════════════════════════════════════════════════════════════════════════════════╗"
+    );
+    println!(
+        "║  Plan 256 Phase 2 — Per-GQA-Group vs Shared TopK (RULER proxy: diversity + coverage)   ║"
+    );
+    println!(
+        "║  HEAD_DIM=64  BLOCK_SIZE=16  N_QUERIES={N_QUERIES}  ITERS={ITERS}                                 ║"
+    );
+    println!(
+        "╠════════╦══════════╦═══════╦════════════════╦════════════════╦═══════════════════════════╣"
+    );
+    println!(
+        "║ n_blk  ║ n_groups ║ top_k ║  shared ns/q   ║  pergrp ns/q   ║  latency ratio (pg/sh)   ║"
+    );
+    println!(
+        "╠════════╬══════════╬═══════╬════════════════╬════════════════╬═══════════════════════════╣"
+    );
 
     // Collect ratios (n_groups >= 2 only) for the aggregate GOAT verdict.
     let mut cov_ratios: Vec<f64> = Vec::new();
@@ -160,8 +177,16 @@ fn bench_per_group_vs_shared() {
                 let mut dec_s: Vec<Vec<usize>> = Vec::with_capacity(N_QUERIES);
                 let mut dec_p: Vec<Vec<usize>> = Vec::with_capacity(N_QUERIES);
                 for query in &queries {
-                    dec_s.push(shared.forward_indexer(query, &cache, n_blocks, top_k, &mut sc_s).blocks);
-                    dec_p.push(pergrp.forward_indexer(query, &cache, n_blocks, top_k, &mut sc_p).blocks);
+                    dec_s.push(
+                        shared
+                            .forward_indexer(query, &cache, n_blocks, top_k, &mut sc_s)
+                            .blocks,
+                    );
+                    dec_p.push(
+                        pergrp
+                            .forward_indexer(query, &cache, n_blocks, top_k, &mut sc_p)
+                            .blocks,
+                    );
                 }
 
                 // Coverage = union of distinct blocks selected across all queries.
@@ -193,7 +218,11 @@ fn bench_per_group_vs_shared() {
                     let b: HashSet<usize> = dec_s[q].iter().copied().collect();
                     let inter = a.intersection(&b).count();
                     let uni = a.len() + b.len() - inter;
-                    let dist = if uni == 0 { 0.0 } else { 1.0 - inter as f64 / uni as f64 };
+                    let dist = if uni == 0 {
+                        0.0
+                    } else {
+                        1.0 - inter as f64 / uni as f64
+                    };
                     spread_sum += dist;
                 }
                 let per_call_spread = spread_sum / N_QUERIES as f64;
@@ -234,15 +263,25 @@ fn bench_per_group_vs_shared() {
         }
     }
 
-    println!("╚════════╩══════════╩═══════╩════════════════╩════════════════╩═══════════════════════════╝");
+    println!(
+        "╚════════╩══════════╩═══════╩════════════════╩════════════════╩═══════════════════════════╝"
+    );
     println!();
-    println!("╔════════╦══════════╦═══════╦════════════╦════════════╦══════════════════╦═══════════════╦═══════════════╗");
-    println!("║ n_blk  ║ n_groups ║ top_k ║ union shrd ║ union pgrp ║ cov ratio (p/sh) ║ recall@k shrd ║ recall@k pgrp ║");
-    println!("╠════════╬══════════╬═══════╬════════════╬════════════╬══════════════════╬═══════════════╬═══════════════╣");
+    println!(
+        "╔════════╦══════════╦═══════╦════════════╦════════════╦══════════════════╦═══════════════╦═══════════════╗"
+    );
+    println!(
+        "║ n_blk  ║ n_groups ║ top_k ║ union shrd ║ union pgrp ║ cov ratio (p/sh) ║ recall@k shrd ║ recall@k pgrp ║"
+    );
+    println!(
+        "╠════════╬══════════╬═══════╬════════════╬════════════╬══════════════════╬═══════════════╬═══════════════╣"
+    );
     for row in &div_rows {
         println!("{row}");
     }
-    println!("╚════════╩══════════╩═══════╩════════════╩════════════╩══════════════════╩═══════════════╩═══════════════╝");
+    println!(
+        "╚════════╩══════════╩═══════╩════════════╩════════════╩══════════════════╩═══════════════╩═══════════════╝"
+    );
     println!();
 
     // ── GOAT verdict (computed, not hardcoded) ─────────────────────
@@ -257,7 +296,10 @@ fn bench_per_group_vs_shared() {
     println!("║  mean coverage ratio (per-group / shared): {mean_cov:>20.3}       ║");
     println!("║  mean latency ratio (per-group / shared): {mean_lat:>20.3}       ║");
     println!("║  threshold:  coverage ≥ 1.500  AND  latency ≤ 2.000              ║");
-    println!("║  (O1) mean per-call Jaccard spread (pgrp vs shared): {ms:>9.4}   ║", ms = mean_spread);
+    println!(
+        "║  (O1) mean per-call Jaccard spread (pgrp vs shared): {ms:>9.4}   ║",
+        ms = mean_spread
+    );
     println!("║       — informational only, design-goal evidence (not a gate)    ║");
     println!("╟──────────────────────────────────────────────────────────────────╢");
 
@@ -266,9 +308,13 @@ fn bench_per_group_vs_shared() {
     if cov_pass && lat_pass {
         println!("║  GOAT: PASS — per-group diversifies selection at acceptable cost ║");
     } else if !cov_pass {
-        println!("║  GOAT: FAIL — coverage ratio {mean_cov:.3} < 1.500 (insufficient diversification) ║");
+        println!(
+            "║  GOAT: FAIL — coverage ratio {mean_cov:.3} < 1.500 (insufficient diversification) ║"
+        );
     } else {
-        println!("║  GOAT: FAIL — latency ratio {mean_lat:.3} > 2.000 (overhead too high)            ║");
+        println!(
+            "║  GOAT: FAIL — latency ratio {mean_lat:.3} > 2.000 (overhead too high)            ║"
+        );
     }
     println!("╚══════════════════════════════════════════════════════════════════╝");
     println!();

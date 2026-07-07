@@ -158,7 +158,9 @@ impl<const D: usize> Copy for FactorizedActionLatent<D> {}
 
 impl<const D: usize> std::fmt::Debug for FactorizedActionLatent<D> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_tuple("FactorizedActionLatent").field(&&self.0[..]).finish()
+        f.debug_tuple("FactorizedActionLatent")
+            .field(&&self.0[..])
+            .finish()
     }
 }
 
@@ -239,7 +241,8 @@ pub struct FilmProjectionBank<const K: usize, const D: usize, const S: usize> {
 unsafe impl<const K: usize, const D: usize, const S: usize> Pod for FilmProjectionBank<K, D, S> {}
 unsafe impl<const K: usize, const D: usize, const S: usize> Zeroable
     for FilmProjectionBank<K, D, S>
-{}
+{
+}
 
 impl<const K: usize, const D: usize, const S: usize> FilmProjectionBank<K, D, S> {
     /// Construct an identity-style bank: scale proj = 0 (γ=0 → no scaling),
@@ -288,7 +291,10 @@ mod tests {
         let mut cb: EffectCodebook<4, 8> = EffectCodebook::zeroed();
         cb.centroids[1] = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0];
         assert_eq!(cb.centroid(1), &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0]);
-        assert_eq!(cb.centroid_arr(1), &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0]);
+        assert_eq!(
+            cb.centroid_arr(1),
+            &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0]
+        );
     }
 
     #[test]

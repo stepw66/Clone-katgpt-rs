@@ -142,14 +142,18 @@ impl<K: InducedCwmKernel + Send + Sync> Clone for InducedCwmSlot<K> {
         // the same induced kernel. This is the "fan-out" pattern: a top-level
         // slot gets cloned into per-worker slots, all of which observe the
         // same hot-swaps.
-        Self { inner: Arc::clone(&self.inner) }
+        Self {
+            inner: Arc::clone(&self.inner),
+        }
     }
 }
 
 impl<K: InducedCwmKernel + Send + Sync> InducedCwmSlot<K> {
     /// Construct an empty slot (no kernel induced yet).
     pub fn new() -> Self {
-        Self { inner: Arc::new(RwLock::new(None)) }
+        Self {
+            inner: Arc::new(RwLock::new(None)),
+        }
     }
 
     /// Construct a slot pre-loaded with `kernel` at `version` / `tick`.
@@ -159,7 +163,9 @@ impl<K: InducedCwmKernel + Send + Sync> InducedCwmSlot<K> {
     /// avoids the temporary empty state.
     pub fn with_kernel(kernel: K, version: u64, created_at_tick: u64) -> Self {
         let commitment = CwmCommitment::from_kernel(&kernel, version, created_at_tick);
-        Self { inner: Arc::new(RwLock::new(Some((kernel, commitment)))) }
+        Self {
+            inner: Arc::new(RwLock::new(Some((kernel, commitment)))),
+        }
     }
 
     /// Hot-swap the kernel.
@@ -420,8 +426,7 @@ mod tests {
         // has no platform-specific layout quirks beyond the [u8; 32] BLAKE3
         // field, which serde_json serialises as a sequence of bytes).
         let json = serde_json::to_string(&original).expect("serde_json::to_string");
-        let restored: CwmCommitment =
-            serde_json::from_str(&json).expect("serde_json::from_str");
+        let restored: CwmCommitment = serde_json::from_str(&json).expect("serde_json::from_str");
 
         assert_eq!(original, restored, "roundtrip must preserve all fields");
         assert_eq!(restored.blake3, original.blake3);
@@ -440,7 +445,10 @@ mod tests {
         let bytes = postcard::to_allocvec(&original).expect("postcard::to_allocvec");
         let restored: CwmCommitment = postcard::from_bytes(&bytes).expect("postcard::from_bytes");
 
-        assert_eq!(original, restored, "postcard roundtrip must preserve all fields");
+        assert_eq!(
+            original, restored,
+            "postcard roundtrip must preserve all fields"
+        );
     }
 
     #[test]
@@ -503,7 +511,11 @@ mod tests {
         // shape allows concurrent reads without deadlock or panic.
         use std::thread;
 
-        let slot = Arc::new(InducedCwmSlot::with_kernel(MockKernel { step_size: 1 }, 0, 0));
+        let slot = Arc::new(InducedCwmSlot::with_kernel(
+            MockKernel { step_size: 1 },
+            0,
+            0,
+        ));
 
         // Spawn N reader threads, each reading `current()` in a tight loop.
         // Concurrently (well, sequentially here — true contention needs a
@@ -531,7 +543,13 @@ mod tests {
 
         // Writer induces several kernels.
         for i in 1..=10u64 {
-            slot.induce(MockKernel { step_size: i as u32 }, i, i * 10);
+            slot.induce(
+                MockKernel {
+                    step_size: i as u32,
+                },
+                i,
+                i * 10,
+            );
         }
 
         for h in handles {

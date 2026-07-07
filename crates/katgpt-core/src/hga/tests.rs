@@ -1,5 +1,5 @@
-use super::*;
 use super::summary::MixedRopeSummarizer;
+use super::*;
 
 // ── T1.4: MixedRopeSummarizer tests ──────────────────────────────────────────
 
@@ -17,8 +17,9 @@ fn mixed_rope_summary_matches_mean_at_zero_rotation() {
 
     // Expected: raw mean of the 4 keys.
     for i in 0..d {
-        let expected: f32 = (0..4).map(|t| keys[t * d + i] as f32).sum::<f32>() / 4.0;
-        assert!((summary[i] - expected).abs() < 1e-5,
+        let expected: f32 = (0..4).map(|t| keys[t * d + i]).sum::<f32>() / 4.0;
+        assert!(
+            (summary[i] - expected).abs() < 1e-5,
             "dim {i}: summary {} != mean {expected} at zero rotation",
             summary[i]
         );
@@ -47,7 +48,7 @@ fn mixed_rope_summary_threshold_derivation() {
     let crossover = s.crossover_index();
     // The crossover should be around 3-4 (the first few pairs are high-freq).
     assert!(
-        crossover >= 3 && crossover <= 5,
+        (3..=5).contains(&crossover),
         "crossover for theta=10000 D=64 span=16: got {crossover}, expected 3-5"
     );
 
@@ -75,8 +76,11 @@ fn mixed_rope_high_freq_pairs_are_low_indices() {
     if s.n_high_freq() > 0 && s.n_low_freq() > 0 {
         let first_low = mask.iter().position(|&h| !h).unwrap();
         // All pairs after first_low should also be low.
-        for i in first_low..mask.len() {
-            assert!(!mask[i], "pair {i} after first_low {first_low} should be low-freq");
+        for (i, &h) in mask.iter().enumerate().skip(first_low) {
+            assert!(
+                !h,
+                "pair {i} after first_low {first_low} should be low-freq"
+            );
         }
     }
 }
@@ -107,8 +111,16 @@ fn mixed_rope_low_freq_uses_midpoint_rotation() {
     let mean_y = (1.0f32 + 9.0) / 2.0;
     let expected_x = mean_x * cos_t - mean_y * sin_t;
     let expected_y = mean_x * sin_t + mean_y * cos_t;
-    assert!((summary[0] - expected_x).abs() < 1e-4, "summary[0]={} expected={expected_x}", summary[0]);
-    assert!((summary[1] - expected_y).abs() < 1e-4, "summary[1]={} expected={expected_y}", summary[1]);
+    assert!(
+        (summary[0] - expected_x).abs() < 1e-4,
+        "summary[0]={} expected={expected_x}",
+        summary[0]
+    );
+    assert!(
+        (summary[1] - expected_y).abs() < 1e-4,
+        "summary[1]={} expected={expected_y}",
+        summary[1]
+    );
 }
 
 // ── T1.5 + T1.6: GroupSummaryCache tests ─────────────────────────────────────
@@ -124,7 +136,7 @@ fn group_summary_cache_append_and_score() {
     // Append 2 chunks.
     for chunk_idx in 0..2 {
         let keys: Vec<f32> = (0..c * d)
-            .map(|i| (chunk_idx as f32 * 100.0 + i as f32))
+            .map(|i| chunk_idx as f32 * 100.0 + i as f32)
             .collect();
         let positions: Vec<usize> = (chunk_idx * c..).take(c).collect();
         cache.append_chunk(&keys, &positions);
@@ -141,7 +153,10 @@ fn group_summary_cache_append_and_score() {
 
     // Scores should be sorted descending.
     for i in 1..scores.len() {
-        assert!(scores[i - 1].score >= scores[i].score, "scores not sorted desc");
+        assert!(
+            scores[i - 1].score >= scores[i].score,
+            "scores not sorted desc"
+        );
     }
 }
 
@@ -198,7 +213,11 @@ fn group_summary_cache_score_skips_unselected_chunks() {
     let scores = cache.score_groups(&query, &[1, 3]);
     assert_eq!(scores.len(), 4); // 2 chunks * 2 groups
     for s in &scores {
-        assert!(s.chunk_idx == 1 || s.chunk_idx == 3, "unexpected chunk {}", s.chunk_idx);
+        assert!(
+            s.chunk_idx == 1 || s.chunk_idx == 3,
+            "unexpected chunk {}",
+            s.chunk_idx
+        );
     }
 }
 
@@ -223,20 +242,27 @@ fn full_coverage_fetch_matches_causal_sdpa() {
     let mut cache = super::GroupSummaryCache::new(d, c, gs, summarizer);
 
     // Simple mean summarizer for the store.
-    let mean_fn = |keys_flat: &[f32], positions: &[usize], group_start: usize, n_tokens: usize| -> Vec<f32> {
-        let total = positions.len();
-        let hd = if total > 0 { keys_flat.len() / total } else { d };
-        let mut s = vec![0.0f32; hd];
-        for t in 0..n_tokens {
-            let off = (group_start + t) * hd;
-            for i in 0..hd {
-                s[i] += keys_flat[off + i];
+    let mean_fn =
+        |keys_flat: &[f32], positions: &[usize], group_start: usize, n_tokens: usize| -> Vec<f32> {
+            let total = positions.len();
+            let hd = if total > 0 {
+                keys_flat.len() / total
+            } else {
+                d
+            };
+            let mut s = vec![0.0f32; hd];
+            for t in 0..n_tokens {
+                let off = (group_start + t) * hd;
+                for i in 0..hd {
+                    s[i] += keys_flat[off + i];
+                }
             }
-        }
-        let inv = 1.0 / n_tokens as f32;
-        for x in s.iter_mut() { *x *= inv; }
-        s
-    };
+            let inv = 1.0 / n_tokens as f32;
+            for x in s.iter_mut() {
+                *x *= inv;
+            }
+            s
+        };
 
     let mut store = InMemoryTieredKvStore::new(d, c, gs, mean_fn);
 
@@ -258,50 +284,74 @@ fn full_coverage_fetch_matches_causal_sdpa() {
 
     // Full-coverage fetch: all chunks local, RouteBudget::FULL.
     let sink_local = SinkLocalSet::new(vec![], (0..n_chunks).collect());
-    let group_sel = crate::tiered_kv::GroupSelection::all_groups(n_chunks, cache.n_groups_per_chunk());
+    let group_sel =
+        crate::tiered_kv::GroupSelection::all_groups(n_chunks, cache.n_groups_per_chunk());
     let ws = store.fetch_working_set(&sink_local, &(0..n_chunks).collect::<Vec<_>>(), &group_sel);
-    assert_eq!(ws.n_tokens, n_tokens, "full coverage should fetch all tokens");
+    assert_eq!(
+        ws.n_tokens, n_tokens,
+        "full coverage should fetch all tokens"
+    );
 
     // Manual SDPA over the working set.
     let sqrt_d = (d as f32).sqrt();
     let mut logits = vec![0.0f32; n_tokens];
     let mut max_logit = f32::NEG_INFINITY;
-    for j in 0..n_tokens {
-        logits[j] = crate::simd::simd_dot_f32(&query, &ws.keys[j * d..(j + 1) * d], d) / sqrt_d;
-        if logits[j] > max_logit { max_logit = logits[j]; }
+    for (j, logit) in logits.iter_mut().enumerate() {
+        *logit = crate::simd::simd_dot_f32(&query, &ws.keys[j * d..(j + 1) * d], d) / sqrt_d;
+        if *logit > max_logit {
+            max_logit = *logit;
+        }
     }
     let mut sum_exp = 0.0f32;
-    for l in logits.iter_mut() { *l = (*l - max_logit).exp(); sum_exp += *l; }
+    for l in logits.iter_mut() {
+        *l = (*l - max_logit).exp();
+        sum_exp += *l;
+    }
     let mut hga_out = vec![0.0f32; d];
     let inv = 1.0 / sum_exp;
-    for j in 0..n_tokens {
-        let w = logits[j] * inv;
-        for i in 0..d { hga_out[i] += w * ws.values[j * d + i]; }
+    for (j, &logit) in logits.iter().enumerate() {
+        let w = logit * inv;
+        for (i, ho) in hga_out.iter_mut().enumerate() {
+            *ho += w * ws.values[j * d + i];
+        }
     }
 
     // Reference: causal SDPA over raw K/V.
     let mut ref_logits = vec![0.0f32; n_tokens];
     let mut ref_max = f32::NEG_INFINITY;
     for j in 0..n_tokens {
-        ref_logits[j] = crate::simd::simd_dot_f32(&query, &all_keys[j * d..(j + 1) * d], d) / sqrt_d;
-        if ref_logits[j] > ref_max { ref_max = ref_logits[j]; }
+        ref_logits[j] =
+            crate::simd::simd_dot_f32(&query, &all_keys[j * d..(j + 1) * d], d) / sqrt_d;
+        if ref_logits[j] > ref_max {
+            ref_max = ref_logits[j];
+        }
     }
     let mut ref_sum = 0.0f32;
-    for l in ref_logits.iter_mut() { *l = (*l - ref_max).exp(); ref_sum += *l; }
+    for l in ref_logits.iter_mut() {
+        *l = (*l - ref_max).exp();
+        ref_sum += *l;
+    }
     let mut ref_out = vec![0.0f32; d];
     let ref_inv = 1.0 / ref_sum;
     for j in 0..n_tokens {
         let w = ref_logits[j] * ref_inv;
-        for i in 0..d { ref_out[i] += w * all_values[j * d + i]; }
+        for i in 0..d {
+            ref_out[i] += w * all_values[j * d + i];
+        }
     }
 
     // Compare — should match within f32 noise.
     let mut max_diff = 0.0f32;
     for i in 0..d {
         let diff = (hga_out[i] - ref_out[i]).abs();
-        if diff > max_diff { max_diff = diff; }
+        if diff > max_diff {
+            max_diff = diff;
+        }
     }
-    assert!(max_diff < 1e-5, "full-coverage fetch SDPA differs from reference by {max_diff}");
+    assert!(
+        max_diff < 1e-5,
+        "full-coverage fetch SDPA differs from reference by {max_diff}"
+    );
 
     // Sanity: RouteBudget::FULL is indeed full.
     let _ = RouteBudget::FULL; // just verify it exists

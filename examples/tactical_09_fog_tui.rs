@@ -428,12 +428,7 @@ impl StrategicGame {
         }
 
         // Compute boss's vision from its position (same radius as player)
-        let boss_vision = compute_visible(
-            &self.grid,
-            boss_pos,
-            state.bridge_open,
-            &self.bridge,
-        );
+        let boss_vision = compute_visible(&self.grid, boss_pos, state.bridge_open, &self.bridge);
 
         if boss_vision.contains(&player_pos) {
             // CHASE: player is visible → remember position, BFS toward player
@@ -457,12 +452,7 @@ impl StrategicGame {
     /// Patrol: pick a reachable floor tile in the upper half and wander toward it.
     /// Falls back to adjacent tile if no good target found.
     fn boss_patrol_step(&self, boss_pos: (usize, usize), tick: u64) -> (usize, usize) {
-        let bridge_row = self
-            .bridge
-            .iter()
-            .map(|&(r, _)| r)
-            .min()
-            .unwrap_or(8);
+        let bridge_row = self.bridge.iter().map(|&(r, _)| r).min().unwrap_or(8);
 
         // Collect floor tiles above the bridge for patrol targets
         let mut rng_s = boss_pos.0 as u64 * 1000 + boss_pos.1 as u64 + tick;

@@ -970,12 +970,16 @@ mod tests {
             let d = h.halt_decision(loop_idx, 0.0, f32::MAX, -1.0);
             assert_ne!(
                 d,
-                HaltDecision::Halt { reason: HaltReason::GainBelowCost },
+                HaltDecision::Halt {
+                    reason: HaltReason::GainBelowCost
+                },
                 "l_min=255 must refuse to halt at loop_idx={loop_idx} even with gain=0, cost=MAX"
             );
             assert_ne!(
                 d,
-                HaltDecision::Halt { reason: HaltReason::Oscillation },
+                HaltDecision::Halt {
+                    reason: HaltReason::Oscillation
+                },
                 "l_min=255 must refuse to halt at loop_idx={loop_idx} even with cos_theta=-1"
             );
             assert_eq!(
@@ -991,7 +995,9 @@ mod tests {
         let d_boundary = h.halt_decision(255, 0.0, f32::MAX, -1.0);
         assert_eq!(
             d_boundary,
-            HaltDecision::Halt { reason: HaltReason::Oscillation },
+            HaltDecision::Halt {
+                reason: HaltReason::Oscillation
+            },
             "at loop_idx == l_min (255), the floor lifts and the halter evaluates normally"
         );
     }

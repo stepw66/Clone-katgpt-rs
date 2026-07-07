@@ -102,12 +102,12 @@ mod tokenizer;
 #[cfg(feature = "cognitive_architecture_root")]
 mod architecture_root;
 
+#[cfg(feature = "cognitive_architecture_root")]
+pub use architecture_root::{CognitiveArchitectureRoot, verify_parts};
 pub use cache::{
     CacheResult, CacheTier, ColdFetcher, ZipfianCacheHierarchy, ZipfianStats, ZipfianStatsSnapshot,
 };
 pub use commitment::{EngramTableId, build_merkle_root};
-#[cfg(feature = "cognitive_architecture_root")]
-pub use architecture_root::{CognitiveArchitectureRoot, verify_parts};
 pub use conv::{IDENTITY_KERNEL, SPEC_KERNEL, ZERO_KERNEL, conv_causal_into};
 pub use forward::{EngramConfig, fuse_into_hidden_state};
 pub use hash::{HashHead, multi_head_hash};

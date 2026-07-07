@@ -178,9 +178,11 @@ pub fn boundary_flux_mass_with_decomp(
         decomp.harmonic.rank, field.rank
     );
     debug_assert_eq!(
-        decomp.harmonic.n_cells(), field.n_cells(),
+        decomp.harmonic.n_cells(),
+        field.n_cells(),
         "boundary_flux_mass_with_decomp: decomp cell count {} != field cell count {}",
-        decomp.harmonic.n_cells(), field.n_cells()
+        decomp.harmonic.n_cells(),
+        field.n_cells()
     );
     let error_bound: f32 = decomp.harmonic.data.iter().copied().map(f32::abs).sum();
     (mass, error_bound)

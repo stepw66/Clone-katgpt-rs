@@ -158,10 +158,7 @@ mod tests {
     #[test]
     fn batch_gate_flags_all_rejected() {
         let gate = ColinearityBatchGate::default();
-        let cands = vec![
-            Candidate::new(unit(4, 0), 0),
-            Candidate::new(unit(4, 1), 1),
-        ];
+        let cands = vec![Candidate::new(unit(4, 0), 0), Candidate::new(unit(4, 1), 1)];
         let admitted = vec![false, false];
         let scores = vec![0.5, 0.5];
         assert!(
@@ -188,10 +185,7 @@ mod tests {
     #[test]
     fn batch_gate_passes_diverse() {
         let gate = ColinearityBatchGate::default();
-        let cands = vec![
-            Candidate::new(unit(4, 0), 0),
-            Candidate::new(unit(4, 1), 1),
-        ];
+        let cands = vec![Candidate::new(unit(4, 0), 0), Candidate::new(unit(4, 1), 1)];
         let admitted = vec![true, true];
         let scores = vec![0.5, 0.5];
         assert!(

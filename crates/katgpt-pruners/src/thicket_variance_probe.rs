@@ -1388,7 +1388,7 @@ mod tests {
         let s = TvpSignal {
             reasoning_disagreement: 0.3,
             format_disagreement: 0.9, // must be ignored
-            logit_kl: 5.0,           // must be ignored
+            logit_kl: 5.0,            // must be ignored
             probe_count_used: 4,
         };
         use katgpt_core::qgf::QgfVarianceSignal;
@@ -1433,7 +1433,7 @@ mod tests {
     fn test_qgf_variance_signal_round_trip_to_guidance_weight() {
         // End-to-end: TvpSignal → confidence → adaptive guidance weight.
         // Low disagreement (0.1 → confidence 0.9) should yield strong guidance.
-        use katgpt_core::qgf::{adaptive_guidance_weight_from_signal, QgfVarianceSignal};
+        use katgpt_core::qgf::{QgfVarianceSignal, adaptive_guidance_weight_from_signal};
         let confident = TvpSignal {
             reasoning_disagreement: 0.1,
             ..TvpSignal::zero()

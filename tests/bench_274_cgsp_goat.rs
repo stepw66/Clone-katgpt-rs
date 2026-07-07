@@ -58,10 +58,12 @@
 #![cfg(test)]
 
 use katgpt_rs::cgsp::{
-    traits::{CollapseSignal, HintDeltaBandit, NoOpBatchGate, NoOpDifficultyFilter, QualityGuide, Solver},
-    BreakevenDifficultyFilter, CgspConfig, CgspLoop, ColinearityBatchGate,
-    ComplexityWeights, CuriosityPrioritySnapshot, CycleResult, Direction, EntropyCollapse,
-    HlaProjectionGuide, PoolConjecturer, Priority, ScratchBuffers, Target, entropy_nats, sigmoid,
+    BreakevenDifficultyFilter, CgspConfig, CgspLoop, ColinearityBatchGate, ComplexityWeights,
+    CuriosityPrioritySnapshot, CycleResult, Direction, EntropyCollapse, HlaProjectionGuide,
+    PoolConjecturer, Priority, ScratchBuffers, Target, entropy_nats, sigmoid,
+    traits::{
+        CollapseSignal, HintDeltaBandit, NoOpBatchGate, NoOpDifficultyFilter, QualityGuide, Solver,
+    },
 };
 use std::time::Instant;
 
@@ -236,10 +238,16 @@ fn build_cgsp_loop(
     let guide = HlaProjectionGuide::new(2.0, 1.0, ComplexityWeights::default());
     let solver = DotSolver { sharpness: 1.0 };
     let bandit = VecBandit::uniform(POOL_SIZE);
-    CgspLoop::new(conj, guide, solver, bandit, CgspConfig {
-        tau_low: TAU_LOW,
-        ..CgspConfig::default()
-    })
+    CgspLoop::new(
+        conj,
+        guide,
+        solver,
+        bandit,
+        CgspConfig {
+            tau_low: TAU_LOW,
+            ..CgspConfig::default()
+        },
+    )
     .with_collapse(EntropyCollapse::new(TAU_LOW))
     .with_difficulty_filter(BreakevenDifficultyFilter::default())
     .with_batch_gate(ColinearityBatchGate::default())
@@ -265,10 +273,16 @@ fn build_baseline_loop(
     let guide = ConstantGuide(1.0);
     let solver = DotSolver { sharpness: 1.0 };
     let bandit = VecBandit::uniform(POOL_SIZE);
-    CgspLoop::new(conj, guide, solver, bandit, CgspConfig {
-        tau_low: TAU_LOW,
-        ..CgspConfig::default()
-    })
+    CgspLoop::new(
+        conj,
+        guide,
+        solver,
+        bandit,
+        CgspConfig {
+            tau_low: TAU_LOW,
+            ..CgspConfig::default()
+        },
+    )
     .with_collapse(NeverCollapse)
     .with_difficulty_filter(NoOpDifficultyFilter)
     .with_batch_gate(NoOpBatchGate)
@@ -277,7 +291,11 @@ fn build_baseline_loop(
 /// Fraction of `targets` for which the target-aligned arm has priority above
 /// `SOLVED_THRESHOLD` (relative to the sum of all priorities).
 fn fraction_solved(priorities: &[f32], targets: &[Target], pool: &[Direction]) -> f32 {
-    let sum: f32 = priorities.iter().copied().filter(|p| p.is_finite() && *p > 0.0).sum();
+    let sum: f32 = priorities
+        .iter()
+        .copied()
+        .filter(|p| p.is_finite() && *p > 0.0)
+        .sum();
     if sum <= 0.0 {
         return 0.0;
     }
@@ -334,8 +352,15 @@ fn run_one(pool: &[Direction], target: &Target, seed: u64, cgsp: bool) -> RunOut
     };
     let _ = pool_clone;
     let solved = fraction_solved(&priorities, std::slice::from_ref(target), pool) > 0.0;
-    let mean_r = if samples > 0 { total_r / samples as f64 } else { 0.0 };
-    RunOutcome { target_solved: solved, mean_r_synth: mean_r }
+    let mean_r = if samples > 0 {
+        total_r / samples as f64
+    } else {
+        0.0
+    };
+    RunOutcome {
+        target_solved: solved,
+        mean_r_synth: mean_r,
+    }
 }
 
 /// **GOAT G1 — Transfer-to-target (informational, not enforced).**
@@ -382,9 +407,15 @@ fn g1_transfer_to_target_informational() {
     println!("┌──────────────────────────────────────────────────────────────────────────┐");
     println!("│ G1: Transfer-to-target INFORMATIONAL (CGSP is curiosity-driven, not    │");
     println!("│     target-seeking by design — see notes)                               │");
-    println!("│   ({G1_SEEDS} seeds × {N_TARGETS} targets × {N_CYCLES} cycles, pool={POOL_SIZE}, dim={POOL_DIM})        │");
-    println!("│   (a) CGSP       {cgsp_solved:>2}/{total_pairs} solved = {cgsp_mean:.4}                              │");
-    println!("│   (b) g_zero     {baseline_solved:>2}/{total_pairs} solved = {baseline_mean:.4}                              │");
+    println!(
+        "│   ({G1_SEEDS} seeds × {N_TARGETS} targets × {N_CYCLES} cycles, pool={POOL_SIZE}, dim={POOL_DIM})        │"
+    );
+    println!(
+        "│   (a) CGSP       {cgsp_solved:>2}/{total_pairs} solved = {cgsp_mean:.4}                              │"
+    );
+    println!(
+        "│   (b) g_zero     {baseline_solved:>2}/{total_pairs} solved = {baseline_mean:.4}                              │"
+    );
     println!("│   Δ (CGSP − baseline)             = {delta_pp:+.2} pp                          │");
     println!("│   Criterion (plan T3.1): CGSP ≥ baseline + 5.00 pp                      │");
     println!("│   Status: INFORMATIONAL — reward formula rewards intermediate-difficulty│");
@@ -432,9 +463,13 @@ fn g1b_mean_reward_informational() {
     println!();
     println!("┌──────────────────────────────────────────────────────────────────────────┐");
     println!("│ G1b: Mean r_synth per admitted candidate (INFORMATIONAL)               │");
-    println!("│   ({G1B_SEEDS} seeds × {N_TARGETS} targets × {N_CYCLES} cycles)                    │");
+    println!(
+        "│   ({G1B_SEEDS} seeds × {N_TARGETS} targets × {N_CYCLES} cycles)                    │"
+    );
     println!("│   (a) CGSP       mean_r_synth = {cgsp_mean_r:.6}                              │");
-    println!("│   (b) g_zero     mean_r_synth = {baseline_mean_r:.6}                              │");
+    println!(
+        "│   (b) g_zero     mean_r_synth = {baseline_mean_r:.6}                              │"
+    );
     println!("│   Δ (CGSP − baseline)         = {delta:+.6} ({delta_pct:+.2} %)                 │");
     println!("│   Note: Guide attenuates reward mass (score < 1.0); this is expected.  │");
     println!("│   CGSP value is in G2 (recovery) + batch gating, not mean reward.      │");
@@ -465,7 +500,10 @@ fn g2_collapse_recovery_under_50_cycles() {
         *p = if i == 0 { 1.0 } else { 0.0 };
     }
     let h_collapsed = entropy_nats(lp.bandit().priorities());
-    assert!(h_collapsed < TAU_LOW, "collapsed entropy {h_collapsed} should be < τ_low");
+    assert!(
+        h_collapsed < TAU_LOW,
+        "collapsed entropy {h_collapsed} should be < τ_low"
+    );
 
     let mut cycles_with = usize::MAX;
     for c in 0..200 {
@@ -497,7 +535,9 @@ fn g2_collapse_recovery_under_50_cycles() {
     println!();
     println!("┌──────────────────────────────────────────────────────────────────────────┐");
     println!("│ G2: Collapse recovery (force one-hot, count cycles to recover)           │");
-    println!("│   τ_low = {TAU_LOW:.2}, pool_size = {POOL_SIZE}, collapsed H = {h_collapsed:.4}                  │");
+    println!(
+        "│   τ_low = {TAU_LOW:.2}, pool_size = {POOL_SIZE}, collapsed H = {h_collapsed:.4}                  │"
+    );
     println!("│   with collapse_aware:    {cycles_with:>4} cycles                       │");
     println!("│   without (baseline):     {cycles_without:>4} cycles                       │");
     println!("│   Criterion: with ≤ 50, without ≥ 200                                   │");
@@ -572,8 +612,13 @@ fn g4_per_cycle_overhead() {
     println!("┌──────────────────────────────────────────────────────────────────────────┐");
     println!("│ G4: Per-cycle overhead ({iters} iters, k=8, pool={POOL_SIZE})                  │");
     println!("│   total elapsed    = {elapsed:?}                            │");
-    println!("│   per-cycle        = {ns_per_cycle:>8.1} ns  ({us_per_cycle:.3} µs)                 │");
-    println!("│   build            = {}                                            │", build_label());
+    println!(
+        "│   per-cycle        = {ns_per_cycle:>8.1} ns  ({us_per_cycle:.3} µs)                 │"
+    );
+    println!(
+        "│   build            = {}                                            │",
+        build_label()
+    );
     println!("│   Criterion (release): ≤ 1000 ns (1.00 µs)                              │");
     println!("└──────────────────────────────────────────────────────────────────────────┘");
 
@@ -589,7 +634,9 @@ fn g4_per_cycle_overhead() {
         );
         println!("✅ G4 PASS — {ns_per_cycle:.1} ns/cycle ≤ 1000 ns");
     } else {
-        println!("⚠️  G4 informational in debug ({ns_per_cycle:.1} ns/cycle) — run in release to enforce");
+        println!(
+            "⚠️  G4 informational in debug ({ns_per_cycle:.1} ns/cycle) — run in release to enforce"
+        );
     }
 }
 
@@ -653,11 +700,16 @@ fn p2_batched_1000_npcs_throughput() {
 
     println!();
     println!("┌──────────────────────────────────────────────────────────────────────────┐");
-    println!("│ P2: Batched throughput ({N_NPCS} NPCs/tick, {chunks} parallel chunks)              │");
+    println!(
+        "│ P2: Batched throughput ({N_NPCS} NPCs/tick, {chunks} parallel chunks)              │"
+    );
     println!("│   total elapsed  = {elapsed:?}                            │");
     println!("│   per-tick       = {us_per_tick:>8.1} µs                                  │");
     println!("│   per-NPC        = {us_per_npc:>8.2} µs                                  │");
-    println!("│   build          = {}                                            │", build_label());
+    println!(
+        "│   build          = {}                                            │",
+        build_label()
+    );
     println!("│   Criterion (release): ≤ 5000 µs (5 ms) per tick                        │");
     println!("└──────────────────────────────────────────────────────────────────────────┘");
 
@@ -671,7 +723,9 @@ fn p2_batched_1000_npcs_throughput() {
         );
         println!("✅ P2 PASS — {us_per_tick:.1} µs/tick ≤ 5000 µs");
     } else {
-        println!("⚠️  P2 informational in debug ({us_per_tick:.1} µs/tick) — run in release to enforce");
+        println!(
+            "⚠️  P2 informational in debug ({us_per_tick:.1} µs/tick) — run in release to enforce"
+        );
     }
 }
 
@@ -730,13 +784,25 @@ fn p3_allocation_audit_steady_state() {
             let per_cycle_bytes = bytes as f64 / window as f64;
 
             println!();
-            println!("┌──────────────────────────────────────────────────────────────────────────┐");
-            println!("│ P3: Allocation audit (debug, TrackingAllocator, window = {window})           │");
-            println!("│   total allocs : {count:>6}                                                │");
-            println!("│   total bytes  : {bytes:>6}                                                │");
-            println!("│   per-cycle    : {per_cycle:>6.2} allocs  ({per_cycle_bytes:>8.1} bytes)               │");
+            println!(
+                "┌──────────────────────────────────────────────────────────────────────────┐"
+            );
+            println!(
+                "│ P3: Allocation audit (debug, TrackingAllocator, window = {window})           │"
+            );
+            println!(
+                "│   total allocs : {count:>6}                                                │"
+            );
+            println!(
+                "│   total bytes  : {bytes:>6}                                                │"
+            );
+            println!(
+                "│   per-cycle    : {per_cycle:>6.2} allocs  ({per_cycle_bytes:>8.1} bytes)               │"
+            );
             println!("│   Criterion: per-cycle < 100 (bounded — NOT zero-alloc)                 │");
-            println!("└──────────────────────────────────────────────────────────────────────────┘");
+            println!(
+                "└──────────────────────────────────────────────────────────────────────────┘"
+            );
 
             assert!(
                 per_cycle < 100.0,
@@ -765,7 +831,9 @@ fn p3_allocation_audit_steady_state() {
             };
             println!("✅ P3 PASS — {per_cycle:.2} allocs/cycle ({verdict})");
             println!("    note: see .benchmarks/274_cgsp_goat.md §P3 for root-cause analysis");
-            println!("    note: TRUE zero-alloc would require replacing `Candidate.direction` with");
+            println!(
+                "    note: TRUE zero-alloc would require replacing `Candidate.direction` with"
+            );
             println!("    a fixed-size `[f32; N]` or a borrow — filed as follow-up optimisation.");
         }
     } else {
@@ -799,9 +867,18 @@ fn g6_latent_raw_boundary_audit() {
     let r = lp.cycle(&target, &mut scratch);
 
     // Stats must all be finite f32 (raw-crossable).
-    assert!(r.stats.priority_entropy.is_finite(), "entropy must be finite f32");
-    assert!(r.stats.mean_guide_score.is_finite(), "guide_score must be finite f32");
-    assert!(r.stats.mean_r_synth.is_finite(), "r_synth must be finite f32");
+    assert!(
+        r.stats.priority_entropy.is_finite(),
+        "entropy must be finite f32"
+    );
+    assert!(
+        r.stats.mean_guide_score.is_finite(),
+        "guide_score must be finite f32"
+    );
+    assert!(
+        r.stats.mean_r_synth.is_finite(),
+        "r_synth must be finite f32"
+    );
     // collapse_triggered is a bool (raw).
     let _collapse_raw: bool = r.collapse_triggered;
 
@@ -810,14 +887,20 @@ fn g6_latent_raw_boundary_audit() {
     let snap = lp.snapshot();
     let h = snap.blake3_hash();
     assert_eq!(h.len(), 32, "BLAKE3 hash is 32 bytes (raw commitment)");
-    assert!(h.iter().any(|&b| b != 0), "BLAKE3 hash should not be all-zero");
+    assert!(
+        h.iter().any(|&b| b != 0),
+        "BLAKE3 hash should not be all-zero"
+    );
 
     // Encode/decode roundtrip — encode is the only place latent bytes are
     // serialised, and it's a one-way bridge into raw bytes for storage/sync.
     let mut buf = Vec::new();
     snap.encode_to(&mut buf);
     let back = CuriosityPrioritySnapshot::decode(&buf).expect("decode");
-    assert_eq!(back.priorities, snap.priorities, "snapshot roundtrip must preserve priorities");
+    assert_eq!(
+        back.priorities, snap.priorities,
+        "snapshot roundtrip must preserve priorities"
+    );
 
     println!();
     println!("┌──────────────────────────────────────────────────────────────────────────┐");
@@ -826,7 +909,10 @@ fn g6_latent_raw_boundary_audit() {
     println!("│                       stats (entropy/guide/r_synth: f32, count: u32)    │");
     println!("│   Latent Direction / Target NEVER appear in CycleResult.                │");
     println!("│   Snapshot: latent directions inside, BLAKE3 raw commitment outside.    │");
-    println!("│   BLAKE3 hash: {} bytes, non-zero                              │", h.len());
+    println!(
+        "│   BLAKE3 hash: {} bytes, non-zero                              │",
+        h.len()
+    );
     println!("│   Criterion: only f32 + bool + u32 cross the trait boundary             │");
     println!("└──────────────────────────────────────────────────────────────────────────┘");
 
@@ -856,9 +942,15 @@ fn zzz_summary_print_goat_matrix() {
     println!("  G6  Latent/raw boundary   only f32+bool+u32 cross    (see gate test)");
     println!();
     println!("Reproduce:");
-    println!("  cargo test --release --test bench_274_cgsp_goat --features cgsp -- --nocapture --test-threads=1");
-    println!("  cargo test --test bench_274_cgsp_goat --features cgsp -- --nocapture --test-threads=1  # P3");
-    println!("  cargo check                                                         # G3 isolation");
+    println!(
+        "  cargo test --release --test bench_274_cgsp_goat --features cgsp -- --nocapture --test-threads=1"
+    );
+    println!(
+        "  cargo test --test bench_274_cgsp_goat --features cgsp -- --nocapture --test-threads=1  # P3"
+    );
+    println!(
+        "  cargo check                                                         # G3 isolation"
+    );
     println!("  cargo check --features cgsp                                         # G3 sanity");
     println!("  # --test-threads=1 is REQUIRED for G4/P2 (tight microbenchmarks)");
     println!("═══════════════════════════════════════════════════════════════════════════");

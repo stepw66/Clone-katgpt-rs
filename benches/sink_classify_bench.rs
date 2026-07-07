@@ -130,38 +130,20 @@ fn main() {
             scratch.ensure_capacity(d);
 
             let us_rand = bench_us(3, 30, || {
-                let d = classify_sink_at(
-                    0,
-                    &attn_column,
-                    &values,
-                    Some(&o_rand),
-                    &cfg,
-                    &mut scratch,
-                );
+                let d =
+                    classify_sink_at(0, &attn_column, &values, Some(&o_rand), &cfg, &mut scratch);
                 std::hint::black_box(d);
             });
 
             let us_rank1 = bench_us(3, 30, || {
-                let d = classify_sink_at(
-                    0,
-                    &attn_column,
-                    &values,
-                    Some(&o_rank1),
-                    &cfg,
-                    &mut scratch,
-                );
+                let d =
+                    classify_sink_at(0, &attn_column, &values, Some(&o_rank1), &cfg, &mut scratch);
                 std::hint::black_box(d);
             });
 
             // Capture kind for the rank-1 case for sanity.
-            let diag = classify_sink_at(
-                0,
-                &attn_column,
-                &values,
-                Some(&o_rank1),
-                &cfg,
-                &mut scratch,
-            );
+            let diag =
+                classify_sink_at(0, &attn_column, &values, Some(&o_rank1), &cfg, &mut scratch);
 
             println!(
                 "{:>5} {:>5} {:>16.3} {:>16.3} {:>10?}",
@@ -180,19 +162,16 @@ fn main() {
     let attn_column = uniform_attn_column(n, 0.7);
     scratch.ensure_capacity(d);
     let us = bench_us(5, 100, || {
-        let d = classify_sink_at(
-            0,
-            &attn_column,
-            &values,
-            Some(&o_rand),
-            &cfg,
-            &mut scratch,
-        );
+        let d = classify_sink_at(0, &attn_column, &values, Some(&o_rand), &cfg, &mut scratch);
         std::hint::black_box(d);
     });
     println!("  n=32, d_h=64 classify_sink_at: {:.3} µs", us);
     println!(
         "  G2.4 target <1µs: {}",
-        if us < 1.0 { "PASS" } else { "FAIL (documented)" }
+        if us < 1.0 {
+            "PASS"
+        } else {
+            "FAIL (documented)"
+        }
     );
 }

@@ -17,14 +17,14 @@ use katgpt_rs::pruners::bomber::ArenaGrid;
 #[cfg(all(feature = "bomber", feature = "go"))]
 use katgpt_rs::pruners::game_state::{StateHeuristic, mcts_search};
 #[cfg(all(feature = "bomber", feature = "go"))]
-use katgpt_rs::pruners::{BomberHeuristic, BomberState};
-#[cfg(all(feature = "bomber", feature = "go"))]
 use katgpt_rs::pruners::go::state::{GoHeuristic, GoState};
 #[cfg(all(feature = "bomber", feature = "go"))]
 use katgpt_rs::pruners::{
     BFCP, BanditPruner, BanditStrategy, BfcpRegionCache, BorelRegion, RegionLabel,
     blake3_logit_hash,
 };
+#[cfg(all(feature = "bomber", feature = "go"))]
+use katgpt_rs::pruners::{BomberHeuristic, BomberState};
 #[cfg(all(feature = "bomber", feature = "go"))]
 use katgpt_rs::speculative::ScreeningPruner;
 

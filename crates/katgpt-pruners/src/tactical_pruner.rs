@@ -203,11 +203,7 @@ impl TacticalPruner {
                 let nc = next.c as isize + dc;
 
                 // 1. Grid bounds (precomputed cols avoids grid[0].len() per call)
-                if nr < 0
-                    || nc < 0
-                    || nr >= self.grid.len() as isize
-                    || nc >= self.cols as isize
-                {
+                if nr < 0 || nc < 0 || nr >= self.grid.len() as isize || nc >= self.cols as isize {
                     return None;
                 }
 
@@ -221,23 +217,19 @@ impl TacticalPruner {
                 }
 
                 // 3. Goal validation (exit locked until all treasures collected)
-                if (nr, nc) == self.goal
-                    && next.collected_treasures != self.all_treasures_mask
-                {
+                if (nr, nc) == self.goal && next.collected_treasures != self.all_treasures_mask {
                     return None;
                 }
 
                 // 4. Check for a LIVE monster at the target tile — O(1) flat lookup
                 let m_idx = self.monster_at[flat];
-                let live_monster_here = m_idx != NO_ENTITY
-                    && (next.killed_monsters & (1 << m_idx)) == 0;
+                let live_monster_here =
+                    m_idx != NO_ENTITY && (next.killed_monsters & (1 << m_idx)) == 0;
 
                 // 5. Treasure collection (locked without item) — O(1) flat lookup
                 if !live_monster_here {
                     let t_idx = self.treasure_at[flat];
-                    if t_idx != NO_ENTITY
-                        && (next.collected_treasures & (1 << t_idx)) == 0
-                    {
+                    if t_idx != NO_ENTITY && (next.collected_treasures & (1 << t_idx)) == 0 {
                         if next.inventory > 0 {
                             next.inventory -= 1;
                             next.collected_treasures |= 1 << t_idx;

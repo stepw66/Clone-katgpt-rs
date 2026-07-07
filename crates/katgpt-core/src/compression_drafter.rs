@@ -279,9 +279,7 @@ impl MatchLengthScorer {
                     unsafe { *candidate.get_unchecked(idx - ctx_len) }
                 };
                 // SAFETY: back <= max_extend <= pos, so pos - back >= 0.
-                let corpus_byte = unsafe {
-                    *self.corpus.get_unchecked(pos as usize - back)
-                };
+                let corpus_byte = unsafe { *self.corpus.get_unchecked(pos as usize - back) };
                 if corpus_byte == qb {
                     back += 1;
                 } else {
@@ -435,10 +433,7 @@ mod tests {
         // AND (b) enough corpus repetition for its hash table to actually find matches.
         // We build a corpus by repeating the seen pattern so LZ4's match-finder engages.
         let seen = b"guard needs sword\n";
-        let corpus: Vec<u8> = std::iter::repeat_n(seen, 8)
-            .flatten()
-            .copied()
-            .collect();
+        let corpus: Vec<u8> = std::iter::repeat_n(seen, 8).flatten().copied().collect();
         let mut d = Lz4FlexDrafter::new(corpus);
         let ctx: &[u8] = b"";
         // Equal-length candidates: seen-substring vs all-unseen-bytes.
@@ -475,7 +470,11 @@ mod tests {
         assert_eq!(batch.len(), single.len());
         // lz4_flex is deterministic — scores must match exactly.
         for (i, (b, s)) in batch.iter().zip(single.iter()).enumerate() {
-            assert_eq!(b, s, "batch vs single mismatch at index {}: {} vs {}", i, b, s);
+            assert_eq!(
+                b, s,
+                "batch vs single mismatch at index {}: {} vs {}",
+                i, b, s
+            );
         }
     }
 
@@ -514,7 +513,10 @@ mod tests {
         d2.replace_corpus(snapshot_bytes);
         let scores_after = d2.score_batch(ctx, candidates);
 
-        assert_eq!(scores_before, scores_after, "snapshot roundtrip must preserve scores");
+        assert_eq!(
+            scores_before, scores_after,
+            "snapshot roundtrip must preserve scores"
+        );
     }
 
     // ── Phase 5+6 tests ──
@@ -534,7 +536,11 @@ mod tests {
         let scorer = MatchLengthScorer::new(b"guard needs sword guard needs potion");
         // Full suffix match
         let ml = scorer.suffix_match_len(b"", b"guard needs");
-        assert!(ml >= 11, "should find the full 'guard needs' substring, got {}", ml);
+        assert!(
+            ml >= 11,
+            "should find the full 'guard needs' substring, got {}",
+            ml
+        );
     }
 
     #[test]
@@ -582,7 +588,10 @@ mod tests {
         let out_long = beam_search(&scorer, b"", &alphabet, 10, 4, 32);
         assert!(out_short.len() <= 3, "short horizon should cap output");
         assert!(out_long.len() <= 10, "long horizon should cap output");
-        assert!(out_long.len() >= out_short.len(), "longer horizon shouldn't be shorter");
+        assert!(
+            out_long.len() >= out_short.len(),
+            "longer horizon shouldn't be shorter"
+        );
     }
 
     #[test]

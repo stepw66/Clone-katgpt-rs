@@ -41,9 +41,9 @@
 // so the `katgpt_core::dllm_solver::*` paths below resolve whenever
 // `rcd_residual` (or its superset `d2f_3sr_warm_start`) is enabled.
 
-use crate::forward_positions::{forward_bidirectional_positions_into, BidirectionalContext};
-use katgpt_core::simd;
+use crate::forward_positions::{BidirectionalContext, forward_bidirectional_positions_into};
 use katgpt_core::PositionOffsetSchedule;
+use katgpt_core::simd;
 use katgpt_transformer::TransformerWeights;
 use katgpt_types::Config;
 use katgpt_types::Rng;
@@ -508,6 +508,7 @@ pub fn denoise_loop_rcd(
 /// When `tsr_config` is `None` or `enabled = false`, behaves identically to
 /// [`denoise_loop_rcd`] (zero overhead — falls through directly).
 #[cfg(feature = "d2f_3sr_warm_start")]
+#[allow(clippy::too_many_arguments)] // public API mirroring denoise_loop_rcd + tsr params
 pub fn denoise_loop_rcd_3sr(
     weights: &TransformerWeights,
     target_tokens: &[usize],
@@ -604,14 +605,13 @@ pub fn denoise_loop_rcd_3sr(
 
             let mut best_token = mask;
             let mut best_exp = 0.0f32;
-            for t in 0..vocab {
+            for (t, &e) in exp_buf[..vocab].iter().enumerate() {
                 if t == mask {
                     continue;
                 }
                 if !constraint.is_valid(p, t, &tokens) {
                     continue;
                 }
-                let e = exp_buf[t];
                 if e > best_exp {
                     best_exp = e;
                     best_token = t;
@@ -629,8 +629,8 @@ pub fn denoise_loop_rcd_3sr(
         // RCD pass: compute entropy-weighted residual for every still-masked
         // position and write to `rcd_residual_embeddings` (h_pre,t for 3SR).
         let mut wrote_residual = false;
-        for p in 0..seq_len {
-            if tokens[p] != mask {
+        for (p, &tok) in tokens.iter().enumerate().take(seq_len) {
+            if tok != mask {
                 continue;
             }
 

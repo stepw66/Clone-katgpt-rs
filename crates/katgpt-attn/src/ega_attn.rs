@@ -155,7 +155,8 @@ impl EgaGate {
 
         for (i, out_slot) in out.iter_mut().enumerate().take(seq_len) {
             let row_off = i * dim;
-            *out_slot = katgpt_core::simd::simd_dot_f32(&x[row_off..row_off + dim], &self.w_proj, dim);
+            *out_slot =
+                katgpt_core::simd::simd_dot_f32(&x[row_off..row_off + dim], &self.w_proj, dim);
         }
     }
 

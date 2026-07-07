@@ -323,12 +323,7 @@ impl MeanFieldOverlap {
     /// `scratch_sq` buffers (which are `clear()`-ed at the start — capacity
     /// is preserved). Chunk-4 inner loop for SIMD auto-vectorisation per
     /// AGENTS.md optimization rules.
-    pub fn aggregate_into(
-        &mut self,
-        hlas: &[&[f32]],
-        adapt: &[&[f32]],
-        n: &[f32],
-    ) {
+    pub fn aggregate_into(&mut self, hlas: &[&[f32]], adapt: &[&[f32]], n: &[f32]) {
         let k = hlas.len().min(adapt.len());
         debug_assert!(
             hlas.len() == adapt.len(),
@@ -388,10 +383,8 @@ impl MeanFieldOverlap {
                 self.scratch_sq[j + 1] += th1 * th1;
                 self.scratch_sq[j + 2] += th2 * th2;
                 self.scratch_sq[j + 3] += th3 * th3;
-                dot_na += n[j] * a[j]
-                    + n[j + 1] * a[j + 1]
-                    + n[j + 2] * a[j + 2]
-                    + n[j + 3] * a[j + 3];
+                dot_na +=
+                    n[j] * a[j] + n[j + 1] * a[j + 1] + n[j + 2] * a[j + 2] + n[j + 3] * a[j + 3];
                 j += 4;
             }
             while j < d {
@@ -1057,7 +1050,11 @@ mod tests {
             g_eff: 1.0,
         };
         let s = saddle_strength(&p);
-        assert!(s > 0.0, "saddle_strength should be positive for saddle, got {}", s);
+        assert!(
+            s > 0.0,
+            "saddle_strength should be positive for saddle, got {}",
+            s
+        );
         // λ₊ = (T + √Δ)/2 = (0 + √(0+4))/2 = 1.
         assert!((s - 1.0).abs() < 1e-6, "λ₊ should be 1.0, got {}", s);
     }
@@ -1074,7 +1071,10 @@ mod tests {
         };
         assert!(hopf_boundary(&p).is_some(), "should be Hopf regime");
         let s = saddle_strength(&p);
-        assert_eq!(s, 0.0, "saddle_strength should be 0 for complex eigenvalues");
+        assert_eq!(
+            s, 0.0,
+            "saddle_strength should be 0 for complex eigenvalues"
+        );
     }
 
     #[test]
@@ -1272,11 +1272,18 @@ mod tests {
         let s = saddle_strength(&p);
         assert!(s > 0.005, "λ₊ = {} should be strong", s);
         let bg_eff = p.beta * p.g_eff;
-        assert!(bg_eff > 9.0, "β·G_eff = {} should exceed spinodal_margin", bg_eff);
+        assert!(
+            bg_eff > 9.0,
+            "β·G_eff = {} should exceed spinodal_margin",
+            bg_eff
+        );
         let clf = RegimeClassifier::default();
         let r = clf.classify_with_g(&MeanFieldOverlap::default(), &p, 1.4);
-        assert_eq!(r, Regime::GlobalLimitCycle,
-            "strong saddle + spinodal proximity → GLC");
+        assert_eq!(
+            r,
+            Regime::GlobalLimitCycle,
+            "strong saddle + spinodal proximity → GLC"
+        );
     }
 
     #[test]
@@ -1296,13 +1303,20 @@ mod tests {
             g_eff: 3.0,
         };
         let bg_eff = p.beta * p.g_eff;
-        assert!(bg_eff < 9.0, "β·G_eff = {} should be below spinodal_margin", bg_eff);
+        assert!(
+            bg_eff < 9.0,
+            "β·G_eff = {} should be below spinodal_margin",
+            bg_eff
+        );
         let s = saddle_strength(&p);
         assert!(s > 0.005, "λ₊ = {} should be strong", s);
         let clf = RegimeClassifier::default();
         let r = clf.classify_with_g(&MeanFieldOverlap::default(), &p, 1.4);
-        assert_eq!(r, Regime::IrregularSwitching,
-            "strong saddle, not near pole → IS");
+        assert_eq!(
+            r,
+            Regime::IrregularSwitching,
+            "strong saddle, not near pole → IS"
+        );
     }
 
     #[test]
@@ -1320,8 +1334,11 @@ mod tests {
         assert_eq!(bg_eff, 0.0, "β=0 → β·G_eff=0");
         let clf = RegimeClassifier::default();
         let r = clf.classify_with_g(&MeanFieldOverlap::default(), &p, 1.5);
-        assert_eq!(r, Regime::IrregularSwitching,
-            "β=0 disables spinodal check → strong saddle → IS");
+        assert_eq!(
+            r,
+            Regime::IrregularSwitching,
+            "β=0 disables spinodal check → strong saddle → IS"
+        );
     }
 
     // ─── fast_tanh sanity ──────────────────────────────────────────────────

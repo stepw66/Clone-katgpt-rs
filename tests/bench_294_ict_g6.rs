@@ -115,7 +115,9 @@ fn g6_feature_isolation_no_ict_symbols_in_default_build() {
     // path would appear in mangled names like katgpt_core::ict::...
     let leaked: Vec<&str> = nm_text
         .lines()
-        .filter(|line| line.to_lowercase().contains("ict_branching") || line.contains("branching_detector"))
+        .filter(|line| {
+            line.to_lowercase().contains("ict_branching") || line.contains("branching_detector")
+        })
         .collect();
 
     if leaked.is_empty() {

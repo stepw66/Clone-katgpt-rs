@@ -49,12 +49,12 @@
 
 use std::sync::Mutex;
 
+use crate::ForwardContext;
+use crate::forward::forward;
+use katgpt_core::types::Config;
 use katgpt_transformer::dense_mesh::traits::DenseNode;
 use katgpt_transformer::dense_mesh::types::{DenseHidden, MeshScratch};
-use crate::forward::forward;
-use crate::ForwardContext;
 use katgpt_transformer::{MultiLayerKVCache, TransformerWeights};
-use katgpt_core::types::Config;
 
 /// Default pool size used when the caller does not explicitly request a
 /// parallelism budget. Sized to the host's logical CPU count so that the
@@ -308,8 +308,9 @@ mod tests {
         // `par_iter_mut` — the same pattern the topology uses. If the Mutex
         // pool failed to isolate per-thread state, this would either deadlock,
         // panic on a poisoned Mutex, or produce torn reads.
-        let mut outputs: Vec<DenseHidden> =
-            (0..n_workers).map(|_| DenseHidden::zeros(1, config.vocab_size)).collect();
+        let mut outputs: Vec<DenseHidden> = (0..n_workers)
+            .map(|_| DenseHidden::zeros(1, config.vocab_size))
+            .collect();
         outputs.par_iter_mut().for_each(|out_slot| {
             let mut scratch = MeshScratch::new(1, config.vocab_size);
             *out_slot = node.forward_dense(&input, 0, &mut scratch);

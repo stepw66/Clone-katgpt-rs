@@ -240,7 +240,12 @@ impl ChunkedContentStore for InMemoryChunkedStore {
     /// **Associated fn** (G4 light-client gate) — no `&self`. Delegates to the
     /// pure-BLAKE3 verifier.
     fn verify_proof(proof: &MerkleProof, leaf_hash: &[u8; 32]) -> bool {
-        verify_binary_merkle_proof(leaf_hash, proof.leaf_index, &proof.siblings, &proof.expected_root)
+        verify_binary_merkle_proof(
+            leaf_hash,
+            proof.leaf_index,
+            &proof.siblings,
+            &proof.expected_root,
+        )
     }
 
     fn stats(&self) -> StoreStats {
@@ -345,9 +350,7 @@ mod tests {
         let id = store.put(&bytes);
 
         // Prove leaf 3, then verify against the actual chunk hash for leaf 3.
-        let proof = store
-            .prove_chunk(&id, 3)
-            .expect("leaf 3 must be provable");
+        let proof = store.prove_chunk(&id, 3).expect("leaf 3 must be provable");
 
         // Recover the chunk hash for leaf 3 by re-chunking + re-hashing.
         let chunks = FixedSizeChunker::new(4).chunk(&bytes);
@@ -365,9 +368,7 @@ mod tests {
         let bytes: Vec<u8> = (0..32).collect();
         let id = store.put(&bytes);
 
-        let proof_for_0 = store
-            .prove_chunk(&id, 0)
-            .expect("leaf 0 must be provable");
+        let proof_for_0 = store.prove_chunk(&id, 0).expect("leaf 0 must be provable");
 
         // Recover leaf 1's hash.
         let chunks = FixedSizeChunker::new(4).chunk(&bytes);
@@ -385,7 +386,10 @@ mod tests {
         let id = store.put(b"");
         // Empty blob: 0 chunks → root = blake3::hash(b"").into().
         let expected_root: [u8; 32] = blake3::hash(b"").into();
-        assert_eq!(id.0, expected_root, "empty blob BlobId must be BLAKE3(empty)");
+        assert_eq!(
+            id.0, expected_root,
+            "empty blob BlobId must be BLAKE3(empty)"
+        );
         let recovered = store.get(&id).expect("empty blob must be retrievable");
         assert!(recovered.is_empty(), "empty blob → empty Vec");
         let stats = store.stats();

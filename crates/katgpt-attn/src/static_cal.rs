@@ -110,10 +110,7 @@ impl StaticCalTable {
 fn hash_scales(scales: &[f32]) -> [u8; 32] {
     let mut hasher = blake3::Hasher::new();
     let bytes: &[u8] = unsafe {
-        std::slice::from_raw_parts(
-            scales.as_ptr() as *const u8,
-            std::mem::size_of_val(scales),
-        )
+        std::slice::from_raw_parts(scales.as_ptr() as *const u8, std::mem::size_of_val(scales))
     };
     hasher.update(bytes);
     hasher.finalize().into()

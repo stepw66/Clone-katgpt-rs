@@ -15,8 +15,7 @@
 
 use katgpt_core::cross_resolution::CrossResolutionBases;
 use katgpt_core::velocity_field_ensemble::{
-    HeterogeneousEnsemble, HeterogeneousEntry, HeterogeneousFitScratch,
-    HeterogeneousVelocityField,
+    HeterogeneousEnsemble, HeterogeneousEntry, HeterogeneousFitScratch, HeterogeneousVelocityField,
 };
 use std::sync::atomic::Ordering;
 
@@ -107,18 +106,10 @@ fn g3_eval_and_fit_zero_alloc_after_warmup() {
 
     // Build N_PAIRS synthetic pairs.
     let xs: Vec<Vec<f32>> = (0..N_PAIRS)
-        .map(|i| {
-            (0..INPUT_DIM)
-                .map(|k| ((i + k) as f32) * 0.01)
-                .collect()
-        })
+        .map(|i| (0..INPUT_DIM).map(|k| ((i + k) as f32) * 0.01).collect())
         .collect();
     let ys: Vec<Vec<f32>> = (0..N_PAIRS)
-        .map(|i| {
-            (0..D)
-                .map(|k| ((i * 2 + k) as f32) * 0.005)
-                .collect()
-        })
+        .map(|i| (0..D).map(|k| ((i * 2 + k) as f32) * 0.005).collect())
         .collect();
     let x_refs: Vec<&[f32]> = xs.iter().map(|v| v.as_slice()).collect();
     let y_refs: Vec<&[f32]> = ys.iter().map(|v| v.as_slice()).collect();

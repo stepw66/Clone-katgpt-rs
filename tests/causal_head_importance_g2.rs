@@ -94,20 +94,13 @@ fn load_bearing_set() -> std::collections::HashSet<usize> {
 }
 
 /// Jaccard similarity between two sets.
-fn jaccard(
-    a: &std::collections::HashSet<usize>,
-    b: &std::collections::HashSet<usize>,
-) -> f32 {
+fn jaccard(a: &std::collections::HashSet<usize>, b: &std::collections::HashSet<usize>) -> f32 {
     if a.is_empty() && b.is_empty() {
         return 1.0;
     }
     let inter = a.intersection(b).count() as f32;
     let union = a.union(b).count() as f32;
-    if union == 0.0 {
-        1.0
-    } else {
-        inter / union
-    }
+    if union == 0.0 { 1.0 } else { inter / union }
 }
 
 /// Build an RtTurboConfig with the SAME retrieval_head_ratio as the causal
@@ -155,13 +148,19 @@ fn g2_causal_excludes_bystanders_attention_mass_includes_them() {
         "attention-mass partition should include bystanders (Jaccard < 1.0), got {attn_jaccard}: {attn_set:?}"
     );
     // Attention-mass top-K must include at least one bystander.
-    let bystanders_in_attn = attn_set.iter().filter(|h| **h >= K_LOAD_BEARING && **h < K_LOAD_BEARING + 4).count();
+    let bystanders_in_attn = attn_set
+        .iter()
+        .filter(|h| **h >= K_LOAD_BEARING && **h < K_LOAD_BEARING + 4)
+        .count();
     assert!(
         bystanders_in_attn > 0,
         "attention-mass top-K should include ≥1 bystander, got 0: {attn_set:?}"
     );
     // And causal excludes all bystanders.
-    let bystanders_in_causal = causal_set.iter().filter(|h| **h >= K_LOAD_BEARING && **h < K_LOAD_BEARING + 4).count();
+    let bystanders_in_causal = causal_set
+        .iter()
+        .filter(|h| **h >= K_LOAD_BEARING && **h < K_LOAD_BEARING + 4)
+        .count();
     assert_eq!(
         bystanders_in_causal, 0,
         "causal top-K should include 0 bystanders, got {bystanders_in_causal}: {causal_set:?}"
@@ -183,8 +182,7 @@ fn g2_causal_invariant_to_bystander_fraction_attention_mass_degrades() {
         let causal_scores = causal_ie_scores(&profiles);
         let attn_scores = attention_mass_scores(&profiles);
 
-        let (causal_critical, _) =
-            partition_by_causal_score(&causal_scores, ratio, None, false);
+        let (causal_critical, _) = partition_by_causal_score(&causal_scores, ratio, None, false);
         let causal_set: std::collections::HashSet<usize> =
             causal_critical.iter().copied().collect();
         let causal_jac = jaccard(&causal_set, &lb_set);
@@ -212,10 +210,19 @@ fn g2_causal_invariant_to_bystander_fraction_attention_mass_degrades() {
     let (_, causal_8, attn_8) = results[2]; // 8 bystanders
 
     // At 0 bystanders both methods agree (no bystanders to confuse attention-mass).
-    assert!((attn_0 - 1.0).abs() < 1e-6, "attn-mass should be 1.0 at 0 bystanders: {attn_0}");
+    assert!(
+        (attn_0 - 1.0).abs() < 1e-6,
+        "attn-mass should be 1.0 at 0 bystanders: {attn_0}"
+    );
     // At ≥4 bystanders, attention-mass degrades below causal.
-    assert!(attn_4 < causal_4, "attn-mass ({attn_4}) should be < causal ({causal_4}) at 4 bystanders");
-    assert!(attn_8 < causal_8, "attn-mass ({attn_8}) should be < causal ({causal_8}) at 8 bystanders");
+    assert!(
+        attn_4 < causal_4,
+        "attn-mass ({attn_4}) should be < causal ({causal_4}) at 4 bystanders"
+    );
+    assert!(
+        attn_8 < causal_8,
+        "attn-mass ({attn_8}) should be < causal ({causal_8}) at 8 bystanders"
+    );
     // Monotonic degradation (more bystanders → worse or equal attention-mass).
     assert!(
         attn_8 <= attn_4 + 1e-6,
@@ -224,9 +231,16 @@ fn g2_causal_invariant_to_bystander_fraction_attention_mass_degrades() {
 
     // Print the table (visible in test output for the benchmark doc).
     eprintln!("\n=== G2 bystander discrimination (n_heads={N_HEADS}, K={K_LOAD_BEARING}) ===");
-    eprintln!("{:>12} {:>14} {:>14} {:>10}", "bystanders", "causal_jac", "attn_jac", "verdict");
+    eprintln!(
+        "{:>12} {:>14} {:>14} {:>10}",
+        "bystanders", "causal_jac", "attn_jac", "verdict"
+    );
     for &(n_byst, cj, aj) in &results {
-        let verdict = if (cj - 1.0).abs() < 1e-6 && aj < cj { "causal wins" } else { "tie/agree" };
+        let verdict = if (cj - 1.0).abs() < 1e-6 && aj < cj {
+            "causal wins"
+        } else {
+            "tie/agree"
+        };
         eprintln!("{:>12} {:>14.3} {:>14.3} {:>10}", n_byst, cj, aj, verdict);
     }
 }
@@ -248,7 +262,8 @@ fn g2_causal_strictly_dominates_on_bystander_workload() {
     let causal_set: std::collections::HashSet<usize> = causal_critical.iter().copied().collect();
 
     let attn_cal = calibrate_from_scores(&attn_scores, &config);
-    let attn_set: std::collections::HashSet<usize> = attn_cal.retrieval_set.iter().copied().collect();
+    let attn_set: std::collections::HashSet<usize> =
+        attn_cal.retrieval_set.iter().copied().collect();
 
     let causal_jac = jaccard(&causal_set, &lb_set);
     let attn_jac = jaccard(&attn_set, &lb_set);

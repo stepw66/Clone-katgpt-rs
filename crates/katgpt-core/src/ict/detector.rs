@@ -105,11 +105,20 @@ impl core::fmt::Debug for BranchingDetector {
             .field("action_dim", &self.action_dim)
             .field("k_percent", &self.k_percent)
             .field("eta", &self.eta)
-            .field("scratch_p_avg", &format_args!("({})", self.scratch_p_avg.len()))
+            .field(
+                "scratch_p_avg",
+                &format_args!("({})", self.scratch_p_avg.len()),
+            )
             .field("scratch_m", &format_args!("({})", self.scratch_m.len()))
             .field("scratch_u", &format_args!("({})", self.scratch_u.len()))
-            .field("scratch_mask", &format_args!("({})", self.scratch_mask.len()))
-            .field("scratch_sorted", &format_args!("({})", self.scratch_sorted.len()))
+            .field(
+                "scratch_mask",
+                &format_args!("({})", self.scratch_mask.len()),
+            )
+            .field(
+                "scratch_sorted",
+                &format_args!("({})", self.scratch_sorted.len()),
+            )
             .field("ema_beta", &self.ema_beta)
             .field("ema_alpha", &self.ema_alpha)
             .field("ema_decay", &self.ema_decay)
@@ -194,7 +203,11 @@ impl BranchingDetector {
     ///
     /// This is the hot path that G5 (`bench_294_ict_g5.rs`) verifies
     /// allocates zero bytes after warmup.
-    pub fn observe_and_detect_into(&mut self, trajectories: &[&[f32]], report: &mut BranchingReport) {
+    pub fn observe_and_detect_into(
+        &mut self,
+        trajectories: &[&[f32]],
+        report: &mut BranchingReport,
+    ) {
         let k = self.k_trajectories;
         let n = self.action_dim;
 
@@ -411,7 +424,10 @@ mod tests {
         // Manual: mean = [0.3, 0.55, 0.15], β = 0.09 + 0.3025 + 0.0225 = 0.415
         let expected_beta = 0.3 * 0.3 + 0.55 * 0.55 + 0.15 * 0.15;
         for &b in &r.beta_per_step {
-            assert!((b - expected_beta).abs() < 1e-4, "β={b}, expected {expected_beta}");
+            assert!(
+                (b - expected_beta).abs() < 1e-4,
+                "β={b}, expected {expected_beta}"
+            );
         }
     }
 
@@ -427,7 +443,11 @@ mod tests {
         let r = d.observe_and_detect(&trajs);
         // β = 0.25 + 0.25 = 0.5, max_p = 0.5, decay = 0.5 → EMA = 0.5 · 0.5 = 0.25
         assert!((d.ema_beta - 0.25).abs() < 1e-4, "ema_beta={}", d.ema_beta);
-        assert!((d.ema_alpha - 0.25).abs() < 1e-4, "ema_alpha={}", d.ema_alpha);
+        assert!(
+            (d.ema_alpha - 0.25).abs() < 1e-4,
+            "ema_alpha={}",
+            d.ema_alpha
+        );
         // beta_per_step should equal β = 0.5.
         assert!((r.beta_per_step[0] - 0.5).abs() < 1e-4);
     }

@@ -24,7 +24,7 @@
 //!   `simd::simd_sum_f32` (clr mgpo + vote).
 //! - `blake3`: dev-only, for clr test fixtures.
 
-#![allow(unexpected_cfgs)]  // root may pass-through aggregate features like `full`
+#![allow(unexpected_cfgs)] // root may pass-through aggregate features like `full`
 
 #[cfg(feature = "claim_rubric")]
 pub mod claim_rubric;

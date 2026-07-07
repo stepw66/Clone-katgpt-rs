@@ -14,8 +14,8 @@
 //! sequence with injected ambiguity + a flip-flop metric. See the TODO at the
 //! bottom of this file.
 
-use std::sync::atomic::{AtomicPtr, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicPtr, Ordering};
 
 use crate::attractor::AttractorKernel;
 use crate::bridge::project_to_scalars;
@@ -79,7 +79,10 @@ fn g1_1_determinism_across_instances() {
         k1.step(&mut s1, x);
         k2.step(&mut s2, x);
     }
-    assert_eq!(s1, s2, "G1.1 FAIL: different instances with same seed diverged");
+    assert_eq!(
+        s1, s2,
+        "G1.1 FAIL: different instances with same seed diverged"
+    );
 }
 
 // ─── G1.2 Boundedness ─────────────────────────────────────────────────────
@@ -235,9 +238,7 @@ fn g1_4_attractor_step_32_under_100ns() {
     #[cfg(not(debug_assertions))]
     {
         if per_step_ns < 100.0 {
-            eprintln!(
-                "G1.4 PASS: {per_step_ns:.1} ns/step < 100ns budget (total {elapsed:?})"
-            );
+            eprintln!("G1.4 PASS: {per_step_ns:.1} ns/step < 100ns budget (total {elapsed:?})");
         } else {
             eprintln!(
                 "G1.4 INFORMATIONAL FAIL: {per_step_ns:.1} ns/step exceeds 100ns budget \
@@ -317,8 +318,14 @@ fn g1_5_snapshot_atomicity() {
                 boxed_kernel.step(&mut state, &input);
                 // Sanity: no reader should ever see a non-finite state.
                 for (i, &v) in state.iter().enumerate() {
-                    assert!(v.is_finite(), "G1.5 FAIL: reader saw NaN/Inf at state[{i}]={v}");
-                    assert!(v.abs() <= 6.0, "G1.5 FAIL: reader saw unbounded state[{i}]={v}");
+                    assert!(
+                        v.is_finite(),
+                        "G1.5 FAIL: reader saw NaN/Inf at state[{i}]={v}"
+                    );
+                    assert!(
+                        v.abs() <= 6.0,
+                        "G1.5 FAIL: reader saw unbounded state[{i}]={v}"
+                    );
                 }
                 steps_completed += 1;
             }
@@ -342,8 +349,7 @@ fn g1_5_snapshot_atomicity() {
         // SAFETY: `old_ptr` came from `Box::into_raw` above; we're the only
         // owner between swaps. Readers may still be using it transiently, so
         // we keep it alive in `alive_boxes` until the test ends.
-        let old_box: Box<Box<dyn MicroRecurrentBeliefState>> =
-            unsafe { Box::from_raw(old_ptr) };
+        let old_box: Box<Box<dyn MicroRecurrentBeliefState>> = unsafe { Box::from_raw(old_ptr) };
         alive_boxes.push(old_box);
         std::thread::sleep(std::time::Duration::from_micros(SWAP_INTERVAL_US));
         if reader_handles.iter().all(|h| h.is_finished()) {
@@ -410,6 +416,12 @@ fn trait_is_object_safe_and_dispatches() {
         assert!(v.abs() <= 6.0);
     }
     // family() dispatch works through the trait object.
-    assert_eq!(kernels[0].family(), crate::types::RecurrenceFamily::Attractor);
-    assert_eq!(kernels[1].family(), crate::types::RecurrenceFamily::DeltaRule);
+    assert_eq!(
+        kernels[0].family(),
+        crate::types::RecurrenceFamily::Attractor
+    );
+    assert_eq!(
+        kernels[1].family(),
+        crate::types::RecurrenceFamily::DeltaRule
+    );
 }

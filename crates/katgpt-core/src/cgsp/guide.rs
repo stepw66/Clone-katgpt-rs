@@ -7,7 +7,7 @@
 //! Final: `relevance · elegance` ∈ `[0, 1]`. Uses sigmoid only (no softmax).
 
 use crate::cgsp::traits::QualityGuide;
-use crate::cgsp::types::{sigmoid, Direction, Target};
+use crate::cgsp::types::{Direction, Target, sigmoid};
 
 // ── ComplexityWeights ─────────────────────────────────────────────────────
 
@@ -190,7 +190,9 @@ mod tests {
         for c in complex_coords.iter_mut() {
             *c *= 2.0;
         }
-        let complex = Direction { coords: complex_coords };
+        let complex = Direction {
+            coords: complex_coords,
+        };
 
         let s_simple = guide.score(&target, &simple);
         let s_complex = guide.score(&target, &complex);
@@ -211,9 +213,14 @@ mod tests {
 
         let mut prev = -f32::INFINITY;
         for v in [-2.0f32, -1.0, 0.0, 1.0, 2.0] {
-            let candidate = Direction { coords: vec![v, 0.0] };
+            let candidate = Direction {
+                coords: vec![v, 0.0],
+            };
             let s = guide.score(&target, &candidate);
-            assert!(s > prev, "score should monotonically increase: {prev} -> {s}");
+            assert!(
+                s > prev,
+                "score should monotonically increase: {prev} -> {s}"
+            );
             prev = s;
         }
     }
@@ -226,8 +233,13 @@ mod tests {
         let weights = ComplexityWeights::default();
         let n = 4usize;
         let val = 1.0 / (n as f32).sqrt();
-        let uniform = Direction { coords: vec![val; n] };
+        let uniform = Direction {
+            coords: vec![val; n],
+        };
         let c = structural_complexity(&uniform, &weights);
-        assert!(c.abs() < 1e-5, "uniform unit should have ~0 complexity, got {c}");
+        assert!(
+            c.abs() < 1e-5,
+            "uniform unit should have ~0 complexity, got {c}"
+        );
     }
 }

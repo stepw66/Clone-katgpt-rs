@@ -127,7 +127,15 @@ fn latent_explicit_latent_explicit_schedule_drives_switches() {
     //   step 6: low entropy            → L→E, switch_count=3.
     let high = probs_to_logits(&[0.25, 0.25, 0.25, 0.25]);
     let low = probs_to_logits(&[0.97, 0.01, 0.01, 0.01]);
-    let schedule = vec![high.clone(), low.clone(), low.clone(), high.clone(), low.clone(), high, low];
+    let schedule = vec![
+        high.clone(),
+        low.clone(),
+        low.clone(),
+        high.clone(),
+        low.clone(),
+        high,
+        low,
+    ];
 
     let adapter = SwiRStrategyAdapter::with_config(
         4,
@@ -222,11 +230,13 @@ fn convergence_fires_close_think_at_half_cmax() {
     // Step 5 drains CloseThink.
     match &trace[5] {
         StepDirective::InjectTokens(ids) => {
-            assert_eq!(ids, &vec![think_close_id], "CloseThink must resolve to think_close id");
+            assert_eq!(
+                ids,
+                &vec![think_close_id],
+                "CloseThink must resolve to think_close id"
+            );
         }
-        other => panic!(
-            "step 5 should inject CloseThink=[{think_close_id}], got {other:?}"
-        ),
+        other => panic!("step 5 should inject CloseThink=[{think_close_id}], got {other:?}"),
     }
 }
 
@@ -385,7 +395,7 @@ fn explicit_mode_emits_token_zero_placeholder() {
         2,
         dim,
         SwiRConfig {
-            w_e_to_l: 64,   // Don't bounce back to Latent during this test.
+            w_e_to_l: 64, // Don't bounce back to Latent during this test.
             w_l_to_e: 0,
             c_max: 64,
             c_convergence_fraction: 10.0,

@@ -31,8 +31,8 @@
 #![cfg(feature = "step_attribution_qualifier")]
 
 use katgpt_pruners::step_attribution_qualifier::{
-    CandidateMutation, QualificationVerdict, ReplayExecutor, ScoreAggregator, StepAttributionQualifier,
-    SumAggregator,
+    CandidateMutation, QualificationVerdict, ReplayExecutor, ScoreAggregator,
+    StepAttributionQualifier, SumAggregator,
 };
 use std::time::{Duration, Instant};
 
@@ -174,7 +174,10 @@ fn main() {
     println!("  Executor: NoOpExecutor (returns *k per input, zero per-tick compute).");
     println!("  Aggregator: SumAggregator (SIMD-friendly sum).");
     println!("  Mutation: AddConst(0.5) (single f32 add).");
-    println!("  Measurement: median of {} outer × {} inner calls, warmup {}.", OUTER, BATCH, WARMUP);
+    println!(
+        "  Measurement: median of {} outer × {} inner calls, warmup {}.",
+        OUTER, BATCH, WARMUP
+    );
     println!();
     println!("  G4 target: gate overhead (aggregate-only) < 1000 ns at W=64.");
     println!();
@@ -212,7 +215,15 @@ fn main() {
     if let Some(agg) = w64_agg {
         println!("    aggregate-only @ W=64 : {:>8.1} ns", agg);
         println!("    target                : {:>8.1} ns", g4_target_ns);
-        println!("    margin                : {:>8.1}× {}", g4_target_ns / agg.max(1e-9), if g4_pass { "(under target)" } else { "(OVER target)" });
+        println!(
+            "    margin                : {:>8.1}× {}",
+            g4_target_ns / agg.max(1e-9),
+            if g4_pass {
+                "(under target)"
+            } else {
+                "(OVER target)"
+            }
+        );
         println!("    G4                    : {}", pass_str(g4_pass));
     }
     println!();

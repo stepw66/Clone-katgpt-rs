@@ -107,7 +107,11 @@ mod tests {
         let w_peak = mgpo_sampling_weight(0.5, gamma);
         let w_zero = mgpo_sampling_weight(0.0, gamma);
         let w_one = mgpo_sampling_weight(1.0, gamma);
-        assert!((w_peak - 1.0).abs() < 1e-6, "peak should be 1.0, got {}", w_peak);
+        assert!(
+            (w_peak - 1.0).abs() < 1e-6,
+            "peak should be 1.0, got {}",
+            w_peak
+        );
         assert!(w_zero < w_peak);
         assert!(w_one < w_peak);
         assert!((w_zero - w_one).abs() < 1e-6, "w(0) should equal w(1)");

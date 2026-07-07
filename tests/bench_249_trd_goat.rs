@@ -121,13 +121,8 @@ fn t1_speculative_acceptance_rate() {
         baseline_scores.push(if raw_passes { 0.8 } else { 0.3 });
 
         // TRDraft: detect failure + refine
-        let failure = trd.detect_prefix_failure(
-            2,
-            marginal_slices[2],
-            1,
-            8,
-            RejectionReason::ArgmaxMismatch,
-        );
+        let failure =
+            trd.detect_prefix_failure(2, marginal_slices[2], 1, 8, RejectionReason::ArgmaxMismatch);
 
         if let Some(failure) = failure {
             let result = trd.refine_branch(&raw_branch, &failure, &marginal_slices, &mut rng);

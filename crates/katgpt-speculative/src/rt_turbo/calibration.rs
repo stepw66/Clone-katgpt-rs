@@ -945,7 +945,10 @@ mod tests {
         let cal = calibrate_from_adaptive_causal(&am, &ov, &suspect_ie, 1.0, &config);
         // Fused: [0.001, 0.8, 0.7, 0.6, 0.5, 0.4, 0.3, 0.2].
         // Top-2: head1 (0.8), head2 (0.7). head0 demoted to local.
-        assert!(!cal.retrieval_set.contains(&0), "bystander head0 must be local");
+        assert!(
+            !cal.retrieval_set.contains(&0),
+            "bystander head0 must be local"
+        );
         assert!(cal.local_set.contains(&0));
         assert_eq!(cal.n_retrieval(), 2);
     }

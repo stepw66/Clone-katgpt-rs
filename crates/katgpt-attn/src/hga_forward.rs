@@ -80,7 +80,11 @@ pub fn forward_hga(
 ) -> HgaOutput {
     let d = store.head_dim();
     let n_chunks = store.n_chunks();
-    assert_eq!(group_cache.n_chunks(), n_chunks, "store/group_cache chunk count mismatch");
+    assert_eq!(
+        group_cache.n_chunks(),
+        n_chunks,
+        "store/group_cache chunk count mismatch"
+    );
     assert_eq!(
         chunk_summaries.len(),
         n_chunks * d,
@@ -170,27 +174,27 @@ fn sdpa(query: &[f32], ws: &WorkingSet, d: usize) -> Vec<f32> {
     // Compute logits.
     let mut logits = vec![0.0f32; n];
     let mut max_logit = f32::NEG_INFINITY;
-    for j in 0..n {
+    for (j, logit) in logits.iter_mut().enumerate().take(n) {
         let k = &ws.keys[j * d..(j + 1) * d];
-        logits[j] = simd_dot_f32(query, k, d) / sqrt_d;
-        if logits[j] > max_logit {
-            max_logit = logits[j];
+        *logit = simd_dot_f32(query, k, d) / sqrt_d;
+        if *logit > max_logit {
+            max_logit = *logit;
         }
     }
 
     // Softmax (numerically stable).
     let mut sum_exp = 0.0f32;
-    for j in 0..n {
-        logits[j] = (logits[j] - max_logit).exp();
-        sum_exp += logits[j];
+    for logit in logits.iter_mut().take(n) {
+        *logit = (*logit - max_logit).exp();
+        sum_exp += *logit;
     }
 
     // Weighted sum of values.
     let mut out = vec![0.0f32; d];
     if sum_exp > 0.0 {
         let inv = 1.0 / sum_exp;
-        for j in 0..n {
-            let weight = logits[j] * inv;
+        for (j, &weight_unscaled) in logits.iter().enumerate().take(n) {
+            let weight = weight_unscaled * inv;
             let v = &ws.values[j * d..(j + 1) * d];
             for i in 0..d {
                 out[i] += weight * v[i];
@@ -208,9 +212,18 @@ mod tests {
     use katgpt_core::tiered_kv::RouteBudget;
 
     /// Simple mean summarizer for the store (matches the one in tiered_kv tests).
-    fn mean_summarizer(keys_flat: &[f32], positions: &[usize], group_start: usize, n_tokens: usize) -> Vec<f32> {
+    fn mean_summarizer(
+        keys_flat: &[f32],
+        positions: &[usize],
+        group_start: usize,
+        n_tokens: usize,
+    ) -> Vec<f32> {
         let total_tokens = positions.len();
-        let d = if total_tokens > 0 { keys_flat.len() / total_tokens } else { 8 };
+        let d = if total_tokens > 0 {
+            keys_flat.len() / total_tokens
+        } else {
+            8
+        };
         let mut summary = vec![0.0f32; d];
         for t in 0..n_tokens {
             let offset = (group_start + t) * d;
@@ -226,7 +239,9 @@ mod tests {
     }
 
     /// Compute chunk summaries (mean of all keys in the chunk) for stage-1 scoring.
-    fn compute_chunk_summaries(store: &InMemoryTieredKvStore<impl Fn(&[f32], &[usize], usize, usize) -> Vec<f32>>) -> Vec<f32> {
+    fn compute_chunk_summaries(
+        store: &InMemoryTieredKvStore<impl Fn(&[f32], &[usize], usize, usize) -> Vec<f32>>,
+    ) -> Vec<f32> {
         let d = store.head_dim();
         let c = store.chunk_size();
         let n = store.n_chunks();
@@ -316,8 +331,8 @@ mod tests {
 
         // Compare — should match within f32 noise.
         let mut max_diff = 0.0f32;
-        for i in 0..d {
-            let diff = (hga_out.out[i] - ref_out[i]).abs();
+        for (a, b) in hga_out.out.iter().zip(ref_out.iter()) {
+            let diff = (a - b).abs();
             if diff > max_diff {
                 max_diff = diff;
             }
@@ -326,7 +341,10 @@ mod tests {
             max_diff < 1e-5,
             "HGA full-coverage output differs from causal SDPA by {max_diff} (should be < 1e-5)"
         );
-        assert_eq!(hga_out.n_fetched, n_tokens, "full coverage should fetch all tokens");
+        assert_eq!(
+            hga_out.n_fetched, n_tokens,
+            "full coverage should fetch all tokens"
+        );
     }
 
     /// Verify that sparse routing fetches fewer tokens than full coverage.

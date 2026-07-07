@@ -17,9 +17,7 @@
 //!
 //! Everything else re-exports from `katgpt_core::speculative::types`.
 
-use crate::transformer::{
-    ForwardContext, PagedKVCache, TransformerWeights, forward_paged,
-};
+use crate::transformer::{ForwardContext, PagedKVCache, TransformerWeights, forward_paged};
 use crate::types::Config;
 
 // ── Re-exported from katgpt-core (Plan 107 Phase 0 + Plan 008 Step 5) ──
@@ -38,8 +36,8 @@ pub use katgpt_core::traits::{
 
 // Always-available speculative substrate types (no feature gate in katgpt-core).
 pub use katgpt_core::speculative::types::{
-    BlockScores, BudgetAdaptation, DecodeStrategy, DraftEvent, DraftResult,
-    FlashPrefillConfig, PrefillMode, RejectionReason, SdeConfig, ScoreReduction, TreeNode,
+    BlockScores, BudgetAdaptation, DecodeStrategy, DraftEvent, DraftResult, FlashPrefillConfig,
+    PrefillMode, RejectionReason, ScoreReduction, SdeConfig, TreeNode,
 };
 
 // Feature-gated re-exports — MUST mirror katgpt-core's gates.
@@ -72,10 +70,10 @@ pub use katgpt_core::speculative::types::StabilitySnapshot;
 // duplicate-path ambiguity. Consumers that need them can `use katgpt_core::speculative::types::*`.
 // The blanket `pub use katgpt_core::speculative::types::*` is intentionally omitted.
 
-#[cfg(feature = "dflare_fusion")]
-pub use katgpt_core::speculative::types::MarginalFusionConfig;
 #[cfg(feature = "dflare_kv_routing")]
 pub use katgpt_core::speculative::types::KvRoutingConfig;
+#[cfg(feature = "dflare_fusion")]
+pub use katgpt_core::speculative::types::MarginalFusionConfig;
 #[cfg(feature = "dflare_progressive_budget")]
 pub use katgpt_core::speculative::types::PositionWeightedBudget;
 #[cfg(feature = "lattice_deduction")]

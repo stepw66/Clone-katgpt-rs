@@ -242,12 +242,7 @@ pub fn attention_forward_safe_into(
         for t in 0..seq_len {
             let s = scores[t];
             let v_row = &v_all[t * kv_dim + kv_off..t * kv_dim + kv_off + head_dim];
-            simd::simd_fused_scale_acc(
-                &mut attn_out[q_off..q_off + head_dim],
-                v_row,
-                s,
-                head_dim,
-            );
+            simd::simd_fused_scale_acc(&mut attn_out[q_off..q_off + head_dim], v_row, s, head_dim);
         }
     }
 }

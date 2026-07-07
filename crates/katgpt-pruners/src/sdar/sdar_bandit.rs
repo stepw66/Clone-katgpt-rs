@@ -287,9 +287,7 @@ impl<P: ScreeningPruner> SdarBanditPruner<P> {
     /// Call `adapt_beta()` after each episode to update.
     #[cfg(feature = "replaid_schedules")]
     pub fn with_learned_beta(mut self, initial_beta: f32) -> Self {
-        self.learned_beta = Some(crate::sdar_gate::SdarLearnedBeta::new(
-            initial_beta,
-        ));
+        self.learned_beta = Some(crate::sdar_gate::SdarLearnedBeta::new(initial_beta));
         self
     }
 

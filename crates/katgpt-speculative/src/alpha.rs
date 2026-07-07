@@ -287,9 +287,7 @@ impl ConflictClause {
         if commitments.len() < self.commitments.len() {
             return false;
         }
-        self.commitments
-            .iter()
-            .all(|c| commitments.contains(c))
+        self.commitments.iter().all(|c| commitments.contains(c))
     }
 
     /// Number of commitments in this clause.

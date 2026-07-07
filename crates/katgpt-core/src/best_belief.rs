@@ -222,7 +222,10 @@ pub(crate) fn best_belief_score_cf(successes: u32, failures: u32, epsilon: f32) 
     if successes == 0 && failures == 0 {
         return epsilon.clamp(EPS_MIN, 1.0 - EPS_MIN);
     }
-    debug_assert!(epsilon > 0.0 && epsilon < 1.0, "epsilon range handled by caller");
+    debug_assert!(
+        epsilon > 0.0 && epsilon < 1.0,
+        "epsilon range handled by caller"
+    );
 
     let eps = epsilon;
     let a: f32 = 1.0 + successes as f32;
@@ -304,15 +307,17 @@ pub fn select_best_belief(
     // Incumbent tie preference: if the incumbent is in range and its score
     // ties the winner, return the incumbent to avoid churn.
     if let Some(inc) = incumbent_idx
-        && inc < candidates.len() && inc != best_idx {
-            let inc_score = best_belief_score(candidates[inc].0, candidates[inc].1, epsilon);
-            // Tie = within ULP-level tolerance. f32 equality is fine here
-            // because the same deterministic computation produces the same
-            // bits; but use <= best_score to be robust to any reordering.
-            if inc_score >= best_score {
-                return inc;
-            }
+        && inc < candidates.len()
+        && inc != best_idx
+    {
+        let inc_score = best_belief_score(candidates[inc].0, candidates[inc].1, epsilon);
+        // Tie = within ULP-level tolerance. f32 equality is fine here
+        // because the same deterministic computation produces the same
+        // bits; but use <= best_score to be robust to any reordering.
+        if inc_score >= best_score {
+            return inc;
         }
+    }
 
     best_idx
 }
@@ -678,10 +683,7 @@ mod tests {
         // Exact tie: two identical candidates. incumbent_idx=Some(1) → 1.
         let candidates: [(u32, u32); 2] = [(10, 5), (10, 5)];
         let winner = select_best_belief(&candidates, 0.05, Some(1));
-        assert_eq!(
-            winner, 1,
-            "incumbent should win the tie (got {winner})"
-        );
+        assert_eq!(winner, 1, "incumbent should win the tie (got {winner})");
     }
 
     #[test]
@@ -770,7 +772,11 @@ mod tests {
                         via_lut.to_bits(),
                         via_cf.to_bits(),
                         "LUT mismatch at S={}, F={}, eps={}: lut={}, cf={}",
-                        s, f, eps, via_lut, via_cf
+                        s,
+                        f,
+                        eps,
+                        via_lut,
+                        via_cf
                     );
                 }
             }
@@ -803,7 +809,11 @@ mod tests {
         assert!(
             off_grid > e05 && off_grid < e10,
             "non-standard ε=0.07 (S={}, F={}) should be between ε=0.05 ({}) and ε=0.1 ({}), got {}",
-            s, f, e05, e10, off_grid
+            s,
+            f,
+            e05,
+            e10,
+            off_grid
         );
     }
 

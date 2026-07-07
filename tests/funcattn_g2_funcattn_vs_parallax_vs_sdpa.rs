@@ -54,9 +54,9 @@
 #![cfg(all(feature = "funcattn", feature = "parallax_attn"))]
 
 use katgpt_core::attention::tiled_attention_forward_with_scores;
-use katgpt_core::funcattn::{funcattn_forward, FuncAttnBasis, FuncAttnConfig, FuncAttnScratch};
+use katgpt_core::funcattn::{FuncAttnBasis, FuncAttnConfig, FuncAttnScratch, funcattn_forward};
 use katgpt_core::parallax_attn::{
-    tiled_attention_parallax_forward, ParallaxActivation, ParallaxConfig, ParallaxScratch,
+    ParallaxActivation, ParallaxConfig, ParallaxScratch, tiled_attention_parallax_forward,
 };
 use katgpt_core::simd;
 
@@ -103,7 +103,11 @@ struct Rng {
 impl Rng {
     fn new(seed: u64) -> Self {
         Self {
-            s: if seed == 0 { 0x9E37_79B9_7F4A_7C15 } else { seed },
+            s: if seed == 0 {
+                0x9E37_79B9_7F4A_7C15
+            } else {
+                seed
+            },
         }
     }
     fn next_u64(&mut self) -> u64 {
@@ -369,18 +373,23 @@ fn train_funcattn(
     let mut scratch = FuncAttnScratch::new(N, D, K);
     let mut out = vec![0.0f32; N * D];
 
-    let mut last_mse = funcattn_forward_mse(
-        x, y, &w_basis, &w_q, &w_k, &w_v, &mut scratch, &mut out,
-    );
+    let mut last_mse =
+        funcattn_forward_mse(x, y, &w_basis, &w_q, &w_k, &w_v, &mut scratch, &mut out);
 
     for step in 0..STEPS {
         last_mse = funcattn_fd_sgd_step(
-            x, y, &mut w_basis, &mut w_q, &mut w_k, &mut w_v, &mut scratch, &mut out,
+            x,
+            y,
+            &mut w_basis,
+            &mut w_q,
+            &mut w_k,
+            &mut w_v,
+            &mut scratch,
+            &mut out,
         );
         if step == 0 || (step + 1) % 25 == 0 || step + 1 == STEPS {
-            let rl2 = funcattn_forward_rel_l2(
-                x, y, &w_basis, &w_q, &w_k, &w_v, &mut scratch, &mut out,
-            );
+            let rl2 =
+                funcattn_forward_rel_l2(x, y, &w_basis, &w_q, &w_k, &w_v, &mut scratch, &mut out);
             eprintln!(
                 "[funcattn] step {:>4}/{:<4}  mse = {:.6}  rel-L2 = {:.6}",
                 step + 1,
@@ -390,9 +399,8 @@ fn train_funcattn(
             );
         }
     }
-    let final_rl2 = funcattn_forward_rel_l2(
-        x, y, &w_basis, &w_q, &w_k, &w_v, &mut scratch, &mut out,
-    );
+    let final_rl2 =
+        funcattn_forward_rel_l2(x, y, &w_basis, &w_q, &w_k, &w_v, &mut scratch, &mut out);
     (last_mse, final_rl2)
 }
 
@@ -476,9 +484,8 @@ fn sdpa_fd_sgd_step(
     buf: &mut SdpaBuffers,
 ) -> f32 {
     let inv_2eps = 1.0 / (2.0 * FD_EPS);
-    let mut fwd = |wq: &[f32], wk: &[f32], wv: &[f32]| -> f32 {
-        sdpa_forward_mse(x, y, wq, wk, wv, buf)
-    };
+    let mut fwd =
+        |wq: &[f32], wk: &[f32], wv: &[f32]| -> f32 { sdpa_forward_mse(x, y, wq, wk, wv, buf) };
 
     for i in 0..w_q.len() {
         let orig = w_q[i];
@@ -535,7 +542,10 @@ fn train_sdpa(
             let rl2 = sdpa_forward_rel_l2(x, y, &w_q, &w_k, &w_v, &mut buf);
             eprintln!(
                 "[sdpa    ] step {:>4}/{:<4}  mse = {:.6}  rel-L2 = {:.6}",
-                step + 1, STEPS, last_mse, rl2,
+                step + 1,
+                STEPS,
+                last_mse,
+                rl2,
             );
         }
     }
@@ -571,6 +581,7 @@ impl ParallaxBuffers {
                 gate_scale: 1.0,
                 zero_init: false,
                 activation: ParallaxActivation::Sigmoid,
+                ..Default::default()
             },
         }
     }
@@ -711,14 +722,15 @@ fn train_parallax(
     let mut last_mse = parallax_forward_mse(x, y, &w_q, &w_k, &w_v, &w_r, &mut buf);
 
     for step in 0..STEPS {
-        last_mse = parallax_fd_sgd_step(
-            x, y, &mut w_q, &mut w_k, &mut w_v, &mut w_r, &mut buf,
-        );
+        last_mse = parallax_fd_sgd_step(x, y, &mut w_q, &mut w_k, &mut w_v, &mut w_r, &mut buf);
         if step == 0 || (step + 1) % 25 == 0 || step + 1 == STEPS {
             let rl2 = parallax_forward_rel_l2(x, y, &w_q, &w_k, &w_v, &w_r, &mut buf);
             eprintln!(
                 "[parallax] step {:>4}/{:<4}  mse = {:.6}  rel-L2 = {:.6}",
-                step + 1, STEPS, last_mse, rl2,
+                step + 1,
+                STEPS,
+                last_mse,
+                rl2,
             );
         }
     }
@@ -784,16 +796,33 @@ fn g2_funcattn_vs_parallax_vs_sdpa() {
         let mut fa_scratch = FuncAttnScratch::new(N, D, K);
         let mut fa_out = vec![0.0f32; N * D];
         let fa_init_mse = funcattn_forward_mse(
-            &x, &y, &init_w_basis, &init_w_q_fa, &init_w_k_fa, &init_w_v_fa,
-            &mut fa_scratch, &mut fa_out,
+            &x,
+            &y,
+            &init_w_basis,
+            &init_w_q_fa,
+            &init_w_k_fa,
+            &init_w_v_fa,
+            &mut fa_scratch,
+            &mut fa_out,
         );
         let mut sd_buf = SdpaBuffers::new();
         let sd_init_mse = sdpa_forward_mse(
-            &x, &y, &init_w_q_sd, &init_w_k_sd, &init_w_v_sd, &mut sd_buf,
+            &x,
+            &y,
+            &init_w_q_sd,
+            &init_w_k_sd,
+            &init_w_v_sd,
+            &mut sd_buf,
         );
         let mut px_buf = ParallaxBuffers::new();
         let px_init_mse = parallax_forward_mse(
-            &x, &y, &init_w_q_px, &init_w_k_px, &init_w_v_px, &init_w_r_px, &mut px_buf,
+            &x,
+            &y,
+            &init_w_q_px,
+            &init_w_k_px,
+            &init_w_v_px,
+            &init_w_r_px,
+            &mut px_buf,
         );
         let y_norm: f32 = y.iter().map(|v| v * v).sum::<f32>().sqrt();
         eprintln!(
@@ -804,12 +833,21 @@ fn g2_funcattn_vs_parallax_vs_sdpa() {
 
     // ── Train all three variants ────────────────────────────────────────
     let (fa_mse, fa_rl2) = train_funcattn(
-        &x, &y, &init_w_basis, &init_w_q_fa, &init_w_k_fa, &init_w_v_fa,
+        &x,
+        &y,
+        &init_w_basis,
+        &init_w_q_fa,
+        &init_w_k_fa,
+        &init_w_v_fa,
     );
-    let (sd_mse, sd_rl2) =
-        train_sdpa(&x, &y, &init_w_q_sd, &init_w_k_sd, &init_w_v_sd);
+    let (sd_mse, sd_rl2) = train_sdpa(&x, &y, &init_w_q_sd, &init_w_k_sd, &init_w_v_sd);
     let (px_mse, px_rl2) = train_parallax(
-        &x, &y, &init_w_q_px, &init_w_k_px, &init_w_v_px, &init_w_r_px,
+        &x,
+        &y,
+        &init_w_q_px,
+        &init_w_k_px,
+        &init_w_v_px,
+        &init_w_r_px,
     );
 
     // ── Verdict ─────────────────────────────────────────────────────────
@@ -819,20 +857,37 @@ fn g2_funcattn_vs_parallax_vs_sdpa() {
     let fa_finite = fa_mse.is_finite();
     let sd_finite = sd_mse.is_finite();
     let px_finite = px_mse.is_finite();
-    let fa_vs_sd = if sd_finite { fa_mse / sd_mse.max(1e-20) } else { f32::NAN };
-    let fa_vs_px = if px_finite { fa_mse / px_mse.max(1e-20) } else { f32::NAN };
+    let fa_vs_sd = if sd_finite {
+        fa_mse / sd_mse.max(1e-20)
+    } else {
+        f32::NAN
+    };
+    let fa_vs_px = if px_finite {
+        fa_mse / px_mse.max(1e-20)
+    } else {
+        f32::NAN
+    };
     eprintln!("\n=== G2 verdict ===");
     eprintln!(
         "  funcattn  mse = {:.6}  rel-L2 = {:.6}   (params: {}){}",
-        fa_mse, fa_rl2, K * D + 3 * D * D, if fa_finite { "" } else { "  [DNF]" },
+        fa_mse,
+        fa_rl2,
+        K * D + 3 * D * D,
+        if fa_finite { "" } else { "  [DNF]" },
     );
     eprintln!(
         "  sdpa      mse = {:.6}  rel-L2 = {:.6}   (params: {}){}",
-        sd_mse, sd_rl2, 3 * D * D, if sd_finite { "" } else { "  [DNF]" },
+        sd_mse,
+        sd_rl2,
+        3 * D * D,
+        if sd_finite { "" } else { "  [DNF]" },
     );
     eprintln!(
         "  parallax  mse = {:.6}  rel-L2 = {:.6}   (params: {}){}",
-        px_mse, px_rl2, 4 * D * D, if px_finite { "" } else { "  [DNF]" },
+        px_mse,
+        px_rl2,
+        4 * D * D,
+        if px_finite { "" } else { "  [DNF]" },
     );
     eprintln!();
     eprintln!("  funcattn / sdpa     (mse) = {:.4}", fa_vs_sd);
@@ -841,31 +896,38 @@ fn g2_funcattn_vs_parallax_vs_sdpa() {
     eprintln!("  Plan 286 T3.2 strict gate:");
     eprintln!(
         "    FUNCATTN ≤ SDPA × 0.1     → {} (ratio {:.4})",
-        if fa_vs_sd.is_finite() && fa_vs_sd <= 0.1 { "PASS" } else { "FAIL" },
+        if fa_vs_sd.is_finite() && fa_vs_sd <= 0.1 {
+            "PASS"
+        } else {
+            "FAIL"
+        },
         fa_vs_sd,
     );
     eprintln!(
         "    FUNCATTN ≤ Parallax × 0.5 → {} (ratio {:.4})",
-        if fa_vs_px.is_finite() && fa_vs_px <= 0.5 { "PASS" } else { "FAIL" },
+        if fa_vs_px.is_finite() && fa_vs_px <= 0.5 {
+            "PASS"
+        } else {
+            "FAIL"
+        },
         fa_vs_px,
     );
 
     let strict_pass =
         fa_vs_sd.is_finite() && fa_vs_sd <= 0.1 && fa_vs_px.is_finite() && fa_vs_px <= 0.5;
-    let competitive_pass = fa_finite
-        && (!sd_finite || fa_mse <= sd_mse)
-        && (!px_finite || fa_mse <= px_mse);
+    let competitive_pass =
+        fa_finite && (!sd_finite || fa_mse <= sd_mse) && (!px_finite || fa_mse <= px_mse);
     if strict_pass {
         eprintln!("  → G2 STRICT PASS — promote candidate per Plan 286 T4.2.");
     } else if competitive_pass {
         eprintln!(
             "  → G2 PARTIAL PASS — FUNCATTN is competitive (lowest finite MSE) but does not meet strict paper-headline targets."
         );
-        eprintln!("    Per Plan 286 T4.3: do NOT promote to default features; document in benchmark 058.");
-    } else {
         eprintln!(
-            "  → G2 FAIL — FUNCATTN does not beat SDPA/Parallax on this regression task."
+            "    Per Plan 286 T4.3: do NOT promote to default features; document in benchmark 058."
         );
+    } else {
+        eprintln!("  → G2 FAIL — FUNCATTN does not beat SDPA/Parallax on this regression task.");
         eprintln!("    Per Plan 286 T4.3: do NOT promote; document null result in benchmark 058.");
     }
 
@@ -878,39 +940,70 @@ fn g2_funcattn_vs_parallax_vs_sdpa() {
     let mut fa_scratch = FuncAttnScratch::new(N, D, K);
     let mut fa_out = vec![0.0f32; N * D];
     let fa_init_mse = funcattn_forward_mse(
-        &x, &y, &init_w_basis, &init_w_q_fa, &init_w_k_fa, &init_w_v_fa,
-        &mut fa_scratch, &mut fa_out,
+        &x,
+        &y,
+        &init_w_basis,
+        &init_w_q_fa,
+        &init_w_k_fa,
+        &init_w_v_fa,
+        &mut fa_scratch,
+        &mut fa_out,
     );
     let mut sd_buf = SdpaBuffers::new();
-    let sd_init_mse = sdpa_forward_mse(&x, &y, &init_w_q_sd, &init_w_k_sd, &init_w_v_sd, &mut sd_buf);
+    let sd_init_mse = sdpa_forward_mse(
+        &x,
+        &y,
+        &init_w_q_sd,
+        &init_w_k_sd,
+        &init_w_v_sd,
+        &mut sd_buf,
+    );
     let mut px_buf = ParallaxBuffers::new();
     let px_init_mse = parallax_forward_mse(
-        &x, &y, &init_w_q_px, &init_w_k_px, &init_w_v_px, &init_w_r_px, &mut px_buf,
+        &x,
+        &y,
+        &init_w_q_px,
+        &init_w_k_px,
+        &init_w_v_px,
+        &init_w_r_px,
+        &mut px_buf,
     );
 
     eprintln!();
     eprintln!(
         "  training reduced mse: funcattn {:.6}→{:.6} ({:.1}%), sdpa {:.6}→{:.6} ({:.1}%), parallax {:.6}→{:.6} ({})",
-        fa_init_mse, fa_mse, (1.0 - fa_mse / fa_init_mse.max(1e-20)) * 100.0,
-        sd_init_mse, sd_mse, (1.0 - sd_mse / sd_init_mse.max(1e-20)) * 100.0,
-        px_init_mse, px_mse,
-        if px_mse.is_finite() { format!("{:.1}%", (1.0 - px_mse / px_init_mse.max(1e-20)) * 100.0) } else { "DNF".to_string() },
+        fa_init_mse,
+        fa_mse,
+        (1.0 - fa_mse / fa_init_mse.max(1e-20)) * 100.0,
+        sd_init_mse,
+        sd_mse,
+        (1.0 - sd_mse / sd_init_mse.max(1e-20)) * 100.0,
+        px_init_mse,
+        px_mse,
+        if px_mse.is_finite() {
+            format!("{:.1}%", (1.0 - px_mse / px_init_mse.max(1e-20)) * 100.0)
+        } else {
+            "DNF".to_string()
+        },
     );
 
     assert!(
         !fa_mse.is_finite() || fa_mse < fa_init_mse,
         "G2 sanity: FUNCATTN regressed (mse {} ≥ init {})",
-        fa_mse, fa_init_mse,
+        fa_mse,
+        fa_init_mse,
     );
     assert!(
         !sd_mse.is_finite() || sd_mse < sd_init_mse,
         "G2 sanity: SDPA regressed (mse {} ≥ init {})",
-        sd_mse, sd_init_mse,
+        sd_mse,
+        sd_init_mse,
     );
     assert!(
         !px_mse.is_finite() || px_mse < px_init_mse,
         "G2 sanity: Parallax regressed (mse {} ≥ init {})",
-        px_mse, px_init_mse,
+        px_mse,
+        px_init_mse,
     );
 
     // If the strict gate ever passes, surface it loudly so the human can
@@ -918,7 +1011,11 @@ fn g2_funcattn_vs_parallax_vs_sdpa() {
     // still forbids default-on until LLM-domain evidence exists.
     if strict_pass {
         eprintln!();
-        eprintln!("  *** G2 STRICT PASS — eligible for T4.2 promotion to opt-in `full` (already in `full`). ***");
-        eprintln!("  *** T4.4 still blocks default-on pending LLM-domain token-prediction evidence. ***");
+        eprintln!(
+            "  *** G2 STRICT PASS — eligible for T4.2 promotion to opt-in `full` (already in `full`). ***"
+        );
+        eprintln!(
+            "  *** T4.4 still blocks default-on pending LLM-domain token-prediction evidence. ***"
+        );
     }
 }

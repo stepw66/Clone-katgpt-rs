@@ -22,9 +22,9 @@ use std::time::Instant;
 use fastrand::Rng;
 use katgpt_rs::pruners::bomber::{ArenaGrid, Cell};
 use katgpt_rs::pruners::game_state::{StateHeuristic, mcts_search};
-use katgpt_rs::pruners::{BomberHeuristic, BomberState};
 use katgpt_rs::pruners::go::state::{GoHeuristic, GoState};
 use katgpt_rs::pruners::go::types::GoCell;
+use katgpt_rs::pruners::{BomberHeuristic, BomberState};
 
 #[cfg(feature = "bfcf_tree")]
 use katgpt_rs::pruners::{BFCP, BorelRegion, RegionLabel};

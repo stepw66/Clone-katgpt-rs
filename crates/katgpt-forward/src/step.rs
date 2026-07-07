@@ -19,20 +19,20 @@ use crate::verifier::{SimulatedVerifier, SpeculativeVerifier};
 use katgpt_transformer::TransformerWeights;
 use katgpt_types::{Config, Rng};
 
-use katgpt_speculative::dd_tree::{build_dd_tree, extract_best_path};
 use crate::dflash::dflash_predict;
 use crate::dflash::dflash_predict_conditioned;
-use katgpt_core::speculative::sampling::sample_from_distribution;
 use crate::{ForwardContext, forward};
+use katgpt_core::speculative::sampling::sample_from_distribution;
+use katgpt_speculative::dd_tree::{build_dd_tree, extract_best_path};
 use katgpt_transformer::MultiLayerKVCache;
 use katgpt_types::softmax_scaled;
 
 // Zero-alloc _with imports
-use katgpt_speculative::dd_tree::TreeBuilder;
+use crate::SpeculativeContext;
 use crate::dflash::{dflash_predict_conditioned_with, dflash_predict_with};
 use katgpt_core::speculative::sampling::sample_residual_distribution_into;
-use crate::SpeculativeContext;
 use katgpt_core::traits::NoPruner;
+use katgpt_speculative::dd_tree::TreeBuilder;
 
 // SR²AM configurator imports (Plan 112 T7)
 #[cfg(feature = "sr2am_configurator")]
@@ -583,7 +583,6 @@ pub fn speculative_step_rollback_with_router(
     let fallback = sample_from_distribution(probs_buf, rng);
     (vec![fallback], 1)
 }
-
 
 /// Zero-alloc variant of [`speculative_step_conditioned`].
 ///

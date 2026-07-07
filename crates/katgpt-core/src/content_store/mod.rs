@@ -53,10 +53,12 @@ pub use chunker::{
     FASTCDC_MIN_CHUNK_SIZE, FASTCDC_MIN_LEVEL, FASTCDC_NORMAL_LEVEL, FastCdcChunker,
     FixedSizeChunker,
 };
-pub use in_memory::InMemoryChunkedStore;
-pub use fetcher::{FsChunkFetcher, InMemoryChunkFetcher, TieredChunkFetcher, TieredWriteBackExt, WriteBack};
 #[cfg(feature = "chunked_net_fetch")]
 pub use fetcher::NetChunkFetcher;
+pub use fetcher::{
+    FsChunkFetcher, InMemoryChunkFetcher, TieredChunkFetcher, TieredWriteBackExt, WriteBack,
+};
+pub use in_memory::InMemoryChunkedStore;
 pub use merkle::{build_binary_merkle_proof, build_binary_merkle_root, verify_binary_merkle_proof};
 pub use r#trait::{ChunkFetcher, ChunkedContentStore, ChunkingStrategy};
 pub use types::{BlobId, ChunkRange, MerkleProof, StoreStats};

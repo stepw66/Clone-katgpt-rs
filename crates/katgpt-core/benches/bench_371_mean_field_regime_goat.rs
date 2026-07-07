@@ -35,9 +35,7 @@
 
 #![cfg(feature = "mean_field_regime")]
 
-use katgpt_core::mean_field::{
-    HopfParams, MeanFieldOverlap, RegimeClassifier, hopf_boundary,
-};
+use katgpt_core::mean_field::{HopfParams, MeanFieldOverlap, RegimeClassifier, hopf_boundary};
 use std::hint::black_box;
 use std::time::Instant;
 
@@ -55,10 +53,18 @@ struct GateResult {
 
 impl GateResult {
     fn pass(name: &'static str, detail: impl Into<String>) -> Self {
-        Self { name, passed: true, detail: detail.into() }
+        Self {
+            name,
+            passed: true,
+            detail: detail.into(),
+        }
     }
     fn fail(name: &'static str, detail: impl Into<String>) -> Self {
-        Self { name, passed: false, detail: detail.into() }
+        Self {
+            name,
+            passed: false,
+            detail: detail.into(),
+        }
     }
 }
 
@@ -66,7 +72,9 @@ impl GateResult {
 
 struct Lcg(u64);
 impl Lcg {
-    fn new(seed: u64) -> Self { Self(seed) }
+    fn new(seed: u64) -> Self {
+        Self(seed)
+    }
     fn next_u32(&mut self) -> u32 {
         // xorshift64
         self.0 ^= self.0 << 13;
@@ -84,8 +92,12 @@ impl Lcg {
 /// Build a synthetic crowd of K NPCs, each with D-dim HLA + D-dim adaptation.
 fn make_crowd(seed: u64, k: usize, d: usize) -> (Vec<Vec<f32>>, Vec<Vec<f32>>) {
     let mut rng = Lcg::new(seed);
-    let hlas: Vec<Vec<f32>> = (0..k).map(|_| (0..d).map(|_| rng.next_f32()).collect()).collect();
-    let adapt: Vec<Vec<f32>> = (0..k).map(|_| (0..d).map(|_| rng.next_f32() * 0.3).collect()).collect();
+    let hlas: Vec<Vec<f32>> = (0..k)
+        .map(|_| (0..d).map(|_| rng.next_f32()).collect())
+        .collect();
+    let adapt: Vec<Vec<f32>> = (0..k)
+        .map(|_| (0..d).map(|_| rng.next_f32() * 0.3).collect())
+        .collect();
     (hlas, adapt)
 }
 
@@ -134,7 +146,13 @@ fn gate_g2_perf() -> Vec<GateResult> {
     });
 
     // ── hopf_boundary — target ≤ 50ns ──
-    let p = HopfParams { tau_m: 1.0, tau_a: 30.0, beta: 10.0, lambda_eff: 1.5, g_eff: 1.0 };
+    let p = HopfParams {
+        tau_m: 1.0,
+        tau_a: 30.0,
+        beta: 10.0,
+        lambda_eff: 1.5,
+        g_eff: 1.0,
+    };
     for _ in 0..1000 {
         let _ = black_box(hopf_boundary(black_box(&p)));
     }
@@ -200,11 +218,20 @@ fn gate_g4_alloc_free() -> Vec<GateResult> {
     results.push(if alloc_count == 0 {
         GateResult::pass("G4.aggregate_into", "0 allocs / 100 calls".to_string())
     } else {
-        GateResult::fail("G4.aggregate_into", format!("{alloc_count} allocs / 100 calls (expected 0)"))
+        GateResult::fail(
+            "G4.aggregate_into",
+            format!("{alloc_count} allocs / 100 calls (expected 0)"),
+        )
     });
 
     // ── hopf_boundary + classify: 0 allocs across 100 calls ──
-    let p = HopfParams { tau_m: 1.0, tau_a: 30.0, beta: 10.0, lambda_eff: 1.5, g_eff: 1.0 };
+    let p = HopfParams {
+        tau_m: 1.0,
+        tau_a: 30.0,
+        beta: 10.0,
+        lambda_eff: 1.5,
+        g_eff: 1.0,
+    };
     let clf = RegimeClassifier::default();
     let ((), alloc_count) = alloc_delta(|| {
         for _ in 0..100 {
@@ -215,7 +242,10 @@ fn gate_g4_alloc_free() -> Vec<GateResult> {
     results.push(if alloc_count == 0 {
         GateResult::pass("G4.classify_path", "0 allocs / 100 calls".to_string())
     } else {
-        GateResult::fail("G4.classify_path", format!("{alloc_count} allocs / 100 calls (expected 0)"))
+        GateResult::fail(
+            "G4.classify_path",
+            format!("{alloc_count} allocs / 100 calls (expected 0)"),
+        )
     });
 
     results
@@ -230,7 +260,13 @@ fn gate_g5_determinism() -> Vec<GateResult> {
     let hlas_ref = borrow_crowd(&hlas);
     let adapt_ref = borrow_crowd(&adapt);
     let n: Vec<f32> = vec![0.7, -0.2, 0.5, 0.4, 0.1, -0.6, 0.3, 0.2];
-    let p = HopfParams { tau_m: 1.0, tau_a: 30.0, beta: 0.8, lambda_eff: 1.2, g_eff: 1.0 };
+    let p = HopfParams {
+        tau_m: 1.0,
+        tau_a: 30.0,
+        beta: 0.8,
+        lambda_eff: 1.2,
+        g_eff: 1.0,
+    };
     let clf = RegimeClassifier::default();
 
     // Two independent aggregator instances, same inputs → bit-identical outputs.
@@ -242,15 +278,19 @@ fn gate_g5_determinism() -> Vec<GateResult> {
     let kappa_match = mfo1.kappa().to_bits() == mfo2.kappa().to_bits();
     let kappa_a_match = mfo1.kappa_a().to_bits() == mfo2.kappa_a().to_bits();
     let q_match = mfo1.q().to_bits() == mfo2.q().to_bits();
-    let g_match = mfo1.estimate_chaos_intensity().to_bits()
-        == mfo2.estimate_chaos_intensity().to_bits();
+    let g_match =
+        mfo1.estimate_chaos_intensity().to_bits() == mfo2.estimate_chaos_intensity().to_bits();
 
     results.push(if kappa_match && kappa_a_match && q_match && g_match {
-        GateResult::pass("G5.aggregate_bit_identical", "κ, κ_a, Q, g all bit-identical across two instances".to_string())
+        GateResult::pass(
+            "G5.aggregate_bit_identical",
+            "κ, κ_a, Q, g all bit-identical across two instances".to_string(),
+        )
     } else {
-        GateResult::fail("G5.aggregate_bit_identical", format!(
-            "κ={kappa_match} κ_a={kappa_a_match} Q={q_match} g={g_match}"
-        ))
+        GateResult::fail(
+            "G5.aggregate_bit_identical",
+            format!("κ={kappa_match} κ_a={kappa_a_match} Q={q_match} g={g_match}"),
+        )
     });
 
     // classify → same Regime enum (and same u8 serialization).
@@ -258,7 +298,10 @@ fn gate_g5_determinism() -> Vec<GateResult> {
     let r2 = clf.classify(&mfo2, &p);
     let regime_match = r1 == r2 && r1.as_u8() == r2.as_u8();
     results.push(if regime_match {
-        GateResult::pass("G5.classify_deterministic", format!("Regime={r1:?} bit-stable (u8={})", r1.as_u8()))
+        GateResult::pass(
+            "G5.classify_deterministic",
+            format!("Regime={r1:?} bit-stable (u8={})", r1.as_u8()),
+        )
     } else {
         GateResult::fail("G5.classify_deterministic", format!("r1={r1:?} r2={r2:?}"))
     });
@@ -272,9 +315,15 @@ fn gate_g5_determinism() -> Vec<GateResult> {
         _ => false,
     };
     results.push(if hopf_match {
-        GateResult::pass("G5.hopf_boundary_deterministic", format!("ω={h1:?} bit-stable"))
+        GateResult::pass(
+            "G5.hopf_boundary_deterministic",
+            format!("ω={h1:?} bit-stable"),
+        )
     } else {
-        GateResult::fail("G5.hopf_boundary_deterministic", format!("h1={h1:?} h2={h2:?}"))
+        GateResult::fail(
+            "G5.hopf_boundary_deterministic",
+            format!("h1={h1:?} h2={h2:?}"),
+        )
     });
 
     results
@@ -307,7 +356,9 @@ fn main() {
     if all_pass {
         println!("  ── G2/G4/G5 ALL PASS ──");
         println!("  G1 (defend-wrong PoC) + G3 (no-regression) ship separately.");
-        println!("  Run the PoC: cargo bench -p riir-poc --bench mean_field_regime_poc -- --nocapture");
+        println!(
+            "  Run the PoC: cargo bench -p riir-poc --bench mean_field_regime_poc -- --nocapture"
+        );
     } else {
         println!("  ── SOME GATES FAILED ──");
         std::process::exit(1);

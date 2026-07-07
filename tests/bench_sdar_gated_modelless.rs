@@ -944,9 +944,7 @@ fn select_ucb1_arm_scalar(
 
 #[cfg(all(feature = "sdar_gate", feature = "bandit"))]
 fn select_ucb1_arm_sdar(
-    bandit: &katgpt_rs::pruners::SdarBanditPruner<
-        katgpt_rs::speculative::types::NoScreeningPruner,
-    >,
+    bandit: &katgpt_rs::pruners::SdarBanditPruner<katgpt_rs::speculative::types::NoScreeningPruner>,
     episode: usize,
     num_arms: usize,
 ) -> usize {
@@ -1001,9 +999,7 @@ fn is_best_arm_most_visited_scalar(
 
 #[cfg(all(feature = "sdar_gate", feature = "bandit"))]
 fn is_best_arm_most_visited_sdar(
-    bandit: &katgpt_rs::pruners::SdarBanditPruner<
-        katgpt_rs::speculative::types::NoScreeningPruner,
-    >,
+    bandit: &katgpt_rs::pruners::SdarBanditPruner<katgpt_rs::speculative::types::NoScreeningPruner>,
     optimal_arm: usize,
     num_arms: usize,
 ) -> bool {

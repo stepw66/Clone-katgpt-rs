@@ -318,9 +318,21 @@ mod integration_tests {
     /// not mean-direction preservation.
     ///
     /// `original_keys_f16` and `compact_keys_f32` are flat `[n_tokens * token_dim]` buffers.
-    fn avg_cosine_sim_tokens(original_keys_f16: &[f16], compact_keys_f32: &[f32], token_dim: usize) -> f32 {
-        let n_original = if token_dim == 0 { 0 } else { original_keys_f16.len() / token_dim };
-        let n_compact = if token_dim == 0 { 0 } else { compact_keys_f32.len() / token_dim };
+    fn avg_cosine_sim_tokens(
+        original_keys_f16: &[f16],
+        compact_keys_f32: &[f32],
+        token_dim: usize,
+    ) -> f32 {
+        let n_original = if token_dim == 0 {
+            0
+        } else {
+            original_keys_f16.len() / token_dim
+        };
+        let n_compact = if token_dim == 0 {
+            0
+        } else {
+            compact_keys_f32.len() / token_dim
+        };
         if n_compact == 0 || n_original == 0 {
             return 0.0;
         }
@@ -728,7 +740,9 @@ mod integration_tests {
         );
 
         if all_pass {
-            println!("\nGOAT gate PASSED: All quality thresholds met (best strategy at each ratio).");
+            println!(
+                "\nGOAT gate PASSED: All quality thresholds met (best strategy at each ratio)."
+            );
         }
     }
 

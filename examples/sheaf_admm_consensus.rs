@@ -36,7 +36,7 @@ fn main() {
     let mut q = vec![0.0f32; n * d_v];
     // Deterministic splitmix64 PRNG for reproducibility (no `rand` dep).
     let mut rng_state: u64 = 0xDEAD_BEEF_CAFE_BABE;
-    for i in 0..n * d_v {
+    for rand_f_slot in q.iter_mut().take(n * d_v) {
         // splitmix64
         rng_state = rng_state.wrapping_add(0x9E37_79B9_7F4A_7C15);
         let mut z = rng_state;
@@ -44,7 +44,7 @@ fn main() {
         z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
         z ^= z >> 31;
         let rand_f = (z as f64 / u64::MAX as f64) as f32 * 2.0 - 1.0; // [-1, 1]
-        q[i] = rand_f;
+        *rand_f_slot = rand_f;
     }
     let objective = LocalObjective::DiagonalQuadratic { diag_q, q };
 
@@ -104,10 +104,7 @@ fn main() {
         max_disagree
     );
     if max_disagree < 1e-3 {
-        println!(
-            "✅ Consensus reached (agents aligned on all {} dims).",
-            d_e
-        );
+        println!("✅ Consensus reached (agents aligned on all {} dims).", d_e);
     } else {
         println!("⚠ Consensus not yet reached (run more iterations).");
     }

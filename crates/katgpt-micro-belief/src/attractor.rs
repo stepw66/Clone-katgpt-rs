@@ -287,7 +287,11 @@ impl AttractorKernel {
         cfg: &katgpt_types::depth_invariance::DepthInvarianceConfig,
     ) -> katgpt_types::depth_invariance::DepthInvarianceDiagnostic {
         let dim = self.dim;
-        assert_eq!(initial_state.len(), dim, "initial_state must have length dim");
+        assert_eq!(
+            initial_state.len(),
+            dim,
+            "initial_state must have length dim"
+        );
         for (i, inp) in inputs.iter().enumerate() {
             assert_eq!(inp.len(), dim, "inputs[{i}] must have length dim");
         }

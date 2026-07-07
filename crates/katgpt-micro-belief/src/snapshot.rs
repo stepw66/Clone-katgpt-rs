@@ -112,7 +112,13 @@ impl MicroRecurrentKernelSnapshot {
         blake3: [u8; 32],
         version: u64,
     ) -> Self {
-        Self { family, dim, weights_blob, blake3, version }
+        Self {
+            family,
+            dim,
+            weights_blob,
+            blake3,
+            version,
+        }
     }
 
     /// Compute (or recompute) the BLAKE3 commitment over
@@ -160,7 +166,10 @@ mod tests {
         assert_eq!(snap.dim, 32);
         assert_eq!(snap.weights_blob, blob);
         assert_eq!(snap.version, 1);
-        assert_ne!(snap.blake3, [0u8; 32], "blake3 must be non-zero after commit");
+        assert_ne!(
+            snap.blake3, [0u8; 32],
+            "blake3 must be non-zero after commit"
+        );
     }
 
     #[test]

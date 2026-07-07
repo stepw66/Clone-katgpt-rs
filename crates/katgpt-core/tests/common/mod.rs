@@ -58,8 +58,7 @@ macro_rules! counting_allocator {
     () => {
         struct CountingAllocator;
 
-        static ALLOC_COUNT: std::sync::atomic::AtomicUsize =
-            std::sync::atomic::AtomicUsize::new(0);
+        static ALLOC_COUNT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
         static DEALLOC_COUNT: std::sync::atomic::AtomicUsize =
             std::sync::atomic::AtomicUsize::new(0);
 

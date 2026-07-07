@@ -13,11 +13,11 @@
 
 use std::collections::{HashSet, VecDeque};
 
-use katgpt_core::traits::{GameState, StateHeuristic};
 use crate::pruners::bomber::{
     ARENA_H, ARENA_W, ArenaGrid, BOMB_FUSE_TICKS, BomberAction, Cell, DEFAULT_BLAST_RANGE,
     DEFAULT_MAX_BOMBS, PowerUpKind, SPAWN_POSITIONS, TICK_LIMIT,
 };
+use katgpt_core::traits::{GameState, StateHeuristic};
 
 /// Four cardinal directions for blast propagation and movement.
 const DIRECTIONS: [(i32, i32); 4] = [(0, -1), (0, 1), (-1, 0), (1, 0)];

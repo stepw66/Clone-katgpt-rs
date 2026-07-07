@@ -579,9 +579,15 @@ mod ssmax_tests {
         let seq_len = 16;
         let head_dim = 8;
         let scale = 1.0 / (head_dim as f32).sqrt();
-        let q: Vec<f32> = (0..seq_len * head_dim).map(|i| ((i as f32) * 0.07).sin()).collect();
-        let k: Vec<f32> = (0..seq_len * head_dim).map(|i| ((i as f32) * 0.05).cos()).collect();
-        let v: Vec<f32> = (0..seq_len * head_dim).map(|i| ((i as f32) * 0.03).sin()).collect();
+        let q: Vec<f32> = (0..seq_len * head_dim)
+            .map(|i| ((i as f32) * 0.07).sin())
+            .collect();
+        let k: Vec<f32> = (0..seq_len * head_dim)
+            .map(|i| ((i as f32) * 0.05).cos())
+            .collect();
+        let v: Vec<f32> = (0..seq_len * head_dim)
+            .map(|i| ((i as f32) * 0.03).sin())
+            .collect();
 
         let mode = SsmaxMode::Fixed { s_l: 1.0 };
         let log_n = (seq_len as f32).ln();
@@ -590,12 +596,23 @@ mod ssmax_tests {
         let mut out_wrapper = vec![0.0f32; seq_len * head_dim];
         let mut out_folded = vec![0.0f32; seq_len * head_dim];
         tiled_attention_forward_ssmax(
-            &q, &k, &v, &mut out_wrapper, seq_len, head_dim, scale, &mode,
+            &q,
+            &k,
+            &v,
+            &mut out_wrapper,
+            seq_len,
+            head_dim,
+            scale,
+            &mode,
         );
         tiled_attention_forward(&q, &k, &v, &mut out_folded, seq_len, head_dim, folded_scale);
 
         for i in 0..(seq_len * head_dim) {
-            assert_eq!(out_wrapper[i], out_folded[i], "SSMax wrapper must match scale-folded at [{}]", i);
+            assert_eq!(
+                out_wrapper[i], out_folded[i],
+                "SSMax wrapper must match scale-folded at [{}]",
+                i
+            );
         }
     }
 
@@ -614,7 +631,12 @@ mod ssmax_tests {
         tiled_attention_forward_ssmax(&q, &k, &v, &mut output, 1, head_dim, 0.25, &mode);
         // Single-token attention: output = V regardless of scale (softmax of 1 elem = 1.0).
         for i in 0..head_dim {
-            assert!((output[i] - 0.5).abs() < 1e-5, "n=1 output[{}] = {}, expected 0.5", i, output[i]);
+            assert!(
+                (output[i] - 0.5).abs() < 1e-5,
+                "n=1 output[{}] = {}, expected 0.5",
+                i,
+                output[i]
+            );
         }
     }
 }

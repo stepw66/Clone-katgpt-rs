@@ -262,9 +262,7 @@ impl<'a> TaxonomyValidator<'a> {
             };
             for &b in accepted.iter().skip(i + 1) {
                 if node_a.incompatible_with.contains(&b) {
-                    scratch
-                        .rejections
-                        .push(ValidationError::Incompatible(a, b));
+                    scratch.rejections.push(ValidationError::Incompatible(a, b));
                     // Remove both from valid — incompatibility is symmetric.
                     valid = remove_from_set(valid, a);
                     valid = remove_from_set(valid, b);
@@ -280,14 +278,15 @@ impl<'a> TaxonomyValidator<'a> {
                 None => continue,
             };
             if let Some(parent_id) = node.parent_id
-                && !valid.contains(parent_id) {
-                    scratch
-                        .rejections
-                        .push(ValidationError::MissingParent(parent_id));
-                    // Drop the orphan child (do NOT auto-add the parent — ARG
-                    // ascending expansion is a separate step (expand_ascending)).
-                    valid = remove_from_set(valid, c);
-                }
+                && !valid.contains(parent_id)
+            {
+                scratch
+                    .rejections
+                    .push(ValidationError::MissingParent(parent_id));
+                // Drop the orphan child (do NOT auto-add the parent — ARG
+                // ascending expansion is a separate step (expand_ascending)).
+                valid = remove_from_set(valid, c);
+            }
         }
 
         // The result owns its rejections Vec; the scratch keeps its capacity for
@@ -421,7 +420,10 @@ mod tests {
 
     #[test]
     fn duplicate_ids_panic() {
-        let dup = vec![node(1, TaxonomyKind::Cluster, None), node(1, TaxonomyKind::Label, None)];
+        let dup = vec![
+            node(1, TaxonomyKind::Cluster, None),
+            node(1, TaxonomyKind::Label, None),
+        ];
         let result = std::panic::catch_unwind(|| {
             TaxonomyValidator::new(dup);
         });
@@ -436,7 +438,11 @@ mod tests {
         candidates.insert(lbl(99)); // not in taxonomy
         let r = v.validate_label_set(&candidates, &mut scratch);
         assert!(r.valid.is_empty());
-        assert!(r.rejections.iter().any(|e| matches!(e, ValidationError::NotFound)));
+        assert!(
+            r.rejections
+                .iter()
+                .any(|e| matches!(e, ValidationError::NotFound))
+        );
     }
 
     #[test]
@@ -468,9 +474,11 @@ mod tests {
         candidates.insert(lbl(3));
         let r = v.validate_label_set(&candidates, &mut scratch);
         assert!(!r.valid.contains(lbl(3)));
-        assert!(r.rejections
-            .iter()
-            .any(|e| matches!(e, ValidationError::MissingParent(p) if *p == lbl(2))));
+        assert!(
+            r.rejections
+                .iter()
+                .any(|e| matches!(e, ValidationError::MissingParent(p) if *p == lbl(2)))
+        );
     }
 
     #[test]

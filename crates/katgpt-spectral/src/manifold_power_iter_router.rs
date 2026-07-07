@@ -62,9 +62,9 @@
 
 #![allow(clippy::too_many_arguments)]
 
-use katgpt_core::simd::{simd_dot_f32, simd_fused_scale_acc};
-use crate::spectral_retract::{power_iter_retract, PowerRetractScratch};
+use crate::spectral_retract::{PowerRetractScratch, power_iter_retract};
 use blake3::Hasher;
+use katgpt_core::simd::{simd_dot_f32, simd_fused_scale_acc};
 
 // ── Config / result types ────────────────────────────────────────────────
 
@@ -213,8 +213,15 @@ pub fn manifold_power_iter_router(
     );
 
     let target_norm = c_prime / (n_experts as f32).sqrt();
-    let (lambda, maxvio) =
-        manifold_power_iter_router_inplace(r, gram_per_expert, n_experts, d_model, target_norm, iters, scratch);
+    let (lambda, maxvio) = manifold_power_iter_router_inplace(
+        r,
+        gram_per_expert,
+        n_experts,
+        d_model,
+        target_norm,
+        iters,
+        scratch,
+    );
 
     MpiRouterResult {
         r_prime: r.to_vec(),
@@ -383,7 +390,9 @@ pub fn gate_sigmoid_topk(
     out_scores: &mut [f32],
 ) -> Vec<usize> {
     let mut idx: Vec<usize> = vec![0usize; n_experts];
-    let kk = gate_sigmoid_topk_into(x, r_prime, n_experts, d_model, beta, k, out_scores, &mut idx);
+    let kk = gate_sigmoid_topk_into(
+        x, r_prime, n_experts, d_model, beta, k, out_scores, &mut idx,
+    );
     idx.truncate(kk);
     idx
 }
@@ -546,8 +555,7 @@ impl MpiRouterSnapshotHook for DefaultMpiRouterSnapshotHook {
 
         // Borrow the cached grams as &[&[f32]] for the kernel call.
         // Lifetime: we hold &mut self, so the borrows are valid for this call.
-        let gram_refs: Vec<&[f32]> =
-            self.cached_grams.iter().map(|g| g.as_slice()).collect();
+        let gram_refs: Vec<&[f32]> = self.cached_grams.iter().map(|g| g.as_slice()).collect();
 
         manifold_power_iter_router(
             router,
@@ -702,7 +710,9 @@ mod tests {
         let n = 3usize;
         let mut r1 = seeded_matrix(5, n, d);
         let mut r2 = seeded_matrix(5, n, d);
-        let grams: Vec<Vec<f32>> = (0..n).map(|i| gram_of(&seeded_matrix(100 + i as u64, d, d), d)).collect();
+        let grams: Vec<Vec<f32>> = (0..n)
+            .map(|i| gram_of(&seeded_matrix(100 + i as u64, d, d), d))
+            .collect();
         let grams_ref: Vec<&[f32]> = grams.iter().map(|g| g.as_slice()).collect();
 
         let mut s1 = PowerRetractScratch::new(d);
@@ -710,7 +720,10 @@ mod tests {
         let _ = manifold_power_iter_router(&mut r1, &grams_ref, n, d, 1.0, 1, &mut s1);
         let _ = manifold_power_iter_router(&mut r2, &grams_ref, n, d, 1.0, 1, &mut s2);
 
-        assert_eq!(r1, r2, "R' must be byte-identical across runs (G5 determinism)");
+        assert_eq!(
+            r1, r2,
+            "R' must be byte-identical across runs (G5 determinism)"
+        );
     }
 
     #[test]
@@ -721,7 +734,9 @@ mod tests {
         let c_prime = 2.0f32;
         let target = c_prime / (n as f32).sqrt();
         let mut r = seeded_matrix(3, n, d);
-        let grams: Vec<Vec<f32>> = (0..n).map(|i| gram_of(&seeded_matrix(50 + i as u64, d, d), d)).collect();
+        let grams: Vec<Vec<f32>> = (0..n)
+            .map(|i| gram_of(&seeded_matrix(50 + i as u64, d, d), d))
+            .collect();
         let grams_ref: Vec<&[f32]> = grams.iter().map(|g| g.as_slice()).collect();
         let mut scratch = PowerRetractScratch::new(d);
         let res = manifold_power_iter_router(&mut r, &grams_ref, n, d, c_prime, 2, &mut scratch);
@@ -760,7 +775,8 @@ mod tests {
         for iters in [1u8, 3, 7, 15] {
             let mut r = seeded_matrix(11, n, d);
             let mut scratch = PowerRetractScratch::new(d);
-            let res = manifold_power_iter_router(&mut r, &grams_ref, n, d, 1.0, iters, &mut scratch);
+            let res =
+                manifold_power_iter_router(&mut r, &grams_ref, n, d, 1.0, iters, &mut scratch);
             // λ is direction-only (R' is normalized to C each iter, so λ
             // reflects angular alignment, not magnitude). Monotone non-decreasing.
             assert!(
@@ -899,7 +915,10 @@ mod tests {
         let mut r_b = r_seed.clone();
         let _ = hook.recondition_at_swap(&mut r_b, &grams_ref, n, d, 1);
         // Same grams → same R' regardless of cache state.
-        assert_eq!(r_a, r_b, "same grams must give same R' across version bumps");
+        assert_eq!(
+            r_a, r_b,
+            "same grams must give same R' across version bumps"
+        );
     }
 
     #[test]
@@ -922,7 +941,11 @@ mod tests {
         let mut idx_buf = vec![0usize; n];
         let kk = gate_sigmoid_topk_into(&x, &r, n, d, beta, k, &mut scores_b, &mut idx_buf);
 
-        assert_eq!(kk, topk_vec.len(), "kk must equal length of allocating variant");
+        assert_eq!(
+            kk,
+            topk_vec.len(),
+            "kk must equal length of allocating variant"
+        );
         assert_eq!(&idx_buf[..kk], topk_vec.as_slice(), "indices must match");
         assert_eq!(scores_a, scores_b, "score buffer contents must match");
     }
@@ -967,7 +990,11 @@ mod tests {
 
         let bits = |f: f32| f.to_bits();
         assert_eq!(bits(lambda_a), bits(lambda_b), "λ must be byte-identical");
-        assert_eq!(bits(maxvio_a), bits(maxvio_b), "MaxVio must be byte-identical");
+        assert_eq!(
+            bits(maxvio_a),
+            bits(maxvio_b),
+            "MaxVio must be byte-identical"
+        );
     }
 
     #[test]

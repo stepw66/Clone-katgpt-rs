@@ -379,8 +379,8 @@ pub(crate) fn has_escape_route(
     blast_range: u32,
     existing_bombs: &[KnownBomb],
 ) -> bool {
-    use std::collections::VecDeque;
     use super::{ARENA_H, ARENA_W};
+    use std::collections::VecDeque;
 
     let max_steps = blast_range as i32 + 1;
     // Fixed-size visited bitmap for the 13×13 arena — replaces HashSet allocation
@@ -577,8 +577,8 @@ pub(crate) fn escape_distance(
     bombs: &[KnownBomb],
     blocked: &[KnownBomb],
 ) -> Option<i32> {
-    use std::collections::VecDeque;
     use super::{ARENA_H, ARENA_W};
+    use std::collections::VecDeque;
 
     if !in_blast_zone(pos, grid, bombs) {
         return Some(0);
@@ -664,10 +664,8 @@ pub(crate) fn score_action(
 
             // In blast zone — use escape distance for directional guidance
             if in_blast_zone(target, grid, bombs) {
-                let current_dist =
-                    escape_distance(pos, grid, bombs, bombs).unwrap_or(i32::MAX);
-                let target_dist =
-                    escape_distance(target, grid, bombs, bombs).unwrap_or(i32::MAX);
+                let current_dist = escape_distance(pos, grid, bombs, bombs).unwrap_or(i32::MAX);
+                let target_dist = escape_distance(target, grid, bombs, bombs).unwrap_or(i32::MAX);
                 return if target_dist < current_dist {
                     10.0 - target_dist as f32 * 0.5 // Moving toward safety
                 } else if target_dist > current_dist {
@@ -1066,7 +1064,9 @@ impl BomberPlayer for ValidatorPlayer {
         let in_danger = in_blast_zone(pos, grid, &self.known_bombs);
         // O(bombs) linear helper — replaces per-call HashSet allocation.
         let is_blocked = |x: i32, y: i32| {
-            self.known_bombs.iter().any(|(p, _, _)| p.0 == x && p.1 == y)
+            self.known_bombs
+                .iter()
+                .any(|(p, _, _)| p.0 == x && p.1 == y)
         };
 
         let mut best = BomberAction::Wait;
@@ -1700,7 +1700,9 @@ impl BomberPlayer for HLPlayer {
 
         // O(bombs) linear helper — replaces per-call HashSet allocation.
         let is_blocked = |x: i32, y: i32| {
-            self.known_bombs.iter().any(|(p, _, _)| p.0 == x && p.1 == y)
+            self.known_bombs
+                .iter()
+                .any(|(p, _, _)| p.0 == x && p.1 == y)
         };
 
         // Find nearest opponent and their predicted trajectory
@@ -1898,7 +1900,10 @@ impl BomberPlayer for HLPlayer {
         let currently_in_blast = in_blast_zone(pos, grid, &self.known_bombs);
         let shape_tick = |action: BomberAction, bombs: &[KnownBomb]| -> f32 {
             match action {
-                BomberAction::Up | BomberAction::Down | BomberAction::Left | BomberAction::Right => {
+                BomberAction::Up
+                | BomberAction::Down
+                | BomberAction::Left
+                | BomberAction::Right => {
                     let target = move_target(&action, pos);
                     let target_in_blast = in_blast_zone(target, grid, bombs);
                     if target_in_blast && !currently_in_blast {
@@ -1921,19 +1926,11 @@ impl BomberPlayer for HLPlayer {
                 }
                 BomberAction::Wait => {
                     // Waiting inside a blast zone is fatal.
-                    if currently_in_blast {
-                        -0.5
-                    } else {
-                        0.0
-                    }
+                    if currently_in_blast { -0.5 } else { 0.0 }
                 }
                 BomberAction::Detonate => {
                     // Detonating while in own blast zone is fatal.
-                    if currently_in_blast {
-                        -0.5
-                    } else {
-                        0.0
-                    }
+                    if currently_in_blast { -0.5 } else { 0.0 }
                 }
             }
         };
@@ -1965,7 +1962,8 @@ impl BomberPlayer for HLPlayer {
                 let pick = safe_explore[rng.usize(0..safe_explore.len())];
                 let action = scores[pick].0;
                 self.round_actions.push(action);
-                self.round_rewards.push(shape_tick(action, &self.known_bombs));
+                self.round_rewards
+                    .push(shape_tick(action, &self.known_bombs));
                 #[cfg(feature = "contextual_bandit")]
                 self.round_contexts.push(phi);
                 self.last_dir = Some(action);
@@ -2091,7 +2089,9 @@ impl BomberPlayer for LoraPlayer {
 
         // O(bombs) linear helper — replaces per-call HashSet allocation.
         let is_blocked = |x: i32, y: i32| {
-            self.known_bombs.iter().any(|(p, _, _)| p.0 == x && p.1 == y)
+            self.known_bombs
+                .iter()
+                .any(|(p, _, _)| p.0 == x && p.1 == y)
         };
 
         // Try LoRA scoring first
@@ -2319,7 +2319,9 @@ impl BomberPlayer for LoraWasmPlayer {
         let in_danger = in_blast_zone(pos, grid, &self.known_bombs);
         // O(bombs) linear helper — replaces per-call HashSet allocation.
         let is_blocked = |x: i32, y: i32| {
-            self.known_bombs.iter().any(|(p, _, _)| p.0 == x && p.1 == y)
+            self.known_bombs
+                .iter()
+                .any(|(p, _, _)| p.0 == x && p.1 == y)
         };
 
         // Try LoRA scoring
@@ -2505,7 +2507,9 @@ impl BomberPlayer for NNPlayer {
         let in_danger = in_blast_zone(pos, grid, &self.known_bombs);
         // O(bombs) linear helper — replaces per-call HashSet allocation.
         let is_blocked = |x: i32, y: i32| {
-            self.known_bombs.iter().any(|(p, _, _)| p.0 == x && p.1 == y)
+            self.known_bombs
+                .iter()
+                .any(|(p, _, _)| p.0 == x && p.1 == y)
         };
 
         let mut best = BomberAction::Wait;

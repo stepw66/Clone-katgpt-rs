@@ -481,7 +481,11 @@ pub fn heat_kernel_trajectory_krylov(
             let base = cell * dim;
             for d in 0..dim {
                 let idx = base + d;
-                let motor_d = if d < motor_dim { motor_vec.get(d).copied().unwrap_or(0.0) } else { 0.0 };
+                let motor_d = if d < motor_dim {
+                    motor_vec.get(d).copied().unwrap_or(0.0)
+                } else {
+                    0.0
+                };
                 out[idx] = lap_field.data[idx] + (motor_d - 1.0) * v[idx];
             }
         }
@@ -543,7 +547,11 @@ pub fn heat_kernel_trajectory_krylov_into(
             let base = cell * dim;
             for d in 0..dim {
                 let idx = base + d;
-                let motor_d = if d < motor_dim { motor_vec.get(d).copied().unwrap_or(0.0) } else { 0.0 };
+                let motor_d = if d < motor_dim {
+                    motor_vec.get(d).copied().unwrap_or(0.0)
+                } else {
+                    0.0
+                };
                 out_buf[idx] = lap_field.data[idx] + (motor_d - 1.0) * v[idx];
             }
         }
@@ -1125,8 +1133,14 @@ mod tests {
         let h_krylov_25 = heat_kernel_trajectory_krylov(&cx, &h0, &motor, 1, 5.0, 25);
         let err_25 = l2_dist(&h_eig, &h_krylov_25) / l2_norm(&h_eig);
 
-        assert!(err_15 < err_5, "k=15 err {err_15} should be < k=5 err {err_5}");
-        assert!(err_25 < err_15, "k=25 err {err_25} should be < k=15 err {err_15}");
+        assert!(
+            err_15 < err_5,
+            "k=15 err {err_15} should be < k=5 err {err_5}"
+        );
+        assert!(
+            err_25 < err_15,
+            "k=25 err {err_25} should be < k=15 err {err_15}"
+        );
     }
 
     /// Krylov at t=0 returns h0 (identity).
@@ -1234,6 +1248,9 @@ mod tests {
 
         let result = heat_kernel_trajectory_krylov(&cx, &h0, &motor, 1, 5.0, 10);
         let max_val = result.data.iter().fold(0.0f32, |a, &b| a.max(b.abs()));
-        assert!(max_val < 1e-30, "krylov zero field should stay zero, max = {max_val}");
+        assert!(
+            max_val < 1e-30,
+            "krylov zero field should stay zero, max = {max_val}"
+        );
     }
 }

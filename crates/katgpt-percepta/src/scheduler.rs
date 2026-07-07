@@ -488,8 +488,7 @@ pub fn milp_schedule(
         .collect();
     // Merged view: dims that are either outputs or protected. Computed once so
     // the hot indicator/constraint loops below do one hash lookup instead of two.
-    let out_or_prot: HashSet<DimId> =
-        output_dims.union(&protected).copied().collect();
+    let out_or_prot: HashSet<DimId> = output_dims.union(&protected).copied().collect();
 
     info!(
         "MILP (HiGHS): {} ops, {} dims, {n} layers, {p} phases",

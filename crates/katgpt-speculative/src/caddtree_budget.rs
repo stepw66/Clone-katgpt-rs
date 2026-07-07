@@ -7,8 +7,8 @@
 //!
 //! Pipeline: marginals → acceptance surrogate → throughput(B) → greedy search → B*
 
-use katgpt_core::traits::ScreeningPruner;
 use katgpt_core::speculative::types::TreeNode;
+use katgpt_core::traits::ScreeningPruner;
 use katgpt_types::Config;
 
 // Re-export build functions from dd_tree module.
@@ -132,11 +132,7 @@ impl AcceptanceSurrogate {
     ///
     /// Use this when evaluating multiple budgets over the same marginals
     /// (e.g. greedy budget search) — pre-compute `top1` once, reuse for all B.
-    pub fn expected_accepted_length_at_budget_top1(
-        &self,
-        top1s: &[f32],
-        budget: usize,
-    ) -> f32 {
+    pub fn expected_accepted_length_at_budget_top1(&self, top1s: &[f32], budget: usize) -> f32 {
         if top1s.is_empty() || budget == 0 {
             return 0.0;
         }
@@ -422,7 +418,9 @@ impl BudgetSelector {
         if cost <= 0.0 {
             return 0.0;
         }
-        let accept_len = self.surrogate.expected_accepted_length_at_budget_top1(top1s, budget);
+        let accept_len = self
+            .surrogate
+            .expected_accepted_length_at_budget_top1(top1s, budget);
         accept_len as f64 / cost
     }
 
@@ -551,7 +549,10 @@ pub fn build_dd_tree_adaptive_mux_residual(
     // 4. All paths share the flat marginals (wiring complete; per-path
     //    marginals are future work). compute_mux_residual indexes at
     //    `position * vocab_size` to pick the right slice.
-    let path_marginals: Vec<&[f32]> = path_scores.iter().map(|_| flat_marginals.as_slice()).collect();
+    let path_marginals: Vec<&[f32]> = path_scores
+        .iter()
+        .map(|_| flat_marginals.as_slice())
+        .collect();
 
     compute_mux_residual(
         &path_scores,
@@ -1014,8 +1015,16 @@ mod tests {
         let _ = build_dd_tree_adaptive_mux_residual(&marginals, &config, &wte, 1, &mut residual);
 
         // Position 1 → m1 = [0, 1] → picks token 1 → embedding [30, 40].
-        assert!((residual[0] - 30.0).abs() < 1e-5, "residual[0]={}", residual[0]);
-        assert!((residual[1] - 40.0).abs() < 1e-5, "residual[1]={}", residual[1]);
+        assert!(
+            (residual[0] - 30.0).abs() < 1e-5,
+            "residual[0]={}",
+            residual[0]
+        );
+        assert!(
+            (residual[1] - 40.0).abs() < 1e-5,
+            "residual[1]={}",
+            residual[1]
+        );
     }
 
     #[cfg(all(feature = "mux_demux", feature = "rcd_residual"))]
@@ -1035,7 +1044,10 @@ mod tests {
             build_dd_tree_adaptive_mux_residual(&marginals, &config, &wte, 5, &mut residual);
 
         assert!(!tree.is_empty(), "tree still built even with bad position");
-        assert!(residual.iter().all(|&v| v == 0.0), "residual should be zeroed");
+        assert!(
+            residual.iter().all(|&v| v == 0.0),
+            "residual should be zeroed"
+        );
     }
 
     #[cfg(all(feature = "mux_demux", feature = "rcd_residual"))]
@@ -1052,6 +1064,9 @@ mod tests {
             build_dd_tree_adaptive_mux_residual(&[], &config, &wte, 0, &mut residual);
 
         assert!(tree.is_empty(), "empty marginals → empty tree");
-        assert!(residual.iter().all(|&v| v == 0.0), "residual should be zeroed");
+        assert!(
+            residual.iter().all(|&v| v == 0.0),
+            "residual should be zeroed"
+        );
     }
 }

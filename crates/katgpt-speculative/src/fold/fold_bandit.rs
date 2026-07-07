@@ -333,8 +333,10 @@ mod tests {
         let bandit = FoldBandit::new();
         let base = bandit.best_budget();
         let gated = bandit.precision_gated_budget(0.0, 0.3);
-        assert!((gated - base).abs() < f32::EPSILON,
-            "confidence=0 should return base budget, got {gated} vs {base}");
+        assert!(
+            (gated - base).abs() < f32::EPSILON,
+            "confidence=0 should return base budget, got {gated} vs {base}"
+        );
     }
 
     #[cfg(feature = "bake_precision")]
@@ -343,8 +345,10 @@ mod tests {
         let bandit = FoldBandit::new();
         let base = bandit.best_budget();
         let gated = bandit.precision_gated_budget(1.0, 0.3);
-        assert!(gated < base,
-            "confidence=1 should reduce budget, got {gated} >= {base}");
+        assert!(
+            gated < base,
+            "confidence=1 should reduce budget, got {gated} >= {base}"
+        );
     }
 
     #[cfg(feature = "bake_precision")]
@@ -357,8 +361,10 @@ mod tests {
         }
         assert!((bandit.best_budget() - 1.0).abs() < f32::EPSILON);
         let gated = bandit.precision_gated_budget(1.0, 10.0);
-        assert!((gated - 0.1).abs() < f32::EPSILON,
-            "should clamp to 0.1 minimum, got {gated}");
+        assert!(
+            (gated - 0.1).abs() < f32::EPSILON,
+            "should clamp to 0.1 minimum, got {gated}"
+        );
     }
 
     #[cfg(feature = "bake_precision")]
@@ -367,7 +373,9 @@ mod tests {
         let bandit = FoldBandit::new();
         let base = bandit.best_budget();
         let gated = bandit.precision_gated_budget(0.8, 0.0);
-        assert!((gated - base).abs() < f32::EPSILON,
-            "alpha=0 should return base budget unchanged, got {gated} vs {base}");
+        assert!(
+            (gated - base).abs() < f32::EPSILON,
+            "alpha=0 should return base budget unchanged, got {gated} vs {base}"
+        );
     }
 }

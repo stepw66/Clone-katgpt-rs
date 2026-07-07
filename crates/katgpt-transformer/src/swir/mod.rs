@@ -106,7 +106,7 @@ mod types;
 pub use controller::SwiRController;
 pub use convex_hull_check::in_vocab_convex_hull;
 pub use entropy::{entropy_from_logits, shannon_entropy};
-pub use signal_mix::{mix_thinking_signal, SignalMixKind};
+pub use signal_mix::{SignalMixKind, mix_thinking_signal};
 pub use soft_embedding::soft_embedding;
 pub use types::{ControlToken, StepAction, SwiRConfig, SwiRStats, ThinkMode};
 

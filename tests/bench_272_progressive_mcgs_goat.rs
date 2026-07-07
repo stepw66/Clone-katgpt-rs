@@ -46,8 +46,8 @@
 #![cfg(test)]
 
 use katgpt_rs::progressive_mcgs::{
-    graph::ProgressiveMcgs, scheduler::EntropyGatedScheduler, scheduler::RngLite,
-    BranchId, NodeId, ProgressiveMcgsConfig, ProgressiveMcgsSearch, Reward, SearchDomain, StepResult,
+    BranchId, NodeId, ProgressiveMcgsConfig, ProgressiveMcgsSearch, Reward, SearchDomain,
+    StepResult, graph::ProgressiveMcgs, scheduler::EntropyGatedScheduler, scheduler::RngLite,
 };
 
 /// Number of RNG seeds averaged for stochastic gates (G1, G3).
@@ -174,7 +174,8 @@ fn config_scheduler_ablated() -> ProgressiveMcgsConfig {
 
 /// Build a fresh search with the given config and seed all branches.
 fn build_search(config: ProgressiveMcgsConfig) -> ProgressiveMcgsSearch<u32> {
-    let mut search = ProgressiveMcgsSearch::new(config, N_BRANCHES).with_max_expansions(N_EXPANSIONS);
+    let mut search =
+        ProgressiveMcgsSearch::new(config, N_BRANCHES).with_max_expansions(N_EXPANSIONS);
     search.add_root(0);
     for b in 0..N_BRANCHES {
         search.seed_branch(BranchId(b), 100 + b);
@@ -251,11 +252,19 @@ fn g1_entropy_decay_under_schedule() {
 
     println!();
     println!("┌──────────────────────────────────────────────────────────────────────────┐");
-    println!("│ G1: Entropy Decay (averaged over {n} seeds, {N_EXPANSIONS} expansions each)         │");
+    println!(
+        "│ G1: Entropy Decay (averaged over {n} seeds, {N_EXPANSIONS} expansions each)         │"
+    );
     println!("├──────────────────────────────────────────────────────────────────────────┤");
-    println!("│ H(π_0) uniform          = {h_initial:.4} nats  (exp(H) = {N_BRANCHES})                │");
-    println!("│ (a) Progressive H(π_1)  = {progressive_final_h:.4} nats  (ratio {ratio_progressive:.3}, exp(H)={prog_eff:.2})  │");
-    println!("│ (c) Ablated     H(π_1)  = {ablated_final_h:.4} nats  (ratio {ratio_ablated:.3}, exp(H)={abl_eff:.2})  │");
+    println!(
+        "│ H(π_0) uniform          = {h_initial:.4} nats  (exp(H) = {N_BRANCHES})                │"
+    );
+    println!(
+        "│ (a) Progressive H(π_1)  = {progressive_final_h:.4} nats  (ratio {ratio_progressive:.3}, exp(H)={prog_eff:.2})  │"
+    );
+    println!(
+        "│ (c) Ablated     H(π_1)  = {ablated_final_h:.4} nats  (ratio {ratio_ablated:.3}, exp(H)={abl_eff:.2})  │"
+    );
     println!("│ Criterion: (a) ratio ≤ 0.6   (c) ratio > 0.85                         │");
     println!("└──────────────────────────────────────────────────────────────────────────┘");
 
@@ -269,11 +278,14 @@ fn g1_entropy_decay_under_schedule() {
     // Note: with a strong Q gap, UCT alone also concentrates. The ablated
     // config should decay LESS than Progressive, but not necessarily stay
     // above 0.85 — UCT's Q-bias is a significant contributor.
-    assert!(ablated_final_h >= progressive_final_h,
+    assert!(
+        ablated_final_h >= progressive_final_h,
         "G1 FAIL: ablated entropy {ablated_final_h:.4} should be ≥ progressive entropy {progressive_final_h:.4} \
-         (otherwise graph structure alone is causing decay, not the schedule)");
+         (otherwise graph structure alone is causing decay, not the schedule)"
+    );
 
-    println!("✅ G1 PASS — entropy decays by {:.1}% under schedule, {:.1}% without",
+    println!(
+        "✅ G1 PASS — entropy decays by {:.1}% under schedule, {:.1}% without",
         (1.0 - ratio_progressive) * 100.0,
         (1.0 - ratio_ablated) * 100.0
     );
@@ -310,8 +322,16 @@ fn g2_backprop_isolation_empty_e_ref_matches_vanilla() {
     let mut nodes_b: Vec<NodeId> = Vec::with_capacity(100);
     for b in 0..4u32 {
         for k in 0..n_per_branch {
-            let parent_a = if k == 0 { root_a } else { nodes_a[((b * n_per_branch) + (k - 1)) as usize] };
-            let parent_b = if k == 0 { root_b } else { nodes_b[((b * n_per_branch) + (k - 1)) as usize] };
+            let parent_a = if k == 0 {
+                root_a
+            } else {
+                nodes_a[((b * n_per_branch) + (k - 1)) as usize]
+            };
+            let parent_b = if k == 0 {
+                root_b
+            } else {
+                nodes_b[((b * n_per_branch) + (k - 1)) as usize]
+            };
             let payload = b * 1000 + k;
             let na = g_refs.expand_primary(parent_a, payload, BranchId(b));
             let nb = g_vanilla.expand_primary(parent_b, payload, BranchId(b));
@@ -360,12 +380,25 @@ fn g2_backprop_isolation_empty_e_ref_matches_vanilla() {
         max_visit_diff = max_visit_diff.max(vd);
         max_q_diff = max_q_diff.max(qd);
         max_cum_diff = max_cum_diff.max(cd);
-        assert_eq!(g_refs.visits(id_a), g_vanilla.visits(id_b),
-            "G2 FAIL: visits mismatch at node {i}: {} vs {}", g_refs.visits(id_a), g_vanilla.visits(id_b));
-        assert!(qd < 1e-6,
-            "G2 FAIL: q_value mismatch at node {i}: {} vs {} (diff {qd})", g_refs.q_value(id_a), g_vanilla.q_value(id_b));
-        assert!(cd < 1e-6,
-            "G2 FAIL: cumulative_reward mismatch at node {i}: {} vs {}", g_refs.cumulative_reward(id_a), g_vanilla.cumulative_reward(id_b));
+        assert_eq!(
+            g_refs.visits(id_a),
+            g_vanilla.visits(id_b),
+            "G2 FAIL: visits mismatch at node {i}: {} vs {}",
+            g_refs.visits(id_a),
+            g_vanilla.visits(id_b)
+        );
+        assert!(
+            qd < 1e-6,
+            "G2 FAIL: q_value mismatch at node {i}: {} vs {} (diff {qd})",
+            g_refs.q_value(id_a),
+            g_vanilla.q_value(id_b)
+        );
+        assert!(
+            cd < 1e-6,
+            "G2 FAIL: cumulative_reward mismatch at node {i}: {} vs {}",
+            g_refs.cumulative_reward(id_a),
+            g_vanilla.cumulative_reward(id_b)
+        );
     }
 
     // Specifically verify branch-1 nodes (the reference-edge targets) have
@@ -374,8 +407,11 @@ fn g2_backprop_isolation_empty_e_ref_matches_vanilla() {
     for i in 25..35 {
         let id_a = nodes_a[i];
         let id_b = nodes_b[i];
-        assert_eq!(g_refs.visits(id_a), g_vanilla.visits(id_b),
-            "G2 FAIL: branch-1 target visits mismatch at node {i}");
+        assert_eq!(
+            g_refs.visits(id_a),
+            g_vanilla.visits(id_b),
+            "G2 FAIL: branch-1 target visits mismatch at node {i}"
+        );
     }
 
     println!();
@@ -443,11 +479,23 @@ fn g3_stagnation_improvement_progressive_faster() {
     println!("┌──────────────────────────────────────────────────────────────────────────┐");
     println!("│ G3: Compute Concentration (fraction of expansions on good branch)      │");
     println!("├──────────────────────────────────────────────────────────────────────────┤");
-    println!("│ {n} seeds × {N_EXPANSIONS} expansions; P_good={P_GOOD_PROGRESS}, P_bad={P_BAD_PROGRESS}            │");
-    println!("│ (a) Progressive: branch 0 share = {:.1}%                         │", prog_b0_share * 100.0);
-    println!("│ (b) Vanilla:     branch 0 share = {:.1}%                         │", vanilla_b0_share * 100.0);
-    println!("│ Concentration ratio: {concentration_ratio:.2}×                                    │");
-    println!("│ Marginal gain from Elite scheduler: {marginal_gain_pct:+.1} percentage points            │");
+    println!(
+        "│ {n} seeds × {N_EXPANSIONS} expansions; P_good={P_GOOD_PROGRESS}, P_bad={P_BAD_PROGRESS}            │"
+    );
+    println!(
+        "│ (a) Progressive: branch 0 share = {:.1}%                         │",
+        prog_b0_share * 100.0
+    );
+    println!(
+        "│ (b) Vanilla:     branch 0 share = {:.1}%                         │",
+        vanilla_b0_share * 100.0
+    );
+    println!(
+        "│ Concentration ratio: {concentration_ratio:.2}×                                    │"
+    );
+    println!(
+        "│ Marginal gain from Elite scheduler: {marginal_gain_pct:+.1} percentage points            │"
+    );
     println!("│ Criterion (soft): Progressive ≥ Vanilla (Elite must not hurt)          │");
     println!("└──────────────────────────────────────────────────────────────────────────┘");
     println!("ℹ️  Note: UCT is a strong concentrator on its own. The Elite scheduler's");
@@ -456,9 +504,12 @@ fn g3_stagnation_improvement_progressive_faster() {
 
     // Soft gate: Progressive must concentrate AT LEAST as much as Vanilla.
     // The Elite sampler can only help, not hurt.
-    assert!(prog_b0_share >= vanilla_b0_share - 0.001,
+    assert!(
+        prog_b0_share >= vanilla_b0_share - 0.001,
         "G3 FAIL: Progressive branch-0 share {:.1}% < Vanilla {:.1}% — Elite sampler is HURTING concentration",
-        prog_b0_share * 100.0, vanilla_b0_share * 100.0);
+        prog_b0_share * 100.0,
+        vanilla_b0_share * 100.0
+    );
 
     println!("✅ G3 PASS (soft) — Progressive ≥ Vanilla on branch-0 concentration");
 }
@@ -504,11 +555,16 @@ fn g4_latency_per_step_under_5us() {
     println!("├──────────────────────────────────────────────────────────────────────────┤");
     println!("│ Steps measured: {steps_taken}                                                 │");
     println!("│ Final graph size: {graph_size} nodes                                       │");
-    println!("│ Per-call: {per_call_ns:.0} ns ({per_call_us:.2} µs)                                       │");
+    println!(
+        "│ Per-call: {per_call_ns:.0} ns ({per_call_us:.2} µs)                                       │"
+    );
     println!("│ Criterion: < 5 µs (5000 ns) per step                                    │");
     println!("└──────────────────────────────────────────────────────────────────────────┘");
 
-    assert!(steps_taken > 0, "G4 FAIL: no steps taken — search budget exhausted during warmup");
+    assert!(
+        steps_taken > 0,
+        "G4 FAIL: no steps taken — search budget exhausted during warmup"
+    );
     // Debug builds are ~50× slower than release, and parallel test execution
     // with TrackingAllocator (G5) adds further overhead. Use profile-aware thresholds:
     // - Release: < 30 µs (plan target was 5 µs, but current step() allocates
@@ -520,10 +576,15 @@ fn g4_latency_per_step_under_5us() {
     #[cfg(not(debug_assertions))]
     let threshold_ns = 30_000.0;
 
-    assert!(per_call_ns < threshold_ns,
-        "G4 FAIL: per-step latency {per_call_ns:.0} ns > {threshold_ns:.0} ns — investigate hot-path allocations");
+    assert!(
+        per_call_ns < threshold_ns,
+        "G4 FAIL: per-step latency {per_call_ns:.0} ns > {threshold_ns:.0} ns — investigate hot-path allocations"
+    );
 
-    println!("✅ G4 PASS — per-step latency {per_call_us:.2} µs < {:.0} µs target", threshold_ns / 1000.0);
+    println!(
+        "✅ G4 PASS — per-step latency {per_call_us:.2} µs < {:.0} µs target",
+        threshold_ns / 1000.0
+    );
 }
 
 /// **GOAT G4b — Scheduler `pick_mode` latency under 1µs.**
@@ -552,8 +613,10 @@ fn g4b_latency_pick_mode_under_1us() {
     println!();
     println!("│ G4b: pick_mode() per-call: {per_call_ns:.1} ns (target < 1000 ns)");
 
-    assert!(per_call_ns < 1000.0,
-        "G4b FAIL: pick_mode latency {per_call_ns:.1} ns > 1 µs");
+    assert!(
+        per_call_ns < 1000.0,
+        "G4b FAIL: pick_mode latency {per_call_ns:.1} ns > 1 µs"
+    );
     println!("✅ G4b PASS — pick_mode latency {per_call_ns:.1} ns < 1 µs");
 }
 
@@ -613,9 +676,15 @@ fn g5_allocation_audit_step_hot_path() {
         println!("┌──────────────────────────────────────────────────────────────────────────┐");
         println!("│ G5: Allocation Audit (debug-only, TrackingAllocator)                     │");
         println!("├──────────────────────────────────────────────────────────────────────────┤");
-        println!("│ Steps measured: {steps_taken}                                                 │");
-        println!("│ Total allocs: {alloc_count}  ({alloc_bytes} bytes)                                │");
-        println!("│ Per-call: {per_call_allocs:.2} allocs  ({per_call_bytes:.1} bytes)                              │");
+        println!(
+            "│ Steps measured: {steps_taken}                                                 │"
+        );
+        println!(
+            "│ Total allocs: {alloc_count}  ({alloc_bytes} bytes)                                │"
+        );
+        println!(
+            "│ Per-call: {per_call_allocs:.2} allocs  ({per_call_bytes:.1} bytes)                              │"
+        );
         println!("│ Criterion: per-call < 5 allocs (StepResult + refset + slack)             │");
         println!("└──────────────────────────────────────────────────────────────────────────┘");
 
@@ -628,8 +697,10 @@ fn g5_allocation_audit_step_hot_path() {
         // Total expected: ~5-20 allocs/step (graph growth adds spikes).
         // Threshold 100 is generous — catches regressions where something
         // accidentally allocates per-token rather than per-expansion.
-        assert!(per_call_allocs < 300.0,
-            "G5 FAIL: per-step allocations {per_call_allocs:.2} > 300 — investigate hot-path allocations");
+        assert!(
+            per_call_allocs < 300.0,
+            "G5 FAIL: per-step allocations {per_call_allocs:.2} > 300 — investigate hot-path allocations"
+        );
 
         println!("✅ G5 PASS — per-step allocations {per_call_allocs:.2} < 300");
     }
@@ -687,7 +758,11 @@ fn zzz_summary_print_goat_matrix() {
     let abl_ratio = abl_h / h_initial as f64;
     let prog_b0 = prog_b0_share_sum / n_summary as f64;
     let vanilla_b0 = vanilla_b0_share_sum / n_summary as f64;
-    let concentration_ratio = if vanilla_b0 > 0.0 { prog_b0 / vanilla_b0 } else { f64::INFINITY };
+    let concentration_ratio = if vanilla_b0 > 0.0 {
+        prog_b0 / vanilla_b0
+    } else {
+        f64::INFINITY
+    };
 
     println!();
     println!("╔══════════════════════════════════════════════════════════════════════════╗");
@@ -698,16 +773,28 @@ fn zzz_summary_print_goat_matrix() {
     println!("║ G1    | entropy ratio ≤ 0.60                  | {prog_ratio:.3}                ║");
     println!("║ G1c   | ablated ratio ≥ progressive ratio     | {abl_ratio:.3} (abl ≥ prog)  ║");
     println!("║ G2    | backprop E_ref=∅ matches vanilla      | bit-identical         ║");
-    println!("║ G3    | Progressive ≥ Vanilla (soft gate)      | ratio {concentration_ratio:.2}×         ║");
+    println!(
+        "║ G3    | Progressive ≥ Vanilla (soft gate)      | ratio {concentration_ratio:.2}×         ║"
+    );
     println!("║ G4    | per-step < 5 µs (release)             | see G4 test           ║");
     println!("║ G5    | < 300 allocs per step (debug)         | see G5 test           ║");
     println!("╚══════════════════════════════════════════════════════════════════════════╝");
     println!();
     println!("  H(π_0)        = {h_initial:.4} nats  (exp(H) = {N_BRANCHES})");
-    println!("  H_prog(π_1)   = {prog_h:.4} nats  (exp(H) = {:.2})", (prog_h as f32).exp());
-    println!("  H_abl(π_1)    = {abl_h:.4} nats  (exp(H) = {:.2})", (abl_h as f32).exp());
+    println!(
+        "  H_prog(π_1)   = {prog_h:.4} nats  (exp(H) = {:.2})",
+        (prog_h as f32).exp()
+    );
+    println!(
+        "  H_abl(π_1)    = {abl_h:.4} nats  (exp(H) = {:.2})",
+        (abl_h as f32).exp()
+    );
     println!("  Paper Figure 3 reference: exp(H) 4.8 → 2.8 (≈42% decay)");
-    println!("  Branch-0 share: Progressive {:.1}% vs Vanilla {:.1}% (ratio {:.2}×)",
-        prog_b0 * 100.0, vanilla_b0 * 100.0, concentration_ratio);
+    println!(
+        "  Branch-0 share: Progressive {:.1}% vs Vanilla {:.1}% (ratio {:.2}×)",
+        prog_b0 * 100.0,
+        vanilla_b0 * 100.0,
+        concentration_ratio
+    );
     println!();
 }

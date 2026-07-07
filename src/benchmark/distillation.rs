@@ -2,10 +2,10 @@
 // sub-functions below; gate the imports so they don't read as unused when
 // all three distillation features are off (e.g. when a downstream consumer
 // builds katgpt-rs with default-features = false).
-#[cfg(any(feature = "bt_rank", feature = "bandit", feature = "g_zero"))]
-use super::{BenchCategory, BenchResult};
 #[cfg(not(any(feature = "bt_rank", feature = "bandit", feature = "g_zero")))]
 use super::BenchResult;
+#[cfg(any(feature = "bt_rank", feature = "bandit", feature = "g_zero"))]
+use super::{BenchCategory, BenchResult};
 #[cfg(any(feature = "bt_rank", feature = "bandit", feature = "g_zero"))]
 use std::time::Instant;
 

@@ -434,8 +434,7 @@ impl KVarNKVCache {
                     let row_off = ch * bpr;
                     let q = unpack_value(&quantized[row_off..row_off + bpr], pos_in_tile, bits);
                     let var_row = s_row[ch];
-                    out[ch] =
-                        (q as f32).mul_add(rtn_scales[ch], rtn_zp[ch]) * var_col * var_row;
+                    out[ch] = (q as f32).mul_add(rtn_scales[ch], rtn_zp[ch]) * var_col * var_row;
                 }
             }
         }
@@ -489,8 +488,7 @@ impl KVarNKVCache {
                     let q0 = (b & 0x0F) as f32;
                     out[2 * i] = q0.mul_add(rtn_scale, rtn_zp_val) * s_col[2 * i] * var_row;
                     let q1 = (b >> 4) as f32;
-                    out[2 * i + 1] =
-                        q1.mul_add(rtn_scale, rtn_zp_val) * s_col[2 * i + 1] * var_row;
+                    out[2 * i + 1] = q1.mul_add(rtn_scale, rtn_zp_val) * s_col[2 * i + 1] * var_row;
                 }
                 if kv_dim & 1 == 1 {
                     let b = packed_row[full_pairs];
@@ -525,12 +523,9 @@ impl KVarNKVCache {
                             let scale = rtn_scales[idx];
                             let zp = rtn_zp[idx];
                             out[4 * i] = ((b & 0x03) as f32).mul_add(scale, zp);
-                            out[4 * i + 1] =
-                                (((b >> 2) & 0x03) as f32).mul_add(scale, zp);
-                            out[4 * i + 2] =
-                                (((b >> 4) & 0x03) as f32).mul_add(scale, zp);
-                            out[4 * i + 3] =
-                                (((b >> 6) & 0x03) as f32).mul_add(scale, zp);
+                            out[4 * i + 1] = (((b >> 2) & 0x03) as f32).mul_add(scale, zp);
+                            out[4 * i + 2] = (((b >> 4) & 0x03) as f32).mul_add(scale, zp);
+                            out[4 * i + 3] = (((b >> 6) & 0x03) as f32).mul_add(scale, zp);
                         }
                         // Tail: 0..=3 remaining values packed in the next byte,
                         // all in the last group.
@@ -574,8 +569,8 @@ impl KVarNKVCache {
                                 if idx >= kv_dim {
                                     break;
                                 }
-                                out[idx] =
-                                    (((tail_byte >> sh) & 0x03) as f32).mul_add(rtn_scale, rtn_zp_val);
+                                out[idx] = (((tail_byte >> sh) & 0x03) as f32)
+                                    .mul_add(rtn_scale, rtn_zp_val);
                             }
                         }
                     }

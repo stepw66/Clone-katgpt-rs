@@ -19,8 +19,8 @@
 //!
 //! Run tests: `cargo test --features tf_loop`
 
-use katgpt_core::simd::simd_fused_decay_write;
 use crate::MultiLayerKVCache;
+use katgpt_core::simd::simd_fused_decay_write;
 use katgpt_core::types::Config;
 use katgpt_core::types::kv_dim;
 

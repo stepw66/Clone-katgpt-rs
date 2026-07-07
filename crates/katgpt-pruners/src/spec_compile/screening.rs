@@ -28,9 +28,10 @@ impl ScreeningPruner for CompiledSpec {
 
         for rule in &self.rules {
             if let Some(rule_depth) = rule.depth
-                && rule_depth != depth {
-                    continue;
-                }
+                && rule_depth != depth
+            {
+                continue;
+            }
 
             if !prefix_matches(&rule.prefix, parent_tokens) {
                 continue;

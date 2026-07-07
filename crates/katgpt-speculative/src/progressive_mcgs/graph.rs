@@ -99,12 +99,7 @@ impl<N: Clone> ProgressiveMcgs<N> {
     }
 
     /// Allocate a fresh node id (dense — always `len` before push).
-    fn push_node(
-        &mut self,
-        payload: N,
-        parent: Option<NodeId>,
-        branch: BranchId,
-    ) -> NodeId {
+    fn push_node(&mut self, payload: N, parent: Option<NodeId>, branch: BranchId) -> NodeId {
         let id = NodeId(self.payloads.len() as u32);
         assert!(
             id.idx() < self.max_nodes,
@@ -116,7 +111,8 @@ impl<N: Clone> ProgressiveMcgs<N> {
         self.primary_parent.push(parent);
         self.primary_children.push(Vec::with_capacity(4));
         self.branch_id.push(branch);
-        self.reference_edges.push(Vec::with_capacity(self.max_refs_per_node));
+        self.reference_edges
+            .push(Vec::with_capacity(self.max_refs_per_node));
         self.visits.push(0);
         self.cumulative_reward.push(0.0);
         // Ensure branch_best vector is large enough.
@@ -503,7 +499,11 @@ mod tests {
 
         // c1: 2 visits, cumulative = 1 + 2 = 3, Q ≈ 3/2 = 1.5
         assert_eq!(g.visits(c1), 2);
-        assert!((g.q_value(c1) - 1.5).abs() < 1e-3, "Q(c1) = {}", g.q_value(c1));
+        assert!(
+            (g.q_value(c1) - 1.5).abs() < 1e-3,
+            "Q(c1) = {}",
+            g.q_value(c1)
+        );
 
         // c2: 1 visit, cumulative = -1, Q = -1
         assert_eq!(g.visits(c2), 1);

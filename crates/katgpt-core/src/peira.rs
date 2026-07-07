@@ -608,10 +608,7 @@ unsafe fn avx2_outer_product_f64(
 #[target_feature(enable = "avx2,fma")]
 #[inline]
 unsafe fn avx2_dot_f64(a: &[f64], b: &[f64], len: usize) -> f64 {
-    use core::arch::x86_64::{
-        _mm256_add_pd, _mm256_loadu_pd,
-        _mm256_mul_pd, _mm256_setzero_pd,
-    };
+    use core::arch::x86_64::{_mm256_add_pd, _mm256_loadu_pd, _mm256_mul_pd, _mm256_setzero_pd};
 
     unsafe {
         let n_chunks = len / 8; // 2× __m256d accumulators
@@ -658,8 +655,7 @@ unsafe fn avx2_dot_f64(a: &[f64], b: &[f64], len: usize) -> f64 {
 #[inline]
 fn horizontal_sum_256d(v: core::arch::x86_64::__m256d) -> f64 {
     use core::arch::x86_64::{
-        _mm_add_pd, _mm_add_sd, _mm_unpackhi_pd,
-        _mm256_castpd256_pd128, _mm256_extractf128_pd,
+        _mm_add_pd, _mm_add_sd, _mm_unpackhi_pd, _mm256_castpd256_pd128, _mm256_extractf128_pd,
     };
     let hi = _mm256_extractf128_pd(v, 1);
     let lo = _mm256_castpd256_pd128(v);

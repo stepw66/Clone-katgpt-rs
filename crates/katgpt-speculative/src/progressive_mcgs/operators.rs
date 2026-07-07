@@ -188,7 +188,10 @@ mod tests {
         let g = build_two_branch_graph();
         // From branch 0, the top foreign node should be b2 (Breakthrough).
         let refs = cross_branch_top_n(&g, BranchId(0), 2);
-        assert!(refs.contains(&NodeId(4)), "expected b2 (NodeId 4) in refs: {refs:?}");
+        assert!(
+            refs.contains(&NodeId(4)),
+            "expected b2 (NodeId 4) in refs: {refs:?}"
+        );
         // All refs should be from branch 1.
         for r in &refs {
             assert_eq!(g.branch_of(*r), BranchId(1));
@@ -219,7 +222,12 @@ mod tests {
             "expected b2 (NodeId 4, highest Q) in aggregate: {agg:?}"
         );
         // Aggregate should have exactly 1 node per branch = 2 total.
-        assert_eq!(agg.len(), 2, "expected 2 nodes (1 per branch), got {}: {agg:?}", agg.len());
+        assert_eq!(
+            agg.len(),
+            2,
+            "expected 2 nodes (1 per branch), got {}: {agg:?}",
+            agg.len()
+        );
         // All aggregate nodes should be valid.
         for id in &agg {
             assert!(id.0 < g.len() as u32);

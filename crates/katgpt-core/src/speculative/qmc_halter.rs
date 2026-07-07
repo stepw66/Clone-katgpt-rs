@@ -321,7 +321,11 @@ pub fn union_bound_ceiling(k: usize, p: f32) -> f32 {
     // otherwise propagate through `min` and confuse the halter's `>=`
     // checks (NaN comparisons are false → never fires TargetMet, but the
     // returned ceiling would be NaN, leaking into diagnostics).
-    let clamped = if raw.is_finite() && raw > 0.0 { raw } else { 0.0 };
+    let clamped = if raw.is_finite() && raw > 0.0 {
+        raw
+    } else {
+        0.0
+    };
     clamped.min(1.0)
 }
 
@@ -505,19 +509,13 @@ mod tests {
     fn test_refused_floor_when_k_below_k_min() {
         let halter = QmcHalter::new(0.95, 4, 64);
         // k=3 < k_min=4 → RefusedFloor regardless of p / n_hits.
-        assert_eq!(
-            halter.evaluate(3, 0.5, 1),
-            QmcHaltDecision::RefusedFloor
-        );
+        assert_eq!(halter.evaluate(3, 0.5, 1), QmcHaltDecision::RefusedFloor);
     }
 
     #[test]
     fn test_refused_floor_zero_k() {
         let halter = QmcHalter::default();
-        assert_eq!(
-            halter.evaluate(0, 0.5, 0),
-            QmcHaltDecision::RefusedFloor
-        );
+        assert_eq!(halter.evaluate(0, 0.5, 0), QmcHaltDecision::RefusedFloor);
     }
 
     // ── QmcHalter::evaluate — HitObserved ──────────────────────────────────
@@ -591,7 +589,9 @@ mod tests {
         let halter = QmcHalter::default();
         let d = halter.evaluate(20, 0.1, 0); // 20 * 0.1 = 2.0 → saturated, 0 hits
         match d {
-            QmcHaltDecision::Halt { reason, ceiling, .. } => {
+            QmcHaltDecision::Halt {
+                reason, ceiling, ..
+            } => {
                 assert_eq!(reason, QmcHaltReason::CeilingSaturated);
                 assert!((ceiling - 1.0).abs() < 1e-6, "ceiling = {ceiling}");
             }
@@ -607,7 +607,9 @@ mod tests {
         let halter = QmcHalter::new(0.95, 1, 64);
         let d = halter.evaluate(19, 0.05, 0); // 19 * 0.05 = 0.95 → exactly target
         match d {
-            QmcHaltDecision::Halt { reason, ceiling, .. } => {
+            QmcHaltDecision::Halt {
+                reason, ceiling, ..
+            } => {
                 assert_eq!(reason, QmcHaltReason::TargetMet);
                 assert!((ceiling - 0.95).abs() < 1e-6, "ceiling = {ceiling}");
             }
@@ -621,7 +623,9 @@ mod tests {
         let halter = QmcHalter::new(0.95, 1, 64);
         let d = halter.evaluate(24, 0.04, 0); // 24 * 0.04 = 0.96
         match d {
-            QmcHaltDecision::Halt { reason, ceiling, .. } => {
+            QmcHaltDecision::Halt {
+                reason, ceiling, ..
+            } => {
                 assert_eq!(reason, QmcHaltReason::TargetMet);
                 assert!((ceiling - 0.96).abs() < 1e-6);
             }
@@ -685,10 +689,7 @@ mod tests {
         let d = halter.evaluate(4, f32::NAN, 0);
         match d {
             QmcHaltDecision::Continue { ceiling, gap } => {
-                assert!(
-                    !ceiling.is_nan(),
-                    "ceiling must be NaN-free, got {ceiling}"
-                );
+                assert!(!ceiling.is_nan(), "ceiling must be NaN-free, got {ceiling}");
                 assert_eq!(ceiling, 0.0);
                 assert!((gap - 0.95).abs() < 1e-6, "gap = {gap}");
             }
@@ -784,10 +785,7 @@ mod tests {
             .find(|&k| union_bound_ceiling(k, p) >= target)
             .expect("QMC should reach target within k=100");
 
-        assert!(
-            qmc_k < iid_k,
-            "QMC k={qmc_k} should be < i.i.d. k={iid_k}"
-        );
+        assert!(qmc_k < iid_k, "QMC k={qmc_k} should be < i.i.d. k={iid_k}");
         // Sanity: i.i.d. budget for p=0.1, target=0.95 is ~29.
         assert_eq!(iid_k, 29, "i.i.d. budget for p=0.1, target=0.95");
         assert_eq!(qmc_k, 10, "QMC budget for p=0.1, target=0.95");
@@ -813,7 +811,9 @@ mod tests {
             }
         }
         match final_decision {
-            QmcHaltDecision::Halt { reason, ceiling, .. } => {
+            QmcHaltDecision::Halt {
+                reason, ceiling, ..
+            } => {
                 assert_eq!(reason, QmcHaltReason::TargetMet);
                 assert_eq!(k, 10, "should halt at k=10 (k*p = 0.5 >= 0.5 target)");
                 assert!((ceiling - 0.5).abs() < 1e-6);
@@ -840,7 +840,9 @@ mod tests {
             }
         }
         match final_decision {
-            QmcHaltDecision::Halt { reason, ceiling, .. } => {
+            QmcHaltDecision::Halt {
+                reason, ceiling, ..
+            } => {
                 // k=10 → ceiling = min(1, 1.0) = 1.0 → CeilingSaturated
                 // (step 4 fires before step 5 TargetMet).
                 assert_eq!(reason, QmcHaltReason::CeilingSaturated);
@@ -868,7 +870,9 @@ mod tests {
             }
         }
         match final_decision {
-            QmcHaltDecision::Halt { reason, coverage, .. } => {
+            QmcHaltDecision::Halt {
+                reason, coverage, ..
+            } => {
                 assert_eq!(reason, QmcHaltReason::HitObserved);
                 assert!((coverage - 1.0).abs() < 1e-6);
             }
@@ -887,7 +891,10 @@ mod tests {
 
     #[test]
     fn test_decision_debug_formats() {
-        let d = QmcHaltDecision::Continue { ceiling: 0.5, gap: 0.45 };
+        let d = QmcHaltDecision::Continue {
+            ceiling: 0.5,
+            gap: 0.45,
+        };
         let s = format!("{d:?}");
         assert!(s.contains("Continue"));
         assert!(s.contains("0.5"));
@@ -921,7 +928,9 @@ mod tests {
                     sink = sink.wrapping_add(ceiling.to_bits() as u64);
                     sink = sink.wrapping_add(gap.to_bits() as u64);
                 }
-                QmcHaltDecision::Halt { ceiling, coverage, .. } => {
+                QmcHaltDecision::Halt {
+                    ceiling, coverage, ..
+                } => {
                     sink = sink.wrapping_add(ceiling.to_bits() as u64);
                     sink = sink.wrapping_add(coverage.to_bits() as u64);
                 }
@@ -930,9 +939,7 @@ mod tests {
         }
         let elapsed = start.elapsed();
         let ns_per_call = elapsed.as_nanos() as f64 / N as f64;
-        eprintln!(
-            "bench_evaluate_latency: {ns_per_call:.2} ns/call (sink={sink}, budget=50 ns)"
-        );
+        eprintln!("bench_evaluate_latency: {ns_per_call:.2} ns/call (sink={sink}, budget=50 ns)");
         // Budget: 50 ns (the decision is a few float ops + branches).
         assert!(
             ns_per_call < 50.0,

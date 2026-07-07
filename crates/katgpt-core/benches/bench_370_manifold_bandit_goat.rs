@@ -262,7 +262,9 @@ struct FlatThompson {
 impl FlatThompson {
     fn new(n_arms: usize, drift_rate: f32) -> Self {
         Self {
-            arms: (0..n_arms).map(|_| BayesianFilterArm::new(drift_rate)).collect(),
+            arms: (0..n_arms)
+                .map(|_| BayesianFilterArm::new(drift_rate))
+                .collect(),
         }
     }
 }
@@ -502,8 +504,10 @@ fn run_trial_shift<B: Bandit>(
 // ─── Gate functions ─────────────────────────────────────────────────────────
 
 fn gate_g1_structural_advantage() -> GateResult {
-    println!("\n--- G1: Structural Advantage (64 arms, 8 clusters, T={}, {} trials) ---",
-             T_G1, TRIALS_G1);
+    println!(
+        "\n--- G1: Structural Advantage (64 arms, 8 clusters, T={}, {} trials) ---",
+        T_G1, TRIALS_G1
+    );
 
     let mut flat_steps = Vec::with_capacity(TRIALS_G1);
     let mut hier_steps = Vec::with_capacity(TRIALS_G1);
@@ -515,7 +519,15 @@ fn gate_g1_structural_advantage() -> GateResult {
         // Flat.
         let mut dom = domain.clone();
         let mut flat = FlatThompson::new(N_ARMS, 0.0);
-        let r = run_trial(&mut flat, &mut dom, trial as u64, T_G1, optimal, N_CLUSTERS, THRESHOLD_G1);
+        let r = run_trial(
+            &mut flat,
+            &mut dom,
+            trial as u64,
+            T_G1,
+            optimal,
+            N_CLUSTERS,
+            THRESHOLD_G1,
+        );
         flat_steps.push(r.steps_to_threshold as u64);
 
         // Hierarchical.
@@ -523,7 +535,15 @@ fn gate_g1_structural_advantage() -> GateResult {
         let root = build_clustered_tree(N_CLUSTERS, ARMS_PER_CLUSTER, 0.0);
         let tree = LatentTaskTree::from_root(root, LatentTaskTreeConfig::default());
         let mut hier = HierarchicalThompson { tree };
-        let r = run_trial(&mut hier, &mut dom, trial as u64, T_G1, optimal, N_CLUSTERS, THRESHOLD_G1);
+        let r = run_trial(
+            &mut hier,
+            &mut dom,
+            trial as u64,
+            T_G1,
+            optimal,
+            N_CLUSTERS,
+            THRESHOLD_G1,
+        );
         hier_steps.push(r.steps_to_threshold as u64);
     }
 
@@ -534,7 +554,10 @@ fn gate_g1_structural_advantage() -> GateResult {
 
     println!("  flat Thompson    median steps-to-90%: {}", med_flat);
     println!("  hierarchical     median steps-to-90%: {}", med_hier);
-    println!("  ratio (hier/flat): {:.3}  (gate: ≤ {:.1})", ratio, RATIO_GATE_G1);
+    println!(
+        "  ratio (hier/flat): {:.3}  (gate: ≤ {:.1})",
+        ratio, RATIO_GATE_G1
+    );
 
     if passed {
         GateResult::pass(
@@ -588,11 +611,11 @@ fn gen_clustered_embeddings_bench(trial: u64) -> Vec<Vec<f32>> {
 }
 
 fn gate_g1_real_tree_structural_advantage() -> GateResult {
+    println!("\n--- G1-real: Structural Advantage with Phase 3 build() tree ---");
     println!(
-        "\n--- G1-real: Structural Advantage with Phase 3 build() tree ---"
+        "    ({} arms, {} clusters, T={}, {} trials)",
+        N_ARMS, N_CLUSTERS, T_G1, TRIALS_G1
     );
-    println!("    ({} arms, {} clusters, T={}, {} trials)",
-             N_ARMS, N_CLUSTERS, T_G1, TRIALS_G1);
 
     let mut flat_steps = Vec::with_capacity(TRIALS_G1);
     let mut hier_steps = Vec::with_capacity(TRIALS_G1);
@@ -608,7 +631,15 @@ fn gate_g1_real_tree_structural_advantage() -> GateResult {
         // Flat.
         let mut dom = domain.clone();
         let mut flat = FlatThompson::new(N_ARMS, 0.0);
-        let r = run_trial(&mut flat, &mut dom, trial as u64, T_G1, optimal, N_CLUSTERS, THRESHOLD_G1);
+        let r = run_trial(
+            &mut flat,
+            &mut dom,
+            trial as u64,
+            T_G1,
+            optimal,
+            N_CLUSTERS,
+            THRESHOLD_G1,
+        );
         flat_steps.push(r.steps_to_threshold as u64);
 
         // Hierarchical — real-constructed tree.
@@ -626,7 +657,15 @@ fn gate_g1_real_tree_structural_advantage() -> GateResult {
         n_top_clusters_seen.push(n_top);
 
         let mut hier = HierarchicalThompson { tree };
-        let r = run_trial(&mut hier, &mut dom, trial as u64, T_G1, optimal, N_CLUSTERS, THRESHOLD_G1);
+        let r = run_trial(
+            &mut hier,
+            &mut dom,
+            trial as u64,
+            T_G1,
+            optimal,
+            N_CLUSTERS,
+            THRESHOLD_G1,
+        );
         hier_steps.push(r.steps_to_threshold as u64);
     }
 
@@ -640,9 +679,14 @@ fn gate_g1_real_tree_structural_advantage() -> GateResult {
 
     println!("  flat Thompson    median steps-to-90%: {}", med_flat);
     println!("  hier (real tree) median steps-to-90%: {}", med_hier);
-    println!("  ratio (hier/flat): {:.3}  (gate: ≤ {:.1})", ratio, RATIO_GATE_G1);
-    println!("  real tree median top-level clusters: {} (domain has {})",
-             median_top, N_CLUSTERS);
+    println!(
+        "  ratio (hier/flat): {:.3}  (gate: ≤ {:.1})",
+        ratio, RATIO_GATE_G1
+    );
+    println!(
+        "  real tree median top-level clusters: {} (domain has {})",
+        median_top, N_CLUSTERS
+    );
 
     if passed {
         GateResult::pass(
@@ -691,7 +735,15 @@ fn gate_g1_real_phase_gate_sweep() -> GateResult {
         let optimal = domain.optimal_arm();
         let mut dom = domain.clone();
         let mut flat = FlatThompson::new(N_ARMS, 0.0);
-        let r = run_trial(&mut flat, &mut dom, trial as u64, T_G1, optimal, N_CLUSTERS, THRESHOLD_G1);
+        let r = run_trial(
+            &mut flat,
+            &mut dom,
+            trial as u64,
+            T_G1,
+            optimal,
+            N_CLUSTERS,
+            THRESHOLD_G1,
+        );
         flat_steps.push(r.steps_to_threshold as u64);
     }
     let med_flat = median_u64(&mut flat_steps);
@@ -717,13 +769,23 @@ fn gate_g1_real_phase_gate_sweep() -> GateResult {
             };
             let tree = LatentTaskTree::build(&embeddings, config);
             let mut hier = HierarchicalThompson { tree };
-            let r = run_trial(&mut hier, &mut dom, trial as u64, T_G1, optimal, N_CLUSTERS, THRESHOLD_G1);
+            let r = run_trial(
+                &mut hier,
+                &mut dom,
+                trial as u64,
+                T_G1,
+                optimal,
+                N_CLUSTERS,
+                THRESHOLD_G1,
+            );
             hier_steps.push(r.steps_to_threshold as u64);
         }
         let med_hier = median_u64(&mut hier_steps);
         let ratio = med_hier as f64 / med_flat as f64;
-        println!("  d={:<2}  hier median steps-to-90%: {:<6}  ratio: {:.3}",
-                 d, med_hier, ratio);
+        println!(
+            "  d={:<2}  hier median steps-to-90%: {:<6}  ratio: {:.3}",
+            d, med_hier, ratio
+        );
         sweep_results.push((d, med_hier, ratio));
         if ratio < best_ratio {
             best_ratio = ratio;
@@ -734,9 +796,13 @@ fn gate_g1_real_phase_gate_sweep() -> GateResult {
     let baseline_ratio = sweep_results[0].2; // d=0 ratio
     let improved = best_d > 0 && best_ratio < baseline_ratio;
     let verdict = if improved {
-        format!("d={best_d} improves G1 (ratio {best_ratio:.3} < baseline {baseline_ratio:.3}) — phase gate is a net win")
+        format!(
+            "d={best_d} improves G1 (ratio {best_ratio:.3} < baseline {baseline_ratio:.3}) — phase gate is a net win"
+        )
     } else {
-        format!("d=0 (ungated) is best (ratio {baseline_ratio:.3}) — phase gate does not improve G1 on this domain")
+        format!(
+            "d=0 (ungated) is best (ratio {baseline_ratio:.3}) — phase gate does not improve G1 on this domain"
+        )
     };
     println!("  verdict: {verdict}");
 
@@ -749,8 +815,12 @@ fn gate_g1_real_phase_gate_sweep() -> GateResult {
 }
 
 fn gate_g2_diversity() -> GateResult {
-    println!("\n--- G2: Diversity Preservation (T={}, {} trials, cluster-frac threshold {:.0}%) ---",
-             T_G2, TRIALS_G2, CLUSTER_FRAC_THRESHOLD * 100.0);
+    println!(
+        "\n--- G2: Diversity Preservation (T={}, {} trials, cluster-frac threshold {:.0}%) ---",
+        T_G2,
+        TRIALS_G2,
+        CLUSTER_FRAC_THRESHOLD * 100.0
+    );
 
     let mut flat_clusters = Vec::with_capacity(TRIALS_G2);
     let mut hier_clusters = Vec::with_capacity(TRIALS_G2);
@@ -764,9 +834,20 @@ fn gate_g2_diversity() -> GateResult {
 
         let mut dom = domain.clone();
         let mut flat = FlatThompson::new(N_ARMS, 0.0);
-        let r = run_trial(&mut flat, &mut dom, trial as u64, T_G2, optimal, N_CLUSTERS, 1.1);
+        let r = run_trial(
+            &mut flat,
+            &mut dom,
+            trial as u64,
+            T_G2,
+            optimal,
+            N_CLUSTERS,
+            1.1,
+        );
         flat_clusters.push(
-            r.cluster_counts.iter().filter(|&&c| c >= threshold_count).count() as u64,
+            r.cluster_counts
+                .iter()
+                .filter(|&&c| c >= threshold_count)
+                .count() as u64,
         );
         flat_rewards.push(r.cumulative_reward);
 
@@ -774,9 +855,20 @@ fn gate_g2_diversity() -> GateResult {
         let root = build_clustered_tree(N_CLUSTERS, ARMS_PER_CLUSTER, 0.0);
         let tree = LatentTaskTree::from_root(root, LatentTaskTreeConfig::default());
         let mut hier = HierarchicalThompson { tree };
-        let r = run_trial(&mut hier, &mut dom, trial as u64, T_G2, optimal, N_CLUSTERS, 1.1);
+        let r = run_trial(
+            &mut hier,
+            &mut dom,
+            trial as u64,
+            T_G2,
+            optimal,
+            N_CLUSTERS,
+            1.1,
+        );
         hier_clusters.push(
-            r.cluster_counts.iter().filter(|&&c| c >= threshold_count).count() as u64,
+            r.cluster_counts
+                .iter()
+                .filter(|&&c| c >= threshold_count)
+                .count() as u64,
         );
         hier_rewards.push(r.cumulative_reward);
     }
@@ -797,14 +889,31 @@ fn gate_g2_diversity() -> GateResult {
         1.0
     };
 
-    println!("  flat      median clusters (≥{:.0}% sel): {}  reward: {:.1}",
-             CLUSTER_FRAC_THRESHOLD * 100.0, med_flat_c, med_flat_r);
-    println!("  hier      median clusters (≥{:.0}% sel): {}  reward: {:.1}",
-             CLUSTER_FRAC_THRESHOLD * 100.0, med_hier_c, med_hier_r);
-    println!("  reward diff: {:.2}%  (matched: {})", reward_diff * 100.0, matched);
-    println!("  hier reward advantage: {:+.2}%  (exploitation gain from structure)",
-             hier_reward_advantage * 100.0);
-    println!("  ratio (hier/flat): {:.3}  (gate: ≥ {:.1})", ratio, RATIO_GATE_G2);
+    println!(
+        "  flat      median clusters (≥{:.0}% sel): {}  reward: {:.1}",
+        CLUSTER_FRAC_THRESHOLD * 100.0,
+        med_flat_c,
+        med_flat_r
+    );
+    println!(
+        "  hier      median clusters (≥{:.0}% sel): {}  reward: {:.1}",
+        CLUSTER_FRAC_THRESHOLD * 100.0,
+        med_hier_c,
+        med_hier_r
+    );
+    println!(
+        "  reward diff: {:.2}%  (matched: {})",
+        reward_diff * 100.0,
+        matched
+    );
+    println!(
+        "  hier reward advantage: {:+.2}%  (exploitation gain from structure)",
+        hier_reward_advantage * 100.0
+    );
+    println!(
+        "  ratio (hier/flat): {:.3}  (gate: ≥ {:.1})",
+        ratio, RATIO_GATE_G2
+    );
 
     // The plan expected hierarchical to visit MORE clusters (diversity claim
     // from the paper's curriculum-learning setting). Empirically, hierarchical
@@ -819,25 +928,33 @@ fn gate_g2_diversity() -> GateResult {
             "G2 diversity preservation",
             format!(
                 "hier {med_hier_c} ≥ {:.1}× flat {med_flat_c} at matched reward (±{:.0}%)",
-                RATIO_GATE_G2, REWARD_TOL_G2 * 100.0
+                RATIO_GATE_G2,
+                REWARD_TOL_G2 * 100.0
             ),
         )
     } else {
         let reason = if !matched {
             format!(
                 "reward mismatch ({:.1}% > {:.0}%) — hier exploits better (+{:.1}% reward), visits fewer clusters (correct bandit behavior; diversity claim is curriculum-learning-specific)",
-                reward_diff * 100.0, REWARD_TOL_G2 * 100.0, hier_reward_advantage * 100.0
+                reward_diff * 100.0,
+                REWARD_TOL_G2 * 100.0,
+                hier_reward_advantage * 100.0
             )
         } else {
-            format!("hier {med_hier_c} < {:.1}× flat {med_flat_c}", RATIO_GATE_G2)
+            format!(
+                "hier {med_hier_c} < {:.1}× flat {med_flat_c}",
+                RATIO_GATE_G2
+            )
         };
         GateResult::fail("G2 diversity preservation", reason)
     }
 }
 
 fn gate_g3_nonstationarity() -> GateResult {
-    println!("\n--- G3: Non-Stationarity Recovery (16 arms, shift @ {}, {} trials) ---",
-             SHIFT_STEP, TRIALS_G3);
+    println!(
+        "\n--- G3: Non-Stationarity Recovery (16 arms, shift @ {}, {} trials) ---",
+        SHIFT_STEP, TRIALS_G3
+    );
 
     let mut flat_no_filter = Vec::with_capacity(TRIALS_G3);
     let mut flat_filter = Vec::with_capacity(TRIALS_G3);
@@ -850,13 +967,27 @@ fn gate_g3_nonstationarity() -> GateResult {
         // (a) Flat, no filter.
         let mut dom = domain.clone();
         let mut s = FlatThompson::new(N_ARMS_G3, 0.0);
-        let (steps, _, _) = run_trial_shift(&mut s, &mut dom, trial as u64, T_G3, SHIFT_STEP, N_CLUSTERS_G3);
+        let (steps, _, _) = run_trial_shift(
+            &mut s,
+            &mut dom,
+            trial as u64,
+            T_G3,
+            SHIFT_STEP,
+            N_CLUSTERS_G3,
+        );
         flat_no_filter.push(steps as u64);
 
         // (b) Flat, with filter (ablation: isolates filter contribution).
         let mut dom = domain.clone();
         let mut s = FlatThompson::new(N_ARMS_G3, DRIFT_RATE);
-        let (steps, _, _) = run_trial_shift(&mut s, &mut dom, trial as u64, T_G3, SHIFT_STEP, N_CLUSTERS_G3);
+        let (steps, _, _) = run_trial_shift(
+            &mut s,
+            &mut dom,
+            trial as u64,
+            T_G3,
+            SHIFT_STEP,
+            N_CLUSTERS_G3,
+        );
         flat_filter.push(steps as u64);
 
         // (c) Hierarchical, with filter.
@@ -864,13 +995,27 @@ fn gate_g3_nonstationarity() -> GateResult {
         let root = build_clustered_tree(N_CLUSTERS_G3, ARMS_PER_CLUSTER_G3, DRIFT_RATE);
         let tree = LatentTaskTree::from_root(root, LatentTaskTreeConfig::default());
         let mut s = HierarchicalThompson { tree };
-        let (steps, _, _) = run_trial_shift(&mut s, &mut dom, trial as u64, T_G3, SHIFT_STEP, N_CLUSTERS_G3);
+        let (steps, _, _) = run_trial_shift(
+            &mut s,
+            &mut dom,
+            trial as u64,
+            T_G3,
+            SHIFT_STEP,
+            N_CLUSTERS_G3,
+        );
         hier_filter.push(steps as u64);
 
         // (d) Sliding-window proxy for Dual-Pool CGSP.
         let mut dom = domain.clone();
         let mut s = SlidingWindowThompson::new(N_ARMS_G3, SLIDING_WINDOW_SIZE);
-        let (steps, _, _) = run_trial_shift(&mut s, &mut dom, trial as u64, T_G3, SHIFT_STEP, N_CLUSTERS_G3);
+        let (steps, _, _) = run_trial_shift(
+            &mut s,
+            &mut dom,
+            trial as u64,
+            T_G3,
+            SHIFT_STEP,
+            N_CLUSTERS_G3,
+        );
         sliding.push(steps as u64);
     }
 
@@ -883,10 +1028,22 @@ fn gate_g3_nonstationarity() -> GateResult {
     let passed = ratio <= RATIO_GATE_G3 as f64;
 
     println!("  flat (no filter)          median recovery: {}", med_flat);
-    println!("  flat (filter={})          median recovery: {}", DRIFT_RATE, med_flat_f);
-    println!("  hier (filter={})          median recovery: {}", DRIFT_RATE, med_hier_f);
-    println!("  sliding-window (W={})     median recovery: {}", SLIDING_WINDOW_SIZE, med_slide);
-    println!("  ratio (hier+filter / flat-no-filter): {:.3}  (gate: ≤ {:.1})", ratio, RATIO_GATE_G3);
+    println!(
+        "  flat (filter={})          median recovery: {}",
+        DRIFT_RATE, med_flat_f
+    );
+    println!(
+        "  hier (filter={})          median recovery: {}",
+        DRIFT_RATE, med_hier_f
+    );
+    println!(
+        "  sliding-window (W={})     median recovery: {}",
+        SLIDING_WINDOW_SIZE, med_slide
+    );
+    println!(
+        "  ratio (hier+filter / flat-no-filter): {:.3}  (gate: ≤ {:.1})",
+        ratio, RATIO_GATE_G3
+    );
 
     if passed {
         GateResult::pass(
@@ -908,8 +1065,12 @@ fn gate_g3_nonstationarity() -> GateResult {
 }
 
 fn gate_g4_latency() -> GateResult {
-    println!("\n--- G4: Latency (depth {}, branching {}, {} leaves) ---",
-             DEPTH_G4, BRANCHING_G4, 1 << DEPTH_G4);
+    println!(
+        "\n--- G4: Latency (depth {}, branching {}, {} leaves) ---",
+        DEPTH_G4,
+        BRANCHING_G4,
+        1 << DEPTH_G4
+    );
 
     let config = LatentTaskTreeConfig::default();
 
@@ -937,7 +1098,9 @@ fn gate_g4_latency() -> GateResult {
             sink = sink.wrapping_add(tree.sample(&mut rng));
         }
         let dt = t0.elapsed();
-        if sink == usize::MAX { std::process::abort(); }
+        if sink == usize::MAX {
+            std::process::abort();
+        }
         sample_ns.push(dt.as_nanos() as u64 / BATCH as u64);
     }
     let med_sample = median_duration_ns_arr(&mut sample_ns);
@@ -955,8 +1118,14 @@ fn gate_g4_latency() -> GateResult {
     }
     let med_observe = median_duration_ns_arr(&mut observe_ns);
 
-    println!("  sample  p50: {} ns  (gate: ≤ {} ns)", med_sample, LATENCY_TARGET_SAMPLE_NS);
-    println!("  observe p50: {} ns  (gate: ≤ {} ns)", med_observe, LATENCY_TARGET_OBSERVE_NS);
+    println!(
+        "  sample  p50: {} ns  (gate: ≤ {} ns)",
+        med_sample, LATENCY_TARGET_SAMPLE_NS
+    );
+    println!(
+        "  observe p50: {} ns  (gate: ≤ {} ns)",
+        med_observe, LATENCY_TARGET_OBSERVE_NS
+    );
 
     // ── Alloc-free hot path ──
     let (_, sample_allocs) = alloc_delta(|| {
@@ -974,8 +1143,8 @@ fn gate_g4_latency() -> GateResult {
     println!("  sample  allocs/100 calls: {}  (gate: 0)", sample_allocs);
     println!("  observe allocs/100 calls: {}  (gate: 0)", observe_allocs);
 
-    let latency_pass = med_sample <= LATENCY_TARGET_SAMPLE_NS
-        && med_observe <= LATENCY_TARGET_OBSERVE_NS;
+    let latency_pass =
+        med_sample <= LATENCY_TARGET_SAMPLE_NS && med_observe <= LATENCY_TARGET_OBSERVE_NS;
     let alloc_pass = sample_allocs == 0 && observe_allocs == 0;
 
     if latency_pass && alloc_pass {
@@ -988,13 +1157,21 @@ fn gate_g4_latency() -> GateResult {
     } else {
         let mut reasons = Vec::new();
         if med_sample > LATENCY_TARGET_SAMPLE_NS {
-            reasons.push(format!("sample {}ns > {}", med_sample, LATENCY_TARGET_SAMPLE_NS));
+            reasons.push(format!(
+                "sample {}ns > {}",
+                med_sample, LATENCY_TARGET_SAMPLE_NS
+            ));
         }
         if med_observe > LATENCY_TARGET_OBSERVE_NS {
-            reasons.push(format!("observe {}ns > {}", med_observe, LATENCY_TARGET_OBSERVE_NS));
+            reasons.push(format!(
+                "observe {}ns > {}",
+                med_observe, LATENCY_TARGET_OBSERVE_NS
+            ));
         }
         if !alloc_pass {
-            reasons.push(format!("allocs sample={sample_allocs} observe={observe_allocs}"));
+            reasons.push(format!(
+                "allocs sample={sample_allocs} observe={observe_allocs}"
+            ));
         }
         GateResult::fail("G4 latency + alloc-free", reasons.join("; "))
     }
@@ -1060,13 +1237,21 @@ fn gate_g5_reproducibility() -> GateResult {
     if blake3_match && seq_match && post_match {
         GateResult::pass(
             "G5 bit-reproducibility",
-            format!("BLAKE3 + pre/post-observe sequences all byte-identical over {G5_SAMPLES} samples"),
+            format!(
+                "BLAKE3 + pre/post-observe sequences all byte-identical over {G5_SAMPLES} samples"
+            ),
         )
     } else {
         let mut reasons = Vec::new();
-        if !blake3_match { reasons.push("BLAKE3 mismatch"); }
-        if !seq_match { reasons.push("pre-observe sequence mismatch"); }
-        if !post_match { reasons.push("post-observe sequence mismatch"); }
+        if !blake3_match {
+            reasons.push("BLAKE3 mismatch");
+        }
+        if !seq_match {
+            reasons.push("pre-observe sequence mismatch");
+        }
+        if !post_match {
+            reasons.push("post-observe sequence mismatch");
+        }
         GateResult::fail("G5 bit-reproducibility", reasons.join("; "))
     }
 }
@@ -1074,7 +1259,9 @@ fn gate_g5_reproducibility() -> GateResult {
 // ─── Main ───────────────────────────────────────────────────────────────────
 
 fn main() {
-    println!("=== Plan 370 - Manifold Bandit GOAT Gate (Phase 2 + Phase 3 G1-real + Phase 4 T4.2 sweep) ===");
+    println!(
+        "=== Plan 370 - Manifold Bandit GOAT Gate (Phase 2 + Phase 3 G1-real + Phase 4 T4.2 sweep) ==="
+    );
 
     let gates = [
         gate_g1_structural_advantage(),

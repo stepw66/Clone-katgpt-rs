@@ -200,11 +200,7 @@ fn dec_route_greedy(
 // ── A* via existing pathfinder ───────────────────────────────
 
 /// Build a pathfinder-compatible `Vec<Vec<char>>` grid from a blocked set.
-fn build_char_grid(
-    w: usize,
-    h: usize,
-    blocked: &HashSet<(usize, usize)>,
-) -> Vec<Vec<char>> {
+fn build_char_grid(w: usize, h: usize, blocked: &HashSet<(usize, usize)>) -> Vec<Vec<char>> {
     (0..h)
         .map(|y| {
             (0..w)
@@ -232,8 +228,7 @@ fn astar_route_cost(
 fn measure(scenario: &Scenario) -> Measurement {
     // A* reference (operates on char grid).
     let grid = build_char_grid(W, H, &scenario.blocked);
-    let astar = astar_route_cost(&grid, scenario.start, scenario.goal)
-        .unwrap_or((0, 0));
+    let astar = astar_route_cost(&grid, scenario.start, scenario.goal).unwrap_or((0, 0));
     let (astar_cost, astar_len) = astar;
 
     // DEC: Dijkstra potential → greedy descent.
@@ -459,13 +454,13 @@ fn validate_dec_flow_field(scenario: &Scenario) -> bool {
 fn print_aggregate(label: &str, agg: &Aggregate, gate_ratio: f64, gate_success: f64) {
     println!("┌─ {label} ───────────────────────────────────────────");
     println!("│  Scenarios: {}", agg.n);
-    println!(
-        "│  Mean cost ratio (DEC/A*): {:.4}",
-        agg.mean_cost_ratio
-    );
+    println!("│  Mean cost ratio (DEC/A*): {:.4}", agg.mean_cost_ratio);
     println!("│  Max  cost ratio (DEC/A*): {:.4}", agg.max_cost_ratio);
     println!("│  Mean length ratio:        {:.4}", agg.mean_len_ratio);
-    println!("│  Success rate:              {:.2}%", agg.success_rate * 100.0);
+    println!(
+        "│  Success rate:              {:.2}%",
+        agg.success_rate * 100.0
+    );
     if let Some((name, r)) = &agg.worst_case {
         println!("│  Worst case: {name}  ratio={r:.4}");
     }
@@ -535,7 +530,10 @@ fn main() {
 
     // ── G4: Obstacle density scaling ───────────────────────────────
     println!("┌─ G4: Obstacle density scaling ──────────────────────────────────");
-    println!("│  {:>8}  {:>8}  {:>10}  {:>10}  {:>10}  {:>12}", "density", "fair_n", "mean_cost", "max_cost", "success%", "mean_len");
+    println!(
+        "│  {:>8}  {:>8}  {:>10}  {:>10}  {:>10}  {:>12}",
+        "density", "fair_n", "mean_cost", "max_cost", "success%", "mean_len"
+    );
     let mut g4_all_pass = true;
     for &density in &[5u8, 10, 15, 20, 25] {
         let scenarios = make_multi_random(15, density);
@@ -556,7 +554,10 @@ fn main() {
             if ratio_ok && success_ok { "✅" } else { "❌" }
         );
     }
-    println!("│  Gate: ratios stable across 5%–25% (fair cases only) → {}", if g4_all_pass { "✅ PASS" } else { "❌ FAIL" });
+    println!(
+        "│  Gate: ratios stable across 5%–25% (fair cases only) → {}",
+        if g4_all_pass { "✅ PASS" } else { "❌ FAIL" }
+    );
     println!("└──────────────────────────────────────────────────────────────────────────");
     println!();
 
@@ -589,7 +590,9 @@ fn main() {
     if all_pass {
         println!("  ✅ DEC WINS on quality — promote `dec_terrain_ai` to default feature.");
         println!("     Note: speed gate still blocked by Issue 013 (remove_face O(n) scan).");
-        println!("           Quality is at parity with A*; incremental speed-up pending Issue 013.");
+        println!(
+            "           Quality is at parity with A*; incremental speed-up pending Issue 013."
+        );
     } else {
         println!("  ❌ DEC LOSES on quality — keep `dec_terrain_ai` opt-in.");
         println!("     Failing gates indicate route quality regressions vs A*.");
@@ -698,9 +701,16 @@ fn bench_multi_agent_amortisation(scenario: &Scenario) {
     let astar_per_agent_us = astar_us / k_agents as f64;
 
     println!("│  DEC  build (shared):     {build_us:>9.1} μs");
-    println!("│  DEC  routing ({k_agents} agents): {route_us:>9.1} μs   per-route: {:>7.2} μs", route_us / k_agents as f64);
-    println!("│  DEC  total:              {dec_total_us:>9.1} μs   per-agent: {dec_per_agent_us:>7.2} μs   reached: {dec_reached}/{k_agents}");
-    println!("│  A*   total:              {astar_us:>9.1} μs   per-agent: {astar_per_agent_us:>7.2} μs   reached: {astar_reached}/{k_agents}");
+    println!(
+        "│  DEC  routing ({k_agents} agents): {route_us:>9.1} μs   per-route: {:>7.2} μs",
+        route_us / k_agents as f64
+    );
+    println!(
+        "│  DEC  total:              {dec_total_us:>9.1} μs   per-agent: {dec_per_agent_us:>7.2} μs   reached: {dec_reached}/{k_agents}"
+    );
+    println!(
+        "│  A*   total:              {astar_us:>9.1} μs   per-agent: {astar_per_agent_us:>7.2} μs   reached: {astar_reached}/{k_agents}"
+    );
     if astar_per_agent_us > 0.0 {
         let speedup = astar_per_agent_us / dec_per_agent_us.max(1e-9);
         let breakeven = (build_us / astar_per_agent_us.max(1e-9)).ceil() as u64;

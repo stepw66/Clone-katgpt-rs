@@ -661,8 +661,8 @@ pub unsafe fn project_ternary_simd_wasm32(
     n_elements: usize,
 ) -> f32 {
     use core::arch::wasm32::{
-        f32x4_add, f32x4_extract_lane, f32x4_splat, f32x4_sub, i32x4, i32x4_ne, i32x4_splat,
-        v128, v128_and, v128_bitselect, v128_load,
+        f32x4_add, f32x4_extract_lane, f32x4_splat, f32x4_sub, i32x4, i32x4_ne, i32x4_splat, v128,
+        v128_and, v128_bitselect, v128_load,
     };
 
     debug_assert!(input.len() >= n_elements);
@@ -790,15 +790,11 @@ pub unsafe fn project_ternary_simd(
     #[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
     {
         // SAFETY: forwarded to caller precondition (see function doc).
-        unsafe {
-            project_ternary_simd_wasm32(input, positive_bits, negative_bits, n_elements)
-        }
+        unsafe { project_ternary_simd_wasm32(input, positive_bits, negative_bits, n_elements) }
     }
     #[cfg(not(all(target_arch = "wasm32", target_feature = "simd128")))]
     {
         // SAFETY: forwarded to caller precondition (see function doc).
-        unsafe {
-            project_ternary_simd_scalar(input, positive_bits, negative_bits, n_elements)
-        }
+        unsafe { project_ternary_simd_scalar(input, positive_bits, negative_bits, n_elements) }
     }
 }

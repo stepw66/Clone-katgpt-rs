@@ -168,6 +168,7 @@ fn forward(
         gate_scale,
         zero_init: false,
         activation,
+        ..Default::default()
     };
     let mut output = vec![0.0f32; n * d];
     tiled_attention_parallax_forward(
@@ -303,6 +304,7 @@ fn experiment_adamw_sigmoid_vs_softmax() {
         gate_scale: 0.0, // base attention, no correction
         zero_init: true,
         activation: ParallaxActivation::Softmax,
+        ..Default::default()
     };
     let mut target = vec![0.0f32; n * d];
     tiled_attention_parallax_forward(
@@ -594,6 +596,7 @@ fn experiment_adamw_learnable_gate() {
         gate_scale: 0.0,
         zero_init: true,
         activation: ParallaxActivation::Softmax,
+        ..Default::default()
     };
     let mut target = vec![0.0f32; n * d];
     tiled_attention_parallax_forward(
@@ -633,6 +636,7 @@ fn experiment_adamw_learnable_gate() {
             gate_scale: gate_sm,
             zero_init: false,
             activation: ParallaxActivation::Softmax,
+            ..Default::default()
         };
         let mut out_sm = vec![0.0f32; n * d];
         tiled_attention_parallax_forward(
@@ -654,6 +658,7 @@ fn experiment_adamw_learnable_gate() {
             gate_scale: gate_sig,
             zero_init: false,
             activation: ParallaxActivation::Sigmoid,
+            ..Default::default()
         };
         let mut out_sig = vec![0.0f32; n * d];
         tiled_attention_parallax_forward(
@@ -1024,6 +1029,7 @@ fn experiment_sink_injection() {
         gate_scale: 0.0,
         zero_init: true,
         activation: ParallaxActivation::Softmax,
+        ..Default::default()
     };
     let mut target = vec![0.0f32; n * d];
     tiled_attention_parallax_forward(
@@ -1503,6 +1509,7 @@ fn experiment_structured_cor_boosting() {
             gate_scale: 0.0, // no correction
             zero_init: true,
             activation: ParallaxActivation::Softmax,
+            ..Default::default()
         };
         let mut base_output = vec![0.0f32; n * d];
         tiled_attention_parallax_forward(
@@ -1848,6 +1855,7 @@ fn experiment_reverse_cor() {
                 gate_scale: 0.0,
                 zero_init: true,
                 activation: ParallaxActivation::Softmax,
+                ..Default::default()
             };
             let mut base_output = vec![0.0f32; n * d];
             tiled_attention_parallax_forward(

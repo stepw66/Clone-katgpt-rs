@@ -18,11 +18,11 @@
 
 #![cfg(feature = "clr")]
 
+use katgpt_core::simd::simd_dot_f32;
 use katgpt_rs::clr::{
     Claim, ClrConfig, ClrScratch, DirectionVectorSource, FnClaimExtractor,
     SigmoidProjectionVerifier, Trajectory, VoteResult, clr_vote,
 };
-use katgpt_core::simd::simd_dot_f32;
 
 // ──────────────────────────────────────────────────────────────────────────
 // Direction source (flat row-major Vec<f32>)
@@ -114,15 +114,19 @@ fn main() {
     // and print it as "answer-{label}").
     let trajectories: Vec<Trajectory<u8>> = vec![
         // Cluster A — outcome 42, both clean. This should be the winner.
-        build_traj(42, 0, &directions, /*flawed_m*/ None, /*tokens*/ 100),
+        build_traj(
+            42,
+            0,
+            &directions,
+            /*flawed_m*/ None,
+            /*tokens*/ 100,
+        ),
         build_traj(42, 1, &directions, None, 80),
-
         // Cluster B — outcome 43, one trajectory flawed (claim #2 orthogonal to
         // its direction). Lower Σ r_k than A because the flawed trajectory's r_k
         // is dragged down by the `(mean)^5` gate.
         build_traj(43, 2, &directions, None, 90),
         build_traj(43, 3, &directions, Some(2), 70),
-
         // Cluster C — outcome 99, both clean but a different answer entirely.
         build_traj(99, 4, &directions, None, 50),
         build_traj(99, 5, &directions, None, 60),

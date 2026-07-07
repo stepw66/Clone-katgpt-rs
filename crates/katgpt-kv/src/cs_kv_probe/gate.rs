@@ -187,8 +187,14 @@ mod tests {
             expected.iter().take(k).map(|(g, _)| *g).collect();
         for (g, &b) in out.iter().enumerate() {
             match b.is_finite() {
-                true => assert!(top_k_groups.contains(&g), "group {g} finite but not in top-{k}"),
-                false => assert!(!top_k_groups.contains(&g), "group {g} pruned but in top-{k}"),
+                true => assert!(
+                    top_k_groups.contains(&g),
+                    "group {g} finite but not in top-{k}"
+                ),
+                false => assert!(
+                    !top_k_groups.contains(&g),
+                    "group {g} pruned but in top-{k}"
+                ),
             }
         }
     }
@@ -207,7 +213,11 @@ mod tests {
             if a.is_finite() && b.is_finite() {
                 assert!((a - b).abs() < 1e-6, "wrapper divergence: {a} vs {b}");
             } else {
-                assert_eq!(a.is_finite(), b.is_finite(), "prune/retain mismatch: {a} vs {b}");
+                assert_eq!(
+                    a.is_finite(),
+                    b.is_finite(),
+                    "prune/retain mismatch: {a} vs {b}"
+                );
             }
         }
     }
@@ -221,7 +231,11 @@ mod tests {
         let budget = DensityBudget::for_dim(4);
         let mut out = vec![0.0_f32; 4];
         run(&r, &budget, 1.0, &mut out); // ca=1 → retain all
-        assert!(out[2].abs() < 1e-5, "top group bias should be ~0, got {}", out[2]);
+        assert!(
+            out[2].abs() < 1e-5,
+            "top group bias should be ~0, got {}",
+            out[2]
+        );
     }
 
     #[test]
@@ -233,7 +247,10 @@ mod tests {
         let finite = out.iter().filter(|b| b.is_finite()).count();
         assert_eq!(finite, budget.k_sparse);
         // And the single retained group is the global max (group 1, score 0.9).
-        assert!(out[1].abs() < 1e-5, "sparse floor should retain the top group");
+        assert!(
+            out[1].abs() < 1e-5,
+            "sparse floor should retain the top group"
+        );
     }
 
     #[test]
@@ -246,7 +263,10 @@ mod tests {
         let mut out = vec![0.0_f32; 4];
         run(&r, &budget, 1.0, &mut out);
         let finite_count = out.iter().filter(|b| b.is_finite()).count();
-        assert!(finite_count > 0, "at least one group must be retained at ca=1.0");
+        assert!(
+            finite_count > 0,
+            "at least one group must be retained at ca=1.0"
+        );
         for &b in out.iter() {
             // No NaN permitted anywhere. Pruned entries are -∞ (finite==false
             // but is_nan()==false too); retained entries are finite.

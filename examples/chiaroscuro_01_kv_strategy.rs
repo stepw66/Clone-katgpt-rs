@@ -38,7 +38,11 @@ fn main() {
     let tau_lo = calibrator.tau_lo_mut();
     let tau_hi = calibrator.tau_hi_mut();
     println!("Calibrated τ_lo = {tau_lo:.4}, τ_hi = {tau_hi:.4}");
-    println!("Observations: {} (window {})\n", calibrator.count(), calibrator.window_len());
+    println!(
+        "Observations: {} (window {})\n",
+        calibrator.count(),
+        calibrator.window_len()
+    );
 
     // Apply per-token strategy.
     let mut counts = [0u64; ChiaroscuroKvStrategy::NUM_VARIANTS];
@@ -49,7 +53,10 @@ fn main() {
 
     let total = keys.len() as u64;
     println!("Per-token strategy distribution:");
-    for (i, label) in ["DctTruncated", "Quantized   ", "FullPrecision"].iter().enumerate() {
+    for (i, label) in ["DctTruncated", "Quantized   ", "FullPrecision"]
+        .iter()
+        .enumerate()
+    {
         let c = counts[i];
         let pct = 100.0 * c as f32 / total as f32;
         let ratio = ChiaroscuroKvStrategy::from_index(i)

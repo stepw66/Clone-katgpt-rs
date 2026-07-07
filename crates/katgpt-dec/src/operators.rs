@@ -65,11 +65,7 @@ pub fn exterior_derivative(cx: &CellComplex, input: &CochainField) -> CochainFie
 /// `output` must have `rank == input.rank + 1`, `dim == input.dim`, and
 /// `data.len() >= cx.n_cells(input.rank + 1) * dim`. Its data is zero-filled then accumulated.
 #[inline]
-pub fn exterior_derivative_into(
-    cx: &CellComplex,
-    input: &CochainField,
-    output: &mut CochainField,
-) {
+pub fn exterior_derivative_into(cx: &CellComplex, input: &CochainField, output: &mut CochainField) {
     let k = input.rank;
     let dim = input.dim;
     output.data.fill(0.0);
@@ -143,11 +139,7 @@ pub fn codifferential(cx: &CellComplex, input: &CochainField) -> CochainField {
 /// `output` must have `rank == input.rank - 1`, `dim == input.dim`, and
 /// `data.len() >= cx.n_cells(input.rank - 1) * dim`. Its data is zero-filled then accumulated.
 #[inline]
-pub fn codifferential_into(
-    cx: &CellComplex,
-    input: &CochainField,
-    output: &mut CochainField,
-) {
+pub fn codifferential_into(cx: &CellComplex, input: &CochainField, output: &mut CochainField) {
     let k = input.rank;
     let dim = input.dim;
     output.data.fill(0.0);
@@ -214,9 +206,17 @@ pub fn hodge_laplacian(cx: &CellComplex, input: &CochainField) -> CochainField {
     let mut output = CochainField::zeros(k, n, dim);
     // Allocate scratch for the two intermediate ranks (k+1, k-1) and one result accumulator (k).
     let mut scratch_upper = CochainField::zeros(k + 1, cx.n_cells(k + 1), dim);
-    let mut scratch_lower = CochainField::zeros(k.saturating_sub(1), cx.n_cells(k.saturating_sub(1)), dim);
+    let mut scratch_lower =
+        CochainField::zeros(k.saturating_sub(1), cx.n_cells(k.saturating_sub(1)), dim);
     let mut scratch_result = CochainField::zeros(k, n, dim);
-    hodge_laplacian_into(cx, input, &mut output, &mut scratch_upper, &mut scratch_lower, &mut scratch_result);
+    hodge_laplacian_into(
+        cx,
+        input,
+        &mut output,
+        &mut scratch_upper,
+        &mut scratch_lower,
+        &mut scratch_result,
+    );
     output
 }
 
@@ -304,11 +304,7 @@ pub fn graph_laplacian(cx: &CellComplex, potential: &CochainField) -> CochainFie
 /// unless `cx` is an unmutated `grid_2d` product — in that case the 5-point-stencil
 /// fast path writes every element exactly once (no zero-fill).
 #[inline]
-pub fn graph_laplacian_into(
-    cx: &CellComplex,
-    potential: &CochainField,
-    output: &mut CochainField,
-) {
+pub fn graph_laplacian_into(cx: &CellComplex, potential: &CochainField, output: &mut CochainField) {
     debug_assert_eq!(potential.rank, 0, "graph_laplacian requires rank-0 cochain");
     // Plan 357 G5 fix: regular grids take the cache-friendly 5-point-stencil
     // fast path. The generic edge-list path is correct but does scattered
@@ -448,8 +444,7 @@ fn graph_laplacian_grid_into(
             let base = row + x * dim;
             let has_left = x > 0;
             let has_right = x < w - 1;
-            let deg = (has_left as u8 + has_right as u8
-                + has_up as u8 + has_down as u8) as f32;
+            let deg = (has_left as u8 + has_right as u8 + has_up as u8 + has_down as u8) as f32;
             // wrapping_sub/add: offsets are only dereferenced when has_left/has_right
             // is true, so the underflowing values at corners (x==0 or x==w-1) are
             // never read. Raw-pointer arithmetic on out-of-bounds offsets is sound
@@ -462,10 +457,18 @@ fn graph_laplacian_grid_into(
                 for c in 0..dim {
                     let center = *p.add(base + c);
                     let mut acc = deg * center;
-                    if has_left { acc -= *p.add(left + c); }
-                    if has_right { acc -= *p.add(right + c); }
-                    if has_up { acc -= *p.add(up + c); }
-                    if has_down { acc -= *p.add(down + c); }
+                    if has_left {
+                        acc -= *p.add(left + c);
+                    }
+                    if has_right {
+                        acc -= *p.add(right + c);
+                    }
+                    if has_up {
+                        acc -= *p.add(up + c);
+                    }
+                    if has_down {
+                        acc -= *p.add(down + c);
+                    }
                     *o.add(base + c) = acc;
                 }
             }
@@ -491,8 +494,12 @@ fn graph_laplacian_grid_into(
                     for c in 0..dim {
                         let center = *p.add(base + c);
                         let mut acc = 3.0 * center;
-                        if has_left { acc -= *p.add(left + c); }
-                        if has_right { acc -= *p.add(right + c); }
+                        if has_left {
+                            acc -= *p.add(left + c);
+                        }
+                        if has_right {
+                            acc -= *p.add(right + c);
+                        }
                         acc -= *p.add(up + c);
                         acc -= *p.add(down + c);
                         *o.add(base + c) = acc;
@@ -755,7 +762,11 @@ mod tests {
         let mut cx = CellComplex::grid_2d(5, 5);
         assert_eq!(cx.grid_dims(), Some((5, 5)));
         cx.remove_face(0);
-        assert_eq!(cx.grid_dims(), None, "grid_dims must clear after remove_face");
+        assert_eq!(
+            cx.grid_dims(),
+            None,
+            "grid_dims must clear after remove_face"
+        );
     }
 
     #[test]
@@ -763,10 +774,18 @@ mod tests {
         // Same contract for remove_cell at every rank.
         let mut cx = CellComplex::grid_2d(5, 5);
         cx.remove_cell(0, 0); // remove vertex 0
-        assert_eq!(cx.grid_dims(), None, "grid_dims must clear after remove_cell(0)");
+        assert_eq!(
+            cx.grid_dims(),
+            None,
+            "grid_dims must clear after remove_cell(0)"
+        );
 
         let mut cx = CellComplex::grid_2d(5, 5);
         cx.remove_cell(1, 0); // remove edge 0
-        assert_eq!(cx.grid_dims(), None, "grid_dims must clear after remove_cell(1)");
+        assert_eq!(
+            cx.grid_dims(),
+            None,
+            "grid_dims must clear after remove_cell(1)"
+        );
     }
 }

@@ -21,7 +21,10 @@ fn main() {
 
         println!("Initial state:");
         println!("  segments:           {n_segments}");
-        println!("  unresolved pairs:   {} (upper bound)", stopper.unresolved_count());
+        println!(
+            "  unresolved pairs:   {} (upper bound)",
+            stopper.unresolved_count()
+        );
         println!("  initial uncertainty: {:.4}", stopper.uncertainty());
 
         // Simulate BCKVSS-style pruning: only 60% of pairs are collider-relevant.

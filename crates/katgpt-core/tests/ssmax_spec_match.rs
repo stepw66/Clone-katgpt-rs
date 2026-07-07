@@ -37,7 +37,7 @@
 #![cfg(feature = "ssmax_temperature")]
 #![cfg(test)]
 
-use katgpt_core::ssmax::{apply_ssmax_inplace, SsmaxConfig, SsmaxMode};
+use katgpt_core::ssmax::{SsmaxConfig, SsmaxMode, apply_ssmax_inplace};
 
 // ── Spec: the dilution bound formula ────────────────────────────────────
 
@@ -160,9 +160,15 @@ fn spec_alpha_gold_strict_mono_in_c() {
         );
         checked += 1;
     }
-    assert!(checked > 8000, "must have checked >8000 strict pairs (got {checked})");
+    assert!(
+        checked > 8000,
+        "must have checked >8000 strict pairs (got {checked})"
+    );
     // Ties are expected but should be a minority.
-    assert!(ties < 2000, "too many f64-saturation ties ({ties}) — c-range too wide?");
+    assert!(
+        ties < 2000,
+        "too many f64-saturation ties ({ties}) — c-range too wide?"
+    );
 }
 
 /// **Lean theorem `ssmax_dominates_base` (empirical ∃-check).**
@@ -343,8 +349,7 @@ fn spec_config_caches_log_n_correctly() {
 fn proofs_directory_exists() {
     // CARGO_MANIFEST_DIR is `crates/katgpt-core` — the `.proofs/` dir is at
     // the repo root, two levels up.
-    let repo_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../");
+    let repo_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../");
     let proofs_dir = repo_root.join(".proofs");
     assert!(
         proofs_dir.exists(),
@@ -353,9 +358,7 @@ fn proofs_directory_exists() {
         proofs_dir.display()
     );
     assert!(
-        proofs_dir
-            .join("KatgptProof/Ssmax/Basic.lean")
-            .exists(),
+        proofs_dir.join("KatgptProof/Ssmax/Basic.lean").exists(),
         "Lean spec file missing: .proofs/KatgptProof/Ssmax/Basic.lean"
     );
     assert!(

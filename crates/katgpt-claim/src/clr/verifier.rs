@@ -138,7 +138,12 @@ mod tests {
         };
         let v = verifier.verify(&claim, 0);
         let expected = 1.0 / (1.0 + (-2.0f32).exp());
-        assert!((v - expected).abs() < 1e-6, "got {}, expected {}", v, expected);
+        assert!(
+            (v - expected).abs() < 1e-6,
+            "got {}, expected {}",
+            v,
+            expected
+        );
     }
 
     #[test]
@@ -148,10 +153,7 @@ mod tests {
         // directions and a claim that has positive dot product with both; the
         // two verdicts should each be > 0.5 and their sum should be > 1 (which
         // softmax would forbid).
-        let dirs = FlatDirections::from_rows(&[
-            &[1.0, 0.0, 0.0, 0.0],
-            &[0.0, 1.0, 0.0, 0.0],
-        ]);
+        let dirs = FlatDirections::from_rows(&[&[1.0, 0.0, 0.0, 0.0], &[0.0, 1.0, 0.0, 0.0]]);
         let verifier = SigmoidProjectionVerifier::new(&dirs, 4);
         let claim = Claim::<()> {
             embedding: vec![2.0, 3.0, 0.0, 0.0],
@@ -160,7 +162,11 @@ mod tests {
         let v0 = verifier.verify(&claim, 0); // sigmoid(2.0)
         let v1 = verifier.verify(&claim, 1); // sigmoid(3.0)
         assert!(v0 > 0.5 && v1 > 0.5);
-        assert!(v0 + v1 > 1.0, "sigmoid sum {} > 1 violates softmax; this confirms sigmoid", v0 + v1);
+        assert!(
+            v0 + v1 > 1.0,
+            "sigmoid sum {} > 1 violates softmax; this confirms sigmoid",
+            v0 + v1
+        );
     }
 
     #[test]
@@ -173,7 +179,11 @@ mod tests {
             payload: (),
         };
         let v = verifier.verify(&claim, 0);
-        assert!((v - 0.5).abs() < 1e-6, "orthogonal claim should give 0.5, got {}", v);
+        assert!(
+            (v - 0.5).abs() < 1e-6,
+            "orthogonal claim should give 0.5, got {}",
+            v
+        );
     }
 
     #[test]

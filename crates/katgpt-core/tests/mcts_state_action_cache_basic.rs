@@ -45,19 +45,13 @@ struct ToySpace;
 
 impl InferenceActionSpace<ToyState> for ToySpace {
     fn actions_at(&self, state: &ToyState) -> &[InferenceAction] {
-        if state.v >= MAX_V {
-            &[]
-        } else {
-            &ACTIONS
-        }
+        if state.v >= MAX_V { &[] } else { &ACTIONS }
     }
 
     fn apply(&self, state: &ToyState, action: InferenceAction) -> ToyState {
         // Deterministic: delta = config_id (0, 1, or 2), clamped to MAX_V.
         let delta = (action.config_id as u8).min(MAX_V - state.v);
-        ToyState {
-            v: state.v + delta,
-        }
+        ToyState { v: state.v + delta }
     }
 
     fn reward(&self, state: &ToyState) -> Option<f32> {
@@ -168,7 +162,9 @@ fn cache_clear_empties_then_repopulates() {
         space.state_hash(&space.apply(&s, a)),
         0.42,
     );
-    let got = cache.get(space.state_hash(&s), a).expect("re-inserted must hit");
+    let got = cache
+        .get(space.state_hash(&s), a)
+        .expect("re-inserted must hit");
     assert!((got.1 - 0.42).abs() < 1e-6);
 }
 
@@ -200,7 +196,10 @@ fn search_finds_an_action_on_fresh_cache() {
         ACTIONS.contains(&action),
         "returned action {action:?} must be in the available set"
     );
-    assert!(result.cache_misses > 0, "fresh cache must have at least one miss (the first visit of each pair)");
+    assert!(
+        result.cache_misses > 0,
+        "fresh cache must have at least one miss (the first visit of each pair)"
+    );
     assert!(!cache.is_empty(), "search must have populated the cache");
 }
 
@@ -252,8 +251,15 @@ fn search_is_deterministic_across_runs() {
     let mut scratch2 = SearchScratch::default();
     let r2 = mcts_search_with_state_action_cache(&space, &root, 30, &cache2, &mut scratch2);
 
-    assert_eq!(cache1.len(), cache2.len(), "deterministic search must produce identical cache sizes");
-    assert_eq!(r1.best_action, r2.best_action, "deterministic search must pick the same action");
+    assert_eq!(
+        cache1.len(),
+        cache2.len(),
+        "deterministic search must produce identical cache sizes"
+    );
+    assert_eq!(
+        r1.best_action, r2.best_action,
+        "deterministic search must pick the same action"
+    );
     assert_eq!(r1.cache_hits, r2.cache_hits);
     assert_eq!(r1.cache_misses, r2.cache_misses);
 }
@@ -266,7 +272,10 @@ fn search_returns_none_for_terminal_root() {
     let cache: StateActionCache<f32> = StateActionCache::new();
     let mut scratch = SearchScratch::default();
     let result = mcts_search_with_state_action_cache(&space, &root, 10, &cache, &mut scratch);
-    assert!(result.best_action.is_none(), "terminal root must return None");
+    assert!(
+        result.best_action.is_none(),
+        "terminal root must return None"
+    );
     assert_eq!(result.tree_size, 0);
     assert_eq!(result.cache_hits, 0);
     assert_eq!(result.cache_misses, 0);
@@ -345,17 +354,26 @@ fn cache_invalidation_clear_then_lookup_returns_none_then_some() {
 
     // Populate.
     cache.insert(space.state_hash(&s), a, next_hash, 0.8);
-    assert!(cache.get(space.state_hash(&s), a).is_some(), "after insert: must hit");
+    assert!(
+        cache.get(space.state_hash(&s), a).is_some(),
+        "after insert: must hit"
+    );
 
     // Clear.
     cache.clear();
-    assert!(cache.get(space.state_hash(&s), a).is_none(), "after clear: must miss");
+    assert!(
+        cache.get(space.state_hash(&s), a).is_none(),
+        "after clear: must miss"
+    );
 
     // Re-populate.
     cache.insert(space.state_hash(&s), a, next_hash, 0.9);
     let got = cache
         .get(space.state_hash(&s), a)
         .expect("after re-insert: must hit");
-    assert!((got.1 - 0.9).abs() < 1e-6, "re-inserted reward must be the new value");
+    assert!(
+        (got.1 - 0.9).abs() < 1e-6,
+        "re-inserted reward must be the new value"
+    );
     assert_eq!(got.0, next_hash, "re-inserted next-state hash must match");
 }

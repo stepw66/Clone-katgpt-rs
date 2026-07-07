@@ -42,7 +42,7 @@
 //! see `riir-ai/crates/riir-engine/tests/bench_313_swir_real_model_goat.rs`
 //! for the custom loop that produces the real G1/G2 numbers).
 
-use crate::swir::{SwiRConfig, SwiRController, StepAction, ThinkMode};
+use crate::swir::{StepAction, SwiRConfig, SwiRController, ThinkMode};
 
 // ────────────────────────────────────────────────────────────────────────────
 // Traits — the abstraction boundary between engine and fuel
@@ -191,8 +191,7 @@ impl BenchResult {
         if self.problems.is_empty() {
             return 0.0;
         }
-        self.problems.iter().map(|p| p.total_steps).sum::<u32>() as f32
-            / self.problems.len() as f32
+        self.problems.iter().map(|p| p.total_steps).sum::<u32>() as f32 / self.problems.len() as f32
     }
 
     /// Average wall-clock latency per problem (nanoseconds).
@@ -200,8 +199,7 @@ impl BenchResult {
         if self.problems.is_empty() {
             return 0;
         }
-        self.problems.iter().map(|p| p.latency_ns).sum::<u64>()
-            / self.problems.len() as u64
+        self.problems.iter().map(|p| p.latency_ns).sum::<u64>() / self.problems.len() as u64
     }
 
     /// Average number of mode switches per problem (SwiR only).
@@ -209,8 +207,7 @@ impl BenchResult {
         if self.problems.is_empty() {
             return 0.0;
         }
-        self.problems.iter().map(|p| p.switches).sum::<u32>() as f32
-            / self.problems.len() as f32
+        self.problems.iter().map(|p| p.switches).sum::<u32>() as f32 / self.problems.len() as f32
     }
 
     /// Human-readable summary.
@@ -272,7 +269,11 @@ impl ComparisonResult {
             if g1_pass { "✅ PASS" } else { "❌ FAIL" },
             if g2_pass { "✅ PASS" } else { "❌ FAIL" },
             self.latency_ratio(),
-            if self.latency_ratio() >= 1.0 { "SwiR faster" } else { "SwiR slower" },
+            if self.latency_ratio() >= 1.0 {
+                "SwiR faster"
+            } else {
+                "SwiR slower"
+            },
         )
     }
 }
@@ -387,7 +388,11 @@ pub fn run_benchmark(
         let elapsed = start.elapsed();
         let stats = ctrl.stats();
         let (latent, explicit_s, total) = if config.mode == BenchMode::Swir {
-            (stats.latent_steps, stats.explicit_steps, stats.latent_steps + stats.explicit_steps)
+            (
+                stats.latent_steps,
+                stats.explicit_steps,
+                stats.latent_steps + stats.explicit_steps,
+            )
         } else {
             (0, config.max_steps, config.max_steps)
         };
@@ -490,7 +495,9 @@ impl SyntheticProblemSource {
         let mut answer_tokens = Vec::with_capacity(n);
         for i in 0..n {
             // Simple LCG for deterministic variety.
-            state = state.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            state = state
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
             let answer_token = (state % 1000) as u32;
             prompts.push(format!("Problem {i}: generate token {answer_token}."));
             answer_tokens.push(answer_token);
@@ -581,7 +588,11 @@ impl DecodeBackend for SyntheticDecodeBackend {
             if is_flat {
                 *p = 1.0 / self.vocab as f32;
             } else {
-                *p = if i == 0 { 0.999 } else { 0.001 / (self.vocab - 1) as f32 };
+                *p = if i == 0 {
+                    0.999
+                } else {
+                    0.001 / (self.vocab - 1) as f32
+                };
             }
         }
         0

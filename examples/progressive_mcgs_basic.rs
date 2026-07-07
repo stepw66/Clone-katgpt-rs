@@ -16,8 +16,8 @@
 //! ```
 
 use katgpt_rs::progressive_mcgs::{
-    EntropyGatedScheduler, ProgressiveMcgsConfig, ProgressiveMcgsSearch, Reward, SearchDomain,
-    BranchId, NodeId,
+    BranchId, EntropyGatedScheduler, NodeId, ProgressiveMcgsConfig, ProgressiveMcgsSearch, Reward,
+    SearchDomain,
 };
 
 /// Synthetic search domain: each branch has a fixed reward probability.
@@ -95,8 +95,8 @@ fn main() {
         ..ProgressiveMcgsConfig::default()
     };
 
-    let mut search = ProgressiveMcgsSearch::<u32>::new(cfg, n_branches)
-        .with_max_expansions(max_expansions);
+    let mut search =
+        ProgressiveMcgsSearch::<u32>::new(cfg, n_branches).with_max_expansions(max_expansions);
     search.add_root(0);
     for b in 0..n_branches {
         search.seed_branch(BranchId(b), 100 + b);
@@ -118,10 +118,12 @@ fn main() {
         let t_norm = search.step_count() as f32 / max_expansions as f32;
 
         // Sample entropy at 50 points.
-        if search.step_count().is_multiple_of((max_expansions / 50).max(1)) {
-            let h = EntropyGatedScheduler::branch_selection_entropy(
-                search.branch_selection_counts(),
-            );
+        if search
+            .step_count()
+            .is_multiple_of((max_expansions / 50).max(1))
+        {
+            let h =
+                EntropyGatedScheduler::branch_selection_entropy(search.branch_selection_counts());
             entropy_curve.push((t_norm, h));
         }
 
@@ -153,14 +155,14 @@ fn main() {
             .map(|id| search.graph().q_value(id))
             .fold(f32::NEG_INFINITY, f32::max);
         let marker = if b == 0 { " ← true best branch" } else { "" };
-        println!(
-            "  Branch {b}: {count:4} selections ({pct:5.1}%)  best Q = {q_best:+.3}{marker}"
-        );
+        println!("  Branch {b}: {count:4} selections ({pct:5.1}%)  best Q = {q_best:+.3}{marker}");
     }
 
     println!("\n--- Entropy Curve (H(π_t) over search progress) ---");
     let h_max = (n_branches as f32).ln();
-    println!("  (max entropy for {n_branches} branches = {h_max:.4} nats, exp(H_max) = {n_branches})");
+    println!(
+        "  (max entropy for {n_branches} branches = {h_max:.4} nats, exp(H_max) = {n_branches})"
+    );
     for (t, h) in &entropy_curve {
         let effective = h.exp();
         let bar_len = ((h / h_max) * 40.0) as usize;

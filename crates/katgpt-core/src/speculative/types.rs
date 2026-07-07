@@ -1219,10 +1219,7 @@ impl TrajectoryCredit {
 
         // Build scores view without consuming traj_scores — the HashMap stays
         // available for O(1) per-node lookup in the second loop below.
-        let scores: Vec<(usize, f32)> = traj_scores
-            .iter()
-            .map(|(&id, &s)| (id, s))
-            .collect();
+        let scores: Vec<(usize, f32)> = traj_scores.iter().map(|(&id, &s)| (id, s)).collect();
         let credit = Self::from_trajectory_scores(&scores);
 
         // Assign propagated credit to each node based on its trajectory's max score.

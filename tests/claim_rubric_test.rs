@@ -13,10 +13,10 @@
 
 #![cfg(feature = "claim_rubric")]
 
+use katgpt_rs::claim_rubric::FeatureClass;
 use katgpt_rs::claim_rubric::{
     Claim, ClaimValidator, EvidenceItemId, EvidenceItemId::*, EvidenceLevel::*,
 };
-use katgpt_rs::claim_rubric::FeatureClass;
 
 // ──────────────────────────────────────────────────────────────────────────
 // Shared fixture slices (R287 §2.2 requirements table)
@@ -103,14 +103,10 @@ fn overclaim_l1_with_l3_verb_downgrades() {
     .with_evidence(L1_ITEMS);
     let g = ClaimValidator.grade(&claim);
     assert_eq!(
-        g.honest_level,
-        L1,
+        g.honest_level, L1,
         "evidence is the binding constraint; vocab does not silently lower honest_level"
     );
-    assert!(
-        g.downgraded,
-        "declared L3 > honest L1 → downgraded"
-    );
+    assert!(g.downgraded, "declared L3 > honest L1 → downgraded");
     assert_eq!(
         g.vocabulary_violations.len(),
         1,
@@ -164,7 +160,10 @@ fn prediction_class_requires_predict_control_parity_for_l3() {
         g.honest_level < L3,
         "missing PredictControlParity caps the claim below L3"
     );
-    assert_eq!(g.honest_level, L2, "evidence supports L2 (all L2 items present)");
+    assert_eq!(
+        g.honest_level, L2,
+        "evidence supports L2 (all L2 items present)"
+    );
     assert!(g.downgraded);
     assert!(
         g.missing_for_declared.contains(&PredictControlParity),
@@ -247,8 +246,7 @@ fn r287_s4_faithfulness_probe_behavior_delta_is_l1() {
     .with_evidence(satisfied);
     let g = ClaimValidator.grade(&claim);
     assert_eq!(
-        g.honest_level,
-        L1,
+        g.honest_level, L1,
         "R287 §4 row 3: FaithfulnessProbe is L2-candidate → honest L1 until generalization evidence ships"
     );
     assert!(
@@ -294,8 +292,7 @@ fn r287_s4_posterior_guided_pruner_is_l2() {
     .with_evidence(L2_ITEMS);
     let g = ClaimValidator.grade(&claim);
     assert_eq!(
-        g.honest_level,
-        L2,
+        g.honest_level, L2,
         "R287 §4 row 5: PosteriorGuidedPruner is L1–L2 → honest L2 (upper bound, gain measured)"
     );
     assert!(!g.downgraded);
@@ -361,12 +358,8 @@ fn vocabulary_overclaim_l3_verb_on_l1_evidence_downgrades() {
 
 #[test]
 fn l1_safe_verb_reads_at_l1_passes_cleanly() {
-    let claim = Claim::new(
-        "the probe reads behavior X",
-        FeatureClass::Detection,
-        L1,
-    )
-    .with_evidence(L1_ITEMS);
+    let claim = Claim::new("the probe reads behavior X", FeatureClass::Detection, L1)
+        .with_evidence(L1_ITEMS);
     let g = ClaimValidator.grade(&claim);
     assert_eq!(g.honest_level, L1);
     assert!(g.vocabulary_violations.is_empty());
@@ -384,10 +377,7 @@ fn l2_verb_induces_at_l1_is_violation() {
     .with_evidence(L1_ITEMS);
     let g = ClaimValidator.grade(&claim);
     assert_eq!(g.honest_level, L1);
-    assert!(g
-        .vocabulary_violations
-        .iter()
-        .any(|v| v.verb == "induces"));
+    assert!(g.vocabulary_violations.iter().any(|v| v.verb == "induces"));
 }
 
 #[test]
@@ -453,12 +443,8 @@ fn prediction_class_without_parity_does_not_auto_promote_to_l3() {
 
 #[test]
 fn promote_advice_lists_missing_items_for_upgrade() {
-    let claim = Claim::new(
-        "the probe reads behavior",
-        FeatureClass::Detection,
-        L2,
-    )
-    .with_evidence(L1_ITEMS);
+    let claim =
+        Claim::new("the probe reads behavior", FeatureClass::Detection, L2).with_evidence(L1_ITEMS);
     let g = ClaimValidator.grade(&claim);
     let advice = ClaimValidator.promote_advice(&g);
     // L2 requires 6 additional items beyond L1; all 6 should be listed.

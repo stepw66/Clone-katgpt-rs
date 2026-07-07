@@ -120,7 +120,9 @@ fn make_random_faithful_case(rng: &mut Rng, dim: usize) -> (RandomFaithfulConsum
     // the probe correctly flags those, but they're out of scope for G1.
     let weights: Vec<f32> = (0..dim).map(|_| 0.3 + rng.f32() * 1.7).collect();
     // Distinct memory values in [1, 9] so shuffle/corrupt change the dot product.
-    let memory: Vec<f32> = (0..dim).map(|i| 1.0 + (i as f32) + rng.f32() * 3.0).collect();
+    let memory: Vec<f32> = (0..dim)
+        .map(|i| 1.0 + (i as f32) + rng.f32() * 3.0)
+        .collect();
     (RandomFaithfulConsumer { weights }, memory)
 }
 
@@ -166,8 +168,12 @@ fn g1_g1b_extended_detection_rate_at_least_99_percent() {
 
     eprintln!(
         "G1/G1b: faithful={:.4} ({}/{}), unfaithful={:.4} ({}/{}), overall={:.4}",
-        faithful_rate, faithful_correct, n_trials_faithful,
-        unfaithful_rate, unfaithful_correct, n_trials_unfaithful,
+        faithful_rate,
+        faithful_correct,
+        n_trials_faithful,
+        unfaithful_rate,
+        unfaithful_correct,
+        n_trials_unfaithful,
         overall
     );
 
@@ -238,7 +244,11 @@ impl ConsumerContext for NonlinearConsumer {
 
     #[inline]
     fn behavior_with_memory(&self, memory: &Vec<f32>) -> f32 {
-        let linear: f32 = memory.iter().zip(self.weights.iter()).map(|(&v, &w)| v * w).sum();
+        let linear: f32 = memory
+            .iter()
+            .zip(self.weights.iter())
+            .map(|(&v, &w)| v * w)
+            .sum();
         let quad: f32 = memory.iter().map(|&v| 0.5 * v * v).sum();
         linear + quad
     }
@@ -372,7 +382,9 @@ fn g2_attribution_spearman_rho_monotonic_stronger_segments() {
         let weights: Vec<f32> = (0..dim).map(|_| (rng.f32() * 2.0 - 1.0) * scale).collect();
         let memory: Vec<f32> = (0..dim).map(|i| 1.0 + (i as f32) * 0.1).collect();
 
-        let ref_consumer = NonlinearConsumer { weights: weights.clone() };
+        let ref_consumer = NonlinearConsumer {
+            weights: weights.clone(),
+        };
         let mut probe = FiniteDifferenceAttributionProbe::new(ref_consumer);
         let exact = NonlinearConsumer { weights }.exact_gradient_norm(&memory);
         let est = probe.attribution_norm(&memory, epsilon);
@@ -382,7 +394,10 @@ fn g2_attribution_spearman_rho_monotonic_stronger_segments() {
     }
 
     let rho = spearman_rho(&reference_norms, &estimated_norms);
-    eprintln!("G2 monotonic sanity (n_segments={}): Spearman \u{03c1} = {:.4}", n_segments, rho);
+    eprintln!(
+        "G2 monotonic sanity (n_segments={}): Spearman \u{03c1} = {:.4}",
+        n_segments, rho
+    );
     assert!(
         rho >= 0.95,
         "G2 monotonic sanity FAIL: \u{03c1} = {:.4} < 0.95 (expected near-perfect separation)",
@@ -438,7 +453,11 @@ fn g3_triggered_injection_skips_at_least_50pct_with_quality_parity() {
     for e in 0..n_events {
         // Uncertainty ∈ [0, 1]; bimodal: half the events low (saturated),
         // half high (memory would help). Saturated regime dominates.
-        let u = if e % 2 == 0 { rng.f32() * 0.4 } else { 0.6 + rng.f32() * 0.4 };
+        let u = if e % 2 == 0 {
+            rng.f32() * 0.4
+        } else {
+            0.6 + rng.f32() * 0.4
+        };
 
         // Memory segment (small contribution).
         let memory: Vec<f32> = (0..dim).map(|_| rng.f32() * 2.0 - 1.0).collect();
@@ -454,7 +473,11 @@ fn g3_triggered_injection_skips_at_least_50pct_with_quality_parity() {
         if inject {
             gated_inject_count += 1;
         }
-        let gated_pred: Vec<f32> = if inject { always_pred.clone() } else { prior.clone() };
+        let gated_pred: Vec<f32> = if inject {
+            always_pred.clone()
+        } else {
+            prior.clone()
+        };
 
         // Ground truth = prior + α·m (no noise on the *quality* axis — we're
         // measuring how close each strategy is to the memory-augmented truth).
@@ -518,7 +541,11 @@ fn g3_triggered_injection_quality_floor() {
     let mut min_quality = f32::INFINITY;
 
     for e in 0..n_events {
-        let u = if e % 2 == 0 { rng.f32() * 0.3 } else { 0.7 + rng.f32() * 0.3 };
+        let u = if e % 2 == 0 {
+            rng.f32() * 0.3
+        } else {
+            0.7 + rng.f32() * 0.3
+        };
         let memory: Vec<f32> = (0..dim).map(|_| rng.f32() * 2.0 - 1.0).collect();
 
         let mut truth = prior.clone();
@@ -538,7 +565,10 @@ fn g3_triggered_injection_quality_floor() {
         }
     }
 
-    eprintln!("G3 quality floor (n_events={}, alpha={}): min cosine = {:.6}", n_events, alpha, min_quality);
+    eprintln!(
+        "G3 quality floor (n_events={}, alpha={}): min cosine = {:.6}",
+        n_events, alpha, min_quality
+    );
     assert!(
         min_quality >= 0.98,
         "G3 quality floor FAIL: min cosine = {:.6} < 0.98 in saturated regime",
@@ -574,7 +604,11 @@ fn g8_static_invariants_when_features_on() {
     // If this test runs at all, the feature is on. The *absence* of these
     // symbols in the default build is verified externally (see
     // `.benchmarks/278_faithfulness_probe_goat.md` G8 section).
-    assert_eq!(size_of::<super::types::Intervention>(), 1, "Intervention must be 1 byte");
+    assert_eq!(
+        size_of::<super::types::Intervention>(),
+        1,
+        "Intervention must be 1 byte"
+    );
     assert_eq!(
         size_of::<FaithfulnessProfile<f32>>(),
         16,

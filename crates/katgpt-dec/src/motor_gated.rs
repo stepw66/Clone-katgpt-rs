@@ -120,7 +120,10 @@ pub fn relu_gate_into(input: &[f32], relu_slope: f32, output: &mut [f32]) {
 /// paper's experiments and all GOAT gates are rank-0; rank ≥ 1 callers wanting
 /// zero-alloc should compose the DEC operators directly.
 #[inline]
-#[allow(clippy::too_many_arguments, reason = "motor-gated evolution needs mesh + field + motor + dual scratch buffers; matches the paper's operator signature")]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "motor-gated evolution needs mesh + field + motor + dual scratch buffers; matches the paper's operator signature"
+)]
 pub fn evolve_motor_gated_field(
     cx: &CellComplex,
     h: &mut CochainField,
@@ -241,7 +244,6 @@ mod tests {
         }
     }
 
-
     // ── T1.6 smoke test 1: motor-free ballistic propagation ──────────────
 
     #[test]
@@ -267,8 +269,8 @@ mod tests {
                 &mut field,
                 &[],
                 0,
-                0.1,   // dt
-                0.0,   // standard ReLU
+                0.1, // dt
+                0.0, // standard ReLU
                 &mut scratch_lap,
                 &mut scratch_relu,
             );
@@ -338,16 +340,7 @@ mod tests {
         let mut no_motor = make_field();
         let mut lap2 = CochainField::zeros(0, cx.n_vertices(), dim);
         let mut relu2 = CochainField::zeros(0, cx.n_vertices(), dim);
-        evolve_motor_gated_field(
-            &cx,
-            &mut no_motor,
-            &[],
-            0,
-            dt,
-            0.0,
-            &mut lap2,
-            &mut relu2,
-        );
+        evolve_motor_gated_field(&cx, &mut no_motor, &[], 0, dt, 0.0, &mut lap2, &mut relu2);
 
         // Ungated channels (2,3): motor gate must not have leaked into them.
         // They are bit-identical between the two runs.

@@ -140,10 +140,7 @@ fn class_name(cls: TokenClass) -> String {
 
 fn print_tag_stratified_table(gap: &PairedLossGap, classes: &[TokenClass]) {
     println!("── Tag-stratified raw means (paper §3 Analysis I) ──");
-    println!(
-        "  {:<14} {:>8} {:>14}",
-        "class", "count", "mean Δ"
-    );
+    println!("  {:<14} {:>8} {:>14}", "class", "count", "mean Δ");
     // Distinct classes present, in a stable display order.
     let display_order = [
         TokenClass::Content,
@@ -156,12 +153,7 @@ fn print_tag_stratified_table(gap: &PairedLossGap, classes: &[TokenClass]) {
         let mean = gap.mean_gap_for_class(classes, cls);
         let count = classes.iter().filter(|c| **c == cls).count();
         if count > 0 {
-            println!(
-                "  {:<14} {:>8} {:>+14.6}",
-                class_name(cls),
-                count,
-                mean
-            );
+            println!("  {:<14} {:>8} {:>+14.6}", class_name(cls), count, mean);
         }
     }
     // CopyN(n) rows: collect distinct n values in ascending order.
@@ -178,12 +170,7 @@ fn print_tag_stratified_table(gap: &PairedLossGap, classes: &[TokenClass]) {
         let target = TokenClass::CopyN(n);
         let mean = gap.mean_gap_for_class(classes, target);
         let count = classes.iter().filter(|c| **c == target).count();
-        println!(
-            "  {:<14} {:>8} {:>+14.6}",
-            class_name(target),
-            count,
-            mean
-        );
+        println!("  {:<14} {:>8} {:>+14.6}", class_name(target), count, mean);
     }
     println!();
 }
@@ -220,22 +207,20 @@ fn print_filtered_aggregates_table(
         "  Amplification |TOP-K∩NO-COPY| / |ALL_TOKENS| = {:.3}×",
         amplification
     );
-    println!(
-        "  Paper §6 Fig 7: filtered loss ~doubles the separation. Target ≥ 1.5×."
-    );
-    let verdict = if amplification >= 1.5 { "PASS ✓" } else { "FAIL ✗" };
+    println!("  Paper §6 Fig 7: filtered loss ~doubles the separation. Target ≥ 1.5×.");
+    let verdict = if amplification >= 1.5 {
+        "PASS ✓"
+    } else {
+        "FAIL ✗"
+    };
     println!("  Verdict: {verdict}");
     println!();
 }
 
 fn print_proposition_1_table(report: &ClassGapReport) {
     println!("── Proposition 1 annotation (paper §5) ──");
-    println!(
-        "  ratio = mean_gap / log|V_τ|. ratio→1: near ceiling (little room).",
-    );
-    println!(
-        "  ratio→0: room for richer feature. NaN: no bound supplied."
-    );
+    println!("  ratio = mean_gap / log|V_τ|. ratio→1: near ceiling (little room).",);
+    println!("  ratio→0: room for richer feature. NaN: no bound supplied.");
     println!(
         "  {:<14} {:>8} {:>12} {:>10} {:>14}",
         "class", "count", "mean Δ", "log|V_τ|", "ratio"

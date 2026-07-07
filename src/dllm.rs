@@ -289,8 +289,8 @@ pub fn corrupt_block(
 // pattern (same as `forward_set_causal_positions` in Plan 401).
 #[cfg(feature = "dllm")]
 pub use katgpt_forward::forward_positions::{
-    attention_forward_safe, forward_bidirectional_positions, forward_bidirectional_positions_into,
-    BidirectionalContext,
+    BidirectionalContext, attention_forward_safe, forward_bidirectional_positions,
+    forward_bidirectional_positions_into,
 };
 // `forward_block_causal_positions` is re-exported separately near its original
 // location (below, after the training code) for source-history continuity.
@@ -600,7 +600,10 @@ fn forward_save<'a>(
             n,
         );
         // Add residual: x_proj += after_norm1
-        katgpt_core::simd::simd_add_inplace(&mut ctx.x_proj_buf, &ctx.after_norm1[p * n..(p + 1) * n]);
+        katgpt_core::simd::simd_add_inplace(
+            &mut ctx.x_proj_buf,
+            &ctx.after_norm1[p * n..(p + 1) * n],
+        );
         // after_attn_res = x_proj (the residual output)
         ctx.after_attn_res[p * n..(p + 1) * n].copy_from_slice(&ctx.x_proj_buf[..n]);
 
@@ -712,8 +715,20 @@ fn forward_save_set_causal<'a>(
         ctx.after_norm2[p * n..(p + 1) * n].copy_from_slice(&ctx.x_buf[..n]);
 
         matmul(&mut ctx.q_all[p * n..], &layer.attn_wq, &ctx.x_buf, n, n);
-        matmul(&mut ctx.k_all[p * kvd..], &layer.attn_wk, &ctx.x_buf, kvd, n);
-        matmul(&mut ctx.v_all[p * kvd..], &layer.attn_wv, &ctx.x_buf, kvd, n);
+        matmul(
+            &mut ctx.k_all[p * kvd..],
+            &layer.attn_wk,
+            &ctx.x_buf,
+            kvd,
+            n,
+        );
+        matmul(
+            &mut ctx.v_all[p * kvd..],
+            &layer.attn_wv,
+            &ctx.x_buf,
+            kvd,
+            n,
+        );
     }
 
     // Phase B: Set-causal attention with masked softmax.
@@ -772,8 +787,8 @@ fn forward_save_set_causal<'a>(
             }
 
             // Persist attention weights (ineligible positions stay 0.0).
-            ctx.attn_weights_all
-                [q * config.n_head * seq_len + h * seq_len..q * config.n_head * seq_len + (h + 1) * seq_len]
+            ctx.attn_weights_all[q * config.n_head * seq_len + h * seq_len
+                ..q * config.n_head * seq_len + (h + 1) * seq_len]
                 .copy_from_slice(&ctx.attn_scratch_scores[..seq_len]);
 
             // Weighted value sum over eligible positions only.
@@ -795,18 +810,45 @@ fn forward_save_set_causal<'a>(
 
     // Phase C: Output projection + residual + MLP + logits (identical to forward_save).
     for p in 0..seq_len {
-        matmul(&mut ctx.x_proj_buf, &layer.attn_wo, &ctx.attn_out_all[p * n..(p + 1) * n], n, n);
-        katgpt_core::simd::simd_add_inplace(&mut ctx.x_proj_buf, &ctx.after_norm1[p * n..(p + 1) * n]);
+        matmul(
+            &mut ctx.x_proj_buf,
+            &layer.attn_wo,
+            &ctx.attn_out_all[p * n..(p + 1) * n],
+            n,
+            n,
+        );
+        katgpt_core::simd::simd_add_inplace(
+            &mut ctx.x_proj_buf,
+            &ctx.after_norm1[p * n..(p + 1) * n],
+        );
         ctx.after_attn_res[p * n..(p + 1) * n].copy_from_slice(&ctx.x_proj_buf[..n]);
 
         ctx.x_buf[..n].copy_from_slice(&ctx.x_proj_buf[..n]);
         rmsnorm(&mut ctx.x_proj_buf);
         ctx.after_mlp_norm[p * n..(p + 1) * n].copy_from_slice(&ctx.x_proj_buf);
-        matmul_relu(&mut ctx.mlp_hidden_all[p * config.mlp_hidden..], &layer.mlp_w1, &ctx.x_proj_buf, config.mlp_hidden, n);
-        matmul(&mut ctx.x_mlp_buf, &layer.mlp_w2, &ctx.mlp_hidden_all[p * config.mlp_hidden..], n, config.mlp_hidden);
+        matmul_relu(
+            &mut ctx.mlp_hidden_all[p * config.mlp_hidden..],
+            &layer.mlp_w1,
+            &ctx.x_proj_buf,
+            config.mlp_hidden,
+            n,
+        );
+        matmul(
+            &mut ctx.x_mlp_buf,
+            &layer.mlp_w2,
+            &ctx.mlp_hidden_all[p * config.mlp_hidden..],
+            n,
+            config.mlp_hidden,
+        );
         katgpt_core::simd::simd_add_inplace(&mut ctx.x_mlp_buf[..n], &ctx.x_buf[..n]);
         ctx.hidden_final[p * n..(p + 1) * n].copy_from_slice(&ctx.x_mlp_buf);
-        matmul(&mut ctx.logits_all[p * config.vocab_size..], &weights.lm_head, &ctx.x_mlp_buf, config.vocab_size, n);
+        matmul(
+            &mut ctx.logits_all[p * config.vocab_size..],
+            &weights.lm_head,
+            &ctx.x_mlp_buf,
+            config.vocab_size,
+            n,
+        );
     }
 
     ForwardActivations {
@@ -988,7 +1030,13 @@ fn backward(
 
         // MLP w1: d_w1 += outer(d_mh, after_mlp_norm)
         let amn = &act.after_mlp_norm[p * n..(p + 1) * n];
-        katgpt_core::simd::simd_outer_product_acc(&mut grads.mlp_w1, &bctx.d_mh[..mlp_h], amn, mlp_h, n);
+        katgpt_core::simd::simd_outer_product_acc(
+            &mut grads.mlp_w1,
+            &bctx.d_mh[..mlp_h],
+            amn,
+            mlp_h,
+            n,
+        );
         // d_after_mlp_norm = w1^T @ d_mh
         bctx.d_amn[..n].fill(0.0);
         for i in 0..mlp_h {
@@ -1187,7 +1235,10 @@ fn backward(
             &mut grads.wte[token * n..token * n + n],
             &bctx.d_rmsnorm_buf[..n],
         );
-        katgpt_core::simd::simd_add_inplace(&mut grads.wpe[p * n..p * n + n], &bctx.d_rmsnorm_buf[..n]);
+        katgpt_core::simd::simd_add_inplace(
+            &mut grads.wpe[p * n..p * n + n],
+            &bctx.d_rmsnorm_buf[..n],
+        );
     }
 }
 
@@ -1540,7 +1591,14 @@ pub fn train_mini_set_causal(
 
             // Backward + SGD update (same as train_mini_dllm — the mask is
             // encoded in the attention weights, so backward() works as-is).
-            backward(&act, &weights, tokens, &is_masked_all[..seq_len], config, &mut bwd_ctx);
+            backward(
+                &act,
+                &weights,
+                tokens,
+                &is_masked_all[..seq_len],
+                config,
+                &mut bwd_ctx,
+            );
             sgd_update(&mut weights, &bwd_ctx.grads, lr);
 
             epoch_loss += loss;
@@ -1628,7 +1686,11 @@ fn evaluate_set_causal_nelbo_internal(
         total += loss;
         count += 1;
     }
-    if count == 0 { 0.0 } else { total / count as f32 }
+    if count == 0 {
+        0.0
+    } else {
+        total / count as f32
+    }
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -1819,14 +1881,14 @@ pub use katgpt_forward::d2f_context::{D2fContext, forward_block_causal_with};
 // public API via these re-exports (they depend on root-only training helpers
 // `train_mini_dllm` / `generate_pattern_dataset`, so they stay in root).
 
-#[cfg(feature = "dllm")]
-pub use katgpt_forward::denoise_loops::{
-    DenoiseConstraint, NoConstraint, NoRepeatConstraint, denoise_loop, denoise_loop_scheduled,
-};
 #[cfg(all(feature = "dllm", feature = "rcd_residual"))]
 pub use katgpt_forward::denoise_loops::denoise_loop_rcd;
 #[cfg(all(feature = "dllm", feature = "d2f_3sr_warm_start"))]
 pub use katgpt_forward::denoise_loops::denoise_loop_rcd_3sr;
+#[cfg(feature = "dllm")]
+pub use katgpt_forward::denoise_loops::{
+    DenoiseConstraint, NoConstraint, NoRepeatConstraint, denoise_loop, denoise_loop_scheduled,
+};
 
 // ═══════════════════════════════════════════════════════════════
 // Position-Offset Reveal-Time Schedule (Research 376, arXiv:2607.01775)

@@ -47,5 +47,5 @@ pub mod vortex_flow;
 
 pub use chunk_summary::{ChunkSummaryCache, ChunkSummaryQuery};
 pub use entmax::{entmax_1p5, entmax_gqa_aggregate, entmax_support};
-pub use routing::{compute_routing_bias, score_blocks_entmax};
 pub use forward::{forward_dash_attn_decode, forward_dash_attn_prefill};
+pub use routing::{compute_routing_bias, score_blocks_entmax};

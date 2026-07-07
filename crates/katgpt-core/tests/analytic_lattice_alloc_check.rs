@@ -139,12 +139,10 @@ fn g5_zero_alloc_after_warmup_all_primitives() {
             ((seed >> 33) as f32) / (1u64 << 31) as f32 * 2.0 - 1.0
         };
 
-        let state = LatticeVector::<N>::new([
-            rng(), rng(), rng(), rng(), rng(), rng(), rng(), rng(),
-        ]);
-        let direction = LatticeVector::<N>::new([
-            rng(), rng(), rng(), rng(), rng(), rng(), rng(), rng(),
-        ]);
+        let state =
+            LatticeVector::<N>::new([rng(), rng(), rng(), rng(), rng(), rng(), rng(), rng()]);
+        let direction =
+            LatticeVector::<N>::new([rng(), rng(), rng(), rng(), rng(), rng(), rng(), rng()]);
 
         for _ in 0..5 {
             let _ = direction_vector_decode(&state, &direction, 1.0);

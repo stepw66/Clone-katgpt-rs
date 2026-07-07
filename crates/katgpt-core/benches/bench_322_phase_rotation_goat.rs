@@ -49,8 +49,8 @@
 #![allow(clippy::doc_lazy_continuation)] // bench doc: prose continuation in a list item
 
 use katgpt_core::{
-    compute_phase_from_projection, compute_phase_per_channel_into, phase_rotation_gate_into,
-    PhaseRotationScratch,
+    PhaseRotationScratch, compute_phase_from_projection, compute_phase_per_channel_into,
+    phase_rotation_gate_into,
 };
 use std::time::Instant;
 
@@ -151,15 +151,8 @@ fn gate_g1_norm_preservation() -> GateResult {
         let mut cos_pc = [0.0f32; 8];
         let mut sin_pc = [0.0f32; 8];
         let mut scratch = PhaseRotationScratch::new(8);
-        if compute_phase_per_channel_into(
-            &st,
-            &dirs,
-            1.0,
-            &mut cos_pc,
-            &mut sin_pc,
-            &mut scratch,
-        )
-        .is_ok()
+        if compute_phase_per_channel_into(&st, &dirs, 1.0, &mut cos_pc, &mut sin_pc, &mut scratch)
+            .is_ok()
         {
             // Every channel should have the same (cos, sin).
             let drift = (cos_pc[0] * cos_pc[0] + sin_pc[0] * sin_pc[0] - 1.0).abs();
@@ -338,7 +331,9 @@ fn gate_g3_latency() -> GateResult {
 
     // D=64 per-channel phase + mix. The cold-path budget.
     let d64_state: Vec<f32> = (0..64).map(|i| (i as f32 - 32.0) * 0.05).collect();
-    let d64_directions: Vec<f32> = (0..64).map(|i| if i % 2 == 0 { 1.0 } else { -1.0 }).collect();
+    let d64_directions: Vec<f32> = (0..64)
+        .map(|i| if i % 2 == 0 { 1.0 } else { -1.0 })
+        .collect();
     let d64_a: Vec<f32> = vec![0.7; 64];
     let d64_b: Vec<f32> = vec![0.3; 64];
     let mut d64_cos = vec![0.0f32; 64];
@@ -359,14 +354,8 @@ fn gate_g3_latency() -> GateResult {
         let dr = bb(&d64_directions[..]);
         let a = bb(&d64_a[..]);
         let b = bb(&d64_b[..]);
-        let _ = compute_phase_per_channel_into(
-            st,
-            dr,
-            4.0,
-            &mut d64_cos,
-            &mut d64_sin,
-            &mut scratch64,
-        );
+        let _ =
+            compute_phase_per_channel_into(st, dr, 4.0, &mut d64_cos, &mut d64_sin, &mut scratch64);
         let _ = phase_rotation_gate_into(a, b, &d64_cos, &d64_sin, &mut d64_out);
         let _ = bb(&d64_out[..]);
     });
@@ -520,9 +509,7 @@ fn main() {
 
     println!();
     if all_pass {
-        println!(
-            "=== ALL GATES PASS — modelless gain proven, eligible for default promotion ==="
-        );
+        println!("=== ALL GATES PASS — modelless gain proven, eligible for default promotion ===");
         std::process::exit(0);
     } else {
         println!("=== ONE OR MORE GATES FAILED — keep opt-in, investigate ===");

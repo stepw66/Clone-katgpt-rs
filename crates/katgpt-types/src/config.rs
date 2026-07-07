@@ -214,7 +214,11 @@ impl Config {
             return base;
         }
         let lo = self.loop_min.max(1);
-        let max_base = if self.loop_max == 0 { base } else { self.loop_max };
+        let max_base = if self.loop_max == 0 {
+            base
+        } else {
+            self.loop_max
+        };
         let hi = max_base.max(base).max(lo);
         let hard_cap = 2 * hi;
         requested.clamp(lo, hard_cap)

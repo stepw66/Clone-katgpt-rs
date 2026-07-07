@@ -77,14 +77,17 @@ pub mod regime;
 pub mod tau;
 
 // Convenience re-exports.
-pub use collapse::{CollapseDiscoveryHarness, OpPromotion, DEFAULT_COLLAPSE_THRESHOLD};
+pub use collapse::{CollapseDiscoveryHarness, DEFAULT_COLLAPSE_THRESHOLD, OpPromotion};
 pub use entropy::{sigmoid, spectral_entropy_dct, spectral_entropy_dct_into};
 pub use kv::{
-    ChiaroscuroKvDispatcher, ChiaroscuroKvStrategy, StrategyUtilization, DEFAULT_DCT_TRUNCATED_COEFFS,
+    ChiaroscuroKvDispatcher, ChiaroscuroKvStrategy, DEFAULT_DCT_TRUNCATED_COEFFS,
+    StrategyUtilization,
 };
 pub use op_trait::{ChiaroscuroOp, ChiaroscuroRouter, DctMixOp, FullAttnOp};
-pub use regime::{ChiarRegimeGate, WelfordVariance, DEFAULT_MIN_PROMPT_TOKENS, DEFAULT_NATURALISTIC_VARIANCE};
-pub use tau::{StreamingTauCalibrator, DEFAULT_MIN_SAMPLES, DEFAULT_TAU_HI, DEFAULT_TAU_LO};
+pub use regime::{
+    ChiarRegimeGate, DEFAULT_MIN_PROMPT_TOKENS, DEFAULT_NATURALISTIC_VARIANCE, WelfordVariance,
+};
+pub use tau::{DEFAULT_MIN_SAMPLES, DEFAULT_TAU_HI, DEFAULT_TAU_LO, StreamingTauCalibrator};
 
 // ---------------------------------------------------------------------------
 // ChiarRouterHook — InferenceRouter integration point (Plan 269 T15)

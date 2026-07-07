@@ -49,14 +49,12 @@ impl Lcg {
 
 fn main() {
     let gate: SalienceTriGate<u32, D> = SalienceTriGate::new(
-        D_SPEAK,
-        D_DELEGATE,
-        0.3, // w_z
-        0.2, // w_c
-        2.0, // beta_speak
-        2.0, // beta_delegate
-        0.5, // tau_speak
-        0.5, // tau_delegate
+        D_SPEAK, D_DELEGATE, 0.3,  // w_z
+        0.2,  // w_c
+        2.0,  // beta_speak
+        2.0,  // beta_delegate
+        0.5,  // tau_speak
+        0.5,  // tau_delegate
         0.15, // floor_speak
         0.4,  // ceil_delegate
     );
@@ -93,9 +91,18 @@ fn main() {
     let millions = decisions_per_sec / 1e6;
 
     // Sanity: the batch did real work (not all the same variant by accident).
-    let silent = out.iter().filter(|d| matches!(d, SalienceDecision::Silent)).count();
-    let speak = out.iter().filter(|d| matches!(d, SalienceDecision::Speak)).count();
-    let delegate = out.iter().filter(|d| matches!(d, SalienceDecision::Delegate(_))).count();
+    let silent = out
+        .iter()
+        .filter(|d| matches!(d, SalienceDecision::Silent))
+        .count();
+    let speak = out
+        .iter()
+        .filter(|d| matches!(d, SalienceDecision::Speak))
+        .count();
+    let delegate = out
+        .iter()
+        .filter(|d| matches!(d, SalienceDecision::Delegate(_)))
+        .count();
     assert_eq!(silent + speak + delegate, n);
 
     println!("Batched decide (N={n}, D={D}): {us:.2} μs → {millions:.1}M decisions/sec");

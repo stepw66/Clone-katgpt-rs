@@ -826,12 +826,10 @@ impl<P: ScreeningPruner> BanditPruner<P> {
         // for the default `soft_route = false` path — zero Mutex + zero heap.
         if enabled {
             if self.soft_route_scores.is_none() {
-                self.soft_route_scores =
-                    Some(Mutex::new(Vec::with_capacity(self.stats.num_arms)));
+                self.soft_route_scores = Some(Mutex::new(Vec::with_capacity(self.stats.num_arms)));
             }
             if self.soft_route_weights.is_none() {
-                self.soft_route_weights =
-                    Some(Mutex::new(Vec::with_capacity(self.stats.num_arms)));
+                self.soft_route_weights = Some(Mutex::new(Vec::with_capacity(self.stats.num_arms)));
             }
         }
     }
@@ -942,12 +940,7 @@ impl<P: ScreeningPruner> BanditPruner<P> {
     /// exact per-arm semantics of `arm_bandit_score` (unvisited → 1.0,
     /// dual_cutoff → 0.0, then CI boost + floor clamp).
     #[inline]
-    fn fill_ci_scores(
-        &self,
-        scores: &mut Vec<f32>,
-        floor: f32,
-        concentration_threshold: f32,
-    ) {
+    fn fill_ci_scores(&self, scores: &mut Vec<f32>, floor: f32, concentration_threshold: f32) {
         let num_arms = self.stats.num_arms;
         // Pass 1: concentration is computed over clamp(q, 0, 1).max(0.01) for
         // all arms (matches arm_bandit_score's inner scan; unvisited arms have
@@ -1043,13 +1036,12 @@ impl<P: ScreeningPruner> BanditPruner<P> {
         };
         let use_ci_fast_path = {
             #[cfg(feature = "idea_divergence")]
-            { false }
+            {
+                false
+            }
             #[cfg(not(feature = "idea_divergence"))]
             {
-                matches!(
-                    self.strategy,
-                    BanditStrategy::CurvatureInfluence { .. }
-                )
+                matches!(self.strategy, BanditStrategy::CurvatureInfluence { .. })
             }
         };
         if use_ci_fast_path {

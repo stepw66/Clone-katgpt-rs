@@ -345,10 +345,7 @@ mod tests {
             reasoning_disagreement: 0.05,
         };
         let w = adaptive_guidance_weight_from_signal(&signal, 0.5, 6.0);
-        assert!(
-            w > 0.9,
-            "low disagreement → strong guidance, got {w}"
-        );
+        assert!(w > 0.9, "low disagreement → strong guidance, got {w}");
     }
 
     #[test]

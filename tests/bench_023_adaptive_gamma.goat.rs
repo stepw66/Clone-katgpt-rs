@@ -75,7 +75,9 @@ const TARGET_TOKENS: usize = STATIC_GAMMA;
 /// Deterministic LCG for reproducible benchmarks.
 #[inline]
 fn lcg(state: &mut u64) -> u64 {
-    *state = state.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+    *state = state
+        .wrapping_mul(6364136223846793005)
+        .wrapping_add(1442695040888963407);
     *state
 }
 
@@ -108,7 +110,12 @@ fn synth_logits(t: usize, out: &mut [f32], rng: &mut u64) {
 /// probability `α` (the true acceptance rate at this step, computed from
 /// the forecast model). If all γ are accepted, a bonus token is appended.
 /// This matches the Leviathan rejection-sampling acceptance process.
-fn simulate_step(gamma: usize, alpha_true: f32, forecast_cost_us: f64, rng: &mut u64) -> (usize, f64) {
+fn simulate_step(
+    gamma: usize,
+    alpha_true: f32,
+    forecast_cost_us: f64,
+    rng: &mut u64,
+) -> (usize, f64) {
     let gamma_eff = gamma.min(GAMMA_MAX);
     let mut accepted = 0usize;
     for _ in 0..gamma_eff {
@@ -148,7 +155,11 @@ impl std::fmt::Display for BenchResult {
         writeln!(f, "  accepted_tokens/sec   : {:.1}", self.accepted_per_sec)?;
         writeln!(f, "  μs/step               : {:.2}", self.us_per_step)?;
         writeln!(f, "  avg γ                 : {:.2}", self.avg_gamma)?;
-        writeln!(f, "  forecast overhead/step: {:.3} μs", self.forecast_overhead_us)
+        writeln!(
+            f,
+            "  forecast overhead/step: {:.3} μs",
+            self.forecast_overhead_us
+        )
     }
 }
 
@@ -259,9 +270,8 @@ fn t5_adaptive_gamma_throughput_gate() {
     let baseline = run_baseline(&forecast);
     let adaptive = run_adaptive(forecast);
 
-    let gain_pct = (adaptive.accepted_per_sec - baseline.accepted_per_sec)
-        / baseline.accepted_per_sec
-        * 100.0;
+    let gain_pct =
+        (adaptive.accepted_per_sec - baseline.accepted_per_sec) / baseline.accepted_per_sec * 100.0;
 
     // Quality gate: KL between feature-ON and feature-OFF output distributions
     // should be ≈ 0 (rejection sampling preserves the target distribution).
@@ -278,38 +288,76 @@ fn t5_adaptive_gamma_throughput_gate() {
     println!("╠══════════════════════════════════════╦══════════════════╦═══════════╣");
     println!("║ Metric                               ║ OFF (static γ=8) ║ ON (adapt)║");
     println!("╠══════════════════════════════════════╬══════════════════╬═══════════╣");
-    println!("║ accepted_tokens/sec                  ║ {:>14.1}   ║ {:>7.1}   ║",
-        baseline.accepted_per_sec, adaptive.accepted_per_sec);
-    println!("║ μs/step                              ║ {:>14.2}   ║ {:>7.2}   ║",
-        baseline.us_per_step, adaptive.us_per_step);
-    println!("║ avg γ                                ║ {:>14.2}   ║ {:>7.2}   ║",
-        baseline.avg_gamma, adaptive.avg_gamma);
-    println!("║ forecast overhead/step               ║ {:>14.3}   ║ {:>7.3}   ║",
-        baseline.forecast_overhead_us, adaptive.forecast_overhead_us);
-    println!("║ total accepted tokens                ║ {:>14}   ║ {:>7}   ║",
-        baseline.total_accepted, adaptive.total_accepted);
+    println!(
+        "║ accepted_tokens/sec                  ║ {:>14.1}   ║ {:>7.1}   ║",
+        baseline.accepted_per_sec, adaptive.accepted_per_sec
+    );
+    println!(
+        "║ μs/step                              ║ {:>14.2}   ║ {:>7.2}   ║",
+        baseline.us_per_step, adaptive.us_per_step
+    );
+    println!(
+        "║ avg γ                                ║ {:>14.2}   ║ {:>7.2}   ║",
+        baseline.avg_gamma, adaptive.avg_gamma
+    );
+    println!(
+        "║ forecast overhead/step               ║ {:>14.3}   ║ {:>7.3}   ║",
+        baseline.forecast_overhead_us, adaptive.forecast_overhead_us
+    );
+    println!(
+        "║ total accepted tokens                ║ {:>14}   ║ {:>7}   ║",
+        baseline.total_accepted, adaptive.total_accepted
+    );
     println!("╠══════════════════════════════════════╩══════════════════╩═══════════╣");
-    println!("║ Throughput gain: {:+.2}%                                                ║", gain_pct);
-    println!("║ Output-dist KL (ON vs OFF): {:.6} nats                                 ║", kl);
+    println!(
+        "║ Throughput gain: {:+.2}%                                                ║",
+        gain_pct
+    );
+    println!(
+        "║ Output-dist KL (ON vs OFF): {:.6} nats                                 ║",
+        kl
+    );
     println!("╠══════════════════════════════════════════════════════════════════════╣");
-    println!("║ Cost model: C_draft={:.1}μs/tok C_verify={:.1}μs/step(batched)        ║",
-        C_DRAFT_PER_TOKEN_US, C_VERIFY_BATCHED_US);
-    println!("║              C_fixed={:.1}μs/step  Vocab={} Steps={}                    ║",
-        C_FIXED_PER_STEP_US, VOCAB_SIZE, N_STEPS);
+    println!(
+        "║ Cost model: C_draft={:.1}μs/tok C_verify={:.1}μs/step(batched)        ║",
+        C_DRAFT_PER_TOKEN_US, C_VERIFY_BATCHED_US
+    );
+    println!(
+        "║              C_fixed={:.1}μs/step  Vocab={} Steps={}                    ║",
+        C_FIXED_PER_STEP_US, VOCAB_SIZE, N_STEPS
+    );
     println!("╚══════════════════════════════════════════════════════════════════════╝");
     println!();
     println!("── GOAT gate (Issue 023 T5) ──");
-    println!("  Gate 1 — throughput gain ≥ 5%:  {:+.2}%  {}",
+    println!(
+        "  Gate 1 — throughput gain ≥ 5%:  {:+.2}%  {}",
         gain_pct,
-        if gain_pct >= 5.0 { "✅ PASS" } else { "❌ FAIL" });
-    println!("  Gate 2 — KL(output_ON || output_OFF) < 0.01:  {:.6}  {}",
+        if gain_pct >= 5.0 {
+            "✅ PASS"
+        } else {
+            "❌ FAIL"
+        }
+    );
+    println!(
+        "  Gate 2 — KL(output_ON || output_OFF) < 0.01:  {:.6}  {}",
         kl,
-        if kl < 0.01 { "✅ PASS" } else { "⚠️  CHECK" });
-    println!("  Gate 3 — forecast overhead < 1% of step cost: {:.3}μs / {:.2}μs = {:.3}%  {}",
+        if kl < 0.01 {
+            "✅ PASS"
+        } else {
+            "⚠️  CHECK"
+        }
+    );
+    println!(
+        "  Gate 3 — forecast overhead < 1% of step cost: {:.3}μs / {:.2}μs = {:.3}%  {}",
         adaptive.forecast_overhead_us,
         adaptive.us_per_step,
         adaptive.forecast_overhead_us / adaptive.us_per_step * 100.0,
-        if adaptive.forecast_overhead_us / adaptive.us_per_step < 0.01 { "✅ PASS" } else { "❌ FAIL" });
+        if adaptive.forecast_overhead_us / adaptive.us_per_step < 0.01 {
+            "✅ PASS"
+        } else {
+            "❌ FAIL"
+        }
+    );
     println!();
 
     // Hard assertion: the benchmark must run to completion (sanity).
@@ -322,16 +370,24 @@ fn t5_adaptive_gamma_throughput_gate() {
     // is recorded in the issue file; the benchmark just produces the numbers).
     if gain_pct >= 5.0 {
         println!("✅ GOAT GATE PASSED — adaptive γ improves throughput by {gain_pct:.2}% (≥ 5%).");
-        println!("   Recommendation: promote-when-confirmed (requires user decision per AGENTS.md).");
+        println!(
+            "   Recommendation: promote-when-confirmed (requires user decision per AGENTS.md)."
+        );
     } else if gain_pct >= 0.0 {
-        println!("⚠️  GOAT GATE MARGINAL — adaptive γ improves throughput by {gain_pct:.2}% (< 5%).");
+        println!(
+            "⚠️  GOAT GATE MARGINAL — adaptive γ improves throughput by {gain_pct:.2}% (< 5%)."
+        );
         println!("   Recommendation: keep-opt-in. The concept works but doesn't meet the 5% bar");
         println!("   under the batched-verify cost model. Real-world gain depends on");
-        println!("   (a) batched verification in LeviathanVerifier, (b) high C_fixed/C_draft ratio.");
+        println!(
+            "   (a) batched verification in LeviathanVerifier, (b) high C_fixed/C_draft ratio."
+        );
     } else {
         println!("❌ GOAT GATE FAILED — adaptive γ hurts throughput by {gain_pct:.2}%.");
         println!("   The paper's γ=ceil(L/α) formula overshoots γ at low α, increasing cost.");
-        println!("   Recommendation: keep-opt-in (or close-as-won't-fix for non-batched verifiers).");
+        println!(
+            "   Recommendation: keep-opt-in (or close-as-won't-fix for non-batched verifiers)."
+        );
         println!("   Root cause: the formula increases γ when α drops to maintain target accept");
         println!("   length — correct for batched verify, counterproductive for per-token verify.");
     }
@@ -364,7 +420,10 @@ fn smoke_forecast_and_simulate() {
         let alpha = forecast.observe_and_forecast(&logits);
         assert!(alpha > 0.0 && alpha <= 1.0, "alpha out of range: {alpha}");
         let gamma = forecast.adaptive_gamma(TARGET_TOKENS, alpha, GAMMA_MIN, GAMMA_MAX);
-        assert!((GAMMA_MIN..=GAMMA_MAX).contains(&gamma), "gamma out of bounds: {gamma}");
+        assert!(
+            (GAMMA_MIN..=GAMMA_MAX).contains(&gamma),
+            "gamma out of bounds: {gamma}"
+        );
         let h = entropy_nats_zero_alloc(&logits);
         let alpha_true = (1.0 - 0.3 * h).clamp(0.01, 1.0);
         let (acc, cost) = simulate_step(gamma, alpha_true, 0.5, &mut rng);

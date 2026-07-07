@@ -81,21 +81,21 @@ pub mod types;
 pub mod value_fitter;
 
 #[cfg(feature = "attn_match")]
-pub use beta_fitter::{fit_beta_nnls, BetaFitConfig, BetaFitResult};
+pub use beta_fitter::{BetaFitConfig, BetaFitResult, fit_beta_nnls};
 #[cfg(feature = "attn_match")]
-pub use chunked::{ChunkedCompactor, ChunkedCompactOutput, ChunkMeta, TextChunk};
+pub use chunked::{ChunkMeta, ChunkedCompactOutput, ChunkedCompactor, TextChunk};
 #[cfg(feature = "attn_match")]
-pub use compact::{compact, compact_with_router, CompactError, CompactOutput, RouterTrace};
+pub use compact::{CompactError, CompactOutput, RouterTrace, compact, compact_with_router};
 #[cfg(feature = "attn_match")]
 pub use head_budget::{HeadBudgetSchedule, HeadBudgetSolver, HeadSensitivityCurve};
 #[cfg(feature = "attn_match")]
 pub use key_selection::{
-    highest_attn::select_highest_attn_keys, omp::select_omp_keys, KeySelection, KeySelectorKind,
+    KeySelection, KeySelectorKind, highest_attn::select_highest_attn_keys, omp::select_omp_keys,
 };
 #[cfg(feature = "attn_match")]
 pub use online::{OnlineCompactResult, OnlineCompactor};
 #[cfg(feature = "attn_match")]
-pub use router::{pick_backend, SolverBackend, SolverRouter, SolverRouterConfig};
+pub use router::{SolverBackend, SolverRouter, SolverRouterConfig, pick_backend};
 #[cfg(feature = "attn_match")]
 pub use score_matrix::{compute_attention_output, compute_score_matrix, compute_softmax_attention};
 #[cfg(feature = "attn_match")]
@@ -103,11 +103,9 @@ pub use score_matrix_rayon::{compute_rms_attention_rayon, compute_score_matrix_r
 #[cfg(feature = "attn_match")]
 pub use score_matrix_simd::compute_score_matrix_simd;
 #[cfg(feature = "attn_match")]
-pub use types::{
-    AmConfig, AmResult, KeySelector, ReconstructionReport, ScoreMethod, SolverChoice,
-};
+pub use types::{AmConfig, AmResult, KeySelector, ReconstructionReport, ScoreMethod, SolverChoice};
 #[cfg(feature = "attn_match")]
-pub use value_fitter::{fit_cv_least_squares, ValueFitConfig, ValueFitResult};
+pub use value_fitter::{ValueFitConfig, ValueFitResult, fit_cv_least_squares};
 
 // NOTE: `adaptive_cot` (AdaptiveTraceCompactor / AdaptiveCompactResult) stays in the
 // katgpt-rs ROOT crate at `src/attn_match_adaptive_cot.rs` because it composes
@@ -119,7 +117,7 @@ pub use value_fitter::{fit_cv_least_squares, ValueFitConfig, ValueFitResult};
 // / `lora_beta_inference` modules, which proved mathematically moot under
 // softmax invariance.
 #[cfg(feature = "attn_match")]
-pub use compact_fixed_beta::{compact_with_fixed_beta, BETA_MAX, BETA_MID, BETA_MIN};
+pub use compact_fixed_beta::{BETA_MAX, BETA_MID, BETA_MIN, compact_with_fixed_beta};
 
 // ── MaxSim retrieval reranking (Plan 080, Research 45) ─────────────────────
 // Moved here from `katgpt-rs/src/rerank.rs` per Proposal 003 Phase 8 (2026-07-04).

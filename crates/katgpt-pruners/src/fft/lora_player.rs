@@ -107,9 +107,7 @@ impl FftLoRAPlayer {
         let weights = TransformerWeights::new(&config, &mut rng);
 
         // Attempt to load the multi-adapter file.
-        let loaded = LoraAdapter::load(lora_path)
-            .ok()
-            .filter(|v| v.len() == 6);
+        let loaded = LoraAdapter::load(lora_path).ok().filter(|v| v.len() == 6);
 
         let (lq, lk, lv, lo, lm1, lm2, lora_loaded) = match loaded {
             Some(v) => {
@@ -119,12 +117,12 @@ impl FftLoRAPlayer {
                 let mlp = config.mlp_hidden;
                 // (adapter, expected_in, expected_out)
                 let checks: [(Option<&LoraAdapter>, usize, usize); 6] = [
-                    (Some(&v[0]), n, n),    // q
-                    (Some(&v[1]), n, kvd),  // k
-                    (Some(&v[2]), n, kvd),  // v
-                    (Some(&v[3]), n, n),    // o
-                    (Some(&v[4]), n, mlp),  // mlp1
-                    (Some(&v[5]), mlp, n),  // mlp2
+                    (Some(&v[0]), n, n),   // q
+                    (Some(&v[1]), n, kvd), // k
+                    (Some(&v[2]), n, kvd), // v
+                    (Some(&v[3]), n, n),   // o
+                    (Some(&v[4]), n, mlp), // mlp1
+                    (Some(&v[5]), mlp, n), // mlp2
                 ];
                 let dims_ok = checks.iter().all(|(a, ein, eout)| {
                     a.map(|ad| ad.in_dim == *ein && ad.out_dim == *eout)
@@ -138,11 +136,17 @@ impl FftLoRAPlayer {
                     let o = it.next().unwrap();
                     let m1 = it.next().unwrap();
                     let m2 = it.next().unwrap();
-                    (Some(q), Some(k), Some(vv), Some(o), Some(m1), Some(m2), true)
+                    (
+                        Some(q),
+                        Some(k),
+                        Some(vv),
+                        Some(o),
+                        Some(m1),
+                        Some(m2),
+                        true,
+                    )
                 } else {
-                    eprintln!(
-                        "FftLoRAPlayer: adapter dims mismatch — falling back to heuristic"
-                    );
+                    eprintln!("FftLoRAPlayer: adapter dims mismatch — falling back to heuristic");
                     (None, None, None, None, None, None, false)
                 }
             }
@@ -268,9 +272,7 @@ impl FftLoRAPlayer {
         let best_idx = self.logits[ACTION_OFFSET..ACTION_OFFSET + ACTION_COUNT]
             .iter()
             .enumerate()
-            .max_by(|(_, a), (_, b)| {
-                a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal)
-            })
+            .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
             .map(|(i, _)| i)
             .unwrap_or(0);
 

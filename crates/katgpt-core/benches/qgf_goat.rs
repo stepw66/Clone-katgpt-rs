@@ -30,9 +30,7 @@
 //! For a quick (non-statistical) GOAT check, use `--bench` with `--profile=dev`
 //! or read the printed ratios from the `qgf_goat_summary` group.
 
-use criterion::{
-    BenchmarkId, Criterion, Throughput, black_box, criterion_group, criterion_main,
-};
+use criterion::{BenchmarkId, Criterion, Throughput, black_box, criterion_group, criterion_main};
 use katgpt_core::qgf::QGuidedDrafter;
 use katgpt_core::traits::{QGradientOracle, SpeculativeGenerator};
 
@@ -75,7 +73,8 @@ impl SpeculativeGenerator for TieredGen {
             }
         }
         self.buf.clear();
-        self.buf.extend_from_slice(&[acc, acc + 1, acc + 2, acc + 3]);
+        self.buf
+            .extend_from_slice(&[acc, acc + 1, acc + 2, acc + 3]);
         Ok(core::mem::take(&mut self.buf))
     }
 }
@@ -162,72 +161,58 @@ fn bench_pipeline_overhead_vs_base(c: &mut Criterion) {
     let mut group = c.benchmark_group("qgf_goat_g4b_pipeline_vs_base");
     group.sample_size(100);
 
-    for (name, work) in [
-        ("cheap", 4u32),
-        ("medium", 64u32),
-        ("expensive", 1024u32),
-    ] {
+    for (name, work) in [("cheap", 4u32), ("medium", 64u32), ("expensive", 1024u32)] {
         // Baseline: unguided generate() + greedy argmax sample (the work the
         // caller does WITHOUT QGF).
-        group.bench_with_input(
-            BenchmarkId::new("base_generate", name),
-            &work,
-            |b, &w| {
-                let mut generator = TieredGen::new(w);
-                let mut rng = fastrand::Rng::new();
-                let condition = 7u32;
-                b.iter(|| {
-                    let cands = generator
-                        .generate(black_box(&condition), &mut rng)
-                        .unwrap();
-                    // Simulate the caller's sample step (argmax is the cheapest
-                    // realistic sampler; representative of the non-QGF path).
-                    let chosen = cands.into_iter().next().unwrap_or(0);
-                    black_box(chosen);
-                });
-            },
-        );
+        group.bench_with_input(BenchmarkId::new("base_generate", name), &work, |b, &w| {
+            let mut generator = TieredGen::new(w);
+            let mut rng = fastrand::Rng::new();
+            let condition = 7u32;
+            b.iter(|| {
+                let cands = generator.generate(black_box(&condition), &mut rng).unwrap();
+                // Simulate the caller's sample step (argmax is the cheapest
+                // realistic sampler; representative of the non-QGF path).
+                let chosen = cands.into_iter().next().unwrap_or(0);
+                black_box(chosen);
+            });
+        });
 
         // Guided: full generate_project_tilt_sample pipeline.
-        group.bench_with_input(
-            BenchmarkId::new("guided_pipeline", name),
-            &work,
-            |b, &w| {
-                let q = vec![0.3f32; N_LOGITS];
-                let oracle = FixedQOracle { q };
-                let mut drafter = QGuidedDrafter::new(TieredGen::new(w), oracle).with_weight(2.0);
-                let mut rng = fastrand::Rng::new();
-                let condition = 7u32;
-                // Pre-allocated scratch (the documented caller-owned-buffer
-                // pattern — reused across iterations, not reallocated).
-                let mut logits = vec![0.1f32; N_LOGITS];
-                let mut grad = vec![0.0f32; N_LOGITS];
-                b.iter(|| {
-                    let out = drafter
-                        .generate_project_tilt_sample(
-                            black_box(&condition),
-                            &mut rng,
-                            black_box(0),
-                            &mut logits,
-                            &mut grad,
-                            |tilted| {
-                                // Greedy argmax sampler over the tilted logits.
-                                let mut best_idx = 0usize;
-                                let mut best_val = f32::NEG_INFINITY;
-                                for (i, &v) in tilted.iter().enumerate() {
-                                    if v > best_val {
-                                        best_val = v;
-                                        best_idx = i;
-                                    }
+        group.bench_with_input(BenchmarkId::new("guided_pipeline", name), &work, |b, &w| {
+            let q = vec![0.3f32; N_LOGITS];
+            let oracle = FixedQOracle { q };
+            let mut drafter = QGuidedDrafter::new(TieredGen::new(w), oracle).with_weight(2.0);
+            let mut rng = fastrand::Rng::new();
+            let condition = 7u32;
+            // Pre-allocated scratch (the documented caller-owned-buffer
+            // pattern — reused across iterations, not reallocated).
+            let mut logits = vec![0.1f32; N_LOGITS];
+            let mut grad = vec![0.0f32; N_LOGITS];
+            b.iter(|| {
+                let out = drafter
+                    .generate_project_tilt_sample(
+                        black_box(&condition),
+                        &mut rng,
+                        black_box(0),
+                        &mut logits,
+                        &mut grad,
+                        |tilted| {
+                            // Greedy argmax sampler over the tilted logits.
+                            let mut best_idx = 0usize;
+                            let mut best_val = f32::NEG_INFINITY;
+                            for (i, &v) in tilted.iter().enumerate() {
+                                if v > best_val {
+                                    best_val = v;
+                                    best_idx = i;
                                 }
-                                best_idx as u32
-                            },
-                        )
-                        .unwrap();
-                    black_box(out);
-                });
-            },
-        );
+                            }
+                            best_idx as u32
+                        },
+                    )
+                    .unwrap();
+                black_box(out);
+            });
+        });
     }
 
     group.finish();

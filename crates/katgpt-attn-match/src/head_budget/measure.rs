@@ -127,7 +127,11 @@ mod tests {
         let curves = measure_sensitivity_stub(4);
         for c in &curves {
             let delta = c.interpolate(1.0);
-            assert!(delta.abs() < 1e-6, "delta at r=1.0 should be 0, got {}", delta);
+            assert!(
+                delta.abs() < 1e-6,
+                "delta at r=1.0 should be 0, got {}",
+                delta
+            );
         }
     }
 }

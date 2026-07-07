@@ -78,13 +78,13 @@
 
 use crate::progressive_mcgs::graph::ProgressiveMcgs;
 use crate::progressive_mcgs::operators::{
-    cross_branch_top_n, intra_branch_history, multi_branch_aggregate, DEFAULT_AGG_PER_BRANCH,
-    DEFAULT_CROSS_BRANCH_N, DEFAULT_INTRA_BRANCH_K,
+    DEFAULT_AGG_PER_BRANCH, DEFAULT_CROSS_BRANCH_N, DEFAULT_INTRA_BRANCH_K, cross_branch_top_n,
+    intra_branch_history, multi_branch_aggregate,
 };
 use crate::progressive_mcgs::scheduler::{EntropyGatedScheduler, RngLite, SelectMode};
 use crate::progressive_mcgs::stagnation::{StagnationGate, StagnationTrigger};
 use crate::progressive_mcgs::types::{
-    BranchId, NodeId, ProgressiveMcgsConfig, Reward, DEFAULT_C_0,
+    BranchId, DEFAULT_C_0, NodeId, ProgressiveMcgsConfig, Reward,
 };
 use crate::progressive_mcgs::uct::{exploration_constant, uct_descend_to_leaf};
 
@@ -310,14 +310,12 @@ impl<N: Clone> ProgressiveMcgsSearch<N> {
         // (Stagnation is observed AFTER reward in the protocol, but we can
         // pre-check what triggers are pending to inform the proposal.)
         // Note: triggers fire based on cumulative state, so we check now.
-        let pending_triggers: Vec<StagnationTrigger> =
-            self.gate.check(branch).iter().collect();
+        let pending_triggers: Vec<StagnationTrigger> = self.gate.check(branch).iter().collect();
 
         let reference_set = self.build_reference_set(branch, &pending_triggers);
 
         // Propose + expand.
-        let payload =
-            domain.propose(&self.graph, parent, branch, &reference_set, self.step_count);
+        let payload = domain.propose(&self.graph, parent, branch, &reference_set, self.step_count);
         let new_node = self.graph.expand_primary(parent, payload, branch);
 
         // Evaluate reward.
@@ -403,12 +401,7 @@ impl<N: Clone> ProgressiveMcgsSearch<N> {
     /// Strategy: find the first node in `branch`, descend its `primary_children`
     /// via UCT until we hit a node with no children (or run out). If the branch
     /// has no nodes yet, return `root` (caller will create a new branch seed).
-    fn descend_to_leaf_in_branch(
-        &self,
-        branch: BranchId,
-        root: NodeId,
-        t_norm: f32,
-    ) -> NodeId {
+    fn descend_to_leaf_in_branch(&self, branch: BranchId, root: NodeId, t_norm: f32) -> NodeId {
         // Find first node in this branch.
         let start = self
             .graph
@@ -466,11 +459,7 @@ impl<N: Clone> ProgressiveMcgsSearch<N> {
     ///
     /// `parent_for_intra` is the parent of the about-to-be-created node —
     /// we walk up from there.
-    fn build_reference_set(
-        &self,
-        branch: BranchId,
-        triggers: &[StagnationTrigger],
-    ) -> Vec<NodeId> {
+    fn build_reference_set(&self, branch: BranchId, triggers: &[StagnationTrigger]) -> Vec<NodeId> {
         if triggers.is_empty() {
             return Vec::new();
         }
@@ -493,7 +482,11 @@ impl<N: Clone> ProgressiveMcgsSearch<N> {
                     }
                 }
                 StagnationTrigger::CrossBranchReference => {
-                    refs.extend(cross_branch_top_n(&self.graph, branch, DEFAULT_CROSS_BRANCH_N));
+                    refs.extend(cross_branch_top_n(
+                        &self.graph,
+                        branch,
+                        DEFAULT_CROSS_BRANCH_N,
+                    ));
                 }
                 StagnationTrigger::MultiBranchAggregation => {
                     refs.extend(multi_branch_aggregate(&self.graph, DEFAULT_AGG_PER_BRANCH));
@@ -633,7 +626,10 @@ mod tests {
             .expect("step should succeed");
         // Failure should backprop as -1.0, so cumulative_reward on new node < 0.
         let cr = search.graph().cumulative_reward(res.new_node);
-        assert!(cr < 0.0, "Failure should produce negative cumulative reward, got {cr}");
+        assert!(
+            cr < 0.0,
+            "Failure should produce negative cumulative reward, got {cr}"
+        );
         // Reward classification should not promote Failure to Breakthrough.
         assert_eq!(res.reward, Reward::Failure);
     }
@@ -652,7 +648,10 @@ mod tests {
     #[test]
     fn classify_reward_promotion_logic() {
         // No prior best → Progress becomes Breakthrough.
-        assert_eq!(classify_reward(Reward::Progress, None), Reward::Breakthrough);
+        assert_eq!(
+            classify_reward(Reward::Progress, None),
+            Reward::Breakthrough
+        );
         // Prior Neutral → Progress is greater → Breakthrough.
         assert_eq!(
             classify_reward(Reward::Progress, Some(Reward::Neutral)),
@@ -760,9 +759,8 @@ mod tests {
         }
 
         // Final entropy should be less than max possible (ln(n_branches)).
-        let h_final = EntropyGatedScheduler::branch_selection_entropy(
-            search.branch_selection_counts(),
-        );
+        let h_final =
+            EntropyGatedScheduler::branch_selection_entropy(search.branch_selection_counts());
         let h_max = (n_branches as f32).ln();
         // Not a strict monotonic assertion (RNG variance), but the schedule
         // should pull entropy below max.

@@ -105,10 +105,7 @@ fn build_layered_moe() -> Vec<LayerFixture> {
         let mut grams = Vec::with_capacity(N_EXPERTS);
         for i in 0..N_EXPERTS {
             // Distinct rank-1 gram per expert per layer so conditioning has signal.
-            let mut u = seeded_vec(
-                10_000 + 100 * l as u64 + i as u64,
-                D_MODEL,
-            );
+            let mut u = seeded_vec(10_000 + 100 * l as u64 + i as u64, D_MODEL);
             let nu = norm(&u);
             for x in &mut u {
                 *x /= nu;
@@ -143,12 +140,12 @@ fn build_spectral_budget() -> SpectralBudgetConfig {
     // Cycle through the 6 LayerType variants. MlpUp is placed last so the
     // final layer has the most negative exponent (α=-0.96) → NS=10.
     let layer_types = vec![
-        LayerType::AttentionQ,   // layer 0: α=-0.25 → NS=5
-        LayerType::AttentionK,   // layer 1: α=-0.25 → NS=5
-        LayerType::AttentionV,   // layer 2: α=-0.25 → NS=5
-        LayerType::AttentionO,   // layer 3: α=-0.25 → NS=5
-        LayerType::MlpDown,      // layer 4: α=-0.392 (interp) → NS=7
-        LayerType::MlpUp,        // layer 5: α=-0.96 → NS=10
+        LayerType::AttentionQ, // layer 0: α=-0.25 → NS=5
+        LayerType::AttentionK, // layer 1: α=-0.25 → NS=5
+        LayerType::AttentionV, // layer 2: α=-0.25 → NS=5
+        LayerType::AttentionO, // layer 3: α=-0.25 → NS=5
+        LayerType::MlpDown,    // layer 4: α=-0.392 (interp) → NS=7
+        LayerType::MlpUp,      // layer 5: α=-0.96 → NS=10
     ];
     SpectralBudgetConfig::from_model_dims(L_LAYERS, 2800, &layer_types)
 }
@@ -162,11 +159,7 @@ fn mpi_condition_layer(
     let grams_ref: Vec<&[f32]> = grams.iter().map(|g| g.as_slice()).collect();
     let target = 1.0f32 / (N_EXPERTS as f32).sqrt();
     let res = manifold_power_iter_router(
-        router,
-        &grams_ref,
-        N_EXPERTS,
-        D_MODEL,
-        1.0, // c_prime
+        router, &grams_ref, N_EXPERTS, D_MODEL, 1.0, // c_prime
         1,   // iters — paper default
         scratch,
     );
@@ -259,10 +252,7 @@ fn composition_spectral_budget_does_not_touch_grams() {
     let sb = build_spectral_budget();
 
     // Snapshot grams before any MPI work.
-    let grams_before: Vec<Vec<f32>> = layers
-        .iter()
-        .flat_map(|l| l.grams.clone())
-        .collect();
+    let grams_before: Vec<Vec<f32>> = layers.iter().flat_map(|l| l.grams.clone()).collect();
 
     // Consult spectral_budget (force a full read of every layer's config).
     let _total_ns: usize = (0..L_LAYERS).map(|l| sb.ns_iterations(l) as usize).sum();
@@ -276,10 +266,7 @@ fn composition_spectral_budget_does_not_touch_grams() {
 
     // Grams after must equal grams before — MPI reads grams but does not write
     // them, and spectral_budget never touches grams at all.
-    let grams_after: Vec<Vec<f32>> = layers
-        .iter()
-        .flat_map(|l| l.grams.clone())
-        .collect();
+    let grams_after: Vec<Vec<f32>> = layers.iter().flat_map(|l| l.grams.clone()).collect();
 
     assert_eq!(
         grams_before.len(),
@@ -367,8 +354,6 @@ fn composition_mpi_lambda_gain_independent_of_ns_depth() {
             lambda_after > lambda_before,
             "G1-λ FAIL: layer {l} (ns_depth={ns}) λ did not improve: {lambda_before:.4} → {lambda_after:.4}"
         );
-        eprintln!(
-            "✓ layer {l} (ns_depth={ns:>2}): λ {lambda_before:.4} → {lambda_after:.4}"
-        );
+        eprintln!("✓ layer {l} (ns_depth={ns:>2}): λ {lambda_before:.4} → {lambda_after:.4}");
     }
 }

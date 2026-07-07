@@ -128,7 +128,10 @@ pub fn score_dot(q_half: &[f32], key_half: &[f32]) -> f32 {
 #[inline]
 pub fn score_idw(q_half: &[f32], key_half: &[f32], epsilon: f32) -> f32 {
     debug_assert_eq!(q_half.len(), key_half.len());
-    debug_assert!(epsilon > 0.0 && epsilon.is_finite(), "IDW epsilon must be > 0");
+    debug_assert!(
+        epsilon > 0.0 && epsilon.is_finite(),
+        "IDW epsilon must be > 0"
+    );
     let n = q_half.len();
     // Sum of squared differences, unrolled by 4 for auto-vectorization.
     let chunks = n / 4;
@@ -260,9 +263,7 @@ fn cartesian_top_k<const SQRT_N: usize>(
 
 // ─── The query_into kernel (T2.1) ──────────────────────────────────────
 
-impl<const SQRT_N: usize, const D_K: usize, const D_V: usize>
-    ProductKeyMemory<SQRT_N, D_K, D_V>
-{
+impl<const SQRT_N: usize, const D_K: usize, const D_V: usize> ProductKeyMemory<SQRT_N, D_K, D_V> {
     /// O(√N) factored top-k retrieval. Writes `(flat_index, weight)` pairs
     /// into `out[..k]`, sorted score-descending. Returns the number written
     /// (always `k` unless the table is degenerate).
@@ -340,12 +341,7 @@ impl<const SQRT_N: usize, const D_K: usize, const D_V: usize>
         heapselect_top_k_desc::<SQRT_N, K>(&scratch.scores_2, &mut scratch.top_2);
 
         // Steps 4–5: Cartesian product + top-k into out. O(K² * k).
-        let n_written = cartesian_top_k::<SQRT_N>(
-            &scratch.top_1[..K],
-            &scratch.top_2[..K],
-            out,
-            k,
-        );
+        let n_written = cartesian_top_k::<SQRT_N>(&scratch.top_1[..K], &scratch.top_2[..K], out, k);
 
         // Step 6: softmax-normalize the k selected scores → weights.
         // (Documented deviation from the global sigmoid rule — see module
@@ -367,7 +363,9 @@ fn softmax_normalize_into(entries: &mut [(usize, f32)]) {
     if entries.is_empty() {
         return;
     }
-    let max = entries.iter().fold(f32::NEG_INFINITY, |m, &(_, s)| m.max(s));
+    let max = entries
+        .iter()
+        .fold(f32::NEG_INFINITY, |m, &(_, s)| m.max(s));
     let mut sum_exp = 0.0f32;
     for (_, s) in entries.iter_mut() {
         let e = (*s - max).exp();
@@ -409,10 +407,7 @@ mod tests {
             }
         }
         // Sort descending by score, tiebreak by lower flat_index.
-        all.sort_by(|a, b| {
-            b.1.total_cmp(&a.1)
-                .then(a.0.cmp(&b.0))
-        });
+        all.sort_by(|a, b| b.1.total_cmp(&a.1).then(a.0.cmp(&b.0)));
         all.truncate(k);
         all
     }
@@ -423,11 +418,7 @@ mod tests {
         let set_b: std::collections::HashSet<usize> = b.iter().copied().collect();
         let inter = set_a.intersection(&set_b).count() as f32;
         let union = set_a.union(&set_b).count() as f32;
-        if union == 0.0 {
-            1.0
-        } else {
-            inter / union
-        }
+        if union == 0.0 { 1.0 } else { inter / union }
     }
 
     // ─── T2.6: top-k set matches brute-force ────────────────────────────
@@ -459,7 +450,10 @@ mod tests {
         // The flat_index 0 (= i=0, j=0) should be in the result — it's the
         // exact match. Its weight should be the highest.
         let indices: Vec<usize> = out[..n].iter().map(|(i, _)| *i).collect();
-        assert!(indices.contains(&0), "exact match flat_index=0 should be in top-k");
+        assert!(
+            indices.contains(&0),
+            "exact match flat_index=0 should be in top-k"
+        );
 
         // Brute-force reference.
         let bf = brute_force_top_k(&table, &q, ScoreFn::Dot, OUT_K);
@@ -558,10 +552,7 @@ mod tests {
             jaccard_sum += jaccard(&indices, &bf_indices);
         }
         let mean = jaccard_sum / N_QUERIES as f32;
-        assert!(
-            mean >= 0.95,
-            "G2 IDW mean Jaccard {mean:.4} < 0.95"
-        );
+        assert!(mean >= 0.95, "G2 IDW mean Jaccard {mean:.4} < 0.95");
     }
 
     #[test]
@@ -585,11 +576,19 @@ mod tests {
         }
         // Sum to 1 (within f32 tolerance).
         let sum: f32 = out[..n].iter().map(|(_, w)| *w).sum();
-        assert!((sum - 1.0).abs() < 1e-5, "weights sum to {sum}, expected 1.0");
+        assert!(
+            (sum - 1.0).abs() < 1e-5,
+            "weights sum to {sum}, expected 1.0"
+        );
         // Descending order (post-normalization, the order is preserved since
         // softmax is monotonic).
         for w in out[..n].windows(2) {
-            assert!(w[0].1 >= w[1].1, "weights not descending: {} > {}", w[0].1, w[1].1);
+            assert!(
+                w[0].1 >= w[1].1,
+                "weights not descending: {} > {}",
+                w[0].1,
+                w[1].1
+            );
         }
     }
 
@@ -617,8 +616,8 @@ mod tests {
         // clusters 1-3 are far from origin (high magnitude).
         let mut keys_1 = vec![0.0f32; SQRT_N * HALF].into_boxed_slice();
         let cluster_centers: [[f32; HALF]; 4] = [
-            [0.1, 0.1, 0.1, 0.1], // cluster 0 — near origin
-            [5.0, 5.0, 5.0, 5.0], // cluster 1 — high magnitude
+            [0.1, 0.1, 0.1, 0.1],   // cluster 0 — near origin
+            [5.0, 5.0, 5.0, 5.0],   // cluster 1 — high magnitude
             [-5.0, 5.0, -5.0, 5.0], // cluster 2 — high magnitude
             [5.0, -5.0, -5.0, 5.0], // cluster 3 — high magnitude
         ];
@@ -634,11 +633,7 @@ mod tests {
         // the cluster choice — every j contributes the same s2).
         let keys_2 = vec![0.5f32; SQRT_N * HALF].into_boxed_slice();
         let values = vec![0.0f32; SQRT_N * SQRT_N * D_V].into_boxed_slice();
-        let table = ProductKeyMemory::<SQRT_N, D_K, D_V>::from_centroids(
-            keys_1,
-            keys_2,
-            values,
-        );
+        let table = ProductKeyMemory::<SQRT_N, D_K, D_V>::from_centroids(keys_1, keys_2, values);
 
         // Query near cluster 0.
         let q = [0.1f32, 0.1, 0.1, 0.1, 0.5, 0.5, 0.5, 0.5];
@@ -646,7 +641,13 @@ mod tests {
         // IDW retrieval.
         let mut scratch: PkmScratch<SQRT_N, K> = PkmScratch::new();
         let mut out_idw = [(0usize, 0.0f32); OUT_K];
-        let n_idw = table.query_into(&q, ScoreFn::idw_default(), OUT_K, &mut out_idw, &mut scratch);
+        let n_idw = table.query_into(
+            &q,
+            ScoreFn::idw_default(),
+            OUT_K,
+            &mut out_idw,
+            &mut scratch,
+        );
 
         // Dot retrieval (fresh scratch).
         let mut scratch2: PkmScratch<SQRT_N, K> = PkmScratch::new();

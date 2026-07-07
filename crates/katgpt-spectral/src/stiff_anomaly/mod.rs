@@ -19,4 +19,6 @@ pub mod subspace;
 
 pub use baseline::{MonteCarloNull, monte_carlo_null_test};
 pub use stability::{EigenvalueTracker, EvaluateBuffers, GateResult, StiffAnomalyGate};
-pub use subspace::{StiffSoftDecomposition, decompose, decompose_into, soft_alignment_ratio, stiff_subspace_k};
+pub use subspace::{
+    StiffSoftDecomposition, decompose, decompose_into, soft_alignment_ratio, stiff_subspace_k,
+};

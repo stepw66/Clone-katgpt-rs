@@ -23,8 +23,8 @@ use crate::cgsp::traits::{
     NoOpBatchGate, NoOpDifficultyFilter, QualityGuide, Solver,
 };
 use crate::cgsp::types::{
-    entropy_nats, CuriosityPrioritySnapshot, CycleResult, CycleStats, Direction, HintPolicy,
-    Priority, ScratchBuffers, Target,
+    CuriosityPrioritySnapshot, CycleResult, CycleStats, Direction, HintPolicy, Priority,
+    ScratchBuffers, Target, entropy_nats,
 };
 
 // ── CgspConfig ────────────────────────────────────────────────────────────
@@ -84,8 +84,15 @@ impl Default for CgspConfig {
 /// - Construct once via [`CgspLoop::new`].
 /// - Reuse across cycles: pass a pre-allocated [`ScratchBuffers`] to `cycle()`.
 /// - Snapshot / restore for the freeze/thaw cycle (Phase 2).
-pub struct CgspLoop<C, G, S, B, Col = EntropyCollapse, Df = NoOpDifficultyFilter, Qg = NoOpBatchGate>
-{
+pub struct CgspLoop<
+    C,
+    G,
+    S,
+    B,
+    Col = EntropyCollapse,
+    Df = NoOpDifficultyFilter,
+    Qg = NoOpBatchGate,
+> {
     pub(crate) conjecturer: C,
     pub(crate) guide: G,
     pub(crate) solver: S,
@@ -133,7 +140,10 @@ where
     Qg: BatchQualityGate,
 {
     /// Replace the collapse detector.
-    pub fn with_collapse<Col2: CollapseSignal>(self, collapse: Col2) -> CgspLoop<C, G, S, B, Col2, Df, Qg> {
+    pub fn with_collapse<Col2: CollapseSignal>(
+        self,
+        collapse: Col2,
+    ) -> CgspLoop<C, G, S, B, Col2, Df, Qg> {
         CgspLoop {
             conjecturer: self.conjecturer,
             guide: self.guide,
@@ -327,8 +337,7 @@ where
         // overhead-dominated solvers whose solve-rates do not reflect hint
         // quality, so their priorities (the hint) are not corrupted by noise.
         if !degenerate && !hint_skip {
-            let staleness_w =
-                staleness_weight(self.config.k_npc, self.config.staleness_lambda);
+            let staleness_w = staleness_weight(self.config.k_npc, self.config.staleness_lambda);
             for i in 0..k {
                 if !admitted[i] {
                     continue;
@@ -699,11 +708,7 @@ impl KnpcSelector {
     /// - `k_max` — maximum planned interval (default 8). The selector never
     ///   returns `k_npc > k_max`.
     #[inline]
-    pub fn new(
-        halter: crate::gain_cost_halt::GainCostLoopHalter,
-        k_min: u8,
-        k_max: u8,
-    ) -> Self {
+    pub fn new(halter: crate::gain_cost_halt::GainCostLoopHalter, k_min: u8, k_max: u8) -> Self {
         Self {
             halter,
             tau: 1,
@@ -848,7 +853,10 @@ mod tests {
         // Build n strictly orthonormal directions (canonical basis vectors).
         // No cross-term so dot products are exactly 0 or 1, giving the guide
         // a clean signal to favor the target-aligned arm.
-        assert!(n <= dim, "pool size {n} must be ≤ dim {dim} for orthonormal pool");
+        assert!(
+            n <= dim,
+            "pool size {n} must be ≤ dim {dim} for orthonormal pool"
+        );
         (0..n)
             .map(|i| {
                 let mut coords = vec![0.0f32; dim];
@@ -939,11 +947,7 @@ mod tests {
         // the only thing that could make arms diverge (the absorb) is gated
         // off by `HintPolicy::Skip`. Contrast `cycle_priority_monotone_in_reward`
         // where the hint-receptive `DotSolver` DOES make the target arm grow.
-        assert_eq!(
-            after.len(),
-            before.len(),
-            "arm count must not change"
-        );
+        assert_eq!(after.len(), before.len(), "arm count must not change");
         let first = after[0];
         for (i, &p) in after.iter().enumerate() {
             assert_eq!(
@@ -1044,11 +1048,7 @@ mod tests {
         );
         // The first 8 directions are the real pool; the last 8 are zero pads.
         for (i, d) in snap.directions.iter().take(8).enumerate() {
-            assert_eq!(
-                d.dim(),
-                pool[i].dim(),
-                "real direction {i} dim mismatch"
-            );
+            assert_eq!(d.dim(), pool[i].dim(), "real direction {i} dim mismatch");
             assert_ne!(
                 d.norm_sq(),
                 0.0,
@@ -1074,9 +1074,13 @@ mod tests {
             prios: vec![0.0; 16],
         };
         let mut lp2 = CgspLoop::new(conj2, guide2, solver2, bandit2, CgspConfig::default());
-        lp2.restore(&snap).expect("restore should succeed with matching arm count");
+        lp2.restore(&snap)
+            .expect("restore should succeed with matching arm count");
         let prios_after = lp2.bandit().priorities().to_vec();
-        assert_eq!(prios_after, snap.priorities, "priorities must roundtrip exactly");
+        assert_eq!(
+            prios_after, snap.priorities,
+            "priorities must roundtrip exactly"
+        );
     }
 
     #[test]
@@ -1326,7 +1330,10 @@ mod tests {
             let d = sel.observe_cycle(0.1, 1.0, 0.9);
             assert!(matches!(
                 d,
-                KnpcDecision::PlanInterval { k_npc: 1, halted_at: 1 }
+                KnpcDecision::PlanInterval {
+                    k_npc: 1,
+                    halted_at: 1
+                }
             ));
         }
 
@@ -1342,7 +1349,10 @@ mod tests {
             let d = sel.observe_cycle(0.1, 1.0, 0.9);
             assert!(matches!(
                 d,
-                KnpcDecision::PlanInterval { k_npc: 3, halted_at: 3 }
+                KnpcDecision::PlanInterval {
+                    k_npc: 3,
+                    halted_at: 3
+                }
             ));
             assert_eq!(sel.tau(), 1, "tau must reset to 1 after Halt");
         }
@@ -1360,7 +1370,10 @@ mod tests {
             // halted_at is the raw loop index (6), but k_npc is clamped to 4.
             assert!(matches!(
                 d,
-                KnpcDecision::PlanInterval { k_npc: 4, halted_at: 6 }
+                KnpcDecision::PlanInterval {
+                    k_npc: 4,
+                    halted_at: 6
+                }
             ));
         }
 
@@ -1373,7 +1386,10 @@ mod tests {
             let d = sel.observe_cycle(10.0, 0.0, -0.5);
             assert!(matches!(
                 d,
-                KnpcDecision::PlanInterval { k_npc: 1, halted_at: 1 }
+                KnpcDecision::PlanInterval {
+                    k_npc: 1,
+                    halted_at: 1
+                }
             ));
         }
 
@@ -1393,7 +1409,10 @@ mod tests {
             let d = sel.observe_cycle(0.01, 10.0, 0.9);
             assert!(matches!(
                 d,
-                KnpcDecision::PlanInterval { k_npc: 3, halted_at: 3 }
+                KnpcDecision::PlanInterval {
+                    k_npc: 3,
+                    halted_at: 3
+                }
             ));
         }
 

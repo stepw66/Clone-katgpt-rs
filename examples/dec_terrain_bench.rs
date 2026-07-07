@@ -190,7 +190,7 @@ fn bench_cache_invalidation() {
     // Hodge decomposition with cache awareness
     let edge_field = {
         let pot = CochainField::zeros(0, cx.n_vertices(), 1);
-        
+
         katgpt_core::dec::exterior_derivative(&cx, &pot)
     };
     let _components = hodge_decompose(&cx, &edge_field);

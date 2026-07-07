@@ -18,9 +18,7 @@
 
 #![cfg(feature = "module_energy_route")]
 
-use katgpt_rs::inference_router::{
-    route_by_module_energy, ComputeTarget, ModuleEnergyProfile,
-};
+use katgpt_rs::inference_router::{ComputeTarget, ModuleEnergyProfile, route_by_module_energy};
 
 fn main() {
     println!("=== Plan 264 Phase 4 — Module-Aware Compute Routing ===\n");
@@ -28,10 +26,17 @@ fn main() {
     // GOAT G7: paper-average profile routes to Plasma at qps=500.
     let paper = ModuleEnergyProfile::PAPER_AVERAGE;
     println!("Paper-average OPD profile: {:?}", paper);
-    println!("  total = {:.3} (valid: {})\n", paper.total(), paper.is_valid());
+    println!(
+        "  total = {:.3} (valid: {})\n",
+        paper.total(),
+        paper.is_valid()
+    );
 
     let target_g7 = route_by_module_energy(paper.ffn, paper.attn, 500);
-    println!("GOAT G7: route(ffn=0.78, attn=0.16, qps=500) = {:?}", target_g7);
+    println!(
+        "GOAT G7: route(ffn=0.78, attn=0.16, qps=500) = {:?}",
+        target_g7
+    );
     if target_g7 == ComputeTarget::Plasma {
         println!("  ✅ PASS: matches paper FFN profile → Plasma\n");
     } else {
@@ -47,11 +52,7 @@ fn main() {
         let qps = (10.0_f32 * 10.0_f32.powf(qps_log as f32 / 100.0)) as u32;
         let target = route_by_module_energy(paper.ffn, paper.attn, qps);
         if prev_target != Some(target) {
-            println!(
-                "  qps={:>6}: {:?}",
-                qps,
-                target
-            );
+            println!("  qps={:>6}: {:?}", qps, target);
             prev_target = Some(target);
             transitions += 1;
         }

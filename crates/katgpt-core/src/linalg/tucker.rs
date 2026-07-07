@@ -115,15 +115,19 @@ pub enum TuckerError {
 impl core::fmt::Display for TuckerError {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
-            TuckerError::InvalidModeCount { got, max } => write!(
-                f,
-                "tucker: invalid mode count {got}, must be in 1..={max}"
-            ),
+            TuckerError::InvalidModeCount { got, max } => {
+                write!(f, "tucker: invalid mode count {got}, must be in 1..={max}")
+            }
             TuckerError::ShapeExceedsSvdLimit { mode, min_dim, max } => write!(
                 f,
                 "tucker: shape at mode {mode} requires SVD of min-dim {min_dim} > {max} (SVD limit)"
             ),
-            TuckerError::RankTooLarge { mode, rank, bound, shape_n } => write!(
+            TuckerError::RankTooLarge {
+                mode,
+                rank,
+                bound,
+                shape_n,
+            } => write!(
                 f,
                 "tucker: rank {rank} for mode {mode} exceeds bound {bound} (shape {shape_n})"
             ),
@@ -134,9 +138,16 @@ impl core::fmt::Display for TuckerError {
                 write!(f, "tucker: input length {got} != product(shape) {expected}")
             }
             TuckerError::OutputSizeMismatch { got, expected } => {
-                write!(f, "tucker: output length {got} != product(shape) {expected}")
+                write!(
+                    f,
+                    "tucker: output length {got} != product(shape) {expected}"
+                )
             }
-            TuckerError::ShapeFactorMismatch { mode, got, expected } => write!(
+            TuckerError::ShapeFactorMismatch {
+                mode,
+                got,
+                expected,
+            } => write!(
                 f,
                 "tucker: out_shape[{mode}]={got} does not match factor rows {expected}"
             ),
@@ -619,7 +630,11 @@ fn advance_multi(
 ///
 /// `out.len()` must be `≥ x.len()`. `x.len()` must equal `prod(shape)`.
 fn unfold_into(x: &[f32], shape: &[usize], mode: usize, out: &mut [f32]) {
-    debug_assert!(shape.len() <= MAX_MODES, "MAX_MODES = {MAX_MODES}, got {}", shape.len());
+    debug_assert!(
+        shape.len() <= MAX_MODES,
+        "MAX_MODES = {MAX_MODES}, got {}",
+        shape.len()
+    );
     let i_n = shape[mode];
     let total = x.len();
     debug_assert_eq!(total, shape.iter().product::<usize>());
@@ -639,7 +654,9 @@ fn unfold_into(x: &[f32], shape: &[usize], mode: usize, out: &mut [f32]) {
 
     out[0] = x[0];
     for &x_val in x.iter().skip(1) {
-        advance_multi(&mut multi, shape, &mut row, &mut col, &row_delta, &col_delta);
+        advance_multi(
+            &mut multi, shape, &mut row, &mut col, &row_delta, &col_delta,
+        );
         out[row * m + col] = x_val;
     }
 }
@@ -666,7 +683,9 @@ fn fold_into(mat: &[f32], shape: &[usize], mode: usize, out: &mut [f32]) {
 
     out[0] = mat[0];
     for out_slot in out.iter_mut().skip(1) {
-        advance_multi(&mut multi, shape, &mut row, &mut col, &row_delta, &col_delta);
+        advance_multi(
+            &mut multi, shape, &mut row, &mut col, &row_delta, &col_delta,
+        );
         *out_slot = mat[row * m + col];
     }
 }
@@ -1608,7 +1627,7 @@ mod tests {
     #[test]
     fn from_owned_rejects_inconsistent_core_length() {
         let owned = TuckerResult {
-            core: vec![0.0; 8],   // claims 8 elements
+            core: vec![0.0; 8], // claims 8 elements
             factors: vec![vec![0.0; 4]],
             core_shape: vec![2, 2, 2], // product = 8 ✓ — make it inconsistent
             factor_shapes: vec![(2, 2)],
@@ -1617,7 +1636,7 @@ mod tests {
         // 1 factor for a 3-mode core_shape → InvalidModeCount. Build a truly
         // core-inconsistent one:
         let owned_bad = TuckerResult {
-            core: vec![0.0; 7],       // 7 ≠ 2*2*2 = 8
+            core: vec![0.0; 7], // 7 ≠ 2*2*2 = 8
             factors: vec![vec![0.0; 4], vec![0.0; 4], vec![0.0; 4]],
             core_shape: vec![2, 2, 2],
             factor_shapes: vec![(2, 2), (2, 2), (2, 2)],

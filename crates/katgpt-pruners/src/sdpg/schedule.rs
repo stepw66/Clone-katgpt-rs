@@ -49,8 +49,7 @@ impl BetaSchedule {
             if self.decay_steps == 0 {
                 return 0.0;
             }
-            let progress =
-                (self.current_step - self.warmup_steps) as f32 / self.decay_steps as f32;
+            let progress = (self.current_step - self.warmup_steps) as f32 / self.decay_steps as f32;
             self.beta_base * (1.0 - progress)
         } else {
             // Post-decay: teacher fully phased out

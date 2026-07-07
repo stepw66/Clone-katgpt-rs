@@ -88,33 +88,58 @@ fn build_selector(
 ) -> FpcgSelector<StubGenerator, StubExtractor> {
     // Synthetic probe: direction[0] = +1, others = 0. So forecast probability
     // is monotone in activation[0]. Aligned activations forecast high.
-    let probe = Arc::new(FutureBehaviorProbe::new(vec![1.0, 0.0, 0.0, 0.0], 0.0, 7, "refusal"));
+    let probe = Arc::new(FutureBehaviorProbe::new(
+        vec![1.0, 0.0, 0.0, 0.0],
+        0.0,
+        7,
+        "refusal",
+    ));
 
     // Candidate pool — each has a known activation[0] that determines its
     // forecast probability.
     let mut pool: Vec<String> = vec![
-        "I refuse to help with that.".to_string(),     // act[0] = +8  → P ≈ 0.9997
-        "Sure, here's how to do it.".to_string(),      // act[0] = -8  → P ≈ 0.0003
-        "Let me think about this.".to_string(),        // act[0] = +2  → P ≈ 0.88
-        "I can't assist with that.".to_string(),       // act[0] = +6  → P ≈ 0.998
-        "Actually, here is the answer:".to_string(),   // act[0] = -5  → P ≈ 0.0067
+        "I refuse to help with that.".to_string(), // act[0] = +8  → P ≈ 0.9997
+        "Sure, here's how to do it.".to_string(),  // act[0] = -8  → P ≈ 0.0003
+        "Let me think about this.".to_string(),    // act[0] = +2  → P ≈ 0.88
+        "I can't assist with that.".to_string(),   // act[0] = +6  → P ≈ 0.998
+        "Actually, here is the answer:".to_string(), // act[0] = -5  → P ≈ 0.0067
     ];
     if include_eos {
         pool.push("\0".to_string()); // EOS marker
     }
     let activations_map: HashMap<String, Vec<f32>> = [
-        ("I refuse to help with that.".to_string(), vec![8.0, 0.0, 0.0, 0.0]),
-        ("Sure, here's how to do it.".to_string(), vec![-8.0, 0.0, 0.0, 0.0]),
-        ("Let me think about this.".to_string(), vec![2.0, 0.0, 0.0, 0.0]),
-        ("I can't assist with that.".to_string(), vec![6.0, 0.0, 0.0, 0.0]),
-        ("Actually, here is the answer:".to_string(), vec![-5.0, 0.0, 0.0, 0.0]),
+        (
+            "I refuse to help with that.".to_string(),
+            vec![8.0, 0.0, 0.0, 0.0],
+        ),
+        (
+            "Sure, here's how to do it.".to_string(),
+            vec![-8.0, 0.0, 0.0, 0.0],
+        ),
+        (
+            "Let me think about this.".to_string(),
+            vec![2.0, 0.0, 0.0, 0.0],
+        ),
+        (
+            "I can't assist with that.".to_string(),
+            vec![6.0, 0.0, 0.0, 0.0],
+        ),
+        (
+            "Actually, here is the answer:".to_string(),
+            vec![-5.0, 0.0, 0.0, 0.0],
+        ),
         ("\0".to_string(), vec![0.0, 0.0, 0.0, 0.0]),
     ]
     .into_iter()
     .collect();
 
-    let generator = StubGenerator { pool, call_count: 0 };
-    let extractor = StubExtractor { activations: activations_map };
+    let generator = StubGenerator {
+        pool,
+        call_count: 0,
+    };
+    let extractor = StubExtractor {
+        activations: activations_map,
+    };
     FpcgSelector::new(generator, extractor, probe, direction, num_candidates, 4)
 }
 

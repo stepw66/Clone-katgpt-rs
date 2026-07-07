@@ -175,7 +175,10 @@ fn main() {
     println!("║  Plan 324 — Bisimulation Operator Inference GOAT Gate       ║");
     println!("╚══════════════════════════════════════════════════════════════╝");
     println!();
-    println!("Graph config: avg out-degree = {}, {} timed runs (median), seed = 42", AVG_DEGREE, TIMED_RUNS);
+    println!(
+        "Graph config: avg out-degree = {}, {} timed runs (median), seed = 42",
+        AVG_DEGREE, TIMED_RUNS
+    );
     println!();
 
     // ── G4: partition_refine latency ────────────────────────────────────
@@ -207,7 +210,11 @@ fn main() {
         );
     }
     println!();
-    let g4_status = if g4_1024_passes { "✅ PASS" } else { "❌ FAIL" };
+    let g4_status = if g4_1024_passes {
+        "✅ PASS"
+    } else {
+        "❌ FAIL"
+    };
     println!("G4 (partition_refine ≤ 1ms @ N=1024): {}", g4_status);
     println!();
 

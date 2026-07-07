@@ -207,7 +207,11 @@ impl EigenbasisTracker {
         let mut old_buf = [0.0_f32; 16];
         let mut new_buf = [0.0_f32; 16];
         let d = self.d;
-        assert!(d <= 16, "push_tick: D={} > 16 stack buffer; widen new_buf/old_buf", d);
+        assert!(
+            d <= 16,
+            "push_tick: D={} > 16 stack buffer; widen new_buf/old_buf",
+            d
+        );
 
         if self.is_full() {
             // Evict the tick at `head` (oldest — head advances on every push
@@ -256,7 +260,12 @@ impl EigenbasisTracker {
         iters: u8,
     ) -> usize {
         let d = self.d;
-        assert!(k >= 1 && k <= d, "recover: k must be in [1, D]=[1, {}], got {}", d, k);
+        assert!(
+            k >= 1 && k <= d,
+            "recover: k must be in [1, D]=[1, {}], got {}",
+            d,
+            k
+        );
         assert_eq!(
             out_eigvecs.len(),
             d * k,
@@ -391,7 +400,17 @@ pub fn recover_eigenbasis_from_window(
     k: usize,
     iters: u8,
 ) -> EigenbasisProvenance {
-    recover_eigenbasis_inner(window, t_dim, d_dim, out_eigvecs, out_eigvals, scratch, k, iters, true)
+    recover_eigenbasis_inner(
+        window,
+        t_dim,
+        d_dim,
+        out_eigvecs,
+        out_eigvals,
+        scratch,
+        k,
+        iters,
+        true,
+    )
 }
 
 /// Fast-path eigenbasis recovery **without** the BLAKE3/`Uuid::now_v7` provenance
@@ -422,7 +441,17 @@ pub fn recover_eigenbasis_from_window_fast(
     k: usize,
     iters: u8,
 ) -> EigenbasisProvenance {
-    recover_eigenbasis_inner(window, t_dim, d_dim, out_eigvecs, out_eigvals, scratch, k, iters, false)
+    recover_eigenbasis_inner(
+        window,
+        t_dim,
+        d_dim,
+        out_eigvecs,
+        out_eigvals,
+        scratch,
+        k,
+        iters,
+        false,
+    )
 }
 
 /// Compute the BLAKE3 cache key for a window without running the eigen-decomposition.
@@ -648,7 +677,9 @@ mod tests {
         // only for synthesizing test inputs).
         let mut s = seed.max(1);
         let mut next = || {
-            s = s.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            s = s
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
             (s >> 33) as f32 / (1u64 << 31) as f32 - 0.5
         };
         // Fill rows cycling through the 3 directions with their energies.
@@ -678,7 +709,14 @@ mod tests {
         let mut eigvals = vec![0.0; k];
         let mut scratch = EigenbasisScratch::new();
         let prov = recover_eigenbasis_from_window(
-            &window, t, d, &mut eigvecs, &mut eigvals, &mut scratch, k, 5,
+            &window,
+            t,
+            d,
+            &mut eigvecs,
+            &mut eigvals,
+            &mut scratch,
+            k,
+            5,
         );
         assert_eq!(prov.ticks, t);
         assert_eq!(prov.dim, d);
@@ -686,7 +724,11 @@ mod tests {
 
         // Eigenvalues descending.
         for i in 1..k {
-            assert!(eigvals[i - 1] >= eigvals[i], "eigvals not descending: {:?}", eigvals);
+            assert!(
+                eigvals[i - 1] >= eigvals[i],
+                "eigvals not descending: {:?}",
+                eigvals
+            );
         }
         // Top-3 eigenvalues should carry ~all the energy (noise floor is ~1%).
         let total = window_total_energy(&window, t, d);
@@ -700,7 +742,12 @@ mod tests {
                 let c = eigvecs[row * k + col];
                 nrm_sq += c * c;
             }
-            assert!((nrm_sq - 1.0).abs() < 1e-3, "col {} not unit norm: {}", col, nrm_sq);
+            assert!(
+                (nrm_sq - 1.0).abs() < 1e-3,
+                "col {} not unit norm: {}",
+                col,
+                nrm_sq
+            );
         }
 
         // Top-3 directions should align with canonical basis 0,1,2 (the seeds).
@@ -715,7 +762,11 @@ mod tests {
                     best = row;
                 }
             }
-            assert_eq!(best, col, "col {} peak at row {} (expected {})", col, best, col);
+            assert_eq!(
+                best, col,
+                "col {} peak at row {} (expected {})",
+                col, best, col
+            );
         }
     }
 
@@ -808,10 +859,20 @@ mod tests {
         recover_eigenbasis_from_window(&window, t, d, &mut b, &mut lb, &mut sb, k, 5);
 
         for i in 0..a.len() {
-            assert_eq!(a[i].to_bits(), b[i].to_bits(), "eigvec bit mismatch at {}", i);
+            assert_eq!(
+                a[i].to_bits(),
+                b[i].to_bits(),
+                "eigvec bit mismatch at {}",
+                i
+            );
         }
         for i in 0..la.len() {
-            assert_eq!(la[i].to_bits(), lb[i].to_bits(), "eigval bit mismatch at {}", i);
+            assert_eq!(
+                la[i].to_bits(),
+                lb[i].to_bits(),
+                "eigval bit mismatch at {}",
+                i
+            );
         }
     }
 
@@ -863,7 +924,10 @@ mod tests {
         std::thread::sleep(std::time::Duration::from_millis(2));
         let p2 = recover_eigenbasis_from_window(&w, t, d, &mut e, &mut l, &mut s, k, 5);
         assert_ne!(p1.window_id, p2.window_id, "v7 ids collided");
-        assert_eq!(p1.window_hash, p2.window_hash, "same window should hash equal");
+        assert_eq!(
+            p1.window_hash, p2.window_hash,
+            "same window should hash equal"
+        );
     }
 
     #[test]
@@ -902,7 +966,16 @@ mod tests {
         let mut ev_s = vec![0.0; d * k];
         let mut el_s = vec![0.0; k];
         let mut scratch = EigenbasisScratch::new();
-        recover_eigenbasis_from_window_fast(&window, t, d, &mut ev_s, &mut el_s, &mut scratch, k, 5);
+        recover_eigenbasis_from_window_fast(
+            &window,
+            t,
+            d,
+            &mut ev_s,
+            &mut el_s,
+            &mut scratch,
+            k,
+            5,
+        );
 
         // Tracker: push all t ticks, then recover.
         let mut tr = EigenbasisTracker::new(t, d);
@@ -919,7 +992,14 @@ mod tests {
         // reassociation differences between single-pass and incremental).
         for i in 0..k {
             let rel = (el_s[i] - el_t[i]).abs() / el_s[i].abs().max(1e-6);
-            assert!(rel < 0.01, "tracker eigval {} ({}) diverges from stateless ({}) by {}", i, el_t[i], el_s[i], rel);
+            assert!(
+                rel < 0.01,
+                "tracker eigval {} ({}) diverges from stateless ({}) by {}",
+                i,
+                el_t[i],
+                el_s[i],
+                rel
+            );
         }
         // Top eigenvalue direction should align (|cos| > 0.95).
         let mut dot = 0.0;
@@ -974,11 +1054,27 @@ mod tests {
         let mut ev_s = vec![0.0; d * k];
         let mut el_s = vec![0.0; k];
         let mut scratch = EigenbasisScratch::new();
-        recover_eigenbasis_from_window_fast(trailing, cap, d, &mut ev_s, &mut el_s, &mut scratch, k, 8);
+        recover_eigenbasis_from_window_fast(
+            trailing,
+            cap,
+            d,
+            &mut ev_s,
+            &mut el_s,
+            &mut scratch,
+            k,
+            8,
+        );
 
         for i in 0..k {
             let rel = (el_s[i] - el_t[i]).abs() / el_s[i].abs().max(1e-6);
-            assert!(rel < 0.02, "evicted eigval {} ({}) vs stateless ({}) rel {}", i, el_t[i], el_s[i], rel);
+            assert!(
+                rel < 0.02,
+                "evicted eigval {} ({}) vs stateless ({}) rel {}",
+                i,
+                el_t[i],
+                el_s[i],
+                rel
+            );
         }
     }
 }

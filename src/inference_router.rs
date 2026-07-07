@@ -342,8 +342,7 @@ impl InferenceRouter {
             // High trust on GPU → allow tier down to CPU.
             // Snapshot gate config once to avoid repeated method calls.
             let cfg = self.gate.config();
-            let low_load =
-                self.gate.estimated_qps() < cfg.gpu_activate_qps * cfg.hysteresis_factor;
+            let low_load = self.gate.estimated_qps() < cfg.gpu_activate_qps * cfg.hysteresis_factor;
             match low_load {
                 true => {
                     log::info!(
@@ -417,9 +416,7 @@ impl InferenceRouter {
         #[cfg(feature = "breakeven_routing")]
         let tier_final = match self.breakeven.select_tier(tier_after_tvp) {
             Some(breakeven_tier) if breakeven_tier != tier_after_tvp => {
-                log::info!(
-                    "Router breakeven tier override: {tier_after_tvp}→{breakeven_tier}"
-                );
+                log::info!("Router breakeven tier override: {tier_after_tvp}→{breakeven_tier}");
                 breakeven_tier
             }
             _ => tier_after_tvp,
@@ -672,9 +669,7 @@ impl InferenceRouter {
                         true
                     }
                     Err(e) => {
-                        log::info!(
-                            "Router: GPU compile failed ({e}), falling back to CPU"
-                        );
+                        log::info!("Router: GPU compile failed ({e}), falling back to CPU");
                         false
                     }
                 }

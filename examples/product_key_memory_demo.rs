@@ -12,9 +12,7 @@
 
 use std::time::Instant;
 
-use katgpt_core::product_key_memory::{
-    PkmScratch, ProductKeyMemory, ScoreFn,
-};
+use katgpt_core::product_key_memory::{PkmScratch, ProductKeyMemory, ScoreFn};
 
 // ─── Const generics (match the Plan 408 G1 bench configuration) ─────────────
 //
@@ -62,18 +60,21 @@ fn part1_basic_retrieval() {
         if !sample_printed {
             println!(
                 "  sample query top-{K}: {}",
-            out[..FINAL_K]
-                .iter()
-                .map(|(idx, w)| format!("slot={idx:6} w={w:.4}"))
-                .collect::<Vec<_>>()
-                .join(",  ")
+                out[..FINAL_K]
+                    .iter()
+                    .map(|(idx, w)| format!("slot={idx:6} w={w:.4}"))
+                    .collect::<Vec<_>>()
+                    .join(",  ")
             );
             sample_printed = true;
         }
     }
 
     let mean_ns = total_ns / n_queries as u64;
-    println!("  N = {} slots (SQRT_N={SQRT_N}, D_K={D_K}, D_V={D_V})", SQRT_N * SQRT_N);
+    println!(
+        "  N = {} slots (SQRT_N={SQRT_N}, D_K={D_K}, D_V={D_V})",
+        SQRT_N * SQRT_N
+    );
     println!("  {n_queries} queries, mean latency = {mean_ns} ns/query");
     println!();
 }
@@ -160,7 +161,13 @@ fn part3_idw_vs_dot() {
     }
 
     table.query_into(&q, ScoreFn::Dot, FINAL_K, &mut out_dot, &mut scratch);
-    table.query_into(&q, ScoreFn::idw_default(), FINAL_K, &mut out_idw, &mut scratch);
+    table.query_into(
+        &q,
+        ScoreFn::idw_default(),
+        FINAL_K,
+        &mut out_idw,
+        &mut scratch,
+    );
 
     // Measure how close (in Euclidean distance over the codebook-1 half-key)
     // the retrieved slots are to the query's first half. IDW should retrieve
@@ -183,7 +190,9 @@ fn part3_idw_vs_dot() {
             dot_mean_dist - idw_mean_dist
         );
     } else {
-        println!("  → Dot happens to win on this seed (geometry can favor Dot; the property is statistical, see Phase 2 unit test t27)");
+        println!(
+            "  → Dot happens to win on this seed (geometry can favor Dot; the property is statistical, see Phase 2 unit test t27)"
+        );
     }
     println!();
 }

@@ -136,7 +136,8 @@ impl NodeStats {
             0 => f32::INFINITY,
             n => {
                 let exploit = self.total_value / n as f32;
-                let explore = UCB1_C * (parent_visits.max(1) as f32).ln().sqrt() / (n as f32).sqrt();
+                let explore =
+                    UCB1_C * (parent_visits.max(1) as f32).ln().sqrt() / (n as f32).sqrt();
                 exploit + explore
             }
         }

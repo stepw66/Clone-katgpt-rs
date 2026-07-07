@@ -142,9 +142,7 @@ impl GroupSelection {
 
     /// All groups within all chunks (full coverage — G1 test mode).
     pub fn all_groups(n_chunks: usize, n_groups_per_chunk: usize) -> Self {
-        let selections = (0..n_chunks)
-            .map(|c| (c, 0, n_groups_per_chunk))
-            .collect();
+        let selections = (0..n_chunks).map(|c| (c, 0, n_groups_per_chunk)).collect();
         Self { selections }
     }
 
@@ -183,12 +181,7 @@ pub trait TieredKvStore {
     /// - `keys` — flattened `[C * D]` key vectors (already RoPE-rotated at their positions).
     /// - `values` — flattened `[C * D]` value vectors.
     /// - `positions` — `[C]` token positions.
-    fn append_chunk(
-        &mut self,
-        keys: &[f32],
-        values: &[f32],
-        positions: &[usize],
-    );
+    fn append_chunk(&mut self, keys: &[f32], values: &[f32], positions: &[usize]);
 
     /// Fetch the full working set: sink + local + routed chunks' selected tokens.
     ///

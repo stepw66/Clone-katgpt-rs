@@ -327,9 +327,8 @@ impl HardwareAwarePrefixScheduler {
             for buf in owned.iter() {
                 survival_probs.push(buf.as_slice());
             }
-            let mut cand_scratch: Vec<(f32, usize, usize)> = Vec::with_capacity(
-                token_probs.iter().map(|s| s.len()).sum(),
-            );
+            let mut cand_scratch: Vec<(f32, usize, usize)> =
+                Vec::with_capacity(token_probs.iter().map(|s| s.len()).sum());
             self.schedule_with_scratch(&survival_probs, &mut cand_scratch, &mut out);
         }
         out
@@ -604,9 +603,7 @@ mod tests {
         // Single request with 10 positions, all survival prob 0.5.
         // Without the cliff, all 10 would be admitted. With the cliff,
         // the early-stop fires when Θ drops at B=3.
-        let r1: &[f32] = &[
-            0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5,
-        ];
+        let r1: &[f32] = &[0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5];
         let out = scheduler.schedule(&[r1]);
         // We expect exactly 2 admits: at B=1, Θ = 0.5 * 100 = 50.
         //                            at B=2, Θ = 1.0 * 100 = 100 (best).
@@ -618,12 +615,7 @@ mod tests {
     fn schedule_multi_request_allocates_more_to_high_survival() {
         // Two requests: r0 has high survival probs, r1 has low survival probs.
         // SPS curve is monotonically decreasing (penalizes big batches).
-        let curve = SpsCurve::from_profile(&[
-            (1, 100.0),
-            (4, 50.0),
-            (8, 25.0),
-            (16, 10.0),
-        ]);
+        let curve = SpsCurve::from_profile(&[(1, 100.0), (4, 50.0), (8, 25.0), (16, 10.0)]);
         let scheduler = HardwareAwarePrefixScheduler::new(curve);
 
         let r0: &[f32] = &[0.95, 0.90, 0.85, 0.80]; // high survival
@@ -736,13 +728,8 @@ mod tests {
         // depends only on candidates admitted so far, not on future ones.
 
         // Cliff SPS curve: cheap up to B=3, drops sharply at B=4.
-        let curve = SpsCurve::from_profile(&[
-            (1, 100.0),
-            (2, 100.0),
-            (3, 100.0),
-            (4, 1.0),
-            (10, 1.0),
-        ]);
+        let curve =
+            SpsCurve::from_profile(&[(1, 100.0), (2, 100.0), (3, 100.0), (4, 1.0), (10, 1.0)]);
         let scheduler = HardwareAwarePrefixScheduler::new(curve);
 
         let r1: &[f32] = &[0.6, 0.36, 0.216, 0.1296, 0.07776];
@@ -761,7 +748,8 @@ mod tests {
         ];
         let out_extended = scheduler.schedule(&[r1_extended]);
         assert_eq!(
-            out_extended, vec![3],
+            out_extended,
+            vec![3],
             "non-anticipating: adding more low-prob candidates must not change ℓ*"
         );
     }

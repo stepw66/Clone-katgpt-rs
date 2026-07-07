@@ -5,7 +5,7 @@
 //! changes as Normal, StiffCollision, or ElasticAbsorption.
 
 use crate::stiff_anomaly::subspace::{
-    decompose_into, soft_alignment_ratio, StiffSoftDecomposition,
+    StiffSoftDecomposition, decompose_into, soft_alignment_ratio,
 };
 
 /// Track eigenvalue/eigenvector stability across temporal windows.
@@ -299,7 +299,14 @@ impl StiffAnomalyGate {
     ) -> GateResult {
         let dim = current.len();
         let mut buf = EvaluateBuffers::with_capacity(dim);
-        self.evaluate_with_buffers(tracker, current, eigenvectors, delta_x, trace_mass, &mut buf)
+        self.evaluate_with_buffers(
+            tracker,
+            current,
+            eigenvectors,
+            delta_x,
+            trace_mass,
+            &mut buf,
+        )
     }
 
     /// Zero-allocation variant of [`evaluate`](Self::evaluate) using pre-allocated buffers.
@@ -453,9 +460,10 @@ mod tests {
         for w in &anomalous {
             let z_scores = tracker.eigenspace_zscore(w);
             if let Some(min_z) = z_scores.iter().cloned().reduce(f32::min)
-                && min_z < gate.z_threshold {
-                    detected += 1;
-                }
+                && min_z < gate.z_threshold
+            {
+                detected += 1;
+            }
         }
         assert_eq!(
             detected, 5,

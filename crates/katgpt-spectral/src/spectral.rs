@@ -1444,20 +1444,10 @@ mod dual_gram_goat_tests {
                 // pairing shifts.
                 const SLACK: usize = 2;
                 let k_max = (k + SLACK).min(rank.min(5).saturating_sub(1));
-                let proj_std_into_dg = subspace_projection(
-                    &std_cal.eigenvectors,
-                    k,
-                    &dg_cal.eigenvectors,
-                    k_max,
-                    d_h,
-                );
-                let proj_dg_into_std = subspace_projection(
-                    &dg_cal.eigenvectors,
-                    k,
-                    &std_cal.eigenvectors,
-                    k_max,
-                    d_h,
-                );
+                let proj_std_into_dg =
+                    subspace_projection(&std_cal.eigenvectors, k, &dg_cal.eigenvectors, k_max, d_h);
+                let proj_dg_into_std =
+                    subspace_projection(&dg_cal.eigenvectors, k, &std_cal.eigenvectors, k_max, d_h);
                 assert!(
                     proj_std_into_dg >= 0.90,
                     "d_h={d_h}, seq_len={seq_len}, evec {k}: \

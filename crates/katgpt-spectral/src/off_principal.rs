@@ -653,7 +653,10 @@ mod tests {
         let q = vec![1.0_f32; d];
         let a = vec![-1.0_f32; d];
         let s = idx.score_bounded(&q, &a);
-        assert!((0.0..=1.0).contains(&s), "score_bounded = {s} not in [0, 1]");
+        assert!(
+            (0.0..=1.0).contains(&s),
+            "score_bounded = {s} not in [0, 1]"
+        );
 
         // Positive score → > 0.5
         let q2 = vec![0.5_f32; d];

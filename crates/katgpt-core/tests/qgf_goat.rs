@@ -37,8 +37,8 @@
 
 #![cfg(all(feature = "qgf_drafter", feature = "qgf_adaptive"))]
 
-use katgpt_core::qgf::adaptive::adaptive_guidance_weight;
 use katgpt_core::qgf::QGuidedDrafter;
+use katgpt_core::qgf::adaptive::adaptive_guidance_weight;
 use katgpt_core::traits::{QGradientOracle, SpeculativeGenerator};
 
 // ──────────────────────────────────────────────────────────────────────────
@@ -81,12 +81,7 @@ impl QGradientOracle for KnownLandscapeOracle {
         self.q_values.clone()
     }
 
-    fn q_gradient_into(
-        &self,
-        _state: &Self::State,
-        _action: &Self::Action,
-        out: &mut [f32],
-    ) {
+    fn q_gradient_into(&self, _state: &Self::State, _action: &Self::Action, out: &mut [f32]) {
         let n = out.len().min(self.q_values.len());
         out[..n].copy_from_slice(&self.q_values[..n]);
         for slot in &mut out[n..] {
@@ -239,7 +234,9 @@ fn goat_g1_random_gradient_no_systematic_gain() {
     for seed in 0..n_trials {
         // Random gradient direction in [-1, 1]^n (NOT aligned with Q).
         let random_grad: Vec<f32> = (0..n).map(|_| rng.f32() * 2.0 - 1.0).collect();
-        let oracle = KnownLandscapeOracle { q_values: random_grad };
+        let oracle = KnownLandscapeOracle {
+            q_values: random_grad,
+        };
         let drafter = QGuidedDrafter::new(UnitGen, oracle).with_weight(3.0);
 
         let mut logits = ref_logits.clone();
@@ -314,8 +311,7 @@ fn goat_g2_zero_weight_bit_identical() {
     };
     let drafter = QGuidedDrafter::new(UnitGen, oracle).with_weight(0.0);
 
-    let logits_initial: Vec<f32> =
-        (0..n).map(|i| (i as f32) * 0.137 - 1.0).collect();
+    let logits_initial: Vec<f32> = (0..n).map(|i| (i as f32) * 0.137 - 1.0).collect();
     let mut logits = logits_initial.clone();
     let mut grad = vec![0.0f32; n];
 
@@ -362,8 +358,15 @@ fn goat_g2_no_guidance_oracle_is_zero() {
     let oracle = NoGuidanceOracle;
     let mut buf = [1.0f32; 8];
     oracle.q_gradient_into(&(), &(), &mut buf);
-    assert!(buf.iter().all(|&v| v == 0.0), "NoGuidanceOracle must zero the gradient buffer");
-    assert_eq!(oracle.confidence(&()), 0.0, "NoGuidanceOracle confidence must be 0.0");
+    assert!(
+        buf.iter().all(|&v| v == 0.0),
+        "NoGuidanceOracle must zero the gradient buffer"
+    );
+    assert_eq!(
+        oracle.confidence(&()),
+        0.0,
+        "NoGuidanceOracle confidence must be 0.0"
+    );
 }
 
 // ══════════════════════════════════════════════════════════════════════════
@@ -481,8 +484,8 @@ fn goat_g5_adaptive_weight_bounded_and_finite() {
         (0.5, 0.5, 6.0),
         (1.0, 0.5, 6.0),
         (100.0, 0.5, 6.0),
-        (0.5, 0.0, 100.0),  // extreme steepness
-        (0.5, 1.0, 0.001),  // near-flat
+        (0.5, 0.0, 100.0), // extreme steepness
+        (0.5, 1.0, 0.001), // near-flat
         (f32::INFINITY, 0.5, 6.0),
         (f32::NEG_INFINITY, 0.5, 6.0),
     ];
@@ -573,10 +576,16 @@ fn goat_g5_adaptive_extremes_saturate_correctly() {
     const THR: f32 = 0.5;
 
     let w_low = adaptive_guidance_weight(0.01, THR, K);
-    assert!(w_low < 0.01, "low confidence must collapse below 0.01, got {w_low}");
+    assert!(
+        w_low < 0.01,
+        "low confidence must collapse below 0.01, got {w_low}"
+    );
 
     let w_high = adaptive_guidance_weight(0.99, THR, K);
-    assert!(w_high > 0.99, "high confidence must saturate above 0.99, got {w_high}");
+    assert!(
+        w_high > 0.99,
+        "high confidence must saturate above 0.99, got {w_high}"
+    );
 
     // Symmetry: at exactly the threshold, weight is 0.5 regardless of steepness.
     let w_mid = adaptive_guidance_weight(THR, THR, K);
@@ -694,7 +703,9 @@ fn t11_qgf_has_highest_cosine_similarity_under_perturbation() {
     // QGF should have cos ≈ 1.0 (deterministic); BPTT/OOD should have cos < 1.
     let true_gradient = vec![1.0f32, 2.0, 3.0, 4.0, 5.0];
 
-    let qgf = QgfEstimator { gradient: true_gradient.clone() };
+    let qgf = QgfEstimator {
+        gradient: true_gradient.clone(),
+    };
     let bptt = BpttLikeEstimator {
         base_gradient: true_gradient.clone(),
         amplification: 0.5, // moderate Jacobian amplification
@@ -744,7 +755,9 @@ fn t11_qgf_variance_is_zero_across_calls() {
     // but ZERO-variance across repeated calls at the same (state, action).
     // This is the structural reason Fig 3 favors QGF — there's no estimator
     // noise to average away.
-    let oracle = KnownLandscapeOracle { q_values: vec![1.0, 2.0, 3.0, 4.0] };
+    let oracle = KnownLandscapeOracle {
+        q_values: vec![1.0, 2.0, 3.0, 4.0],
+    };
     let mut g1 = [0.0f32; 4];
     let mut g2 = [0.0f32; 4];
     let mut g3 = [0.0f32; 4];
@@ -769,7 +782,9 @@ fn t11_qgf_drop_jacobian_documented_in_trait() {
     // If someone added a `generator: &G` parameter to enable BPTT, this test
     // would fail to compile (the function signature changed), forcing a
     // conscious review of the variance implications.
-    let oracle = KnownLandscapeOracle { q_values: vec![1.0, 2.0] };
+    let oracle = KnownLandscapeOracle {
+        q_values: vec![1.0, 2.0],
+    };
     let mut out = [0.0f32; 2];
     // Signature: (state, action, out) — no generator, no Jacobian.
     oracle.q_gradient_into(&(), &(), &mut out);

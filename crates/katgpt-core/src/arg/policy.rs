@@ -162,9 +162,7 @@ impl<'a> PolicyEnvelope<'a> {
                 };
             }
             // Allowlist enforcement: a non-allowed label under Restrict forces Refocus.
-            if !self.constraints.is_allowed(label)
-                && matches!(self.state, PolicyState::Restrict)
-            {
+            if !self.constraints.is_allowed(label) && matches!(self.state, PolicyState::Restrict) {
                 return PolicyDecision {
                     proceed: ShouldProceed::Refocus,
                     enforce_constraints: true,

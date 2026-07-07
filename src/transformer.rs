@@ -9,9 +9,9 @@ use rayon::prelude::*;
 // / `load_ternary_bits` / `DecodeStage` callers resolve unchanged.
 pub use katgpt_transformer::{
     ContiguousWeights, DecodeStage, GateStatistics, KVCache, KVLayerSnapshot, KVSnapshot,
-    LayerWeights, MtpProjection, MultiLayerKVCache, PagedKVCache, PrefillContext,
-    RavenKVCache, TransformerWeights, WallPrefixState, load_mtp_projection,
-    load_ternary_bits, preload_kv_cache, project_target_activation,
+    LayerWeights, MtpProjection, MultiLayerKVCache, PagedKVCache, PrefillContext, RavenKVCache,
+    TransformerWeights, WallPrefixState, load_mtp_projection, load_ternary_bits, preload_kv_cache,
+    project_target_activation,
 };
 // Page size in tokens for PagedKVCache — re-exported so root's tests can drive
 // `paged.ensure_pages(0, PAGE_SIZE - 1)` without restating the literal.
@@ -95,9 +95,8 @@ pub use katgpt_forward::{DepthRouteIndicesArgs, depth_route_with_indices};
 #[cfg(feature = "coda_fusion")]
 pub use katgpt_forward::forward_coda;
 pub use katgpt_forward::{
-    cluster_map_from_embeddings, cluster_map_round_robin, clustered_lm_head,
-    forward, forward_base, select_topk_indices, select_topk_indices_into_buf,
-    standard_lm_head,
+    cluster_map_from_embeddings, cluster_map_round_robin, clustered_lm_head, forward, forward_base,
+    select_topk_indices, select_topk_indices_into_buf, standard_lm_head,
 };
 // `attention_head` is `unsafe fn` — re-export publicly for root's other
 // forward variants and tests that call it inside `unsafe { ... }` blocks.
@@ -223,7 +222,6 @@ pub fn forward_with_domain_latent<'a>(
 // `crate::transformer::forward_decode_stage` call sites continue to resolve.
 #[cfg(feature = "decode_specialize")]
 pub use katgpt_forward::forward::forward_decode_stage;
-
 
 // ---------------------------------------------------------------------------
 // LT2 Looped Inference (Plan 108, Research 73)
@@ -552,11 +550,7 @@ pub fn forward_looped<'a>(
                         })
                         .map(|(i, _)| i)
                         .unwrap_or(0);
-                    if !gate.should_recurse(
-                        &_gate_prev_logits,
-                        &_gate_scratch_logits,
-                        candidate,
-                    ) {
+                    if !gate.should_recurse(&_gate_prev_logits, &_gate_scratch_logits, candidate) {
                         // Dead compute detected: this iteration did not
                         // improve the candidate's prediction, so further
                         // iterations are unlikely to either. Break the outer
@@ -592,60 +586,53 @@ pub fn forward_looped<'a>(
         // refinement, cheaper than erank, and the kernel ships `step_size`
         // exactly for this use (see plan Open Question 2 resolution).
         #[cfg(feature = "gain_cost_halt")]
-        if halter_active && tau > 0
-            && let Some(h) = halter.as_deref_mut() {
-                // gain = ||h^(tau) - h^(tau-1)||₂. `ctx.prev_h` was saved at
-                // the top of this iteration (before the layer pass), so it
-                // holds h^(tau-1); `ctx.x` now holds h^(tau) post-pass.
-                let gain = katgpt_core::gain_cost_halt::step_size(
-                    &ctx.x[..n],
-                    &ctx.prev_h[..n],
-                );
+        if halter_active
+            && tau > 0
+            && let Some(h) = halter.as_deref_mut()
+        {
+            // gain = ||h^(tau) - h^(tau-1)||₂. `ctx.prev_h` was saved at
+            // the top of this iteration (before the layer pass), so it
+            // holds h^(tau-1); `ctx.x` now holds h^(tau) post-pass.
+            let gain = katgpt_core::gain_cost_halt::step_size(&ctx.x[..n], &ctx.prev_h[..n]);
 
-                // cost = fixed tax (flat Ω(r), LoopCoder-v2 default).
-                // Cached on the first evaluation (tau == 1) as 0.01 × the
-                // first step size. Open Question 1 resolution: Phase 2 ships
-                // the flat-tax default; riir-ai can override with
-                // coherence-decay/staleness by not using this code path.
-                if tau == 1 {
-                    cost_floor = 0.01 * gain;
-                }
-                let cost = cost_floor;
-
-                // cos θ between the current and previous update directions.
-                // curr_step = h^(tau) - h^(tau-1); prev_step_buf holds
-                // h^(tau-1) - h^(tau-2) from the prior iteration. On tau == 1
-                // there is no tau-2 state, so cos θ is 0.0 (neutral,
-                // non-oscillatory — does not trip the detector).
-                curr_step_buf.clear();
-                for (cur, prev) in ctx.x[..n].iter().zip(ctx.prev_h[..n].iter()) {
-                    curr_step_buf.push(cur - prev);
-                }
-                let cos_theta = if prev_step_buf.is_empty() {
-                    0.0
-                } else {
-                    katgpt_core::gain_cost_halt::angular_change(
-                        &curr_step_buf,
-                        &prev_step_buf,
-                    )
-                };
-
-                // The halter expects a 1-based loop index (`tau` is 0-based).
-                let decision =
-                    h.halt_decision(tau + 1, gain, cost, cos_theta);
-                if let katgpt_core::gain_cost_halt::HaltDecision::Halt { .. } =
-                    decision
-                {
-                    break;
-                }
-
-                // Roll the current step into the previous-step slot for the
-                    // next iteration's cos θ. `std::mem::swap` avoids a copy;
-                    // the now-swapped-in `curr_step_buf` will be `clear()`'d
-                    // at the top of the next evaluation.
-                std::mem::swap(&mut curr_step_buf, &mut prev_step_buf);
-                h.update_prev_step(gain);
+            // cost = fixed tax (flat Ω(r), LoopCoder-v2 default).
+            // Cached on the first evaluation (tau == 1) as 0.01 × the
+            // first step size. Open Question 1 resolution: Phase 2 ships
+            // the flat-tax default; riir-ai can override with
+            // coherence-decay/staleness by not using this code path.
+            if tau == 1 {
+                cost_floor = 0.01 * gain;
             }
+            let cost = cost_floor;
+
+            // cos θ between the current and previous update directions.
+            // curr_step = h^(tau) - h^(tau-1); prev_step_buf holds
+            // h^(tau-1) - h^(tau-2) from the prior iteration. On tau == 1
+            // there is no tau-2 state, so cos θ is 0.0 (neutral,
+            // non-oscillatory — does not trip the detector).
+            curr_step_buf.clear();
+            for (cur, prev) in ctx.x[..n].iter().zip(ctx.prev_h[..n].iter()) {
+                curr_step_buf.push(cur - prev);
+            }
+            let cos_theta = if prev_step_buf.is_empty() {
+                0.0
+            } else {
+                katgpt_core::gain_cost_halt::angular_change(&curr_step_buf, &prev_step_buf)
+            };
+
+            // The halter expects a 1-based loop index (`tau` is 0-based).
+            let decision = h.halt_decision(tau + 1, gain, cost, cos_theta);
+            if let katgpt_core::gain_cost_halt::HaltDecision::Halt { .. } = decision {
+                break;
+            }
+
+            // Roll the current step into the previous-step slot for the
+            // next iteration's cos θ. `std::mem::swap` avoids a copy;
+            // the now-swapped-in `curr_step_buf` will be `clear()`'d
+            // at the top of the next evaluation.
+            std::mem::swap(&mut curr_step_buf, &mut prev_step_buf);
+            h.update_prev_step(gain);
+        }
     }
 
     // Snapshot hidden state
@@ -1088,7 +1075,12 @@ fn depth_route(
     //    Eliminates the scaled_buf copy + separate scale + add passes.
     for (i, &src) in sources.iter().enumerate() {
         let weight = logits_buf[i] * inv_sum;
-        katgpt_core::simd::simd_fused_scale_acc(&mut residual[..n_embd], &src[..n_embd], weight, n_embd);
+        katgpt_core::simd::simd_fused_scale_acc(
+            &mut residual[..n_embd],
+            &src[..n_embd],
+            weight,
+            n_embd,
+        );
     }
 }
 
@@ -1126,7 +1118,11 @@ pub fn depth_route_weights(
 
         // Scale src * inv_rms * norm_weight into scratch via fused SIMD, then dot with query
         scaled[..n_embd].copy_from_slice(&src[..n_embd]);
-        katgpt_core::simd::simd_scale_mul_inplace(&mut scaled[..n_embd], &norm_weight[..n_embd], inv_rms);
+        katgpt_core::simd::simd_scale_mul_inplace(
+            &mut scaled[..n_embd],
+            &norm_weight[..n_embd],
+            inv_rms,
+        );
         let logit = katgpt_core::simd::simd_dot_f32(&scaled[..n_embd], query_weight, n_embd);
 
         logits[i] = logit;
@@ -2431,8 +2427,7 @@ pub fn forward_raven<'a>(
         // Fast path: when num_slots <= kvd, just copy first num_slots K elements.
         // Avoids per-iteration modulo (slow on most ISAs).
         if num_slots <= kvd {
-            ctx.raven_query_buf[..num_slots]
-                .copy_from_slice(&ctx.k[..num_slots]);
+            ctx.raven_query_buf[..num_slots].copy_from_slice(&ctx.k[..num_slots]);
         } else {
             for (i, slot) in ctx.raven_query_buf[..num_slots].iter_mut().enumerate() {
                 *slot = ctx.k[i % kvd];

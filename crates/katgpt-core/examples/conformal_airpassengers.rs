@@ -13,8 +13,8 @@
 
 use katgpt_core::{
     ConformalIntervalCalibrator, DecayUnit, PointForecaster, PredictiveInterval, ResidualMode,
-    SeasonalPoolForecaster,
-    crps_interval, empirical_coverage, mean_crps_interval, mean_winkler, winkler_score,
+    SeasonalPoolForecaster, crps_interval, empirical_coverage, mean_crps_interval, mean_winkler,
+    winkler_score,
 };
 
 /// Synthetic AirPassengers-like series: 144 monthly observations with a
@@ -50,7 +50,9 @@ fn generate_airpassengers_proxy(seed: u64) -> Vec<f32> {
         let level = 4.6 + (t as f32) * (6.3 - 4.6) / (n as f32 - 1.0);
         let season = seasonal[t % m];
         let noise = gaussian(0.03); // ~3% multiplicative noise on the log scale.
-        let log_y = level + (season - 1.0).ln().abs().max(0.0) * (if season > 1.0 { 1.0 } else { -1.0 }) + noise;
+        let log_y = level
+            + (season - 1.0).ln().abs().max(0.0) * (if season > 1.0 { 1.0 } else { -1.0 })
+            + noise;
         // Convert back: y = exp(log_y). Use a cleaner multiplicative form:
         let y = (level.exp()) * season * (gaussian(0.05).exp());
         let _ = log_y;
@@ -73,8 +75,10 @@ fn main() {
     let test = &series[n_train..];
 
     println!("=== Conformal AirPassengers CRPS (Plan 340 T1.12) ===");
-    println!("n_total = {} (proxy), n_train = {}, h_forecast = {}, m = {}",
-             n, n_train, h_forecast, m);
+    println!(
+        "n_total = {} (proxy), n_train = {}, h_forecast = {}, m = {}",
+        n, n_train, h_forecast, m
+    );
     println!();
 
     // --- Conformal overlay on SeasonalPoolForecaster ---
@@ -132,9 +136,11 @@ fn main() {
         baseline_forecaster.observe(y);
     }
     let mean_res: f32 = baseline_residuals.iter().sum::<f32>() / baseline_residuals.len() as f32;
-    let var_res: f32 = baseline_residuals.iter()
+    let var_res: f32 = baseline_residuals
+        .iter()
         .map(|r| (r - mean_res).powi(2))
-        .sum::<f32>() / baseline_residuals.len() as f32;
+        .sum::<f32>()
+        / baseline_residuals.len() as f32;
     let std_res = var_res.sqrt();
     let mut baseline_intervals = Vec::with_capacity(h_forecast);
     let mut baseline_actuals = Vec::with_capacity(h_forecast);
@@ -146,12 +152,7 @@ fn main() {
     for (h, &y) in test.iter().enumerate() {
         let mut fc = 0.0_f32;
         baseline_forecaster2.forecast_into(&[], h + 1, &mut fc);
-        let iv = PredictiveInterval::new(
-            fc - 1.96 * std_res,
-            fc,
-            fc + 1.96 * std_res,
-            alpha,
-        );
+        let iv = PredictiveInterval::new(fc - 1.96 * std_res, fc, fc + 1.96 * std_res, alpha);
         baseline_intervals.push(iv);
         baseline_actuals.push(y);
         baseline_forecaster2.observe(y);
@@ -183,16 +184,36 @@ fn main() {
 
     println!("Metric                  | Conformal Overlay | Seasonal-Naive ±2σ");
     println!("------------------------|-------------------|--------------------");
-    println!("Empirical coverage (α=.05) | {:>17.4} | {:>18.4}", conf_cov, base_cov);
-    println!("Mean interval CRPS      | {:>17.4} | {:>18.4}", conf_crps, base_crps);
-    println!("Mean Winkler score      | {:>17.4} | {:>18.4}", conf_winkler, base_winkler);
-    println!("Point-forecast RMSE     | {:>17.4} | {:>18.4}", conf_rmse, base_rmse);
+    println!(
+        "Empirical coverage (α=.05) | {:>17.4} | {:>18.4}",
+        conf_cov, base_cov
+    );
+    println!(
+        "Mean interval CRPS      | {:>17.4} | {:>18.4}",
+        conf_crps, base_crps
+    );
+    println!(
+        "Mean Winkler score      | {:>17.4} | {:>18.4}",
+        conf_winkler, base_winkler
+    );
+    println!(
+        "Point-forecast RMSE     | {:>17.4} | {:>18.4}",
+        conf_rmse, base_rmse
+    );
     println!();
     println!("Training residual σ     = {:.4}", std_res);
-    println!("Per-step CRPS (conformal) min/mean/max = {:.4} / {:.4} / {:.4}",
-             conf_crps_values.iter().cloned().fold(f32::INFINITY, f32::min),
-             conf_crps_values.iter().sum::<f32>() / conf_crps_values.len() as f32,
-             conf_crps_values.iter().cloned().fold(f32::NEG_INFINITY, f32::max));
+    println!(
+        "Per-step CRPS (conformal) min/mean/max = {:.4} / {:.4} / {:.4}",
+        conf_crps_values
+            .iter()
+            .cloned()
+            .fold(f32::INFINITY, f32::min),
+        conf_crps_values.iter().sum::<f32>() / conf_crps_values.len() as f32,
+        conf_crps_values
+            .iter()
+            .cloned()
+            .fold(f32::NEG_INFINITY, f32::max)
+    );
 
     // Verdict: conformal overlay should have coverage closer to 0.95 than the
     // ±2σ baseline (which assumes Gaussian residuals — a poor fit for
@@ -203,15 +224,25 @@ fn main() {
     let conf_cov_err = (conf_cov - target_coverage).abs();
     let base_cov_err = (base_cov - target_coverage).abs();
     if conf_cov_err < base_cov_err {
-        println!("✅ Conformal overlay coverage ({:.4}) is closer to target ({:.4}) than ±2σ baseline ({:.4})",
-                 conf_cov, target_coverage, base_cov);
+        println!(
+            "✅ Conformal overlay coverage ({:.4}) is closer to target ({:.4}) than ±2σ baseline ({:.4})",
+            conf_cov, target_coverage, base_cov
+        );
     } else {
-        println!("⚠ Conformal overlay coverage ({:.4}) is NOT closer to target ({:.4}) than ±2σ baseline ({:.4}) — investigate",
-                 conf_cov, target_coverage, base_cov);
+        println!(
+            "⚠ Conformal overlay coverage ({:.4}) is NOT closer to target ({:.4}) than ±2σ baseline ({:.4}) — investigate",
+            conf_cov, target_coverage, base_cov
+        );
     }
     if conf_crps <= 2.0 * base_crps {
-        println!("✅ Conformal CRPS ({:.4}) is within 2× of baseline ({:.4}) — Report-the-Floor gate holds", conf_crps, base_crps);
+        println!(
+            "✅ Conformal CRPS ({:.4}) is within 2× of baseline ({:.4}) — Report-the-Floor gate holds",
+            conf_crps, base_crps
+        );
     } else {
-        println!("⚠ Conformal CRPS ({:.4}) exceeds 2× baseline ({:.4}) — investigate", conf_crps, base_crps);
+        println!(
+            "⚠ Conformal CRPS ({:.4}) exceeds 2× baseline ({:.4}) — investigate",
+            conf_crps, base_crps
+        );
     }
 }

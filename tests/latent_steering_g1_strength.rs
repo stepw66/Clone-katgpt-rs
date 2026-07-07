@@ -28,9 +28,7 @@
 
 #![cfg(feature = "latent_field_steering")]
 
-use katgpt_core::latent_steering::{
-    HLA_FEAR, LatentSteeringVector, apply_latent_steering,
-};
+use katgpt_core::latent_steering::{HLA_FEAR, LatentSteeringVector, apply_latent_steering};
 
 const ALPHA: f32 = 0.5;
 /// Required relative shift on the target axis: post/pre ≥ 1.30.

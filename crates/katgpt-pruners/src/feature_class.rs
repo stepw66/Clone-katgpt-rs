@@ -49,12 +49,7 @@ mod tests {
     fn default_feature_class_is_detection() {
         struct AnonymousScreener;
         impl ScreeningPruner for AnonymousScreener {
-            fn relevance(
-                &self,
-                _depth: usize,
-                _token_idx: usize,
-                _parent_tokens: &[usize],
-            ) -> f32 {
+            fn relevance(&self, _depth: usize, _token_idx: usize, _parent_tokens: &[usize]) -> f32 {
                 1.0
             }
         }

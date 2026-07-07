@@ -158,7 +158,6 @@ fn sigmoid(x: f32) -> f32 {
     1.0 / (1.0 + (-x).exp())
 }
 
-
 #[path = "../tests/common/mod.rs"]
 mod common;
 counting_allocator!();

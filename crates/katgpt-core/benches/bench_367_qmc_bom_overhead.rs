@@ -25,9 +25,7 @@
 use std::hint::black_box;
 use std::time::Instant;
 
-use katgpt_core::speculative::qmc::{
-    LatticeQmc, fill_noise_queries_gaussian_qmc,
-};
+use katgpt_core::speculative::qmc::{LatticeQmc, fill_noise_queries_gaussian_qmc};
 use katgpt_core::{AttractorKernel, BoMSampler, NoiseQueryConfig};
 
 const WARMUP_ITERS: usize = 1_000;

@@ -1,7 +1,7 @@
 //! CPU-side LoRA adapter.
 
-use super::*;
 use super::domain::{read_f32_le, read_u16_le, read_u32_le};
+use super::*;
 
 // ---------------------------------------------------------------------------
 // LoRA Adapter — CPU inference path (Plan 025)
@@ -286,8 +286,7 @@ impl LoraAdapter {
         file_data.extend_from_slice(checksum.as_bytes());
         file_data.extend_from_slice(&payload);
 
-        std::fs::write(path, &file_data)
-            .map_err(|e| format!("Failed to write lora file: {e}"))
+        std::fs::write(path, &file_data).map_err(|e| format!("Failed to write lora file: {e}"))
     }
 
     /// Load LoRA adapters from a compact binary format.

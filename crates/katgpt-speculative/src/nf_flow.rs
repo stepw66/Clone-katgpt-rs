@@ -326,7 +326,13 @@ impl NfFlowScore {
         projection_pos: usize,
         guidance_weight: f32,
     ) -> f32 {
-        score_with_qgf_at(marginals, selected, gradient, projection_pos, guidance_weight)
+        score_with_qgf_at(
+            marginals,
+            selected,
+            gradient,
+            projection_pos,
+            guidance_weight,
+        )
     }
 
     /// Return the index of the candidate with the highest QGF-augmented score.
@@ -617,7 +623,10 @@ mod tests {
         let gradient = vec![1.0, -1.0];
         let expected = flow_score(&marginals, &selected);
         let got = score_with_qgf(&marginals, &selected, &gradient, 0.0);
-        assert!((got - expected).abs() < 1e-6, "zero weight: got {got}, expected {expected}");
+        assert!(
+            (got - expected).abs() < 1e-6,
+            "zero weight: got {got}, expected {expected}"
+        );
     }
 
     #[test]
@@ -627,7 +636,10 @@ mod tests {
         let selected = vec![0usize];
         let expected = flow_score(&marginals, &selected);
         let got = score_with_qgf(&marginals, &selected, &[], 1.0);
-        assert!((got - expected).abs() < 1e-6, "empty gradient: got {got}, expected {expected}");
+        assert!(
+            (got - expected).abs() < 1e-6,
+            "empty gradient: got {got}, expected {expected}"
+        );
     }
 
     #[test]
@@ -640,7 +652,10 @@ mod tests {
         let base = flow_score(&marginals, &selected);
         let expected = base + w * 2.0; // gradient[selected[0]] = gradient[0] = 2.0
         let got = score_with_qgf(&marginals, &selected, &gradient, w);
-        assert!((got - expected).abs() < 1e-6, "got {got}, expected {expected}");
+        assert!(
+            (got - expected).abs() < 1e-6,
+            "got {got}, expected {expected}"
+        );
     }
 
     #[test]
@@ -653,7 +668,10 @@ mod tests {
         let base = flow_score(&marginals, &selected);
         let expected = base + w * (-10.0); // gradient[selected[1]] = gradient[1] = -10.0
         let got = score_with_qgf(&marginals, &selected, &gradient, w);
-        assert!((got - expected).abs() < 1e-6, "got {got}, expected {expected}");
+        assert!(
+            (got - expected).abs() < 1e-6,
+            "got {got}, expected {expected}"
+        );
     }
 
     #[test]
@@ -667,7 +685,10 @@ mod tests {
         // gradient[selected[0]] = gradient[0] = 5.0
         let expected = base + w * 5.0;
         let got = score_with_qgf_at(&marginals, &selected, &gradient, 0, w);
-        assert!((got - expected).abs() < 1e-6, "got {got}, expected {expected}");
+        assert!(
+            (got - expected).abs() < 1e-6,
+            "got {got}, expected {expected}"
+        );
     }
 
     #[test]
@@ -688,7 +709,10 @@ mod tests {
         let base = flow_score(&marginals, &selected);
         let expected = base; // gradient[5] = 0.0 (missing)
         let got = score_with_qgf(&marginals, &selected, &gradient, w);
-        assert!((got - expected).abs() < 1e-6, "got {got}, expected {expected}");
+        assert!(
+            (got - expected).abs() < 1e-6,
+            "got {got}, expected {expected}"
+        );
     }
 
     #[test]
@@ -722,7 +746,10 @@ mod tests {
 
         let best_nf = select_best(&marginals, &candidates);
         let best_qgf = select_best_qgf(&marginals, &candidates, &gradient, 0.0);
-        assert_eq!(best_nf, best_qgf, "zero-weight QGF should match NFCoT alone");
+        assert_eq!(
+            best_nf, best_qgf,
+            "zero-weight QGF should match NFCoT alone"
+        );
     }
 
     #[test]
@@ -734,7 +761,10 @@ mod tests {
         let w = 0.5;
         let got = scorer.score_with_qgf(&marginals, &selected, &gradient, w);
         let expected = score_with_qgf(&marginals, &selected, &gradient, w);
-        assert!((got - expected).abs() < 1e-6, "instance: got {got}, expected {expected}");
+        assert!(
+            (got - expected).abs() < 1e-6,
+            "instance: got {got}, expected {expected}"
+        );
     }
 
     #[test]
@@ -746,7 +776,10 @@ mod tests {
         assert_eq!(scores.len(), 2);
         // candidate 0: base + 1*gradient[0] = base + 1
         // candidate 1: base + 1*gradient[1] = base - 1
-        assert!(scores[0] > scores[1], "candidate 0 should score higher with positive gradient");
+        assert!(
+            scores[0] > scores[1],
+            "candidate 0 should score higher with positive gradient"
+        );
     }
 
     // ── Benchmarks ──────────────────────────────────────────────────

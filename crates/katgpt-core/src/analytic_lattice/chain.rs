@@ -156,12 +156,7 @@ pub fn compose_chain_into(
                 scratch.copy_from_slice(&out.data);
             }
             // Final step: out = C[n-1] × tmp
-            matmul_row_major(
-                &ops[ops.len() - 1].data,
-                scratch,
-                &mut out.data,
-                k,
-            );
+            matmul_row_major(&ops[ops.len() - 1].data, scratch, &mut out.data, k);
         }
     }
 
@@ -293,10 +288,13 @@ mod tests {
         let a = TransportOperator::identity(2);
         let b = TransportOperator::identity(3);
         let err = compose_chain(&[a, b]).unwrap_err();
-        assert_eq!(err, ChainError::DimensionMismatchK {
-            expected: 2,
-            got: 3
-        });
+        assert_eq!(
+            err,
+            ChainError::DimensionMismatchK {
+                expected: 2,
+                got: 3
+            }
+        );
     }
 
     #[test]

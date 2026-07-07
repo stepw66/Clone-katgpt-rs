@@ -44,7 +44,9 @@ struct SplitMix64 {
 
 impl SplitMix64 {
     fn new(seed: u64) -> Self {
-        Self { state: seed.wrapping_add(0x9E37_79B9_7F4A_7C15) }
+        Self {
+            state: seed.wrapping_add(0x9E37_79B9_7F4A_7C15),
+        }
     }
 
     fn next_u64(&mut self) -> u64 {
@@ -358,10 +360,7 @@ impl<const K: usize, const D: usize> EffectCodebook<K, D> {
         seed: u64,
         max_iters: usize,
     ) -> Self {
-        debug_assert_eq!(
-            patch_size, D,
-            "patch_size {patch_size} != codebook D={D}"
-        );
+        debug_assert_eq!(patch_size, D, "patch_size {patch_size} != codebook D={D}");
         debug_assert!(k <= K, "k ({k}) > K ({K})");
 
         // Pre-pass: count total patches.

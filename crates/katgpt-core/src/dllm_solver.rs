@@ -928,10 +928,7 @@ pub fn compute_entropy_weights(
         crate::simd::simd_add_scalar_inplace(&mut softmax_scratch[..vocab_size], -max_l);
         let sum_exp = crate::simd::simd_exp_sum_inplace(&mut softmax_scratch[..vocab_size]);
         if sum_exp > 0.0 {
-            crate::simd::simd_scale_inplace(
-                &mut softmax_scratch[..vocab_size],
-                1.0 / sum_exp,
-            );
+            crate::simd::simd_scale_inplace(&mut softmax_scratch[..vocab_size], 1.0 / sum_exp);
         }
 
         alphas[p] = normalized_entropy(softmax_scratch, log_vocab);

@@ -70,11 +70,11 @@ pub use katgpt_forward::{forward_ahla, forward_hla, generate_ahla_into, generate
 // Re-export the substrate API at `crate::hla::*` for backward compatibility
 // with all existing call sites (`crate::hla::MultiLayerHlaCache`, etc.).
 pub use katgpt_core::hla::{
-    ahla_denom, ahla_layer_step, ahla_step, hla_denom, hla_layer_readout, hla_layer_update,
-    hla_readout, hla_readout_normalized, hla_state_update,
-};
-pub use katgpt_core::hla::{
     AhlaLayerState, AhlaQHeadState, HlaLayerState, HlaQHeadState, HlaVariant, MultiLayerAhlaCache,
     MultiLayerHlaCache, MultiLayerParallaxAhlaCache, ParallaxAhlaLayerState,
     ParallaxAhlaQHeadState,
+};
+pub use katgpt_core::hla::{
+    ahla_denom, ahla_layer_step, ahla_step, hla_denom, hla_layer_readout, hla_layer_update,
+    hla_readout, hla_readout_normalized, hla_state_update,
 };

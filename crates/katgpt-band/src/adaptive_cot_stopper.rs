@@ -238,8 +238,7 @@ mod tests {
         // Adaptive: resolve pairs one at a time until unresolved is empty
         // OR uncertainty drops below τ.
         let config = AdaptiveCoTConfig::default();
-        let mut stopper =
-            AdaptiveCoTStopper::from_segment_count(n_segments, config);
+        let mut stopper = AdaptiveCoTStopper::from_segment_count(n_segments, config);
 
         // Simulate the "hard query" — only 60% of pairs are actually
         // collider-relevant; the other 40% are pruned by the band-CI test
@@ -289,7 +288,10 @@ mod tests {
         );
 
         // Sanity: after resolving all pairs, stopper should stop.
-        assert!(!adaptive_continue, "should_continue should be false after all pairs resolved");
+        assert!(
+            !adaptive_continue,
+            "should_continue should be false after all pairs resolved"
+        );
     }
 
     /// Empty stopper immediately returns false.

@@ -34,7 +34,7 @@
 //!
 //! See `.plans/268_qgf_test_time_q_guided_flow.md` §Phase 4 T8.
 
-use crate::qgf::route::{route_for, QgfComputeRoute};
+use crate::qgf::route::{QgfComputeRoute, route_for};
 use crate::traits::QGradientOracle;
 
 // ── Sealing ────────────────────────────────────────────────────────────
@@ -308,7 +308,9 @@ where
             "states and projected_actions must have equal length"
         );
         let batch = states.len();
-        let needed = batch.checked_mul(action_space_size).expect("batch * action_space_size overflow");
+        let needed = batch
+            .checked_mul(action_space_size)
+            .expect("batch * action_space_size overflow");
         assert!(
             out.len() >= needed,
             "out buffer too small: need {needed}, got {}",
@@ -320,9 +322,12 @@ where
         match route {
             QgfComputeRoute::GpuBatch => {
                 // Try GPU delegate; fall back to CPU on failure (written == 0).
-                let written = self
-                    .gpu
-                    .try_batch_gradient_into(states, projected_actions, action_space_size, out);
+                let written = self.gpu.try_batch_gradient_into(
+                    states,
+                    projected_actions,
+                    action_space_size,
+                    out,
+                );
                 if written == batch {
                     return QgfComputeRoute::GpuBatch;
                 }
@@ -430,12 +435,7 @@ where
 /// Internal: optimised "maybe-ANE" trait. Counterpart to [`GpuDelegateOpt`].
 pub trait AneDelegateOpt<S: ?Sized, A: ?Sized> {
     /// Returns `Some(written)` if the delegate ran, `None` if no delegate.
-    fn try_gradient_into(
-        &self,
-        state: &S,
-        projected_action: &A,
-        out: &mut [f32],
-    ) -> Option<usize>;
+    fn try_gradient_into(&self, state: &S, projected_action: &A, out: &mut [f32]) -> Option<usize>;
 }
 
 impl<S: ?Sized, A: ?Sized> AneDelegateOpt<S, A> for NullAneDelegate {
@@ -455,12 +455,7 @@ where
     D: QgfAneDelegate<S, A>,
 {
     #[inline]
-    fn try_gradient_into(
-        &self,
-        state: &S,
-        projected_action: &A,
-        out: &mut [f32],
-    ) -> Option<usize> {
+    fn try_gradient_into(&self, state: &S, projected_action: &A, out: &mut [f32]) -> Option<usize> {
         let written = self.gradient_into(state, projected_action, out.len(), out);
         Some(written)
     }
@@ -671,7 +666,13 @@ mod tests {
     struct MockAne;
     impl super::SealedForTests for MockAne {}
     impl QgfAneDelegate<f32, ()> for MockAne {
-        fn gradient_into(&self, state: &f32, _: &(), action_space_size: usize, out: &mut [f32]) -> usize {
+        fn gradient_into(
+            &self,
+            state: &f32,
+            _: &(),
+            action_space_size: usize,
+            out: &mut [f32],
+        ) -> usize {
             for (i, slot) in out.iter_mut().enumerate().take(action_space_size) {
                 *slot = state * i as f32;
             }

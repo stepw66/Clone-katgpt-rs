@@ -25,7 +25,7 @@
 
 #![cfg(feature = "renoise_ce")]
 
-use katgpt_core::{renoise_ce_score, RenoiseCeConfig, RenoiseCeProbe};
+use katgpt_core::{RenoiseCeConfig, RenoiseCeProbe, renoise_ce_score};
 use std::hint::black_box;
 use std::time::Instant;
 
@@ -126,15 +126,14 @@ fn plurality_vote_select(candidates: &[VecState]) -> Option<usize> {
     let mut best_idx = 0;
     let mut best_dist = f32::INFINITY;
     for (i, c) in candidates.iter().enumerate() {
-        let dist: f32 = c
-            .0
-            .iter()
-            .zip(centroid.iter())
-            .map(|(a, b)| {
-                let d = a - b;
-                d * d
-            })
-            .sum();
+        let dist: f32 =
+            c.0.iter()
+                .zip(centroid.iter())
+                .map(|(a, b)| {
+                    let d = a - b;
+                    d * d
+                })
+                .sum();
         if dist < best_dist {
             best_dist = dist;
             best_idx = i;
@@ -268,12 +267,7 @@ fn clr_renoise_fusion_select(
 
 /// Generate a candidate pool with a target "coverage" of correct candidates.
 /// `coverage` = fraction of candidates that are correct (near a basin).
-fn generate_pool(
-    n: usize,
-    dim: usize,
-    coverage: f32,
-    rng: &mut fastrand::Rng,
-) -> Vec<VecState> {
+fn generate_pool(n: usize, dim: usize, coverage: f32, rng: &mut fastrand::Rng) -> Vec<VecState> {
     let n_correct = ((n as f32) * coverage).round() as usize;
     let mut pool = Vec::with_capacity(n);
     // Correct candidates: near ±1 basins.
@@ -343,7 +337,9 @@ fn g1_renoise_ce_beats_plurality_at_99pct_coverage() {
     let plurality_acc = plurality_correct as f32 / N_TRIALS as f32;
     let clr_acc = clr_correct as f32 / N_TRIALS as f32;
 
-    eprintln!("G1 @ 99% coverage: renoise-CE={renoise_acc:.3}, plurality={plurality_acc:.3}, clr={clr_acc:.3}");
+    eprintln!(
+        "G1 @ 99% coverage: renoise-CE={renoise_acc:.3}, plurality={plurality_acc:.3}, clr={clr_acc:.3}"
+    );
 
     // G1 target: renoise-CE ≥ 0.95, plurality ≤ 0.85.
     assert!(
@@ -424,7 +420,9 @@ fn g2_clr_renoise_fusion_beats_clr_alone() {
     let fusion_acc = fusion_correct as f32 / N_TRIALS as f32;
     let clr_acc = clr_alone_correct as f32 / N_TRIALS as f32;
     let gain = (fusion_acc - clr_acc) * 100.0;
-    eprintln!("G2 @ 70% coverage: fusion={fusion_acc:.3}, clr-alone={clr_acc:.3}, gain={gain:+.1}pp");
+    eprintln!(
+        "G2 @ 70% coverage: fusion={fusion_acc:.3}, clr-alone={clr_acc:.3}, gain={gain:+.1}pp"
+    );
     // G2 target: fusion ≥ +5pp over CLR-alone.
     assert!(
         gain >= 5.0,
@@ -493,7 +491,9 @@ fn g4_renoise_ce_score_zero_alloc_fixed_array_state() {
     let (_, delta) = alloc_delta(|| {
         let _ = renoise_ce_score(&op, &candidate, &config, &mut rng);
     });
-    eprintln!("G4: renoise_ce_score (fixed-array State, k=4) alloc count = {delta} (target: ~0 — primitive hot path is stack-only; small count is fastrand RNG jitter)");
+    eprintln!(
+        "G4: renoise_ce_score (fixed-array State, k=4) alloc count = {delta} (target: ~0 — primitive hot path is stack-only; small count is fastrand RNG jitter)"
+    );
     // The primitive itself allocates 0 when the State type is stack-only.
     // The residual count (typically 0-8) is fastrand::Rng internal jitter,
     // NOT the primitive. The key property: the count is bounded (does NOT
@@ -531,7 +531,9 @@ fn g5_renoise_ce_score_latency() {
     }
     let elapsed = start.elapsed();
     let per_call_ns = elapsed.as_nanos() as f64 / n as f64;
-    eprintln!("G5: renoise_ce_score D=8 k=8 latency = {per_call_ns:.0}ns/call (target < 100µs = 100000ns)");
+    eprintln!(
+        "G5: renoise_ce_score D=8 k=8 latency = {per_call_ns:.0}ns/call (target < 100µs = 100000ns)"
+    );
     assert!(
         per_call_ns < 100_000.0,
         "G5 FAIL: latency {per_call_ns:.0}ns > 100µs target"

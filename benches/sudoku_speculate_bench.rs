@@ -158,7 +158,9 @@ fn latent_marginals(board: &Sudoku9x9, lookahead: usize) -> Vec<Vec<f32>> {
     (0..la)
         .map(|depth| {
             let mut p = vec![0.0f32; SUDOKU_VOCAB];
-            let Some((row, col)) = pruner.position_at(depth) else { return p; };
+            let Some((row, col)) = pruner.position_at(depth) else {
+                return p;
+            };
             // Compute candidate bitmask against the CURRENT board.
             let mut count = 0u32;
             for d in 1..=9u8 {
@@ -239,13 +241,23 @@ fn backtrack_with_initial_fallback(board: &mut Sudoku9x9) -> (bool, usize, bool)
 /// primitive is architecturally an 8-deep lookahead, designed for token-level
 /// speculative decoding — NOT full-puzzle search.
 fn solve_speculate_iterative(lookahead_in: usize, tree_budget: usize) -> SolveStats {
-    solve_speculate_with_drafter(lookahead_in, tree_budget, uniform_marginals, SudokuPruner::new)
+    solve_speculate_with_drafter(
+        lookahead_in,
+        tree_budget,
+        uniform_marginals,
+        SudokuPruner::new,
+    )
 }
 
 /// Same as `solve_speculate_iterative` but uses the constraint-aware
 /// ("latent") drafter instead of uniform marginals.
 fn solve_speculate_latent(lookahead_in: usize, tree_budget: usize) -> SolveStats {
-    solve_speculate_with_drafter(lookahead_in, tree_budget, latent_marginals, SudokuPruner::new)
+    solve_speculate_with_drafter(
+        lookahead_in,
+        tree_budget,
+        latent_marginals,
+        SudokuPruner::new,
+    )
 }
 
 /// Issue 005 Option A + B combined: MRV cell ordering (`new_mrv`) surfaces
@@ -330,7 +342,11 @@ where
         // Deepest, highest-score path.
         let best = tree
             .iter()
-            .max_by(|a, b| a.depth.cmp(&b.depth).then(a.score.partial_cmp(&b.score).unwrap()))
+            .max_by(|a, b| {
+                a.depth
+                    .cmp(&b.depth)
+                    .then(a.score.partial_cmp(&b.score).unwrap())
+            })
             .unwrap();
         let path = extract_parent_tokens(best.parent_path, best.depth + 1);
 
@@ -471,21 +487,37 @@ fn main() {
     println!("── Mode 4: solve_fast (MRV + constraint propagation) ─────────");
     let (t_fast, s_fast) = median_batch(solve_fast);
     println!("  solved:          {}", s_fast.solved);
-    println!("  steps:           {}  (vs backtrack {})", s_fast.steps, s_bt.steps);
+    println!(
+        "  steps:           {}  (vs backtrack {})",
+        s_fast.steps, s_bt.steps
+    );
     println!("  median time:     {}/solve", fmt_us(t_fast));
     let fast_us = t_fast.as_nanos() as f64 / 1000.0;
     let fast_per_step_us = fast_us / s_fast.steps.max(1) as f64;
     println!("  per-step:        {:.2} µs", fast_per_step_us);
     let speedup = bt_us / fast_us.max(1e-9);
     let step_reduction = s_bt.steps as f64 / s_fast.steps.max(1) as f64;
-    println!("  speedup:         {:.2}× faster ({}× fewer steps)", speedup, step_reduction.round() as u64);
+    println!(
+        "  speedup:         {:.2}× faster ({}× fewer steps)",
+        speedup,
+        step_reduction.round() as u64
+    );
     println!();
 
     // ── Mode 2: speculate_iterative ──
     println!("── Mode 2: speculate_iterative (DDTree + greedy commit + fallback) ──");
     println!("  (lookahead capped at 8 — TreeNode.parent_path u128 / 16-bit ceiling)");
-    println!("{:<10} {:>10} {:>10} {:>12} {:>10} {:>12} {:>12} {:>10}",
-        "lookahead", "budget", "solved", "spec_commits", "fallback", "full_revert", "tree_nodes", "time");
+    println!(
+        "{:<10} {:>10} {:>10} {:>12} {:>10} {:>12} {:>12} {:>10}",
+        "lookahead",
+        "budget",
+        "solved",
+        "spec_commits",
+        "fallback",
+        "full_revert",
+        "tree_nodes",
+        "time"
+    );
     println!("{}", "─".repeat(92));
 
     // A few (lookahead, budget) configs to characterize the trade-off.
@@ -494,7 +526,7 @@ fn main() {
         (4, 32),
         (8, 64),
         (8, 128),
-        (16, 256),  // clamped to 8 internally
+        (16, 256), // clamped to 8 internally
     ];
     for &(la, budget) in configs {
         let (t, s) = median_batch(|| solve_speculate_iterative(la, budget));
@@ -522,8 +554,17 @@ fn main() {
     println!("  drafter: naked single → p=1.0; N candidates → uniform 1/N");
     println!("  (same 8-deep u128 ceiling; plasma SIMD has nothing extra to");
     println!("   accelerate here — the marginals are already sharp)");
-    println!("{:<10} {:>10} {:>10} {:>12} {:>10} {:>12} {:>12} {:>10}",
-        "lookahead", "budget", "solved", "spec_commits", "fallback", "full_revert", "tree_nodes", "time");
+    println!(
+        "{:<10} {:>10} {:>10} {:>12} {:>10} {:>12} {:>12} {:>10}",
+        "lookahead",
+        "budget",
+        "solved",
+        "spec_commits",
+        "fallback",
+        "full_revert",
+        "tree_nodes",
+        "time"
+    );
     println!("{}", "─".repeat(92));
     for &(la, budget) in configs {
         let (t, s) = median_batch(|| solve_speculate_latent(la, budget));
@@ -553,8 +594,17 @@ fn main() {
         println!("── Mode 6: speculate_mrv_cp (MRV ordering + CP drafter) ────");
         println!("  drafter: MRV cell order + naked single → p=1.0 (Issue 005 A+B)");
         println!("  (modelless: no training, pure deterministic rules engine)");
-        println!("{:<10} {:>10} {:>10} {:>12} {:>10} {:>12} {:>12} {:>10}",
-            "lookahead", "budget", "solved", "spec_commits", "fallback", "full_revert", "tree_nodes", "time");
+        println!(
+            "{:<10} {:>10} {:>10} {:>12} {:>10} {:>12} {:>12} {:>10}",
+            "lookahead",
+            "budget",
+            "solved",
+            "spec_commits",
+            "fallback",
+            "full_revert",
+            "tree_nodes",
+            "time"
+        );
         println!("{}", "─".repeat(92));
         // Use the (8, 128) config as the headline (matches Mode 2/5 mid-row).
         let mrv_cfgs: &[(usize, usize)] = &[(4, 64), (8, 128), (8, 256)];
@@ -578,8 +628,10 @@ fn main() {
     // ── Mode 3: DDTree primitive throughput ──
     println!("── Mode 3: DDTree primitive throughput (lookahead=8, Inkala) ──");
     println!("  measures raw build_one_tree() cost — the speculate unit primitive");
-    println!("{:<14} {:>12} {:>12} {:>14}",
-        "budget", "nodes_built", "time", "nodes/µs");
+    println!(
+        "{:<14} {:>12} {:>12} {:>14}",
+        "budget", "nodes_built", "time", "nodes/µs"
+    );
     println!("{}", "─".repeat(56));
 
     let budgets: &[usize] = &[64, 256, 1_024, 4_096, 16_384];
@@ -598,9 +650,8 @@ fn main() {
             }
             samples.sort();
             let mid = OUTER / 2;
-            let median_batch_ns = (samples[mid].as_nanos() as f64
-                + samples[mid - 1].as_nanos() as f64)
-                / 2.0;
+            let median_batch_ns =
+                (samples[mid].as_nanos() as f64 + samples[mid - 1].as_nanos() as f64) / 2.0;
             (
                 Duration::from_nanos((median_batch_ns / inner as f64) as u64),
                 last_nodes,
@@ -610,8 +661,7 @@ fn main() {
             let nodes = build_one_tree(budget);
             (t0.elapsed(), nodes)
         };
-        let nodes_per_us =
-            nodes as f64 / (t.as_nanos().max(1) as f64 / 1000.0);
+        let nodes_per_us = nodes as f64 / (t.as_nanos().max(1) as f64 / 1000.0);
         println!(
             "{:<14} {:>12} {:>12} {:>14.1}",
             budget,
@@ -624,7 +674,11 @@ fn main() {
 
     // ── Verdict ──
     println!("── Verdict ───────────────────────────────────────────────────");
-    println!("  backtrack:           {} steps, {} (ground truth)", s_bt.steps, fmt_us(t_bt));
+    println!(
+        "  backtrack:           {} steps, {} (ground truth)",
+        s_bt.steps,
+        fmt_us(t_bt)
+    );
     println!();
     println!("  ARCHITECTURAL CEILING: TreeNode.parent_path is u128 packing");
     println!("  16-bit tokens → max lookahead = 8 (128/16). The DDTree speculate");
@@ -669,9 +723,15 @@ fn main() {
     println!("  constraint check. With uniform OR latent marginals on a 9-digit");
     println!("  vocab, the SIMD argmax has nothing to accelerate.");
     println!();
-    println!("  TL;DR: hardest Sudoku solves in ~{} via backtrack,", fmt_us(t_bt));
-    println!("         or ~{} via solve_fast ({:.1}× speedup, modelless MRV + CP).",
-        fmt_us(t_fast), bt_us / fast_us.max(1e-9));
+    println!(
+        "  TL;DR: hardest Sudoku solves in ~{} via backtrack,",
+        fmt_us(t_bt)
+    );
+    println!(
+        "         or ~{} via solve_fast ({:.1}× speedup, modelless MRV + CP).",
+        fmt_us(t_fast),
+        bt_us / fast_us.max(1e-9)
+    );
     println!("         Speculate-way TIES backtrack with MRV+CP (Issue 005 A+B:");
     println!("         ~20 forced commits vs 7-14 without), but cannot beat it — the");
     println!("         8-deep u128 ceiling blocks the in-place cascade that makes");
@@ -750,21 +810,31 @@ fn main() {
     let speedup_vs_bt = t_vbt.as_nanos() as f64 / t_vfast.as_nanos().max(1) as f64;
     let speedup_vs_sp = t_vsp.as_nanos() as f64 / t_vfast.as_nanos().max(1) as f64;
     let hero = format!("⚡  World's Hardest Sudoku solved in {}", fmt_us(t_vfast));
-    let sub  = "(Arto Inkala — 21 clues, 60 empties)";
+    let sub = "(Arto Inkala — 21 clues, 60 empties)";
     let w = hero.len().max(sub.len());
     println!();
     println!("╔{}╗", "═".repeat(w + 2));
     println!("║ {:<width$} ║", hero, width = w);
-    println!("║ {:<width$} ║", sub,  width = w);
+    println!("║ {:<width$} ║", sub, width = w);
     println!("╚{}╝", "═".repeat(w + 2));
     println!();
     println!("Leaderboard (single-shot, this run):");
-    println!("  🥇  solve_fast   {:>10}   {:>7} steps   —/speed",
-        fmt_us(t_vfast), s_verify_fast.steps);
-    println!("  🥈  backtrack    {:>10}   {:>7} steps   {:.1}× slower",
-        fmt_us(t_vbt), s_verify_bt.steps, speedup_vs_bt);
-    println!("  🥉  speculate    {:>10}   fell back    {:.1}× slower",
-        fmt_us(t_vsp), speedup_vs_sp);
+    println!(
+        "  🥇  solve_fast   {:>10}   {:>7} steps   —/speed",
+        fmt_us(t_vfast),
+        s_verify_fast.steps
+    );
+    println!(
+        "  🥈  backtrack    {:>10}   {:>7} steps   {:.1}× slower",
+        fmt_us(t_vbt),
+        s_verify_bt.steps,
+        speedup_vs_bt
+    );
+    println!(
+        "  🥉  speculate    {:>10}   fell back    {:.1}× slower",
+        fmt_us(t_vsp),
+        speedup_vs_sp
+    );
     #[cfg(all(feature = "sudoku_mrv", feature = "sudoku_cp"))]
     {
         let speedup_vs_mrv = t_vbt.as_nanos() as f64 / t_vmrv.as_nanos().max(1) as f64;
@@ -772,11 +842,20 @@ fn main() {
         // (>10%) faster; within ±10% call it a TIE (median batch shows they're
         // essentially equal, both ~2.5 ms, so this is the honest label).
         let ratio = t_vmrv.as_nanos() as f64 / t_vbt.as_nanos().max(1) as f64;
-        let tag = if ratio < 0.90 { "BEATS backtrack" }
-                  else if ratio > 1.10 { "slower than backtrack" }
-                  else { "TIES backtrack" };
-        println!("  ⭐  spec_mrv_cp  {:>10}   {:>7} cmits  {:.1}× {}",
-            fmt_us(t_vmrv), s_verify_mrv.spec_commits, speedup_vs_mrv, tag);
+        let tag = if ratio < 0.90 {
+            "BEATS backtrack"
+        } else if ratio > 1.10 {
+            "slower than backtrack"
+        } else {
+            "TIES backtrack"
+        };
+        println!(
+            "  ⭐  spec_mrv_cp  {:>10}   {:>7} cmits  {:.1}× {}",
+            fmt_us(t_vmrv),
+            s_verify_mrv.spec_commits,
+            speedup_vs_mrv,
+            tag
+        );
     }
     println!();
     println!("solve_fast = MRV cell selection + naked-singles constraint");

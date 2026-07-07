@@ -101,9 +101,10 @@ impl SpecHopConfig {
             return Err(format!("volatility must be > 0, got {}", self.volatility));
         }
         if let Some(k) = self.k
-            && k == 0 {
-                return Err("k must be >= 1 when specified".to_string());
-            }
+            && k == 0
+        {
+            return Err("k must be >= 1 when specified".to_string());
+        }
         Ok(())
     }
 

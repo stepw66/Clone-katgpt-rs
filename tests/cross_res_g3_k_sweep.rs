@@ -31,7 +31,7 @@
 #![cfg(feature = "cross_resolution_transport")]
 
 use katgpt_core::cross_resolution::{
-    CrossResolutionBases, CrossResScratch, transport_cross_resolution_into,
+    CrossResScratch, CrossResolutionBases, transport_cross_resolution_into,
 };
 use katgpt_core::simd;
 
@@ -70,7 +70,9 @@ impl Rng {
 #[allow(clippy::needless_range_loop)] // orthonormalization math, explicit indexing clearer
 fn random_orthonormal(dim: usize, k: usize, rng: &mut Rng) -> Vec<f32> {
     assert!(k <= dim);
-    let mut cols: Vec<Vec<f32>> = (0..k).map(|_| (0..dim).map(|_| rng.next_f32()).collect()).collect();
+    let mut cols: Vec<Vec<f32>> = (0..k)
+        .map(|_| (0..dim).map(|_| rng.next_f32()).collect())
+        .collect();
     for i in 0..k {
         for j in 0..i {
             let dot: f32 = cols[i].iter().zip(cols[j].iter()).map(|(a, b)| a * b).sum();
@@ -164,8 +166,10 @@ fn g3_k_sweep_characterization() {
     let mut basis_rng = Rng::new(0xC300_F1EDu64);
     let personality_basis = random_orthonormal(D_SRC, INTRINSIC_K, &mut basis_rng);
 
-    println!("\nG3 K-SWEEP (d_src={}, d_dst={}, intrinsic_k={}, n_samples={} per cell)",
-        D_SRC, D_DST, INTRINSIC_K, N_SAMPLES);
+    println!(
+        "\nG3 K-SWEEP (d_src={}, d_dst={}, intrinsic_k={}, n_samples={} per cell)",
+        D_SRC, D_DST, INTRINSIC_K, N_SAMPLES
+    );
     println!("======================================================================");
     print!("{:<8}", "k\\bf");
     for &bf in BAND_FRACS {
@@ -232,7 +236,11 @@ fn g3_k_sweep_characterization() {
         // Gram-Schmidt the phi_cols to make them orthonormal.
         for i in 0..k {
             for j in 0..i {
-                let dot: f32 = phi_cols[i].iter().zip(phi_cols[j].iter()).map(|(a, b)| a * b).sum();
+                let dot: f32 = phi_cols[i]
+                    .iter()
+                    .zip(phi_cols[j].iter())
+                    .map(|(a, b)| a * b)
+                    .sum();
                 for r in 0..D_SRC {
                     phi_cols[i][r] -= dot * phi_cols[j][r];
                 }
@@ -284,10 +292,13 @@ fn g3_k_sweep_characterization() {
         println!();
     }
     println!("======================================================================");
-    println!("\nInterpretation: when k < intrinsic_k={}, the transport basis cannot fully", INTRINSIC_K);
+    println!(
+        "\nInterpretation: when k < intrinsic_k={}, the transport basis cannot fully",
+        INTRINSIC_K
+    );
     println!("capture the personality subspace → cos drops. When k ≥ intrinsic_k, the");
     println!("transport is lossless on the personality subspace → cos ≈ sqrt(bf).");
-    println!("For bf=0.85, sqrt(0.85) ≈ 0.92. The elbow at k=intrinsic_k is the", );
+    println!("For bf=0.85, sqrt(0.85) ≈ 0.92. The elbow at k=intrinsic_k is the",);
     println!("recommended minimum transport rank for this personality class.");
     println!("\nG3 PASS (characterization only — no hard gate). Update Research 291");
     println!("§5.3 'Recommended k per tier pair' with the elbow values from this table.");

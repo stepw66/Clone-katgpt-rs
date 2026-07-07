@@ -26,7 +26,7 @@
 
 use criterion::{Criterion, criterion_group, criterion_main};
 use katgpt_core::diversity::temp::{
-    extrapolated_snapshot_schedule, perturbed_loss_vector, select_diverse_subset_into, LossKernel,
+    LossKernel, extrapolated_snapshot_schedule, perturbed_loss_vector, select_diverse_subset_into,
 };
 use std::hint::black_box;
 

@@ -27,7 +27,11 @@ pub enum TopologyError {
     /// Edge matrix has wrong dimensions for the topology.
     EdgeMatrixMismatch { layer: usize },
     /// Hidden dimensions don't line up across a layer boundary.
-    HiddenDimMismatch { layer: usize, from: usize, to: usize },
+    HiddenDimMismatch {
+        layer: usize,
+        from: usize,
+        to: usize,
+    },
 }
 
 /// A layer-wise fully-connected DenseMesh (paper §3.1.3).
@@ -91,11 +95,7 @@ impl LayerwiseTopology {
         node: Box<dyn DenseNode>,
         edge: Box<dyn DenseEdge>,
     ) -> Result<Self, TopologyError> {
-        Self::new(
-            Topology::chain(),
-            node,
-            vec![vec![edge]],
-        )
+        Self::new(Topology::chain(), node, vec![vec![edge]])
     }
 
     /// Forward pass through the mesh.
@@ -261,14 +261,16 @@ impl LayerwiseTopology {
         // Pre-allocate output slots and per-worker scratch. Both are moved into
         // parallel iterators below; rayon splits them into disjoint `&mut`
         // chunks per task, so no two tasks ever alias.
-        let mut next: Vec<DenseHidden> =
-            (0..width_next).map(|_| DenseHidden::zeros(seq_len, hidden_dim)).collect();
+        let mut next: Vec<DenseHidden> = (0..width_next)
+            .map(|_| DenseHidden::zeros(seq_len, hidden_dim))
+            .collect();
         // One scratch per successor node. Allocated per mesh-forward call; for
         // width-4 that is 4 scratch allocations, dwarfed by the transformer
         // forward cost. (Pooling these in the topology is a future Path B
         // optimisation; out of scope for the ~50 LoC Path A target.)
-        let mut local_scratches: Vec<MeshScratch> =
-            (0..width_next).map(|_| MeshScratch::new(seq_len, hidden_dim)).collect();
+        let mut local_scratches: Vec<MeshScratch> = (0..width_next)
+            .map(|_| MeshScratch::new(seq_len, hidden_dim))
+            .collect();
 
         // Shared (Sync) captures — edges + node + predecessor hidden states.
         let edges_l = &self.edges[l];
@@ -354,17 +356,11 @@ impl LayerwiseTopology {
         // Drain pooled scratch + output. Grown on first call (or width bump),
         // then stable — no allocator traffic in steady state.
         let mut scratches: Vec<MeshScratch> = {
-            let mut guard = self
-                .scratch_pool
-                .lock()
-                .expect("scratch_pool poisoned");
+            let mut guard = self.scratch_pool.lock().expect("scratch_pool poisoned");
             std::mem::take(&mut *guard)
         };
         let mut next: Vec<DenseHidden> = {
-            let mut guard = self
-                .output_pool
-                .lock()
-                .expect("output_pool poisoned");
+            let mut guard = self.output_pool.lock().expect("output_pool poisoned");
             std::mem::take(&mut *guard)
         };
         while scratches.len() < width_next {
@@ -438,9 +434,9 @@ impl LayerwiseTopology {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::edge_identity::IdentityEdge;
     use super::super::types::DenseHidden;
+    use super::*;
 
     /// A trivial node that passes input through unchanged (for gate 1).
     struct IdentityNode {
@@ -507,6 +503,9 @@ mod tests {
                 vec![Box::new(IdentityEdge::new()), Box::new(IdentityEdge::new())],
             ],
         );
-        assert!(matches!(result, Err(TopologyError::EdgeMatrixMismatch { .. })));
+        assert!(matches!(
+            result,
+            Err(TopologyError::EdgeMatrixMismatch { .. })
+        ));
     }
 }

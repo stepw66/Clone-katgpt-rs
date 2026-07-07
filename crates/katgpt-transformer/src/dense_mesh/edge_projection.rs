@@ -27,7 +27,9 @@ impl ProjectionEdge {
     pub fn new(in_dim: usize, out_dim: usize, seed: u64) -> Self {
         let mut rng = fastrand::Rng::with_seed(seed);
         let scale = 1.0 / (in_dim as f32).sqrt();
-        let matrix = (0..in_dim * out_dim).map(|_| rng.f32() * 2.0 * scale - scale).collect();
+        let matrix = (0..in_dim * out_dim)
+            .map(|_| rng.f32() * 2.0 * scale - scale)
+            .collect();
         Self {
             matrix,
             in_dim,

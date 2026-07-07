@@ -156,13 +156,22 @@ fn g2_behavior_rank_preservation() {
 
     // ── α sweep: characterize rank preservation across steering strengths ─
     println!("G2 rank preservation sweep (d={D}, n_actions={N_ACTIONS}, n_samples={N_SAMPLES}):");
-    println!("  {:>6} | {:>10} | {:>10} | {:>12}", "alpha", "mean_cos", "min_cos", "argmax_flip%");
+    println!(
+        "  {:>6} | {:>10} | {:>10} | {:>12}",
+        "alpha", "mean_cos", "min_cos", "argmax_flip%"
+    );
     println!("  -------|------------|------------|--------------");
 
     let mut gate_result = None;
     for &alpha in &[0.1, ALPHA_GATE, 0.5, 0.9] {
         let (mean, min, flip) = measure_at_alpha(alpha, &states, &weights, &direction);
-        println!("  {:>6.1} | {:>10.4} | {:>10.4} | {:>11.1}%", alpha, mean, min, flip * 100.0);
+        println!(
+            "  {:>6.1} | {:>10.4} | {:>10.4} | {:>11.1}%",
+            alpha,
+            mean,
+            min,
+            flip * 100.0
+        );
         if (alpha - ALPHA_GATE).abs() < 1e-5 {
             gate_result = Some((mean, min, flip));
         }

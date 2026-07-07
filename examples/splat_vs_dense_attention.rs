@@ -11,9 +11,7 @@
 fn main() {
     #[cfg(feature = "specialist_projection")]
     {
-        use katgpt_rs::specialist_projection::{
-            route_specialist_projection, SpecialistMask,
-        };
+        use katgpt_rs::specialist_projection::{SpecialistMask, route_specialist_projection};
 
         println!("=== Plan 265 Phase 2: SPLAT vs. Dense Attention ===\n");
 
@@ -63,9 +61,7 @@ fn main() {
         let density = mask.density();
         let route = route_specialist_projection(density);
 
-        println!(
-            "Mask density: {density:.3} (target 0.5 for MSA rescue benchmark)"
-        );
+        println!("Mask density: {density:.3} (target 0.5 for MSA rescue benchmark)");
         println!("Compute route at this density: {route:?}");
         println!();
 

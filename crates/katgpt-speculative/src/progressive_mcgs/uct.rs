@@ -177,7 +177,7 @@ mod tests {
         let bad_child = g.expand_primary(root, 2, BranchId(0));
 
         g.backprop(good_child, Reward::Breakthrough); // Q ≈ 2
-        g.backprop(bad_child, Reward::Failure);       // Q = -1
+        g.backprop(bad_child, Reward::Failure); // Q = -1
 
         let picked = uct_select_child(&g, root, 0.1).unwrap();
         assert_eq!(picked, good_child);

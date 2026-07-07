@@ -287,10 +287,7 @@ impl S2FCollapseDetector {
     ///
     /// Zero-allocation: only scalar EMA update. No allocations.
     #[cfg(feature = "thicket_variance_probe")]
-    pub fn observe_tvp_disagreement(
-        &mut self,
-        signal: &crate::thicket_variance_probe::TvpSignal,
-    ) {
+    pub fn observe_tvp_disagreement(&mut self, signal: &crate::thicket_variance_probe::TvpSignal) {
         let alpha = self.ema_alpha;
         self.tvp_reasoning_ema =
             (1.0 - alpha) * self.tvp_reasoning_ema + alpha * signal.reasoning_disagreement;
@@ -1349,8 +1346,7 @@ mod tests {
                 let tau = 4.0_f32 * (1.0 + ((i % 3) as f32));
                 // Vary e0 across {1.2, 1.5, 1.8, 2.1}.
                 let e0 = 1.2 + 0.3 * ((i % 4) as f32);
-                let trace =
-                    gradual_convergence_trace(e0, e_star, tau, TRACE_LEN);
+                let trace = gradual_convergence_trace(e0, e_star, tau, TRACE_LEN);
 
                 // Arm A: hesitation-only (derivative channel disabled).
                 let mut det_without = make_detector_without_derivative(THRESHOLD);
@@ -1472,10 +1468,10 @@ mod tests {
                 collapse_threshold: 8,
                 efficiency_gamma: 0.5,
             };
-            let mut tight = S2FCollapseDetector::new(HESITATION_TOKENS.to_vec(), &budget)
-                .with_tau_deriv(0.001);
-            let mut loose = S2FCollapseDetector::new(HESITATION_TOKENS.to_vec(), &budget)
-                .with_tau_deriv(0.5);
+            let mut tight =
+                S2FCollapseDetector::new(HESITATION_TOKENS.to_vec(), &budget).with_tau_deriv(0.001);
+            let mut loose =
+                S2FCollapseDetector::new(HESITATION_TOKENS.to_vec(), &budget).with_tau_deriv(0.5);
             let trace = vec![0.5_f32; 200];
             let mut tight_step = None;
             let mut loose_step = None;
@@ -1500,15 +1496,17 @@ mod tests {
         /// `reset()` clears derivative state but preserves config (tau, alphas).
         #[test]
         fn reset_clears_derivative_state_but_preserves_config() {
-            let mut detector =
-                make_detector_with_derivative(8).with_tau_deriv(0.005);
+            let mut detector = make_detector_with_derivative(8).with_tau_deriv(0.005);
             let tau_before = detector.tau_deriv();
             // Drive some entropy through.
             for e in [0.1_f32, 0.9, 0.2, 0.8] {
                 detector.observe_entropy(e);
             }
             let deriv_before = detector.last_entropy_derivative();
-            assert!(deriv_before.abs() > 0.0, "derivative must be nonzero after mixed samples");
+            assert!(
+                deriv_before.abs() > 0.0,
+                "derivative must be nonzero after mixed samples"
+            );
 
             detector.reset();
             assert_eq!(

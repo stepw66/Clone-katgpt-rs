@@ -97,6 +97,4 @@ pub mod kernel;
 pub mod types;
 
 pub use kernel::{PkmScratch, score_dot, score_idw};
-pub use types::{
-    ProductKeyMemory, PkEntry, PkQuery, ScoreFn, D_K_FLOOR, SQRT_N_FLOOR,
-};
+pub use types::{D_K_FLOOR, PkEntry, PkQuery, ProductKeyMemory, SQRT_N_FLOOR, ScoreFn};

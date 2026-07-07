@@ -108,7 +108,10 @@ fn main() {
     );
 
     println!("\n  Per-chunk reconstruction errors:");
-    println!("  {:>8} {:>10} {:>10} {:>14}", "chunk", "src_len", "cmp_len", "rel_error");
+    println!(
+        "  {:>8} {:>10} {:>10} {:>14}",
+        "chunk", "src_len", "cmp_len", "rel_error"
+    );
     for (i, m) in out_kv.per_chunk.iter().enumerate() {
         println!(
             "  {:>8} {:>10} {:>10} {:>14.6}",
@@ -194,15 +197,10 @@ fn main() {
     // ── Comparison ─────────────────────────────────────────────────────────
     print_separator();
     println!("[3] KV-based vs Text-based comparison");
+    println!("  {:>30} {:>15} {:>15}", "", "KV-based", "Text-based");
     println!(
         "  {:>30} {:>15} {:>15}",
-        "", "KV-based", "Text-based"
-    );
-    println!(
-        "  {:>30} {:>15} {:>15}",
-        "total_compact_len",
-        out_kv.total_compact_len,
-        out_txt.total_compact_len
+        "total_compact_len", out_kv.total_compact_len, out_txt.total_compact_len
     );
     println!(
         "  {:>30} {:>15.6} {:>15.6}",

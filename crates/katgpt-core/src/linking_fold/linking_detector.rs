@@ -135,7 +135,11 @@ pub struct LinkingVerdict {
 impl LinkingVerdict {
     /// Convenience constructor for the unlinked verdict.
     pub const fn not_linked() -> Self {
-        Self { linked: false, link: 0, witness: None }
+        Self {
+            linked: false,
+            link: 0,
+            witness: None,
+        }
     }
 }
 
@@ -221,8 +225,10 @@ pub fn detect_linking_into(
     let g_y = build_epsilon_knn_graph(y_proj, config.k_neighbors, config.epsilon_quantile);
 
     // ── Step 3: fundamental cycle bases (capped — see max_cycles_per_cloud) ──
-    let cycles_x = fundamental_cycle_basis(n_x, &g_x, config.min_cycle_len, config.max_cycles_per_cloud);
-    let cycles_y = fundamental_cycle_basis(n_y, &g_y, config.min_cycle_len, config.max_cycles_per_cloud);
+    let cycles_x =
+        fundamental_cycle_basis(n_x, &g_x, config.min_cycle_len, config.max_cycles_per_cloud);
+    let cycles_y =
+        fundamental_cycle_basis(n_y, &g_y, config.min_cycle_len, config.max_cycles_per_cloud);
     if cycles_x.is_empty() || cycles_y.is_empty() {
         return LinkingVerdict::not_linked();
     }
@@ -235,10 +241,14 @@ pub fn detect_linking_into(
     // bounded by `|Cx|·|Cy|·n_sub² / gap²`, which rounds to 0 once the gap
     // exceeds the cycle diameters. The threshold is conservative — only skips
     // pairs that provably cannot round to ±1.
-    let bounds_x: Vec<CycleBounds> = cycles_x.iter()
-        .map(|c| CycleBounds::compute(c, x_proj)).collect();
-    let bounds_y: Vec<CycleBounds> = cycles_y.iter()
-        .map(|c| CycleBounds::compute(c, y_proj)).collect();
+    let bounds_x: Vec<CycleBounds> = cycles_x
+        .iter()
+        .map(|c| CycleBounds::compute(c, x_proj))
+        .collect();
+    let bounds_y: Vec<CycleBounds> = cycles_y
+        .iter()
+        .map(|c| CycleBounds::compute(c, y_proj))
+        .collect();
     for (i, cx) in cycles_x.iter().enumerate() {
         let bx = &bounds_x[i];
         for (j, cy) in cycles_y.iter().enumerate() {
@@ -247,7 +257,11 @@ pub fn detect_linking_into(
             }
             let link = gauss_linking_integral(cx, cy, x_proj, y_proj, config.n_subdivisions);
             if link != 0 {
-                return LinkingVerdict { linked: true, link, witness: Some((i, j)) };
+                return LinkingVerdict {
+                    linked: true,
+                    link,
+                    witness: Some((i, j)),
+                };
             }
         }
     }
@@ -307,10 +321,14 @@ fn pca_project_joint_into_3d(
 
     // Center both clouds.
     for p in x_proj.iter_mut() {
-        for k in 0..3 { p[k] -= mean[k]; }
+        for k in 0..3 {
+            p[k] -= mean[k];
+        }
     }
     for p in y_proj.iter_mut() {
-        for k in 0..3 { p[k] -= mean[k]; }
+        for k in 0..3 {
+            p[k] -= mean[k];
+        }
     }
 
     // 3×3 covariance on the joint centered clouds.
@@ -379,9 +397,13 @@ fn mean_and_variance_3d(x: &[[f32; 3]], y: &[[f32; 3]]) -> ([f32; 3], [f32; 3]) 
     let n = (x.len() + y.len()) as f32;
     let mut mean = [0.0_f32; 3];
     for p in x.iter().chain(y.iter()) {
-        for k in 0..3 { mean[k] += p[k]; }
+        for k in 0..3 {
+            mean[k] += p[k];
+        }
     }
-    for k in 0..3 { mean[k] /= n.max(1.0); }
+    for k in 0..3 {
+        mean[k] /= n.max(1.0);
+    }
     let mut var = [0.0_f32; 3];
     for p in x.iter().chain(y.iter()) {
         for k in 0..3 {
@@ -390,7 +412,9 @@ fn mean_and_variance_3d(x: &[[f32; 3]], y: &[[f32; 3]]) -> ([f32; 3], [f32; 3]) 
         }
     }
     let nf = n.max(1.0);
-    for k in 0..3 { var[k] /= nf; }
+    for k in 0..3 {
+        var[k] /= nf;
+    }
     (mean, var)
 }
 
@@ -419,7 +443,9 @@ fn covariance_3d(x: &[[f32; 3]], y: &[[f32; 3]]) -> [[f32; 3]; 3] {
 /// Standard textbook algorithm; converges in a handful of sweeps for 3×3.
 fn jacobi_eigendecomp_3x3(mut a: [[f32; 3]; 3]) -> ([[f32; 3]; 3], [f32; 3]) {
     let mut v = [[0.0_f32; 3]; 3];
-    for i in 0..3 { v[i][i] = 1.0; }
+    for i in 0..3 {
+        v[i][i] = 1.0;
+    }
 
     for _sweep in 0..50 {
         // Off-diagonal magnitude.
@@ -467,11 +493,15 @@ fn jacobi_eigendecomp_3x3(mut a: [[f32; 3]; 3]) -> ([[f32; 3]; 3], [f32; 3]) {
     for i in 0..3 {
         let mut max_k = i;
         for k in (i + 1)..3 {
-            if lam[k] > lam[max_k] { max_k = k; }
+            if lam[k] > lam[max_k] {
+                max_k = k;
+            }
         }
         if max_k != i {
             lam.swap(i, max_k);
-            for k in 0..3 { v[k].swap(i, max_k); }
+            for k in 0..3 {
+                v[k].swap(i, max_k);
+            }
         }
     }
     (v, lam)
@@ -518,7 +548,10 @@ fn build_epsilon_knn_graph(
             .collect();
         // Partial sort: get the kk smallest.
         dists.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
-        let kth = dists.get(kk.saturating_sub(1)).map(|(d, _)| *d).unwrap_or(f32::INFINITY);
+        let kth = dists
+            .get(kk.saturating_sub(1))
+            .map(|(d, _)| *d)
+            .unwrap_or(f32::INFINITY);
         all_kth_distances.push(kth);
     }
 
@@ -627,7 +660,9 @@ fn fundamental_cycle_basis(
         cycle.push(cur);
         while cur != lca {
             cur = parent[cur];
-            if cur == usize::MAX { break; }
+            if cur == usize::MAX {
+                break;
+            }
             cycle.push(cur);
         }
         // lca → v: walk up from v to lca, then reverse (excluding lca, already added).
@@ -636,7 +671,9 @@ fn fundamental_cycle_basis(
         while cur != lca {
             v_to_lca.push(cur);
             cur = parent[cur];
-            if cur == usize::MAX { break; }
+            if cur == usize::MAX {
+                break;
+            }
         }
         v_to_lca.reverse();
         cycle.extend(v_to_lca);
@@ -657,10 +694,8 @@ fn fundamental_cycle_basis(
         // Partial selection: O(β) average — partition so the `max_cycles`
         // shortest cycles are in the front, then truncate. Cheaper than a
         // full sort and we only need the K shortest, not a total order.
-        let (_before, _kth, _after) = cycles.select_nth_unstable_by(
-            max_cycles,
-            |a, b| a.len().cmp(&b.len()),
-        );
+        let (_before, _kth, _after) =
+            cycles.select_nth_unstable_by(max_cycles, |a, b| a.len().cmp(&b.len()));
         cycles.truncate(max_cycles);
     }
     cycles
@@ -711,10 +746,22 @@ fn gauss_linking_integral(
     // `my_z[j]` as independent contiguous f32 streams, which LLVM fuses into
     // 4-wide vector loads. The earlier stride-3 (xyzxyz) layout blocked vec
     // (non-power-of-2 stride → gather, not contiguous load).
-    let Segments { mx_x, mx_y, mx_z, tx_x, tx_y, tx_z } =
-        subdivide_cycle_soa(cycle_x, points_x, n_sub);
-    let Segments { mx_x: my_x, mx_y: my_y, mx_z: my_z, tx_x: ty_x, tx_y: ty_y, tx_z: ty_z } =
-        subdivide_cycle_soa(cycle_y, points_y, n_sub);
+    let Segments {
+        mx_x,
+        mx_y,
+        mx_z,
+        tx_x,
+        tx_y,
+        tx_z,
+    } = subdivide_cycle_soa(cycle_x, points_x, n_sub);
+    let Segments {
+        mx_x: my_x,
+        mx_y: my_y,
+        mx_z: my_z,
+        tx_x: ty_x,
+        tx_y: ty_y,
+        tx_z: ty_z,
+    } = subdivide_cycle_soa(cycle_y, points_y, n_sub);
 
     let mut total = 0.0_f32;
     // Outer loop: one fixed sx segment. Inner loop: reduction over all sy
@@ -754,15 +801,15 @@ fn gauss_linking_integral(
 /// its own contiguous `Vec<f32>`. Replaces the old `Vec<CycleSegment>` (AoS)
 /// and the intermediate stride-3 layout (both blocked auto-vec).
 struct Segments {
-    mx_x: Vec<f32>, mx_y: Vec<f32>, mx_z: Vec<f32>,
-    tx_x: Vec<f32>, tx_y: Vec<f32>, tx_z: Vec<f32>,
+    mx_x: Vec<f32>,
+    mx_y: Vec<f32>,
+    mx_z: Vec<f32>,
+    tx_x: Vec<f32>,
+    tx_y: Vec<f32>,
+    tx_z: Vec<f32>,
 }
 
-fn subdivide_cycle_soa(
-    cycle: &[usize],
-    points: &[[f32; 3]],
-    n_sub: usize,
-) -> Segments {
+fn subdivide_cycle_soa(cycle: &[usize], points: &[[f32; 3]], n_sub: usize) -> Segments {
     let n = cycle.len();
     let total = n * n_sub;
     let mut mx_x = Vec::with_capacity(total);
@@ -791,7 +838,14 @@ fn subdivide_cycle_soa(
             tx_z.push(inv_tz);
         }
     }
-    Segments { mx_x, mx_y, mx_z, tx_x, tx_y, tx_z }
+    Segments {
+        mx_x,
+        mx_y,
+        mx_z,
+        tx_x,
+        tx_y,
+        tx_z,
+    }
 }
 
 /// Bounding sphere + perimeter for a cycle, used to cheaply reject cycle
@@ -827,10 +881,14 @@ impl CycleBounds {
         let mut cz = 0.0_f32;
         for &v in cycle {
             let p = points[v];
-            cx += p[0]; cy += p[1]; cz += p[2];
+            cx += p[0];
+            cy += p[1];
+            cz += p[2];
         }
         let inv_n = 1.0_f32 / (n as f32);
-        cx *= inv_n; cy *= inv_n; cz *= inv_n;
+        cx *= inv_n;
+        cy *= inv_n;
+        cz *= inv_n;
         // Max squared distance from centroid + perimeter.
         let mut r_sq = 0.0_f32;
         let mut perimeter = 0.0_f32;
@@ -842,7 +900,9 @@ impl CycleBounds {
             let dy = p[1] - cy;
             let dz = p[2] - cz;
             let d2 = dx * dx + dy * dy + dz * dz;
-            if d2 > r_sq { r_sq = d2; }
+            if d2 > r_sq {
+                r_sq = d2;
+            }
             // Perimeter: distance from prev to p (first iter: prev==first==p, 0).
             let ex = p[0] - prev[0];
             let ey = p[1] - prev[1];
@@ -859,7 +919,11 @@ impl CycleBounds {
         // (last → first) is what we just added. But the loop above set
         // prev=first initially and advanced it, so the first iteration added
         // |first-first|=0 and we never added |last→first| until now. Correct.
-        CycleBounds { center: [cx, cy, cz], r_sq, perimeter }
+        CycleBounds {
+            center: [cx, cy, cz],
+            r_sq,
+            perimeter,
+        }
     }
 
     /// Returns false if the Gauss linking integral of these two cycles
@@ -1023,8 +1087,14 @@ mod tests {
     #[test]
     fn degenerate_empty_input() {
         let cfg = LinkingDetectorConfig::default();
-        assert_eq!(detect_linking(&[], &[0.0; 30], 3, &cfg), LinkingVerdict::not_linked());
-        assert_eq!(detect_linking(&[0.0; 30], &[], 3, &cfg), LinkingVerdict::not_linked());
+        assert_eq!(
+            detect_linking(&[], &[0.0; 30], 3, &cfg),
+            LinkingVerdict::not_linked()
+        );
+        assert_eq!(
+            detect_linking(&[0.0; 30], &[], 3, &cfg),
+            LinkingVerdict::not_linked()
+        );
     }
 
     #[test]
@@ -1033,7 +1103,10 @@ mod tests {
         // k_neighbors default is 8; need ≥ 9 points per cloud.
         let x = vec![0.0_f32; 6 * 3];
         let y = vec![0.0_f32; 6 * 3];
-        assert_eq!(detect_linking(&x, &y, 3, &cfg), LinkingVerdict::not_linked());
+        assert_eq!(
+            detect_linking(&x, &y, 3, &cfg),
+            LinkingVerdict::not_linked()
+        );
     }
 
     #[test]
@@ -1043,7 +1116,10 @@ mod tests {
         // All points identical → PCA collapses → not linked.
         let x = vec![1.0_f32; n * 3];
         let y = vec![2.0_f32; n * 3];
-        assert_eq!(detect_linking(&x, &y, 3, &cfg), LinkingVerdict::not_linked());
+        assert_eq!(
+            detect_linking(&x, &y, 3, &cfg),
+            LinkingVerdict::not_linked()
+        );
     }
 
     #[test]
@@ -1079,7 +1155,9 @@ mod tests {
         // V should be a rotation (columns are unit vectors).
         for col in 0..3 {
             let mut norm_sq = 0.0;
-            for row in 0..3 { norm_sq += v[row][col] * v[row][col]; }
+            for row in 0..3 {
+                norm_sq += v[row][col] * v[row][col];
+            }
             assert!((norm_sq - 1.0).abs() < 1e-4, "column {col} not unit");
         }
     }
@@ -1105,8 +1183,12 @@ mod tests {
         let mut y = vec![0.0f32; n * d];
         for i in 0..n {
             let b = i * 3;
-            x[i * d] = x3[b]; x[i * d + 1] = x3[b + 1]; x[i * d + 2] = x3[b + 2];
-            y[i * d] = y3[b]; y[i * d + 1] = y3[b + 1]; y[i * d + 2] = y3[b + 2];
+            x[i * d] = x3[b];
+            x[i * d + 1] = x3[b + 1];
+            x[i * d + 2] = x3[b + 2];
+            y[i * d] = y3[b];
+            y[i * d + 1] = y3[b + 1];
+            y[i * d + 2] = y3[b + 2];
             // dims 3..d stay zero (initialized above).
         }
         let cfg = LinkingDetectorConfig::default();
@@ -1137,17 +1219,27 @@ mod tests {
             // Phase 1: PCA-3D
             let s = Instant::now();
             let ok = pca_project_joint_into_3d(
-                black_box(&x), black_box(&y), black_box(d),
-                black_box(&mut xp), black_box(&mut yp));
+                black_box(&x),
+                black_box(&y),
+                black_box(d),
+                black_box(&mut xp),
+                black_box(&mut yp),
+            );
             t_pca.push(s.elapsed().as_nanos());
             assert!(ok);
 
             // Phase 2: kNN graph (x)
             let s = Instant::now();
             let gx = build_epsilon_knn_graph(
-                black_box(&xp), black_box(cfg.k_neighbors), black_box(cfg.epsilon_quantile));
+                black_box(&xp),
+                black_box(cfg.k_neighbors),
+                black_box(cfg.epsilon_quantile),
+            );
             let gy = build_epsilon_knn_graph(
-                black_box(&yp), black_box(cfg.k_neighbors), black_box(cfg.epsilon_quantile));
+                black_box(&yp),
+                black_box(cfg.k_neighbors),
+                black_box(cfg.epsilon_quantile),
+            );
             t_knn.push(s.elapsed().as_nanos());
 
             // Phase 3: cycle basis
@@ -1164,29 +1256,56 @@ mod tests {
             for cxa in &cx {
                 for cya in &cy {
                     sum = sum.wrapping_add(gauss_linking_integral(
-                        cxa, cya, &xp, &yp, cfg.n_subdivisions));
+                        cxa,
+                        cya,
+                        &xp,
+                        &yp,
+                        cfg.n_subdivisions,
+                    ));
                 }
             }
             t_gauss.push(s.elapsed().as_nanos());
             let _ = black_box(sum);
         }
-        let med = |v: &[u128]| { let mut s = v.to_vec(); s.sort(); s[s.len() / 2] };
+        let med = |v: &[u128]| {
+            let mut s = v.to_vec();
+            s.sort();
+            s[s.len() / 2]
+        };
         let total = med(&t_pca) + med(&t_knn) + med(&t_cyc) + med(&t_gauss);
         println!();
         println!("══════════════════════════════════════════════════════════════════");
-        println!("  linking_detector phase breakdown (n=2×{}, d={}, k={}, n_sub={})",
-                 n, d, cfg.k_neighbors, cfg.n_subdivisions);
-        println!("  cycle counts: β_x={}, β_y={} (Gauss pairs = {})",
-                 last_cycles_x, last_cycles_y, last_cycles_x * last_cycles_y);
+        println!(
+            "  linking_detector phase breakdown (n=2×{}, d={}, k={}, n_sub={})",
+            n, d, cfg.k_neighbors, cfg.n_subdivisions
+        );
+        println!(
+            "  cycle counts: β_x={}, β_y={} (Gauss pairs = {})",
+            last_cycles_x,
+            last_cycles_y,
+            last_cycles_x * last_cycles_y
+        );
         println!("══════════════════════════════════════════════════════════════════");
-        println!("  Phase 1 PCA-3D:        {:>8.3} ms  ({:>5.1}%)",
-                 med(&t_pca) as f64 / 1e6, med(&t_pca) as f64 * 100.0 / total as f64);
-        println!("  Phase 2 kNN graph:     {:>8.3} ms  ({:>5.1}%)  ← O(n²) ×2 (x,y) + sort per point",
-                 med(&t_knn) as f64 / 1e6, med(&t_knn) as f64 * 100.0 / total as f64);
-        println!("  Phase 3 cycle basis:   {:>8.3} ms  ({:>5.1}%)",
-                 med(&t_cyc) as f64 / 1e6, med(&t_cyc) as f64 * 100.0 / total as f64);
-        println!("  Phase 4 Gauss (β²·s²): {:>8.3} ms  ({:>5.1}%)",
-                 med(&t_gauss) as f64 / 1e6, med(&t_gauss) as f64 * 100.0 / total as f64);
+        println!(
+            "  Phase 1 PCA-3D:        {:>8.3} ms  ({:>5.1}%)",
+            med(&t_pca) as f64 / 1e6,
+            med(&t_pca) as f64 * 100.0 / total as f64
+        );
+        println!(
+            "  Phase 2 kNN graph:     {:>8.3} ms  ({:>5.1}%)  ← O(n²) ×2 (x,y) + sort per point",
+            med(&t_knn) as f64 / 1e6,
+            med(&t_knn) as f64 * 100.0 / total as f64
+        );
+        println!(
+            "  Phase 3 cycle basis:   {:>8.3} ms  ({:>5.1}%)",
+            med(&t_cyc) as f64 / 1e6,
+            med(&t_cyc) as f64 * 100.0 / total as f64
+        );
+        println!(
+            "  Phase 4 Gauss (β²·s²): {:>8.3} ms  ({:>5.1}%)",
+            med(&t_gauss) as f64 / 1e6,
+            med(&t_gauss) as f64 * 100.0 / total as f64
+        );
         println!("  ─────────────────────────────────");
         println!("  TOTAL:                 {:>8.3} ms", total as f64 / 1e6);
         println!();
@@ -1199,10 +1318,8 @@ mod tests {
         let gy = build_epsilon_knn_graph(&yp, cfg.k_neighbors, cfg.epsilon_quantile);
         let cx = fundamental_cycle_basis(n, &gx, cfg.min_cycle_len, cfg.max_cycles_per_cloud);
         let cy = fundamental_cycle_basis(n, &gy, cfg.min_cycle_len, cfg.max_cycles_per_cloud);
-        let bx_bounds: Vec<CycleBounds> = cx.iter()
-            .map(|c| CycleBounds::compute(c, &xp)).collect();
-        let by_bounds: Vec<CycleBounds> = cy.iter()
-            .map(|c| CycleBounds::compute(c, &yp)).collect();
+        let bx_bounds: Vec<CycleBounds> = cx.iter().map(|c| CycleBounds::compute(c, &xp)).collect();
+        let by_bounds: Vec<CycleBounds> = cy.iter().map(|c| CycleBounds::compute(c, &yp)).collect();
         let mut skipped = 0usize;
         let mut evaluated = 0usize;
         let mut witness_pair = None;
@@ -1223,26 +1340,46 @@ mod tests {
         let total_pairs = cx.len() * cy.len();
         match witness_pair {
             Some((i, j, ev_at, sk)) => {
-                println!("  BB-skip: rejected {}/{} pairs ({:.1}%), evaluated {} before witness",
-                         sk, total_pairs, sk as f64 * 100.0 / total_pairs as f64, ev_at);
-                println!("  witness: cycle_x[{}] (len={}) × cycle_y[{}] (len={}) → link found at evaluated-pair #{}",
-                         i, cx[i].len(), j, cy[j].len(), ev_at);
+                println!(
+                    "  BB-skip: rejected {}/{} pairs ({:.1}%), evaluated {} before witness",
+                    sk,
+                    total_pairs,
+                    sk as f64 * 100.0 / total_pairs as f64,
+                    ev_at
+                );
+                println!(
+                    "  witness: cycle_x[{}] (len={}) × cycle_y[{}] (len={}) → link found at evaluated-pair #{}",
+                    i,
+                    cx[i].len(),
+                    j,
+                    cy[j].len(),
+                    ev_at
+                );
             }
             None => {
-                println!("  BB-skip: rejected {}/{} pairs ({:.1}%); NO witness found in manual scan",
-                         skipped, total_pairs, skipped as f64 * 100.0 / total_pairs as f64);
+                println!(
+                    "  BB-skip: rejected {}/{} pairs ({:.1}%); NO witness found in manual scan",
+                    skipped,
+                    total_pairs,
+                    skipped as f64 * 100.0 / total_pairs as f64
+                );
             }
         }
         // Also measure the REAL detect_linking path (with skip + early-exit) for
         // apples-to-apples comparison with the bench.
         let mut full_xp = vec![[0.0f32; 3]; n];
         let mut full_yp = vec![[0.0f32; 3]; n];
-        for _ in 0..2 { let _ = detect_linking_into(&x, &y, d, &mut full_xp, &mut full_yp, &cfg); }
+        for _ in 0..2 {
+            let _ = detect_linking_into(&x, &y, d, &mut full_xp, &mut full_yp, &cfg);
+        }
         let s = Instant::now();
         let verdict = detect_linking_into(&x, &y, d, &mut full_xp, &mut full_yp, &cfg);
         let real_ns = s.elapsed().as_nanos();
-        println!("  REAL detect_linking (skip+early-exit): {:.3} ms, verdict={:?}",
-                 real_ns as f64 / 1e6, verdict);
+        println!(
+            "  REAL detect_linking (skip+early-exit): {:.3} ms, verdict={:?}",
+            real_ns as f64 / 1e6,
+            verdict
+        );
         println!();
     }
 }

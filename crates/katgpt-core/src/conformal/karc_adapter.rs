@@ -125,7 +125,11 @@ where
             delay_state.len()
         );
         let ok = self.karc.forecast_into(delay_state, &mut self.scratch_out);
-        *out = if ok { self.scratch_out[self.channel] } else { 0.0 };
+        *out = if ok {
+            self.scratch_out[self.channel]
+        } else {
+            0.0
+        };
     }
 }
 
@@ -217,10 +221,10 @@ mod tests {
         let adapter = KarcChannelForecaster::new(karc, 0);
         let mut cal = ConformalIntervalCalibrator::new(
             adapter,
-            1, // n_channels
-            1, // max_h
-            1, // m
-            32, // capacity
+            1,   // n_channels
+            1,   // max_h
+            1,   // m
+            32,  // capacity
             0.0, // exp_lambda
             DecayUnit::Step,
             ResidualMode::HStep,

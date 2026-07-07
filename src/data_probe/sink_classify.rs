@@ -295,10 +295,22 @@ mod tests {
 
         // Audit call (first call) — must match per-call DualPolicy.
         let kind_dual = apply_dual_policy_gate(
-            &attn, &values, &o, &policy_dual, 2.0, &mut scratch_a, &mut out_dual,
+            &attn,
+            &values,
+            &o,
+            &policy_dual,
+            2.0,
+            &mut scratch_a,
+            &mut out_dual,
         );
         let kind_cached = apply_dual_policy_gate_cached(
-            &attn, &values, &o, 2.0, &mut scratch_b, &mut cached, &mut out_cached,
+            &attn,
+            &values,
+            &o,
+            2.0,
+            &mut scratch_b,
+            &mut cached,
+            &mut out_cached,
         );
         assert_eq!(kind_dual, kind_cached, "audit call should classify same");
         assert_eq!(kind_dual, SinkKind::Broadcast);
@@ -312,7 +324,13 @@ mod tests {
 
         // Subsequent cached calls should reuse the cached Broadcast decision.
         let kind_cached_2 = apply_dual_policy_gate_cached(
-            &attn, &values, &o, 2.0, &mut scratch_b, &mut cached, &mut out_cached,
+            &attn,
+            &values,
+            &o,
+            2.0,
+            &mut scratch_b,
+            &mut cached,
+            &mut out_cached,
         );
         assert_eq!(kind_cached_2, SinkKind::Broadcast);
         assert_eq!(cached.calls_since_audit, 2);
@@ -347,7 +365,13 @@ mod tests {
 
         // First call: audit.
         let _ = apply_dual_policy_gate_cached(
-            &attn, &values, &o, 2.0, &mut scratch, &mut cached, &mut out,
+            &attn,
+            &values,
+            &o,
+            2.0,
+            &mut scratch,
+            &mut cached,
+            &mut out,
         );
         assert_eq!(cached.cached_kind, Some(SinkKind::Broadcast));
         assert_eq!(cached.calls_since_audit, 1);
@@ -359,7 +383,13 @@ mod tests {
 
         // Next call should re-audit.
         let kind = apply_dual_policy_gate_cached(
-            &attn, &values, &o, 2.0, &mut scratch, &mut cached, &mut out,
+            &attn,
+            &values,
+            &o,
+            2.0,
+            &mut scratch,
+            &mut cached,
+            &mut out,
         );
         assert_eq!(kind, SinkKind::Broadcast);
         assert_eq!(cached.calls_since_audit, 1);
@@ -406,10 +436,23 @@ mod tests {
         let sr_flat = stable_rank_update_into_flat(&o_flat, n, d, &mut sc_flat, 5);
 
         // Both should classify as effectively rank-1 (cosine probe fires).
-        assert!((sr_vec - 1.0).abs() < 0.05, "vec sr={}, expected ~1.0", sr_vec);
-        assert!((sr_flat - 1.0).abs() < 0.05, "flat sr={}, expected ~1.0", sr_flat);
+        assert!(
+            (sr_vec - 1.0).abs() < 0.05,
+            "vec sr={}, expected ~1.0",
+            sr_vec
+        );
+        assert!(
+            (sr_flat - 1.0).abs() < 0.05,
+            "flat sr={}, expected ~1.0",
+            sr_flat
+        );
         // Bit-identical (same arithmetic, just different slicing).
-        assert!((sr_vec - sr_flat).abs() < 1e-6, "vec={} flat={}", sr_vec, sr_flat);
+        assert!(
+            (sr_vec - sr_flat).abs() < 1e-6,
+            "vec={} flat={}",
+            sr_vec,
+            sr_flat
+        );
     }
 
     /// Flat stable-rank on zero matrix must return 0.0 (not NaN).
@@ -420,7 +463,11 @@ mod tests {
         let o_flat = vec![0.0f32; n * d];
         let mut scratch = StableRankScratch::new(d);
         let sr = stable_rank_update_into_flat(&o_flat, n, d, &mut scratch, 5);
-        assert!(sr.abs() < 1e-6, "zero-matrix flat sr should be 0, got {}", sr);
+        assert!(
+            sr.abs() < 1e-6,
+            "zero-matrix flat sr should be 0, got {}",
+            sr
+        );
         assert!(!sr.is_nan());
     }
 
@@ -438,7 +485,8 @@ mod tests {
         let mut sc_b = StableRankScratch::new(d);
 
         let diag_vec = classify_sink_at(0, &attn_col, &values_rows, None, &cfg, &mut sc_a);
-        let diag_flat = classify_sink_at_flat(0, &attn_col, &values_flat, n, d, None, &cfg, &mut sc_b);
+        let diag_flat =
+            classify_sink_at_flat(0, &attn_col, &values_flat, n, d, None, &cfg, &mut sc_b);
 
         assert_eq!(diag_vec.kind, SinkKind::Nop);
         assert_eq!(diag_flat.kind, SinkKind::Nop);
@@ -461,11 +509,16 @@ mod tests {
         let mut sc_a = StableRankScratch::new(d);
         let mut sc_b = StableRankScratch::new(d);
 
-        let diag_vec = classify_sink_at(
-            0, &attn_col, &values_rows, Some(&o_rows), &cfg, &mut sc_a,
-        );
+        let diag_vec = classify_sink_at(0, &attn_col, &values_rows, Some(&o_rows), &cfg, &mut sc_a);
         let diag_flat = classify_sink_at_flat(
-            0, &attn_col, &values_flat, n, d, Some((&o_flat, n, d)), &cfg, &mut sc_b,
+            0,
+            &attn_col,
+            &values_flat,
+            n,
+            d,
+            Some((&o_flat, n, d)),
+            &cfg,
+            &mut sc_b,
         );
 
         assert_eq!(diag_vec.kind, SinkKind::Broadcast);
@@ -500,7 +553,15 @@ mod tests {
         let mut out_flat = Vec::new();
 
         classify_all_sinks(&attn_rows, &values_rows, &cfg, &mut sc_a, &mut out_vec);
-        classify_all_sinks_flat(&attn_flat, n, &values_flat, d, &cfg, &mut sc_b, &mut out_flat);
+        classify_all_sinks_flat(
+            &attn_flat,
+            n,
+            &values_flat,
+            d,
+            &cfg,
+            &mut sc_b,
+            &mut out_flat,
+        );
 
         assert_eq!(out_vec.len(), out_flat.len());
         assert_eq!(out_vec.len(), 1, "only pos 0 exceeds τ_sink=0.5");
@@ -542,10 +603,24 @@ mod tests {
         let mut sc_b = StableRankScratch::new(d);
 
         let kind_vec = apply_dual_policy_gate(
-            &attn_rows, &values_rows, &o_rows, &policy, gate_scale, &mut sc_a, &mut out_rows,
+            &attn_rows,
+            &values_rows,
+            &o_rows,
+            &policy,
+            gate_scale,
+            &mut sc_a,
+            &mut out_rows,
         );
         let kind_flat = apply_dual_policy_gate_flat(
-            &attn_flat, &values_flat, &o_flat, n, d, &policy, gate_scale, &mut sc_b, &mut out_flat,
+            &attn_flat,
+            &values_flat,
+            &o_flat,
+            n,
+            d,
+            &policy,
+            gate_scale,
+            &mut sc_b,
+            &mut out_flat,
         );
 
         assert_eq!(kind_vec, kind_flat);
@@ -556,7 +631,10 @@ mod tests {
             for j in 0..d {
                 let v = out_rows[i][j];
                 let f = out_flat[i * d + j];
-                assert!((v - f).abs() < 1e-6, "mismatch at [{i}][{j}]: vec={v} flat={f}");
+                assert!(
+                    (v - f).abs() < 1e-6,
+                    "mismatch at [{i}][{j}]: vec={v} flat={f}"
+                );
             }
         }
     }
@@ -589,7 +667,15 @@ mod tests {
         let mut scratch = StableRankScratch::new(d);
 
         let kind = apply_dual_policy_gate_flat(
-            &attn_flat, &values_flat, &o_flat, n, d, &policy, gate_scale, &mut scratch, &mut out_flat,
+            &attn_flat,
+            &values_flat,
+            &o_flat,
+            n,
+            d,
+            &policy,
+            gate_scale,
+            &mut scratch,
+            &mut out_flat,
         );
         assert_eq!(kind, SinkKind::Nop);
 
@@ -632,11 +718,27 @@ mod tests {
         // Per-call reference.
         let policy = SinkAwarePolicy::DualPolicy(cfg);
         let kind_a = apply_dual_policy_gate_flat(
-            &attn_flat, &values_flat, &o_flat, n, d, &policy, 2.0, &mut sc_a, &mut out_a,
+            &attn_flat,
+            &values_flat,
+            &o_flat,
+            n,
+            d,
+            &policy,
+            2.0,
+            &mut sc_a,
+            &mut out_a,
         );
         // Cached audit call.
         let kind_b = apply_dual_policy_gate_cached_flat(
-            &attn_flat, &values_flat, &o_flat, n, d, 2.0, &mut sc_b, &mut cached, &mut out_b,
+            &attn_flat,
+            &values_flat,
+            &o_flat,
+            n,
+            d,
+            2.0,
+            &mut sc_b,
+            &mut cached,
+            &mut out_b,
         );
         assert_eq!(kind_a, kind_b);
         assert_eq!(kind_b, SinkKind::Broadcast);
@@ -649,7 +751,15 @@ mod tests {
 
         // Second cached call — reuses decision, calls_since_audit increments.
         let kind_c = apply_dual_policy_gate_cached_flat(
-            &attn_flat, &values_flat, &o_flat, n, d, 2.0, &mut sc_b, &mut cached, &mut out_b,
+            &attn_flat,
+            &values_flat,
+            &o_flat,
+            n,
+            d,
+            2.0,
+            &mut sc_b,
+            &mut cached,
+            &mut out_b,
         );
         assert_eq!(kind_c, SinkKind::Broadcast);
         assert_eq!(cached.calls_since_audit, 2);

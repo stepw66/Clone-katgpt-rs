@@ -69,8 +69,8 @@
 //!   in the architecture root once this ships.
 
 use crate::closure::PrimitiveTransitionGraph;
-use crate::simd::simd_dot_f32;
 use crate::sigmoid;
+use crate::simd::simd_dot_f32;
 
 // ── Functor edge parameters ───────────────────────────────────────────────
 
@@ -113,13 +113,13 @@ impl FunctorEdgeParams {
     /// Construct with explicit params.
     #[inline]
     #[must_use]
-    pub const fn new(
-        direction_set: [u8; 32],
-        direction_index: u16,
-        beta: f32,
-        tau: f32,
-    ) -> Self {
-        Self { direction_set, direction_index, beta, tau }
+    pub const fn new(direction_set: [u8; 32], direction_index: u16, beta: f32, tau: f32) -> Self {
+        Self {
+            direction_set,
+            direction_index,
+            beta,
+            tau,
+        }
     }
 
     /// Default gate scalars (β=8.0, τ=0.6) — matches riir-ai's
@@ -315,7 +315,7 @@ pub fn functor_edge_gate(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::closure::{serialize_postcard, OperatorKind, PrimitiveKind, PtgRecorder};
+    use crate::closure::{OperatorKind, PrimitiveKind, PtgRecorder, serialize_postcard};
 
     // ── FunctorEdgeParams ──────────────────────────────────────────────────
 
@@ -393,7 +393,11 @@ mod tests {
         let params = FunctorEdgeParams::new([0u8; 32], 0, 8.0, 0.6);
         let mut out = [0.0f32; 4];
         apply_functor_edge_into(&state, &params, &direction, 4, &mut out);
-        assert!(out[0] > 1.0, "gate opened: out[0] should be > 1.0, got {}", out[0]);
+        assert!(
+            out[0] > 1.0,
+            "gate opened: out[0] should be > 1.0, got {}",
+            out[0]
+        );
     }
 
     #[test]

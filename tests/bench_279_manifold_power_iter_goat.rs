@@ -324,7 +324,12 @@ fn g04_subms_swap_game_scale() {
         eprintln!("  (debug build — G4 timing gate skipped, run with --release for the real gate)");
         gate_check!("G4", true, "debug build — skipped");
     } else {
-        gate_check!("G4", ms_mpi < 1.0, "MPI recondition took {:.3}ms (must be < 1ms)", ms_mpi);
+        gate_check!(
+            "G4",
+            ms_mpi < 1.0,
+            "MPI recondition took {:.3}ms (must be < 1ms)",
+            ms_mpi
+        );
     }
 }
 
@@ -367,7 +372,7 @@ fn g05_determinism_sync_safe() {
 
 #[test]
 fn g06_dry_non_regression_gauge_rebalance() {
-    use katgpt_rs::gauge_invariant::{gauge_rebalance, GaugeRebalanceScratch};
+    use katgpt_rs::gauge_invariant::{GaugeRebalanceScratch, gauge_rebalance};
 
     // Mirror t01: A·B^T preserved after rebalance.
     let m = 16;
@@ -532,6 +537,10 @@ fn zzz_goat_gate_summary() {
     eprintln!("  GOAT GATE: {}/{}  (failures: {})", p, p + f, f);
     eprintln!("══════════════════════════════════════════════════");
     if f > 0 {
-        panic!("GOAT GATE FAILED: {}/{} gates red — do NOT promote", f, p + f);
+        panic!(
+            "GOAT GATE FAILED: {}/{} gates red — do NOT promote",
+            f,
+            p + f
+        );
     }
 }

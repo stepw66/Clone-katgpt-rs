@@ -9,9 +9,7 @@
 
 #[cfg(feature = "cs_kv_probe")]
 fn main() {
-    use katgpt_rs::cs_kv_probe::{
-        CsKvProbe, CsProbeConfig, DensityBudget, Episode, GatedKvSlice,
-    };
+    use katgpt_rs::cs_kv_probe::{CsKvProbe, CsProbeConfig, DensityBudget, Episode, GatedKvSlice};
 
     let n_heads = 64_usize;
     let d = 128_usize; // KV cache dim per episode.
@@ -67,8 +65,18 @@ fn main() {
     });
     println!("CS-KV Probe — top-10 groups (signal = {:?}):", signal_heads);
     for (rank, &g) in idx.iter().take(10).enumerate() {
-        let marker = if signal_heads.contains(&g) { "★" } else { " " };
-        println!("  {:>2}. group {:>2}  score {:+.4} {}", rank + 1, g, ranking.scores[g], marker);
+        let marker = if signal_heads.contains(&g) {
+            "★"
+        } else {
+            " "
+        };
+        println!(
+            "  {:>2}. group {:>2}  score {:+.4} {}",
+            rank + 1,
+            g,
+            ranking.scores[g],
+            marker
+        );
     }
 
     // Density budget — paper floors 3.5% / 87% at D = 64.
@@ -83,12 +91,27 @@ fn main() {
     let mut idx_scratch = vec![0_usize; n_heads];
     for ca in [0.0_f32, 0.25, 0.5, 0.75, 1.0] {
         let k = budget.k_for(ca);
-        GatedKvSlice::apply(&ranking, &budget, ca, &kv_dummy, &mut idx_scratch, &mut bias);
+        GatedKvSlice::apply(
+            &ranking,
+            &budget,
+            ca,
+            &kv_dummy,
+            &mut idx_scratch,
+            &mut bias,
+        );
         let finite = bias.iter().filter(|b| b.is_finite()).count();
-        let top_in = idx.iter().take(k).filter(|&&g| signal_heads.contains(&g)).count();
+        let top_in = idx
+            .iter()
+            .take(k)
+            .filter(|&&g| signal_heads.contains(&g))
+            .count();
         println!(
             "  ca={:>4} → K={:>2}  gate-finite={:>2}  signal-in-top-K={}/{}",
-            ca, k, finite, top_in, signal_heads.len()
+            ca,
+            k,
+            finite,
+            top_in,
+            signal_heads.len()
         );
     }
 }

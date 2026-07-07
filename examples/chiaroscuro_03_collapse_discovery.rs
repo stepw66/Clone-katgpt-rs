@@ -48,7 +48,10 @@ fn main() {
         println!("\n✓ Collapse detected!");
         println!("  Survivors (keep): {:?}", promotion.keep);
         println!("  Demote: {:?}", promotion.demote);
-        println!("  Recommendation: remove ops at indices {:?} from the router.", promotion.demote);
+        println!(
+            "  Recommendation: remove ops at indices {:?} from the router.",
+            promotion.demote
+        );
         println!("  This mirrors the paper's RBF removal — improves quality");
         println!("  by avoiding wasted capacity on redundant operators.");
     } else {
@@ -87,5 +90,7 @@ fn main() {
 #[cfg(not(feature = "chiaroscuro"))]
 fn main() {
     eprintln!("This example requires the `chiaroscuro` feature.");
-    eprintln!("Run with: cargo run --example chiaroscuro_03_collapse_discovery --features chiaroscuro");
+    eprintln!(
+        "Run with: cargo run --example chiaroscuro_03_collapse_discovery --features chiaroscuro"
+    );
 }

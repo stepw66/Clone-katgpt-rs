@@ -20,14 +20,14 @@
 
 // Plan 394 (2026-07-05): scorers + substrate re-export shim moved to
 // katgpt-forward. Re-export them here so historical paths resolve.
+#[cfg(feature = "maxsim")]
+pub use katgpt_forward::prefill::block_score_maxsim;
 pub use katgpt_forward::prefill::{
     AttentionScorer, BlockAttentionScorer, PrefillScorer, RandomScorer, UniformScorer,
     block_compression_ratio, block_select, block_select_grid, compress_prompt,
     compress_prompt_blocks, should_compress, speculative_prefill, speculative_prefill_adaptive,
     speculative_prefill_block,
 };
-#[cfg(feature = "maxsim")]
-pub use katgpt_forward::prefill::block_score_maxsim;
 
 // `FlashPrefillConfig` is only used by the `dash_attn`-gated `block_select_entmax`.
 // Gate the import to match so it doesn't read as unused under default features.
@@ -123,19 +123,9 @@ mod tests {
     #[cfg(feature = "rest")]
     use crate::transformer::TransformerWeights;
     #[cfg(feature = "rest")]
-    use crate::types::Rng;
-    #[cfg(feature = "rest")]
     use crate::types::Config;
-
-    // Only used by the `rest`-gated bridge test; gate the helper to match so it
-    // doesn't read as dead code under default features.
     #[cfg(feature = "rest")]
-    fn make_draft() -> (TransformerWeights, Config) {
-        let config = Config::draft();
-        let mut rng = Rng::new(42);
-        let weights = TransformerWeights::new(&config, &mut rng);
-        (weights, config)
-    }
+    use crate::types::Rng;
 
     /// Bridge test: prefill compression → KV cache fill → speculative decode.
     /// Validates the data flow from prompt compression through to speculative

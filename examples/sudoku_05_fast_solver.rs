@@ -10,7 +10,10 @@ fn main() {
     let clues = b.clue_count();
     let (solved, steps) = b.solve_fast();
     println!("Arto Inkala: {clues} clues");
-    println!("solve_fast: solved={solved}, steps={steps}, is_solved={}", b.is_solved());
+    println!(
+        "solve_fast: solved={solved}, steps={steps}, is_solved={}",
+        b.is_solved()
+    );
     println!();
     print!("{}", b.display());
 }

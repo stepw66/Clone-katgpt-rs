@@ -262,11 +262,11 @@ mod tests {
     #[test]
     fn sigma_dp_returns_infinity_for_invalid_budget() {
         let cases = [
-            (0.0, 1e-5, 0.1), // epsilon <= 0
+            (0.0, 1e-5, 0.1),  // epsilon <= 0
             (-1.0, 1e-5, 0.1), // epsilon < 0
-            (1.0, 0.0, 0.1),  // delta <= 0
-            (1.0, 1.0, 0.1),  // delta >= 1
-            (1.0, 1.5, 0.1),  // delta > 1
+            (1.0, 0.0, 0.1),   // delta <= 0
+            (1.0, 1.0, 0.1),   // delta >= 1
+            (1.0, 1.5, 0.1),   // delta > 1
         ];
         for &(eps, delta, sens) in &cases {
             let cfg = KarcDpNoiseConfig {
@@ -381,8 +381,7 @@ mod tests {
         let sigma = cfg.sigma_dp();
 
         let mean: f64 = wout.iter().map(|&x| x as f64).sum::<f64>() / n as f64;
-        let var: f64 =
-            wout.iter().map(|&x| (x as f64 - mean).powi(2)).sum::<f64>() / n as f64;
+        let var: f64 = wout.iter().map(|&x| (x as f64 - mean).powi(2)).sum::<f64>() / n as f64;
         let stddev = var.sqrt();
 
         // Box-Muller + xorshift64 is not perfectly calibrated; allow 10%

@@ -29,8 +29,8 @@
 //! activations. This matches the codebase convention
 //! (`personality_composition::sigmoid`, `latent_field_steering`, etc.).
 
-use crate::babel_codec::commitment::BabelCommitment;
 use crate::babel_codec::BabelCodec;
+use crate::babel_codec::commitment::BabelCommitment;
 
 /// Numerically stable scalar sigmoid: `σ(x) = 1 / (1 + e^{-x})`.
 ///
@@ -287,8 +287,13 @@ impl<const D: usize, const K: usize> BabelCodec for SigmoidLatentCodec<D, K> {
 
         // 3. Record ratio + commitment.
         let bytes_in = (D * core::mem::size_of::<f32>()) as f32;
-        let bytes_out = (out.len() * (core::mem::size_of::<u32>() + core::mem::size_of::<f32>())) as f32;
-        self.last_ratio = if bytes_in > 0.0 { bytes_out / bytes_in } else { 1.0 };
+        let bytes_out =
+            (out.len() * (core::mem::size_of::<u32>() + core::mem::size_of::<f32>())) as f32;
+        self.last_ratio = if bytes_in > 0.0 {
+            bytes_out / bytes_in
+        } else {
+            1.0
+        };
         self.last_commitment = BabelCommitment::of(out.as_bytes());
         out
     }
@@ -459,7 +464,10 @@ mod tests {
             .iter()
             .cloned()
             .fold(f32::NEG_INFINITY, f32::max);
-        assert!((top - 1.0).abs() < 1e-5, "saturated score should be ~1.0, got {top}");
+        assert!(
+            (top - 1.0).abs() < 1e-5,
+            "saturated score should be ~1.0, got {top}"
+        );
     }
 
     #[test]
@@ -509,11 +517,13 @@ mod tests {
         // With bias = +5 on every direction, even a zero input gives σ(5)≈0.993.
         const D: usize = 4;
         const K: usize = 2;
-        let dirs: Vec<[f32; D]> = (0..4).map(|i| {
-            let mut d = [0.0; D];
-            d[i] = 1.0;
-            d
-        }).collect();
+        let dirs: Vec<[f32; D]> = (0..4)
+            .map(|i| {
+                let mut d = [0.0; D];
+                d[i] = 1.0;
+                d
+            })
+            .collect();
         let bias = vec![5.0; 4];
         let mut codec = SigmoidLatentCodec::<D, K>::new(dirs, bias, 1.0).unwrap();
         let input = [0.0f32; D];
@@ -568,7 +578,11 @@ mod tests {
         // Top-3 by magnitude (here all positive, so top-3 largest): 8, 7, 6 → axes 7, 6, 5.
         let mut got: Vec<u32> = compressed.indices[..compressed.len()].to_vec();
         got.sort_unstable();
-        assert_eq!(got, vec![5, 6, 7], "top-3 must be axes 5,6,7 (largest inputs)");
+        assert_eq!(
+            got,
+            vec![5, 6, 7],
+            "top-3 must be axes 5,6,7 (largest inputs)"
+        );
     }
 
     #[test]
@@ -598,7 +612,10 @@ mod tests {
         // bytes_out = K * (4 + 4) = 32, bytes_in = D * 4 = 32 → ratio = 1.0
         // (latent projection is not a byte-compression win by itself; its
         // value is API uniformity, per the honest framing in the module docs).
-        assert!((r - 1.0).abs() < 1e-5, "expected ratio ~1.0 for D=8 K=4, got {r}");
+        assert!(
+            (r - 1.0).abs() < 1e-5,
+            "expected ratio ~1.0 for D=8 K=4, got {r}"
+        );
     }
 
     #[test]

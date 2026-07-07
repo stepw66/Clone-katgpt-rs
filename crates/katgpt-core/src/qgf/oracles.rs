@@ -94,11 +94,7 @@ mod leo_head_oracle {
         type State = Vec<f32>;
         type Action = ();
 
-        fn q_gradient_at(
-            &self,
-            state: &Self::State,
-            _projected_action: &Self::Action,
-        ) -> Vec<f32> {
+        fn q_gradient_at(&self, state: &Self::State, _projected_action: &Self::Action) -> Vec<f32> {
             let all_q = self.head.all_goals_q(state);
             if self.goal_idx < self.head.goal_count() {
                 self.head.q_for_goal(&all_q, self.goal_idx).to_vec()
@@ -163,7 +159,13 @@ mod leo_head_oracle {
 
         #[test]
         fn test_leo_head_oracle_gradient() {
-            let oracle = LeoHeadOracle::new(MockLeo { goals: 2, actions: 4 }, 1);
+            let oracle = LeoHeadOracle::new(
+                MockLeo {
+                    goals: 2,
+                    actions: 4,
+                },
+                1,
+            );
 
             let state = vec![0.0; 8];
             let grad = oracle.q_gradient_at(&state, &());
@@ -174,7 +176,13 @@ mod leo_head_oracle {
 
         #[test]
         fn test_leo_head_oracle_into_matches_at() {
-            let oracle = LeoHeadOracle::new(MockLeo { goals: 2, actions: 4 }, 0);
+            let oracle = LeoHeadOracle::new(
+                MockLeo {
+                    goals: 2,
+                    actions: 4,
+                },
+                0,
+            );
 
             let state = vec![0.0; 8];
             let via_at = oracle.q_gradient_at(&state, &());
@@ -189,7 +197,13 @@ mod leo_head_oracle {
 
         #[test]
         fn test_leo_head_oracle_out_of_range_goal_zeros() {
-            let oracle = LeoHeadOracle::new(MockLeo { goals: 2, actions: 4 }, 99);
+            let oracle = LeoHeadOracle::new(
+                MockLeo {
+                    goals: 2,
+                    actions: 4,
+                },
+                99,
+            );
 
             let state = vec![0.0; 8];
             let grad = oracle.q_gradient_at(&state, &());
@@ -203,14 +217,26 @@ mod leo_head_oracle {
 
         #[test]
         fn test_leo_head_oracle_confidence_is_one() {
-            let oracle = LeoHeadOracle::new(MockLeo { goals: 1, actions: 2 }, 0);
+            let oracle = LeoHeadOracle::new(
+                MockLeo {
+                    goals: 1,
+                    actions: 2,
+                },
+                0,
+            );
             // Deterministic cached lookup → confidence 1.0.
             assert_eq!(oracle.confidence(&vec![0.0; 2]), 1.0);
         }
 
         #[test]
         fn test_leo_head_oracle_set_goal() {
-            let mut oracle = LeoHeadOracle::new(MockLeo { goals: 2, actions: 4 }, 0);
+            let mut oracle = LeoHeadOracle::new(
+                MockLeo {
+                    goals: 2,
+                    actions: 4,
+                },
+                0,
+            );
             assert_eq!(oracle.goal_idx(), 0);
 
             let state = vec![0.0; 8];
@@ -218,7 +244,10 @@ mod leo_head_oracle {
 
             oracle.set_goal_idx(1);
             assert_eq!(oracle.goal_idx(), 1);
-            assert_eq!(oracle.q_gradient_at(&state, &()), vec![10.0, 20.0, 30.0, 40.0]);
+            assert_eq!(
+                oracle.q_gradient_at(&state, &()),
+                vec![10.0, 20.0, 30.0, 40.0]
+            );
         }
     }
 }
@@ -277,11 +306,7 @@ mod flow_field_oracle {
         type State = ();
         type Action = (u16, u16);
 
-        fn q_gradient_at(
-            &self,
-            _state: &Self::State,
-            projected_action: &Self::Action,
-        ) -> Vec<f32> {
+        fn q_gradient_at(&self, _state: &Self::State, projected_action: &Self::Action) -> Vec<f32> {
             let (x, y) = *projected_action;
             let (dx, dy) = self.field.lookup(x, y);
             vec![dx, dy]
@@ -471,11 +496,7 @@ mod action_bridge_oracle {
         type State = [f32; D];
         type Action = ();
 
-        fn q_gradient_at(
-            &self,
-            state: &Self::State,
-            _projected_action: &Self::Action,
-        ) -> Vec<f32> {
+        fn q_gradient_at(&self, state: &Self::State, _projected_action: &Self::Action) -> Vec<f32> {
             let mut out = vec![0.0f32; A];
             self.gradient_into_inner(state, &mut out);
             out
@@ -677,11 +698,7 @@ impl QGradientOracle for BfnProxyOracle {
     type State = ();
     type Action = ();
 
-    fn q_gradient_at(
-        &self,
-        _state: &Self::State,
-        _projected_action: &Self::Action,
-    ) -> Vec<f32> {
+    fn q_gradient_at(&self, _state: &Self::State, _projected_action: &Self::Action) -> Vec<f32> {
         self.returns.clone()
     }
 
@@ -786,7 +803,10 @@ mod no_guidance_tests {
     fn test_no_guidance_oracle_zero_gradient() {
         let oracle = NoGuidanceOracle;
         let g = oracle.q_gradient_at(&(), &());
-        assert!(g.is_empty(), "NoGuidanceOracle should return empty gradient");
+        assert!(
+            g.is_empty(),
+            "NoGuidanceOracle should return empty gradient"
+        );
 
         let mut buf = [99.0f32; 4];
         oracle.q_gradient_into(&(), &(), &mut buf);
@@ -884,23 +904,15 @@ mod warm_tier_oracle {
             out
         }
 
-        fn q_gradient_into(
-            &self,
-            state: &Self::State,
-            projected: &Self::Action,
-            out: &mut [f32],
-        ) {
+        fn q_gradient_into(&self, state: &Self::State, projected: &Self::Action, out: &mut [f32]) {
             // Single-state batch — the delegate's contract is a slice of
             // state refs, so we build a 1-element view. Avoids allocation;
             // the delegate writes directly into `out`.
             let state_ref: [&S; 1] = [state];
             let action_ref: [&A; 1] = [projected];
-            let written = self.delegate.batch_gradient_into(
-                &state_ref,
-                &action_ref,
-                out.len(),
-                out,
-            );
+            let written =
+                self.delegate
+                    .batch_gradient_into(&state_ref, &action_ref, out.len(), out);
             if written == 0 {
                 // GPU failure — zero the buffer so downstream tilt is a no-op.
                 for slot in out.iter_mut() {
@@ -952,13 +964,7 @@ mod warm_tier_oracle {
         struct FailingGpuDelegate;
         impl SealedForTests for FailingGpuDelegate {}
         impl QgfGpuDelegate<f32, ()> for FailingGpuDelegate {
-            fn batch_gradient_into(
-                &self,
-                _: &[&f32],
-                _: &[&()],
-                _: usize,
-                _: &mut [f32],
-            ) -> usize {
+            fn batch_gradient_into(&self, _: &[&f32], _: &[&()], _: usize, _: &mut [f32]) -> usize {
                 0
             }
         }
@@ -985,7 +991,10 @@ mod warm_tier_oracle {
             let oracle: WarmTierOracle<f32, (), _> = WarmTierOracle::new(FailingGpuDelegate, 4);
             let mut buf = [99.0f32; 4];
             oracle.q_gradient_into(&1.0, &(), &mut buf);
-            assert_eq!(buf, [0.0; 4], "GPU failure must zero the buffer for safe tilt no-op");
+            assert_eq!(
+                buf, [0.0; 4],
+                "GPU failure must zero the buffer for safe tilt no-op"
+            );
         }
 
         #[test]
@@ -1103,12 +1112,7 @@ mod cold_tier_oracle {
             buf
         }
 
-        fn q_gradient_into(
-            &self,
-            key: &Self::State,
-            _: &Self::Action,
-            out: &mut [f32],
-        ) {
+        fn q_gradient_into(&self, key: &Self::State, _: &Self::Action, out: &mut [f32]) {
             let n = self.loader.load_row(key, out);
             if n == 0 {
                 // Cache miss — zero the buffer so the tilt is a no-op.
@@ -1220,6 +1224,6 @@ mod cold_tier_oracle {
 }
 
 // Re-export the Warm / Cold tier oracle types.
+pub use cold_tier_oracle::{ColdTierOracle, QTableLoader};
 #[cfg(feature = "qgf_drafter")]
 pub use warm_tier_oracle::WarmTierOracle;
-pub use cold_tier_oracle::{ColdTierOracle, QTableLoader};

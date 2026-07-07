@@ -233,12 +233,7 @@ pub fn expected_improvement_per_action(pi: &[f32], q: &[f32], m: f32) -> Vec<f32
 ///
 /// Panics if `out.len() != pi.len()`, plus the same assertions as
 /// [`expected_max_over_m`].
-pub fn expected_improvement_per_action_inplace(
-    pi: &[f32],
-    q: &[f32],
-    m: f32,
-    out: &mut [f32],
-) {
+pub fn expected_improvement_per_action_inplace(pi: &[f32], q: &[f32], m: f32, out: &mut [f32]) {
     let k = pi.len();
     assert!(k == q.len(), "pi and q must have the same length");
     assert!(k > 0, "pi and q must be non-empty");
@@ -354,10 +349,7 @@ mod tests {
         let pi = [0.3, 0.3, 0.4];
         let q = [1.0, 2.0, 0.5];
         let ei = expected_improvement(0.0, &pi, &q, 2.0);
-        assert!(
-            ei.abs() < 1e-6,
-            "EI should be 0 when R < min(q), got {ei}"
-        );
+        assert!(ei.abs() < 1e-6, "EI should be 0 when R < min(q), got {ei}");
     }
 
     /// If R > max(q), EI is bounded and positive.
@@ -366,10 +358,7 @@ mod tests {
         let pi = [0.3, 0.3, 0.4];
         let q = [1.0, 2.0, 0.5];
         let ei = expected_improvement(5.0, &pi, &q, 2.0);
-        assert!(
-            ei > 0.0,
-            "EI should be positive when R > max(q), got {ei}"
-        );
+        assert!(ei > 0.0, "EI should be positive when R > max(q), got {ei}");
         // EI should be at most R - min(q) = 5.0 - 0.5 = 4.5 (best-case improvement).
         assert!(
             ei <= 5.0 - 0.5 + 1e-5,
@@ -446,7 +435,10 @@ mod tests {
         let pi = [0.2, 0.3, 0.1, 0.4];
         let q = [1.0, -0.5, 2.0, 0.3];
         let ms = [0.3_f32, 0.5, 0.75, 1.0, 1.5, 2.0, 3.0, 5.0, 10.0];
-        let vals: Vec<f32> = ms.iter().map(|&m| expected_max_over_m(&pi, &q, m)).collect();
+        let vals: Vec<f32> = ms
+            .iter()
+            .map(|&m| expected_max_over_m(&pi, &q, m))
+            .collect();
         for i in 1..vals.len() {
             assert!(
                 vals[i] >= vals[i - 1] - 1e-5,
@@ -507,7 +499,10 @@ mod tests {
         expected_improvement_per_action_inplace(&pi, &q, m, &mut inplace);
 
         for (i, (a, b)) in allocated.iter().zip(inplace.iter()).enumerate() {
-            assert!((a - b).abs() < 1e-6, "Mismatch at [{i}]: alloc={a}, inplace={b}");
+            assert!(
+                (a - b).abs() < 1e-6,
+                "Mismatch at [{i}]: alloc={a}, inplace={b}"
+            );
         }
     }
 
@@ -836,9 +831,7 @@ mod tests {
             for &m in ms {
                 let q_plus = expected_improvement_per_action(&pi, &q, m);
                 let remax_arm = (0..k)
-                    .max_by(|&a, &b| {
-                        q_plus[a].partial_cmp(&q_plus[b]).unwrap_or(Ordering::Equal)
-                    })
+                    .max_by(|&a, &b| q_plus[a].partial_cmp(&q_plus[b]).unwrap_or(Ordering::Equal))
                     .unwrap();
 
                 // The theorem allows ties (when q values are equal). Check

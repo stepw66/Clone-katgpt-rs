@@ -165,11 +165,8 @@ fn bench_batch_1000_npcs(c: &mut Criterion) {
             .collect(),
     );
     // Per-NPC belief vectors (the `par_iter_mut` needs mutable state).
-    let states: Mutex<Vec<Vec<f32>>> = Mutex::new(
-        (0..BATCH_NPCS)
-            .map(|_| vec![0.0f32; BATCH_DIM])
-            .collect(),
-    );
+    let states: Mutex<Vec<Vec<f32>>> =
+        Mutex::new((0..BATCH_NPCS).map(|_| vec![0.0f32; BATCH_DIM]).collect());
     let input = vec![0.5f32; BATCH_DIM];
 
     group.bench_function("leaky_rayon_par_iter_dim8", |b| {

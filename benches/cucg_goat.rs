@@ -25,11 +25,7 @@ fn main() {
     println!();
 
     // G1: rubric beats fixed-interval (search rubric recall/FDR)
-    let mut results = vec![(
-        "G1",
-        "rubric recall ≥0.80, FDR ≤0.20",
-        g1_search_rubric(),
-    )];
+    let mut results = vec![("G1", "rubric recall ≥0.80, FDR ≤0.20", g1_search_rubric())];
 
     // G2: skip-if-reliable ≥50% suppression
     results.push((
@@ -345,12 +341,7 @@ fn g6_sigmoid_never_softmax() -> (String, bool) {
         format!(
             "static: 0 softmax hits; canary T={:.0}: H_softmax={:.4} (\u{2192}0), \
              H_sigmoid={:.4} (\u{2192}ln({})={:.4}), \u{394}={:.4} \u{2014} different class",
-            large_t,
-            h_softmax,
-            h_sigmoid,
-            n_positive as i64,
-            expected_plateau,
-            plateau_gap,
+            large_t, h_softmax, h_sigmoid, n_positive as i64, expected_plateau, plateau_gap,
         ),
         pass,
     )

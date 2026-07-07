@@ -216,7 +216,13 @@ impl<R: Copy> StateActionCache<R> {
     /// new value (the last observation wins; this is correct under the
     /// DeterministicTransition contract since both observations are equal).
     #[inline]
-    pub fn insert(&self, state: blake3::Hash, action: InferenceAction, next: blake3::Hash, reward: R) {
+    pub fn insert(
+        &self,
+        state: blake3::Hash,
+        action: InferenceAction,
+        next: blake3::Hash,
+        reward: R,
+    ) {
         if self.disabled.load(std::sync::atomic::Ordering::Relaxed) {
             return;
         }
@@ -275,11 +281,7 @@ impl<R: Copy> StateActionCache<R> {
     /// Skips pairs whose `(state_hash, action)` is not in the cache (a miss
     /// is not a determinism violation, just an un-cached pair).
     #[cfg(debug_assertions)]
-    pub fn verify_determinism<S, A>(
-        &self,
-        space: &A,
-        samples: &[(S, InferenceAction)],
-    ) -> usize
+    pub fn verify_determinism<S, A>(&self, space: &A, samples: &[(S, InferenceAction)]) -> usize
     where
         S: Clone,
         A: InferenceActionSpace<S>,
@@ -584,7 +586,9 @@ where
         };
     }
 
-    scratch.nodes.push(SearchNode::new_root(root_hash, root_actions));
+    scratch
+        .nodes
+        .push(SearchNode::new_root(root_hash, root_actions));
 
     let mut cache_hits = 0usize;
     let mut cache_misses = 0usize;
@@ -608,9 +612,7 @@ where
         let mut leaf_idx = 0usize;
         loop {
             // Terminal or Expand candidate (has unexpanded actions) → stop.
-            if space.is_terminal(&current_state)
-                || !scratch.nodes[leaf_idx].is_fully_expanded()
-            {
+            if space.is_terminal(&current_state) || !scratch.nodes[leaf_idx].is_fully_expanded() {
                 break;
             }
             // Fully expanded non-terminal: descend via UCB1.
@@ -762,9 +764,12 @@ where
             space.actions_at(&next_state)
         };
         let child_idx = scratch.nodes.len();
-        scratch
-            .nodes
-            .push(SearchNode::new_child(next_hash, action, leaf_idx, next_actions));
+        scratch.nodes.push(SearchNode::new_child(
+            next_hash,
+            action,
+            leaf_idx,
+            next_actions,
+        ));
         scratch.nodes[leaf_idx].children.push(child_idx);
         (rollout_reward, rollout_steps)
     }
@@ -828,8 +833,6 @@ where
     (space.reward(&current).unwrap_or(0.0), steps)
 }
 
-
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -861,8 +864,14 @@ mod tests {
         let sa = blake3::hash(b"state-a");
         let sb = blake3::hash(b"state-b");
         let a = InferenceAction::new(0, 0);
-        let ka = StateActionKey { state: sa, action: a };
-        let kb = StateActionKey { state: sb, action: a };
+        let ka = StateActionKey {
+            state: sa,
+            action: a,
+        };
+        let kb = StateActionKey {
+            state: sb,
+            action: a,
+        };
         assert_ne!(ka, kb, "same action at different states must differ");
     }
 
@@ -889,7 +898,10 @@ mod tests {
         cache.clear();
         assert!(cache.is_empty());
         assert_eq!(cache.len(), 0);
-        assert!(cache.get(s, a).is_none(), "cleared entry must not be retrievable");
+        assert!(
+            cache.get(s, a).is_none(),
+            "cleared entry must not be retrievable"
+        );
     }
 
     #[test]
@@ -905,7 +917,10 @@ mod tests {
         let g1 = cache.get(s, a1).expect("a1 must hit");
         assert!((g0.1 - 0.1).abs() < 1e-6);
         assert!((g1.1 - 0.9).abs() < 1e-6);
-        assert_ne!(g0.0, g1.0, "different actions must lead to different next states");
+        assert_ne!(
+            g0.0, g1.0,
+            "different actions must lead to different next states"
+        );
     }
 
     #[test]

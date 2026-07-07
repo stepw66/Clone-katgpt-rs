@@ -5,12 +5,11 @@
 //! Run: `cargo run --example kv_share_demo --features kv_share`
 
 #[cfg(feature = "kv_share")]
-use katgpt_rs::kv_share::{
-    merge_kv_weights, cache_layout, cache_slots_per_layer,
-    memory_per_token, attention_flops_factor,
-};
-#[cfg(feature = "kv_share")]
 use katgpt_core::types::{AttentionProjection, CacheLayout};
+#[cfg(feature = "kv_share")]
+use katgpt_rs::kv_share::{
+    attention_flops_factor, cache_layout, cache_slots_per_layer, memory_per_token, merge_kv_weights,
+};
 
 #[cfg(feature = "kv_share")]
 fn main() {
@@ -36,20 +35,38 @@ fn main() {
     let head_dim = 64;
 
     println!("Memory per token (head_dim={head_dim}):");
-    println!("  Full:    {} bytes", memory_per_token(CacheLayout::KV, head_dim));
-    println!("  SharedKV: {} bytes", memory_per_token(CacheLayout::K, head_dim));
+    println!(
+        "  Full:    {} bytes",
+        memory_per_token(CacheLayout::KV, head_dim)
+    );
+    println!(
+        "  SharedKV: {} bytes",
+        memory_per_token(CacheLayout::K, head_dim)
+    );
     println!("  Savings:  50%\n");
 
     println!("Cache slots per layer (base=1024):");
     let base_slots = 1024;
-    println!("  Full:    {} slots", cache_slots_per_layer(CacheLayout::KV, base_slots));
-    println!("  SharedKV: {} slots", cache_slots_per_layer(CacheLayout::K, base_slots));
+    println!(
+        "  Full:    {} slots",
+        cache_slots_per_layer(CacheLayout::KV, base_slots)
+    );
+    println!(
+        "  SharedKV: {} slots",
+        cache_slots_per_layer(CacheLayout::K, base_slots)
+    );
     println!("  Capacity: 2x (same memory)\n");
 
     // 4. FLOPs reduction
     println!("Attention FLOPs factor:");
-    println!("  Full:    {:.1}x", attention_flops_factor(AttentionProjection::Full));
-    println!("  SharedKV: {:.2}x (33% reduction)", attention_flops_factor(AttentionProjection::SharedKV));
+    println!(
+        "  Full:    {:.1}x",
+        attention_flops_factor(AttentionProjection::Full)
+    );
+    println!(
+        "  SharedKV: {:.2}x (33% reduction)",
+        attention_flops_factor(AttentionProjection::SharedKV)
+    );
 
     println!("\n=== Demo Complete ===");
     println!("Key insight: K=V sharing halves KV cache memory with ~3% perplexity cost.");

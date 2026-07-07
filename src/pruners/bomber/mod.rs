@@ -64,15 +64,15 @@ pub mod bomber_state;
 #[cfg(feature = "sdpg_bandit")]
 pub mod sdpg_helpers;
 
-pub use bomber_state::{BombSnapshot, BomberHeuristic, BomberState, PlayerSnapshot};
 #[cfg(feature = "bandit")]
 pub use bomber_state::BanditBomberHeuristic;
+pub use bomber_state::{BombSnapshot, BomberHeuristic, BomberState, PlayerSnapshot};
 
 pub use arena::ArenaGrid;
 pub use gate_player::GatePlayer;
 pub use players::{BomberPlayer, GreedyPlayer, HLPlayer, RandomPlayer, ValidatorPlayer};
-pub use sonlt_player::SonltPlayer;
 pub use replay_backward::{BackwardSample, BackwardWalkResult, ReplayBackwardWalker};
+pub use sonlt_player::SonltPlayer;
 
 #[cfg(feature = "contextual_bandit")]
 pub use contextual_bandit::{CONTEXT_DIM, ContextualBandit, DEFAULT_LEARNING_RATE, compute_phi};

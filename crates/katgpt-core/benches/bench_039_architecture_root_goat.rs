@@ -41,12 +41,10 @@ fn g1_correctness() -> bool {
     let eid = EngramTableId([0x77; 32]);
 
     // 1. Determinism: same inputs → same root.
-    let a = CognitiveArchitectureRoot::from_parts(
-        &[0xAA; 32], &eid, &[0xBB; 32], &[0xCC; 32], 42, 99,
-    );
-    let b = CognitiveArchitectureRoot::from_parts(
-        &[0xAA; 32], &eid, &[0xBB; 32], &[0xCC; 32], 42, 99,
-    );
+    let a =
+        CognitiveArchitectureRoot::from_parts(&[0xAA; 32], &eid, &[0xBB; 32], &[0xCC; 32], 42, 99);
+    let b =
+        CognitiveArchitectureRoot::from_parts(&[0xAA; 32], &eid, &[0xBB; 32], &[0xCC; 32], 42, 99);
     if a != b {
         return false;
     }
@@ -83,9 +81,8 @@ fn g1_avalanche() -> (bool, u32, u32) {
     // distance. Average across 6 single-bit mutations (ptg, engram, shard,
     // functor, tick, npc_id). BLAKE3 avalanche target: ~128 bits, floor 96.
     let eid = EngramTableId([0x77; 32]);
-    let base = CognitiveArchitectureRoot::from_parts(
-        &[0xAA; 32], &eid, &[0xBB; 32], &[0xCC; 32], 42, 99,
-    );
+    let base =
+        CognitiveArchitectureRoot::from_parts(&[0xAA; 32], &eid, &[0xBB; 32], &[0xCC; 32], 42, 99);
 
     let mut mutated_ptg = [0xAA; 32];
     mutated_ptg[0] ^= 1;
@@ -98,8 +95,22 @@ fn g1_avalanche() -> (bool, u32, u32) {
 
     let mutations = [
         CognitiveArchitectureRoot::from_parts(&mutated_ptg, &eid, &[0xBB; 32], &[0xCC; 32], 42, 99),
-        CognitiveArchitectureRoot::from_parts(&[0xAA; 32], &mutated_eid, &[0xBB; 32], &[0xCC; 32], 42, 99),
-        CognitiveArchitectureRoot::from_parts(&[0xAA; 32], &eid, &mutated_shard, &[0xCC; 32], 42, 99),
+        CognitiveArchitectureRoot::from_parts(
+            &[0xAA; 32],
+            &mutated_eid,
+            &[0xBB; 32],
+            &[0xCC; 32],
+            42,
+            99,
+        ),
+        CognitiveArchitectureRoot::from_parts(
+            &[0xAA; 32],
+            &eid,
+            &mutated_shard,
+            &[0xCC; 32],
+            42,
+            99,
+        ),
         CognitiveArchitectureRoot::from_parts(&[0xAA; 32], &eid, &[0xBB; 32], &mutated_sig, 42, 99),
         CognitiveArchitectureRoot::from_parts(&[0xAA; 32], &eid, &[0xBB; 32], &[0xCC; 32], 43, 99),
         CognitiveArchitectureRoot::from_parts(&[0xAA; 32], &eid, &[0xBB; 32], &[0xCC; 32], 42, 100),
@@ -150,7 +161,14 @@ fn g2_perf() -> (bool, f64, f64) {
     let root = CognitiveArchitectureRoot::from_parts(&ptg, &eid, &shard, &sig, 42, 99);
     let mut verify_call = || {
         // Touch every byte to prevent the optimizer from eliding this.
-        let ok = root.verify(black_box(&ptg), black_box(&eid), black_box(&shard), black_box(&sig), 42, 99);
+        let ok = root.verify(
+            black_box(&ptg),
+            black_box(&eid),
+            black_box(&shard),
+            black_box(&sig),
+            42,
+            99,
+        );
         // Verify returns bool; fold into the [u8;32] shape the timer expects.
         // We don't actually need the bytes — we need to keep the call alive.
         let mut probe = [0u8; 32];
@@ -193,9 +211,8 @@ fn g2_alloc_free() -> (bool, usize, usize, usize) {
     });
 
     // One construction (informational — should also be 0 since size_of == 32).
-    let (_, construct_allocs) = alloc_delta(|| {
-        CognitiveArchitectureRoot::from_parts(&ptg, &eid, &shard, &sig, 42, 99)
-    });
+    let (_, construct_allocs) =
+        alloc_delta(|| CognitiveArchitectureRoot::from_parts(&ptg, &eid, &shard, &sig, 42, 99));
 
     let pass = from_parts_allocs == 0 && verify_allocs == 0 && construct_allocs == 0;
     (pass, from_parts_allocs, verify_allocs, construct_allocs)
@@ -215,7 +232,10 @@ fn main() {
     println!("   Determinism:           same inputs → same root");
     println!("   Verify round-trip:     identical inputs verify ✓");
     println!("   Bit-flip sensitivity:  single-bit PTG mutation breaks verify");
-    println!("   Result:                {}", if g1_pass { "PASS ✓" } else { "FAIL ✗" });
+    println!(
+        "   Result:                {}",
+        if g1_pass { "PASS ✓" } else { "FAIL ✗" }
+    );
     println!();
 
     // G1: avalanche
@@ -224,7 +244,10 @@ fn main() {
     println!("   Min Hamming distance:  {min_bits}/256 bits  (across 6 single-bit mutations)");
     println!("   Avg Hamming distance:  {avg_bits}/256 bits  (BLAKE3 expected ~128)");
     println!("   Floor:                 ≥ 96 bits (37.5% — regression guard, not a quality gate)");
-    println!("   Result:                {}", if g1a_pass { "PASS ✓" } else { "FAIL ✗" });
+    println!(
+        "   Result:                {}",
+        if g1a_pass { "PASS ✓" } else { "FAIL ✗" }
+    );
     println!();
 
     // G2: perf
@@ -233,7 +256,10 @@ fn main() {
     println!("   from_parts:            {from_ns:.2} ns  (single BLAKE3 pass over ~204 bytes)");
     println!("   verify:                {verify_ns:.2} ns  (re-derive + compare)");
     println!("   Gate:                  each < 500 ns (2.5× headroom over expected ~200 ns)");
-    println!("   Result:                {}", if g2_pass { "PASS ✓" } else { "FAIL ✗" });
+    println!(
+        "   Result:                {}",
+        if g2_pass { "PASS ✓" } else { "FAIL ✗" }
+    );
     println!();
 
     // G2-alloc
@@ -243,7 +269,10 @@ fn main() {
     println!("   verify × 1000:         {v_allocs} allocs");
     println!("   Construction × 1:      {c_allocs} allocs  (informational — size_of == 32)");
     println!("   Threshold:             0 allocs on both hot paths");
-    println!("   Result:                {}", if g2a_pass { "PASS ✓" } else { "FAIL ✗" });
+    println!(
+        "   Result:                {}",
+        if g2a_pass { "PASS ✓" } else { "FAIL ✗" }
+    );
     println!();
 
     // G3: no-regression (informational — verified at the command line)
@@ -258,9 +287,15 @@ fn main() {
     // G4: alloc-free struct layout
     let g4_pass = std::mem::size_of::<CognitiveArchitectureRoot>() == 32;
     println!("── G4 (alloc-free): struct layout ──");
-    println!("   size_of::<CognitiveArchitectureRoot>(): {} bytes", std::mem::size_of::<CognitiveArchitectureRoot>());
+    println!(
+        "   size_of::<CognitiveArchitectureRoot>(): {} bytes",
+        std::mem::size_of::<CognitiveArchitectureRoot>()
+    );
     println!("   Threshold:             32 bytes (no padding, no indirection)");
-    println!("   Result:                {}", if g4_pass { "PASS ✓" } else { "FAIL ✗" });
+    println!(
+        "   Result:                {}",
+        if g4_pass { "PASS ✓" } else { "FAIL ✗" }
+    );
     println!();
 
     // G5/G6: modelless

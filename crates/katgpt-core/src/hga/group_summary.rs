@@ -54,7 +54,7 @@ impl GroupSummaryCache {
     ) -> Self {
         assert!(chunk_size > 0, "chunk_size must be > 0");
         assert!(
-            chunk_size % group_size == 0,
+            chunk_size.is_multiple_of(group_size),
             "chunk_size ({chunk_size}) must be divisible by group_size ({group_size})"
         );
         let n_groups_per_chunk = chunk_size / group_size;
@@ -105,9 +105,9 @@ impl GroupSummaryCache {
 
         for g in 0..self.n_groups_per_chunk {
             let group_start = g * self.group_size;
-            let summary = self
-                .summarizer
-                .summarize(keys_flat, positions, group_start, self.group_size);
+            let summary =
+                self.summarizer
+                    .summarize(keys_flat, positions, group_start, self.group_size);
             debug_assert_eq!(summary.len(), self.head_dim);
             self.summaries.extend_from_slice(&summary);
         }
@@ -131,11 +131,7 @@ impl GroupSummaryCache {
     /// Uses dot-product scoring (NOT entmax). Entmax is used only at the
     /// chunk-selection level in `forward_hga`; group selection is dot-product
     /// + top-K (deterministic, no normalization needed for ranking).
-    pub fn score_groups(
-        &self,
-        query: &[f32],
-        selected_chunks: &[usize],
-    ) -> Vec<GroupScore> {
+    pub fn score_groups(&self, query: &[f32], selected_chunks: &[usize]) -> Vec<GroupScore> {
         let mut scores = Vec::with_capacity(selected_chunks.len() * self.n_groups_per_chunk);
         for &chunk_idx in selected_chunks {
             if chunk_idx >= self.n_chunks {
@@ -152,7 +148,11 @@ impl GroupSummaryCache {
             }
         }
         // Sort by score descending.
-        scores.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+        scores.sort_by(|a, b| {
+            b.score
+                .partial_cmp(&a.score)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
         scores
     }
 
@@ -169,7 +169,8 @@ impl GroupSummaryCache {
         let top_k: Vec<&GroupScore> = scores.iter().take(k_g).collect();
 
         // Group by chunk to build contiguous ranges.
-        let mut by_chunk: std::collections::BTreeMap<usize, Vec<usize>> = std::collections::BTreeMap::new();
+        let mut by_chunk: std::collections::BTreeMap<usize, Vec<usize>> =
+            std::collections::BTreeMap::new();
         for s in top_k {
             by_chunk.entry(s.chunk_idx).or_default().push(s.group_idx);
         }

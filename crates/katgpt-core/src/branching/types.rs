@@ -338,7 +338,10 @@ impl<E> CognitiveBranch<E> {
     /// Push a sorted token onto the signature (maintains sort + dedup).
     /// Call this after writing an episodic entry to enable Jaccard fallback.
     pub fn push_token(&mut self, token: u64) {
-        let pos = self.token_signature.binary_search(&token).unwrap_or_else(|p| p);
+        let pos = self
+            .token_signature
+            .binary_search(&token)
+            .unwrap_or_else(|p| p);
         if pos == self.token_signature.len() || self.token_signature[pos] != token {
             self.token_signature.insert(pos, token);
         }

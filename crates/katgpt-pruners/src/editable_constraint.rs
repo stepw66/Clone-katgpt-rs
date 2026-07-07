@@ -255,8 +255,16 @@ mod tests {
     fn test_parse_rules_valid_postcard() {
         // `parse_rules` expects postcard (binary) bytes, not JSON.
         let input = vec![
-            RuleEdit { attribute: "bracket_depth".into(), threshold: 0.5, action: "reject".into() },
-            RuleEdit { attribute: "token_entropy".into(), threshold: 0.8, action: "accept".into() },
+            RuleEdit {
+                attribute: "bracket_depth".into(),
+                threshold: 0.5,
+                action: "reject".into(),
+            },
+            RuleEdit {
+                attribute: "token_entropy".into(),
+                threshold: 0.8,
+                action: "accept".into(),
+            },
         ];
         let bytes = postcard::to_allocvec(&input).unwrap();
         let rules = parse_rules(&bytes).unwrap();
@@ -279,9 +287,11 @@ mod tests {
 
     #[test]
     fn test_parse_rules_invalid_action() {
-        let input = vec![
-            RuleEdit { attribute: "depth".into(), threshold: 0.5, action: "explode".into() },
-        ];
+        let input = vec![RuleEdit {
+            attribute: "depth".into(),
+            threshold: 0.5,
+            action: "explode".into(),
+        }];
         let bytes = postcard::to_allocvec(&input).unwrap();
         let result = parse_rules(&bytes);
         assert!(result.is_err());
@@ -297,9 +307,11 @@ mod tests {
 
     #[test]
     fn test_parse_rules_maybe_action() {
-        let input = vec![
-            RuleEdit { attribute: "x".into(), threshold: 0.3, action: "maybe".into() },
-        ];
+        let input = vec![RuleEdit {
+            attribute: "x".into(),
+            threshold: 0.3,
+            action: "maybe".into(),
+        }];
         let bytes = postcard::to_allocvec(&input).unwrap();
         let rules = parse_rules(&bytes).unwrap();
         assert_eq!(rules[0].action, "maybe");

@@ -29,8 +29,8 @@
 #![cfg(feature = "sheaf_admm")]
 
 use katgpt_dec::{
-    AdmmScratch, CellComplex, CochainField, LocalObjective, SheafMaps,
-    graph_laplacian, hodge_decompose, sheaf_admm_step,
+    AdmmScratch, CellComplex, CochainField, LocalObjective, SheafMaps, graph_laplacian,
+    hodge_decompose, sheaf_admm_step,
 };
 
 // ---------------------------------------------------------------------------
@@ -173,9 +173,7 @@ fn g1_dec_identity_consensus_reached() {
     eprintln!(
         "G1: 32×32 grid, d_v={d_v}, d_e={d_e}, K={k_iters}, T={t_steps}, rho={rho}, eta={eta}"
     );
-    eprintln!(
-        "G1: ‖F x‖_∞ initial={d_initial:.6}, final={d_final:.3e} (target < 1e-5)"
-    );
+    eprintln!("G1: ‖F x‖_∞ initial={d_initial:.6}, final={d_final:.3e} (target < 1e-5)");
 
     assert!(
         d_final < 1e-5,
@@ -266,9 +264,9 @@ fn g2_dual_conservation_bit_exact() {
         &mut consensus_z,
         &mut dual_u,
         &objective,
-        1.0,  // rho
-        0.2,  // eta
-        5,    // diffusion_steps
+        1.0, // rho
+        0.2, // eta
+        5,   // diffusion_steps
         &mut scratch,
     );
 
@@ -408,9 +406,7 @@ fn g3_heterogeneous_restriction_compresses() {
     eprintln!(
         "G3: 4-vertex path, d_v={d_v}, d_e={d_e}, selector dims={dim_indices:?}, 100 random unit-norm x"
     );
-    eprintln!(
-        "G3: max observed ‖F x‖/‖x‖ = {max_ratio:.6} (target ≤ 1.0)"
-    );
+    eprintln!("G3: max observed ‖F x‖/‖x‖ = {max_ratio:.6} (target ≤ 1.0)");
     eprintln!("G3: PASS ✅");
 }
 
@@ -478,9 +474,9 @@ fn g6_determinism_bit_exact_across_runs() {
             &mut z,
             &mut u,
             &objective,
-            1.0,  // rho
-            0.2,  // eta
-            5,    // diffusion_steps
+            1.0, // rho
+            0.2, // eta
+            5,   // diffusion_steps
             &mut scratch,
         );
 
@@ -493,24 +489,14 @@ fn g6_determinism_bit_exact_across_runs() {
                     x.data, rx.data,
                     "G6 FAIL: primal differs in run {run} (bit-exactness violated)"
                 );
-                assert_eq!(
-                    z.data, rz.data,
-                    "G6 FAIL: consensus differs in run {run}"
-                );
-                assert_eq!(
-                    u.data, ru.data,
-                    "G6 FAIL: dual differs in run {run}"
-                );
+                assert_eq!(z.data, rz.data, "G6 FAIL: consensus differs in run {run}");
+                assert_eq!(u.data, ru.data, "G6 FAIL: dual differs in run {run}");
             }
         }
     }
 
-    eprintln!(
-        "G6: 8×8 grid, d_v={d_v}, d_e={d_e}, {n_runs} runs from same initial state"
-    );
-    eprintln!(
-        "G6: all {n_runs} outputs bit-identical (assert_eq on f32 slices)"
-    );
+    eprintln!("G6: 8×8 grid, d_v={d_v}, d_e={d_e}, {n_runs} runs from same initial state");
+    eprintln!("G6: all {n_runs} outputs bit-identical (assert_eq on f32 slices)");
     eprintln!(
         "G6: release-build determinism verified by running this test under `cargo test --release`"
     );

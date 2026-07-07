@@ -490,8 +490,7 @@ impl<P: ScreeningPruner> AbsorbCompress for AbsorbCompressLayer<P> {
         // HashSet lookup (commit 458a589c) was a net loss for small arm counts.
         let mut candidates: Vec<(usize, f32)> = (0..self.arm_visits.len())
             .filter(|&arm| {
-                self.arm_visits[arm] >= self.config.min_visits
-                    && !self.compressed.contains(&arm)
+                self.arm_visits[arm] >= self.config.min_visits && !self.compressed.contains(&arm)
             })
             .filter_map(|arm| self.compress_candidate_score(arm))
             .collect();

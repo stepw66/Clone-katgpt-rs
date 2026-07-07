@@ -108,11 +108,7 @@ fn make_candidates(n: usize, seed: u64) -> Vec<Vec<f32>> {
 fn make_bank(n: usize, seed: u64) -> Vec<Vec<f32>> {
     let mut rng = Lcg::new(seed);
     (0..n)
-        .map(|_| {
-            (0..EMBED_DIM)
-                .map(|_| rng.next_f32() * 2.0 - 1.0)
-                .collect()
-        })
+        .map(|_| (0..EMBED_DIM).map(|_| rng.next_f32() * 2.0 - 1.0).collect())
         .collect()
 }
 
@@ -248,7 +244,8 @@ fn main() {
 
     // ── rank() latency ────────────────────────────────────────────────
     println!("--- rank() latency (median of {OUTER} samples, warmup {WARMUP}) ---");
-    let mut rank_results: Vec<(usize, Duration, bool, Duration)> = Vec::with_capacity(RANK_SIZES.len());
+    let mut rank_results: Vec<(usize, Duration, bool, Duration)> =
+        Vec::with_capacity(RANK_SIZES.len());
     for &n in RANK_SIZES {
         let candidates = make_candidates(n, 0xBEEF);
         let bank = make_bank(100, 0xCAFE);
@@ -257,7 +254,9 @@ fn main() {
         // Trait-path sampler (owns the scorer).
         let avail_for_trait = MedianTopMAvailability::new(bank.clone(), M);
         let sampler = AlienSampler::new(
-            DotCoherence { direction: direction.clone() },
+            DotCoherence {
+                direction: direction.clone(),
+            },
             avail_for_trait,
             AlienConfig::paper_default(),
         );
@@ -268,13 +267,24 @@ fn main() {
         // borrowing `sampler` for `rank_precomputed`, so we construct fresh
         // instances. The perf cost being measured is the same.)
         let avail_batch = MedianTopMAvailability::new(bank.clone(), M);
-        let coh_batch = DotCoherence { direction: direction.clone() };
+        let coh_batch = DotCoherence {
+            direction: direction.clone(),
+        };
         let sampler_batch = AlienSampler::new(
-            DotCoherence { direction: direction.clone() },
+            DotCoherence {
+                direction: direction.clone(),
+            },
             MedianTopMAvailability::new(bank.clone(), M),
             AlienConfig::paper_default(),
         );
-        let dt_batch = bench_rank_batch(&sampler_batch, &avail_batch, &coh_batch, &candidates, n, bank_len);
+        let dt_batch = bench_rank_batch(
+            &sampler_batch,
+            &avail_batch,
+            &coh_batch,
+            &candidates,
+            n,
+            bank_len,
+        );
 
         let target_us = if n <= 1_000 { 500.0 } else { 5_000.0 };
         let pass = dt_batch.as_secs_f64() * 1e6 <= target_us;
@@ -309,8 +319,8 @@ fn main() {
     println!();
 
     // ── Verdict ─────────────────────────────────────────────────────────
-    let all_pass = rank_results.iter().all(|&(_, _, p, _)| p)
-        && mtm_results.iter().all(|&(_, _, p)| p);
+    let all_pass =
+        rank_results.iter().all(|&(_, _, p, _)| p) && mtm_results.iter().all(|&(_, _, p)| p);
     println!("=== Phase 2 Microbench Verdict ===");
     for (n, dt_trait, p, dt_batch) in &rank_results {
         println!(
@@ -321,11 +331,17 @@ fn main() {
         );
     }
     for (bank_n, dt, p) in &mtm_results {
-        println!("  median_top_m bank={bank_n:>6}: {:.2} µs  [{}]", dt.as_secs_f64() * 1e6, pass_str(*p));
+        println!(
+            "  median_top_m bank={bank_n:>6}: {:.2} µs  [{}]",
+            dt.as_secs_f64() * 1e6,
+            pass_str(*p)
+        );
     }
     println!();
     if all_pass {
-        println!("  → All Phase 2 microbench targets met (batch path). Proceed to Phase 3 GOAT gate.");
+        println!(
+            "  → All Phase 2 microbench targets met (batch path). Proceed to Phase 3 GOAT gate."
+        );
     } else {
         println!("  → Some Phase 2 targets missed. Profile hot loops before GOAT gate.");
     }

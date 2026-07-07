@@ -194,12 +194,10 @@ mod tests {
         let mem_a = vec![1.0_f32, 1.0];
         let mem_b = vec![1.0_f32, 1.0];
 
-        let mut probe_a = FiniteDifferenceAttributionProbe::new(LinearConsumer {
-            weights: weights_a,
-        });
-        let mut probe_b = FiniteDifferenceAttributionProbe::new(LinearConsumer {
-            weights: weights_b,
-        });
+        let mut probe_a =
+            FiniteDifferenceAttributionProbe::new(LinearConsumer { weights: weights_a });
+        let mut probe_b =
+            FiniteDifferenceAttributionProbe::new(LinearConsumer { weights: weights_b });
 
         let norm_a = probe_a.attribution_norm(&mem_a, 1e-4);
         let norm_b = probe_b.attribution_norm(&mem_b, 1e-4);

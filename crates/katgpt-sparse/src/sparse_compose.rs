@@ -359,20 +359,10 @@ mod tests {
 
     #[test]
     fn intersect_disjoint_masks_returns_empty() {
-        let a = SparseTaskVector::from_parts(
-            (10, 1),
-            vec![0, 2, 4],
-            vec![1.0, 2.0, 3.0],
-            1.0,
-        )
-        .unwrap();
-        let b = SparseTaskVector::from_parts(
-            (10, 1),
-            vec![1, 3, 5],
-            vec![4.0, 5.0, 6.0],
-            1.0,
-        )
-        .unwrap();
+        let a =
+            SparseTaskVector::from_parts((10, 1), vec![0, 2, 4], vec![1.0, 2.0, 3.0], 1.0).unwrap();
+        let b =
+            SparseTaskVector::from_parts((10, 1), vec![1, 3, 5], vec![4.0, 5.0, 6.0], 1.0).unwrap();
         let c = compose_intersect(&a, &b);
         assert_eq!(c.len(), 0);
         assert!(c.is_empty());
@@ -380,20 +370,12 @@ mod tests {
 
     #[test]
     fn intersect_identical_masks_returns_full() {
-        let a = SparseTaskVector::from_parts(
-            (10, 1),
-            vec![1, 3, 5, 7],
-            vec![1.0, 2.0, 3.0, 4.0],
-            1.0,
-        )
-        .unwrap();
-        let b = SparseTaskVector::from_parts(
-            (10, 1),
-            vec![1, 3, 5, 7],
-            vec![0.5, 0.5, 0.5, 0.5],
-            1.0,
-        )
-        .unwrap();
+        let a =
+            SparseTaskVector::from_parts((10, 1), vec![1, 3, 5, 7], vec![1.0, 2.0, 3.0, 4.0], 1.0)
+                .unwrap();
+        let b =
+            SparseTaskVector::from_parts((10, 1), vec![1, 3, 5, 7], vec![0.5, 0.5, 0.5, 0.5], 1.0)
+                .unwrap();
         let c = compose_intersect(&a, &b);
         assert_eq!(c.len(), 4);
         assert_eq!(c.mask, vec![1, 3, 5, 7]);
@@ -408,7 +390,11 @@ mod tests {
         let a = SparseTaskVector::from_parts((5, 1), vec![0], vec![1.0], 0.8).unwrap();
         let b = SparseTaskVector::from_parts((5, 1), vec![0], vec![1.0], 0.4).unwrap();
         let c = compose_intersect(&a, &b);
-        assert!((c.eta - 0.6).abs() < 1e-6, "expected eta=0.6, got {}", c.eta);
+        assert!(
+            (c.eta - 0.6).abs() < 1e-6,
+            "expected eta=0.6, got {}",
+            c.eta
+        );
     }
 
     #[test]
@@ -445,20 +431,10 @@ mod tests {
 
     #[test]
     fn union_disjoint_masks_concatenates() {
-        let a = SparseTaskVector::from_parts(
-            (10, 1),
-            vec![0, 2, 4],
-            vec![1.0, 2.0, 3.0],
-            1.0,
-        )
-        .unwrap();
-        let b = SparseTaskVector::from_parts(
-            (10, 1),
-            vec![1, 3, 5],
-            vec![4.0, 5.0, 6.0],
-            1.0,
-        )
-        .unwrap();
+        let a =
+            SparseTaskVector::from_parts((10, 1), vec![0, 2, 4], vec![1.0, 2.0, 3.0], 1.0).unwrap();
+        let b =
+            SparseTaskVector::from_parts((10, 1), vec![1, 3, 5], vec![4.0, 5.0, 6.0], 1.0).unwrap();
         let c = compose_union(&a, &b);
         assert_eq!(c.len(), 6);
         assert_eq!(c.mask, vec![0, 1, 2, 3, 4, 5]);
@@ -466,20 +442,10 @@ mod tests {
 
     #[test]
     fn union_identical_masks_sums_deltas() {
-        let a = SparseTaskVector::from_parts(
-            (10, 1),
-            vec![1, 3, 5],
-            vec![1.0, 2.0, 3.0],
-            1.0,
-        )
-        .unwrap();
-        let b = SparseTaskVector::from_parts(
-            (10, 1),
-            vec![1, 3, 5],
-            vec![0.5, 0.5, 0.5],
-            1.0,
-        )
-        .unwrap();
+        let a =
+            SparseTaskVector::from_parts((10, 1), vec![1, 3, 5], vec![1.0, 2.0, 3.0], 1.0).unwrap();
+        let b =
+            SparseTaskVector::from_parts((10, 1), vec![1, 3, 5], vec![0.5, 0.5, 0.5], 1.0).unwrap();
         let c = compose_union(&a, &b);
         assert_eq!(c.len(), 3); // no duplication at shared coords
         assert_eq!(c.mask, vec![1, 3, 5]);
@@ -493,25 +459,19 @@ mod tests {
         let a = SparseTaskVector::from_parts((5, 1), vec![0], vec![1.0], 0.3).unwrap();
         let b = SparseTaskVector::from_parts((5, 1), vec![0], vec![1.0], 0.7).unwrap();
         let c = compose_union(&a, &b);
-        assert!((c.eta - 1.0).abs() < 1e-6, "expected eta=1.0, got {}", c.eta);
+        assert!(
+            (c.eta - 1.0).abs() < 1e-6,
+            "expected eta=1.0, got {}",
+            c.eta
+        );
     }
 
     #[test]
     fn union_partial_overlap() {
-        let a = SparseTaskVector::from_parts(
-            (20, 1),
-            vec![2, 5, 8],
-            vec![1.0, 2.0, 3.0],
-            1.0,
-        )
-        .unwrap();
-        let b = SparseTaskVector::from_parts(
-            (20, 1),
-            vec![5, 9, 12],
-            vec![10.0, 20.0, 30.0],
-            1.0,
-        )
-        .unwrap();
+        let a =
+            SparseTaskVector::from_parts((20, 1), vec![2, 5, 8], vec![1.0, 2.0, 3.0], 1.0).unwrap();
+        let b = SparseTaskVector::from_parts((20, 1), vec![5, 9, 12], vec![10.0, 20.0, 30.0], 1.0)
+            .unwrap();
         let c = compose_union(&a, &b);
         // 5 is shared; 2, 8, 9, 12 are unique.
         assert_eq!(c.mask, vec![2, 5, 8, 9, 12]);
@@ -556,20 +516,10 @@ mod tests {
     #[test]
     fn intersect_apply_matches_manual_sum() {
         let shape = (6, 1);
-        let a = SparseTaskVector::from_parts(
-            shape,
-            vec![0, 2, 4],
-            vec![1.0, 2.0, 3.0],
-            1.0,
-        )
-        .unwrap();
-        let b = SparseTaskVector::from_parts(
-            shape,
-            vec![2, 4, 5],
-            vec![10.0, 20.0, 30.0],
-            1.0,
-        )
-        .unwrap();
+        let a =
+            SparseTaskVector::from_parts(shape, vec![0, 2, 4], vec![1.0, 2.0, 3.0], 1.0).unwrap();
+        let b = SparseTaskVector::from_parts(shape, vec![2, 4, 5], vec![10.0, 20.0, 30.0], 1.0)
+            .unwrap();
 
         let composed = compose_intersect(&a, &b);
         assert_eq!(composed.mask, vec![2, 4]);
@@ -586,20 +536,8 @@ mod tests {
     #[test]
     fn union_apply_matches_manual_sum() {
         let shape = (6, 1);
-        let a = SparseTaskVector::from_parts(
-            shape,
-            vec![0, 2],
-            vec![1.0, 2.0],
-            1.0,
-        )
-        .unwrap();
-        let b = SparseTaskVector::from_parts(
-            shape,
-            vec![2, 4],
-            vec![10.0, 20.0],
-            1.0,
-        )
-        .unwrap();
+        let a = SparseTaskVector::from_parts(shape, vec![0, 2], vec![1.0, 2.0], 1.0).unwrap();
+        let b = SparseTaskVector::from_parts(shape, vec![2, 4], vec![10.0, 20.0], 1.0).unwrap();
 
         let composed = compose_union(&a, &b);
         // union eta = 2.0

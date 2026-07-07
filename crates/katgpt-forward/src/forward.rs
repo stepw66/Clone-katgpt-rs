@@ -34,7 +34,7 @@
 //! same reason. This is a wider API surface than the in-root era, but the
 //! functions are well-documented as internal dispatchers / SIMD helpers.
 
-use katgpt_core::types as types;
+use katgpt_core::types;
 use katgpt_core::types::{Config, matmul, matmul_parallel};
 // `rmsnorm` is only called on the `#[cfg(not(feature = "kog_cpu_fusion"))]` branch
 // of forward_base / forward_coda. Import it conditionally to avoid the unused
@@ -98,8 +98,9 @@ pub unsafe fn attention_head(
     // replaces N scalar (dot * scale) and N scalar max operations
     let scores_raw = unsafe { std::slice::from_raw_parts_mut(scores_buf.as_mut_ptr(), t_n) };
     katgpt_core::simd::simd_scale_inplace(scores_raw, scale);
-    let max_score =
-        katgpt_core::simd::simd_max_f32(unsafe { std::slice::from_raw_parts(scores_buf.as_ptr(), t_n) });
+    let max_score = katgpt_core::simd::simd_max_f32(unsafe {
+        std::slice::from_raw_parts(scores_buf.as_ptr(), t_n)
+    });
 
     // Pass 2: exp(scores - max) and accumulate sum
     // Shift scores by max using SIMD broadcast add, then SIMD exp
@@ -940,7 +941,12 @@ pub fn forward_coda<'a>(
 
         // LoRA perturbation for output projection: add to ctx.x (CODA output)
         if let Some(lora) = lora {
-            katgpt_core::types::lora_apply(&mut ctx.x[..n], lora, &ctx.attn_out[..n], &mut ctx.lora_buf);
+            katgpt_core::types::lora_apply(
+                &mut ctx.x[..n],
+                lora,
+                &ctx.attn_out[..n],
+                &mut ctx.lora_buf,
+            );
         }
 
         // ── CODA AUXILIARY REDUCTION: compute rstd ─────────────────────

@@ -50,8 +50,18 @@ fn case_tiebreak_picks_shorter() {
     println!("── Case 1: tied within eps → shorter rep wins ──────────────────");
     // Two clusters, identical reliability (0.80). Representative tokens: 100 vs 50.
     let trajectories: Vec<Trajectory<()>> = vec![
-        Trajectory { outcome: (), tokens_or_steps: 100, claims: vec![], log_probs: None },
-        Trajectory { outcome: (), tokens_or_steps: 50, claims: vec![], log_probs: None },
+        Trajectory {
+            outcome: (),
+            tokens_or_steps: 100,
+            claims: vec![],
+            log_probs: None,
+        },
+        Trajectory {
+            outcome: (),
+            tokens_or_steps: 50,
+            claims: vec![],
+            log_probs: None,
+        },
     ];
     let c0 = cluster((), 0.80, 0, &[0]);
     let c1 = cluster((), 0.80, 1, &[1]);
@@ -64,7 +74,10 @@ fn case_tiebreak_picks_shorter() {
     println!("  Cluster B: Σ r_k = 0.800, rep idx 1, tokens =  50");
     println!("  eps       = {eps}");
     println!("  winner    : cluster {idx}");
-    assert_eq!(idx, 1, "case 1: brevity should pick cluster B (shorter, 50 tokens)");
+    assert_eq!(
+        idx, 1,
+        "case 1: brevity should pick cluster B (shorter, 50 tokens)"
+    );
     println!("  → brevity picks cluster B (50 tokens) ✅");
     println!();
 }
@@ -78,8 +91,18 @@ fn case_reliability_overrides_length() {
     // Cluster A has higher reliability (0.90 vs 0.50) but is longer (200 vs 50).
     // Since 0.90 - 0.50 = 0.40 >> eps, A wins outright — brevity doesn't matter.
     let trajectories: Vec<Trajectory<()>> = vec![
-        Trajectory { outcome: (), tokens_or_steps: 200, claims: vec![], log_probs: None },
-        Trajectory { outcome: (), tokens_or_steps: 50, claims: vec![], log_probs: None },
+        Trajectory {
+            outcome: (),
+            tokens_or_steps: 200,
+            claims: vec![],
+            log_probs: None,
+        },
+        Trajectory {
+            outcome: (),
+            tokens_or_steps: 50,
+            claims: vec![],
+            log_probs: None,
+        },
     ];
     let c0 = cluster((), 0.90, 0, &[0]);
     let c1 = cluster((), 0.50, 1, &[1]);
@@ -93,7 +116,10 @@ fn case_reliability_overrides_length() {
     println!("  eps       = {eps}");
     println!("  Δ         = {:.3} (>> eps)", 0.90 - 0.50);
     println!("  winner    : cluster {idx}");
-    assert_eq!(idx, 0, "case 2: reliability dominates — cluster A wins despite being longer");
+    assert_eq!(
+        idx, 0,
+        "case 2: reliability dominates — cluster A wins despite being longer"
+    );
     println!("  → reliability wins, length is irrelevant ✅");
     println!();
 }
@@ -107,8 +133,18 @@ fn case_token_tie_first_wins() {
     // Both clusters have the same reliability AND the same tokens (50 each).
     // Tiebreak rule: first-encountered wins. That's cluster A (index 0).
     let trajectories: Vec<Trajectory<()>> = vec![
-        Trajectory { outcome: (), tokens_or_steps: 50, claims: vec![], log_probs: None },
-        Trajectory { outcome: (), tokens_or_steps: 50, claims: vec![], log_probs: None },
+        Trajectory {
+            outcome: (),
+            tokens_or_steps: 50,
+            claims: vec![],
+            log_probs: None,
+        },
+        Trajectory {
+            outcome: (),
+            tokens_or_steps: 50,
+            claims: vec![],
+            log_probs: None,
+        },
     ];
     let c0 = cluster((), 0.70, 0, &[0]);
     let c1 = cluster((), 0.70, 1, &[1]);

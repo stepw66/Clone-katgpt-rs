@@ -96,7 +96,13 @@ pub trait ActivationExtractor {
     /// avoid allocation on the hot path; extractors that don't need it may
     /// ignore the parameter. The returned slice is the activation — typically
     /// a borrow into the extractor's internal buffer.
-    fn extract_activation<'a>(&'a mut self, prefix: &str, candidate: &str, layer: usize, scratch: &'a mut [f32]) -> &'a [f32];
+    fn extract_activation<'a>(
+        &'a mut self,
+        prefix: &str,
+        candidate: &str,
+        layer: usize,
+        scratch: &'a mut [f32],
+    ) -> &'a [f32];
 }
 
 /// FPCG candidate-sampler + score + select loop.
@@ -383,8 +389,8 @@ mod tests {
     /// Each candidate is paired with a known-good/bad score via the
     /// `StubExtractor` below.
     struct StubGenerator {
-            // candidates to return on each generate_candidates call
-            candidates: Vec<String>,
+        // candidates to return on each generate_candidates call
+        candidates: Vec<String>,
     }
 
     impl SentenceCandidateGenerator for StubGenerator {
@@ -426,7 +432,12 @@ mod tests {
     /// Build a stub probe where direction[0] is the only nonzero element,
     /// so the forecast probability is monotone in activation[0].
     fn stub_probe(bias: f32) -> Arc<FutureBehaviorProbe> {
-        Arc::new(FutureBehaviorProbe::new(vec![1.0, 0.0, 0.0, 0.0], bias, 0, "stub"))
+        Arc::new(FutureBehaviorProbe::new(
+            vec![1.0, 0.0, 0.0, 0.0],
+            bias,
+            0,
+            "stub",
+        ))
     }
 
     fn make_selector(
@@ -458,9 +469,9 @@ mod tests {
     #[test]
     fn positive_direction_picks_highest_probability() {
         let candidates = vec![
-            "low.".to_string(),   // activation[0] = -5 → low prob
-            "high.".to_string(),  // activation[0] = +5 → high prob
-            "mid.".to_string(),   // activation[0] = 0  → σ(0) = 0.5
+            "low.".to_string(),  // activation[0] = -5 → low prob
+            "high.".to_string(), // activation[0] = +5 → high prob
+            "mid.".to_string(),  // activation[0] = 0  → σ(0) = 0.5
         ];
         let activations = vec![
             ("low.".to_string(), vec![-5.0, 0.0, 0.0, 0.0]),
@@ -470,17 +481,16 @@ mod tests {
         let mut sel = make_selector(candidates, activations, SteeringDirection::Positive, 3);
         let mut rng = Rng::with_seed(0);
         let chosen = sel.step("", &mut rng);
-        assert_eq!(chosen, "high.", "Positive direction must pick highest-prob candidate");
+        assert_eq!(
+            chosen, "high.",
+            "Positive direction must pick highest-prob candidate"
+        );
     }
 
     /// T3.6: Negative direction picks the lowest-probability candidate.
     #[test]
     fn negative_direction_picks_lowest_probability() {
-        let candidates = vec![
-            "low.".to_string(),
-            "high.".to_string(),
-            "mid.".to_string(),
-        ];
+        let candidates = vec!["low.".to_string(), "high.".to_string(), "mid.".to_string()];
         let activations = vec![
             ("low.".to_string(), vec![-5.0, 0.0, 0.0, 0.0]),
             ("high.".to_string(), vec![5.0, 0.0, 0.0, 0.0]),
@@ -489,7 +499,10 @@ mod tests {
         let mut sel = make_selector(candidates, activations, SteeringDirection::Negative, 3);
         let mut rng = Rng::with_seed(0);
         let chosen = sel.step("", &mut rng);
-        assert_eq!(chosen, "low.", "Negative direction must pick lowest-prob candidate");
+        assert_eq!(
+            chosen, "low.",
+            "Negative direction must pick lowest-prob candidate"
+        );
     }
 
     /// T3.6: selector terminates at EOS. The generator returning only the
@@ -516,7 +529,12 @@ mod tests {
             call_count: usize,
         }
         impl SentenceCandidateGenerator for CyclingGenerator {
-            fn generate_candidates(&mut self, _prefix: &str, n: usize, _rng: &mut Rng) -> Vec<String> {
+            fn generate_candidates(
+                &mut self,
+                _prefix: &str,
+                n: usize,
+                _rng: &mut Rng,
+            ) -> Vec<String> {
                 let mut out = Vec::with_capacity(n);
                 for _ in 0..n {
                     let idx = self.call_count % self.pool.len();
@@ -526,17 +544,20 @@ mod tests {
                 out
             }
         }
-        let pool: Vec<String> = (0..5)
-            .map(|i| format!("candidate_{i}."))
-            .collect();
+        let pool: Vec<String> = (0..5).map(|i| format!("candidate_{i}.")).collect();
         let activations: Vec<(String, Vec<f32>)> = pool
             .iter()
             .enumerate()
             .map(|(i, s)| (s.clone(), vec![i as f32 - 2.0, 0.0, 0.0, 0.0]))
             .collect();
         let probe = stub_probe(0.0);
-        let generator = CyclingGenerator { pool, call_count: 0 };
-        let ext = StubExtractor { activations: activations.into_iter().collect() };
+        let generator = CyclingGenerator {
+            pool,
+            call_count: 0,
+        };
+        let ext = StubExtractor {
+            activations: activations.into_iter().collect(),
+        };
         let mut sel = FpcgSelector::new(generator, ext, probe, SteeringDirection::Positive, 10, 4);
 
         let capacity_before = sel.candidates_buf_capacity();
@@ -572,8 +593,8 @@ mod tests {
         // Generator always offers the same 2 candidates per step.
         let candidates = vec!["alpha.".to_string(), "beta.".to_string()];
         let activations = vec![
-            ("alpha.".to_string(), vec![1.0, 0.0, 0.0, 0.0]),  // higher prob
-            ("beta.".to_string(), vec![-1.0, 0.0, 0.0, 0.0]),  // lower prob
+            ("alpha.".to_string(), vec![1.0, 0.0, 0.0, 0.0]), // higher prob
+            ("beta.".to_string(), vec![-1.0, 0.0, 0.0, 0.0]), // lower prob
         ];
         let mut sel = make_selector(candidates, activations, SteeringDirection::Positive, 2);
         let mut rng = Rng::with_seed(0);
@@ -594,14 +615,21 @@ mod tests {
         let probe = stub_probe(0.0);
         struct ZeroExt;
         impl ActivationExtractor for ZeroExt {
-            fn extract_activation<'a>(&'a mut self, _: &str, _: &str, _: usize, scratch: &'a mut [f32]) -> &'a [f32] {
+            fn extract_activation<'a>(
+                &'a mut self,
+                _: &str,
+                _: &str,
+                _: usize,
+                scratch: &'a mut [f32],
+            ) -> &'a [f32] {
                 for v in scratch.iter_mut() {
                     *v = 0.0;
                 }
                 scratch
             }
         }
-        let mut sel = FpcgSelector::new(EmptyGen, ZeroExt, probe, SteeringDirection::Positive, 5, 4);
+        let mut sel =
+            FpcgSelector::new(EmptyGen, ZeroExt, probe, SteeringDirection::Positive, 5, 4);
         let mut rng = Rng::with_seed(0);
         let out = sel.run("prompt", 100, &mut rng);
         assert_eq!(out, "", "empty pool must terminate immediately");
@@ -656,6 +684,9 @@ mod tests {
         let new_probe = FutureBehaviorProbe::new(vec![-1.0, 0.0, 0.0, 0.0], 0.0, 0, "v2");
         sel.swap_probe(new_probe);
         let after = sel.step("", &mut rng);
-        assert_eq!(after, "a.", "tie-break still goes to first index after swap");
+        assert_eq!(
+            after, "a.",
+            "tie-break still goes to first index after swap"
+        );
     }
 }

@@ -310,8 +310,14 @@ fn main() {
         let causal_cal = calibrate_from_causal_scores(&causal_scores, &causal_config);
 
         println!("  Causal-necessity partition:");
-        println!("    Retrieval (causally load-bearing): {:?}", causal_cal.retrieval_set);
-        println!("    Local (bystanders + irrelevant):   {:?}", causal_cal.local_set);
+        println!(
+            "    Retrieval (causally load-bearing): {:?}",
+            causal_cal.retrieval_set
+        );
+        println!(
+            "    Local (bystanders + irrelevant):   {:?}",
+            causal_cal.local_set
+        );
         println!("    Mode: {:?}", causal_config.calibration_mode);
         println!("\n  Contrast with attention-mass (Step 2-3): attention-mass");
         println!("  ranks by WHERE a head attends; causal ranks by WHETHER");
@@ -320,6 +326,8 @@ fn main() {
     }
     #[cfg(not(feature = "causal_head_importance"))]
     {
-        println!("\n(Step 6: causal-necessity mode hidden — enable `causal_head_importance` feature)");
+        println!(
+            "\n(Step 6: causal-necessity mode hidden — enable `causal_head_importance` feature)"
+        );
     }
 }

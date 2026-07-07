@@ -234,10 +234,7 @@ mod tests {
         let mut scratch = SleepTimeScratch::new();
         let a1 = anticipator.anticipate(&c, &dirs, &mut scratch);
         let a2 = anticipator.anticipate(&c, &dirs, &mut scratch);
-        assert_eq!(
-            a1.blake3, a2.blake3,
-            "same inputs → same BLAKE3 commitment"
-        );
+        assert_eq!(a1.blake3, a2.blake3, "same inputs → same BLAKE3 commitment");
         assert!(a1.verify_commitment(), "commitment verifies");
     }
 

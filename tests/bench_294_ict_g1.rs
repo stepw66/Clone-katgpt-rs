@@ -83,10 +83,12 @@ fn g1_distributional_discrimination() {
 
     println!("\n=== G1 — ICT distributional discrimination (paper Fig 1a) ===");
     println!("p_A = [0.5, 0.5, 0, 0, 0, 0]                H_1 = {h1_a:.6}, β = {beta_a:.6}");
+    println!("p_B = [{t:.4}, {q:.4}, {q:.4}, 0, 0, 0]   H_1 = {h1_b:.6}, β = {beta_b:.6}");
     println!(
-        "p_B = [{t:.4}, {q:.4}, {q:.4}, 0, 0, 0]   H_1 = {h1_b:.6}, β = {beta_b:.6}"
+        "ΔH_1 = {:.2e}   Δβ = {:.4}",
+        (h1_a - h1_b).abs(),
+        (beta_a - beta_b).abs()
     );
-    println!("ΔH_1 = {:.2e}   Δβ = {:.4}", (h1_a - h1_b).abs(), (beta_a - beta_b).abs());
 
     // (1) H_1 cannot distinguish — both have ln 2 to within tolerance.
     assert!(

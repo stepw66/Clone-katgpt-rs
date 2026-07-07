@@ -384,11 +384,7 @@ impl Sudoku9x9 {
         #[allow(clippy::needless_range_loop)]
         for r in 0..9 {
             for c in 0..9 {
-                cands[r][c] = if self.grid[r][c] == 0 {
-                    0b111111111
-                } else {
-                    0
-                };
+                cands[r][c] = if self.grid[r][c] == 0 { 0b111111111 } else { 0 };
             }
         }
         // Seed candidates from the initial clues.

@@ -458,12 +458,8 @@ where
 /// Same as [`jacobian_svd_at`]: panics if `x.len() != n` (where `n` was
 /// passed to [`JacobianSvdScratch::with_capacity`]) or if `f` writes a slice
 /// of the wrong length.
-pub fn jacobian_svd_at_into<F>(
-    f: F,
-    x: &[f32],
-    eps: f32,
-    scratch: &mut JacobianSvdScratch,
-) where
+pub fn jacobian_svd_at_into<F>(f: F, x: &[f32], eps: f32, scratch: &mut JacobianSvdScratch)
+where
     F: Fn(&[f32], &mut [f32]),
 {
     let n = x.len();
@@ -1187,7 +1183,8 @@ mod tests {
         assert!(
             result.rank >= 3,
             "sigmoid Jacobian expected rank ≥ 3, got {} (sigmas = {:?})",
-            result.rank, result.singular_values
+            result.rank,
+            result.singular_values
         );
 
         // Build P_true = Σ_k v_k v_k^T (8×8) and check every recovered right
@@ -1542,8 +1539,8 @@ mod tests {
         // Right singular vectors placed at columns 3, 7, 10 (NOT 0, 1, 2) to
         // force the extraction to look beyond the first min(m,n) columns.
         let mut v = [[0.0_f32; 12]; 3];
-        v[0][3] = 1.0;  // v1 at column 3
-        v[1][7] = 1.0;  // v2 at column 7
+        v[0][3] = 1.0; // v1 at column 3
+        v[1][7] = 1.0; // v2 at column 7
         v[2][10] = 1.0; // v3 at column 10
         let sigma = [10.0_f32, 5.0, 2.0];
         let mut w = vec![0.0_f32; m * n];
@@ -1570,7 +1567,11 @@ mod tests {
         thin_svd_into(&m_flat, m_rows, n_cols, &mut result, &mut work);
 
         // min(3, 12) = 3 singular triples.
-        assert_eq!(result.len(), 3, "3×12 matrix should give 3 singular triples");
+        assert_eq!(
+            result.len(),
+            3,
+            "3×12 matrix should give 3 singular triples"
+        );
         // The top-3 singular values must be {10, 5, 2} — NOT garbage from the
         // null-space columns 0, 1, 2.
         let sv = [
@@ -1583,14 +1584,18 @@ mod tests {
             "σ1 should be ≈10.0, got {}",
             sv[0]
         );
-        assert!((sv[1] - 5.0).abs() < 0.1, "σ2 should be ≈5.0, got {}", sv[1]);
-        assert!((sv[2] - 2.0).abs() < 0.1, "σ3 should be ≈2.0, got {}", sv[2]);
-        // Rank-3 (the 3 non-zero singular values).
-        assert_eq!(
-            result.rank, 3,
-            "rank should be 3, got {}",
-            result.rank
+        assert!(
+            (sv[1] - 5.0).abs() < 0.1,
+            "σ2 should be ≈5.0, got {}",
+            sv[1]
         );
+        assert!(
+            (sv[2] - 2.0).abs() < 0.1,
+            "σ3 should be ≈2.0, got {}",
+            sv[2]
+        );
+        // Rank-3 (the 3 non-zero singular values).
+        assert_eq!(result.rank, 3, "rank should be 3, got {}", result.rank);
     }
 
     // ── Issue 043 regression: rank-deficient SVD must not be slower than ────
@@ -1658,7 +1663,11 @@ mod tests {
         thin_svd_into(&w_full, 8, 8, &mut result, &mut work);
         assert_eq!(result.rank, 8, "full-rank matrix should be rank 8");
         thin_svd_into(&w_rank4, 8, 8, &mut result, &mut work);
-        assert_eq!(result.rank, 4, "rank-4 matrix should be rank 4, got {}", result.rank);
+        assert_eq!(
+            result.rank, 4,
+            "rank-4 matrix should be rank 4, got {}",
+            result.rank
+        );
 
         // Warmup both paths.
         thin_svd_into(&w_full, 8, 8, &mut result, &mut work);

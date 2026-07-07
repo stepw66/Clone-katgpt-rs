@@ -75,7 +75,12 @@ impl Default for EntropyGatedScheduler {
 impl EntropyGatedScheduler {
     /// Construct with explicit hyperparameters.
     #[must_use]
-    pub const fn with_config(w_min: f32, switch_start: f32, switch_end: f32, elite_topk: usize) -> Self {
+    pub const fn with_config(
+        w_min: f32,
+        switch_start: f32,
+        switch_end: f32,
+        elite_topk: usize,
+    ) -> Self {
         Self {
             w_min,
             switch_start,
@@ -345,6 +350,9 @@ mod tests {
     #[test]
     fn entropy_empty_zero() {
         let counts: [u32; 0] = [];
-        assert_eq!(EntropyGatedScheduler::branch_selection_entropy(&counts), 0.0);
+        assert_eq!(
+            EntropyGatedScheduler::branch_selection_entropy(&counts),
+            0.0
+        );
     }
 }

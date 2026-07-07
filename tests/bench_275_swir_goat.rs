@@ -69,9 +69,8 @@
 #![cfg(test)]
 
 use katgpt_rs::swir::{
-    entropy_from_logits, in_vocab_convex_hull, mix_thinking_signal, shannon_entropy,
-    soft_embedding, SwiRConfig, SwiRController, SwiRStrategyAdapter, StepAction,
-    ThinkMode,
+    StepAction, SwiRConfig, SwiRController, SwiRStrategyAdapter, ThinkMode, entropy_from_logits,
+    in_vocab_convex_hull, mix_thinking_signal, shannon_entropy, soft_embedding,
 };
 use katgpt_rs::thinking_cot::{ControlTokenIds, StepContext, StepDirective, ThinkingStrategy};
 use std::time::Instant;
@@ -191,7 +190,11 @@ fn g3_step_perf_under_200ns_release() {
     // Warm up (first step initialises reference_entropy — slightly slower).
     let mut entropy = 5.0f32;
     for i in 0..64 {
-        entropy = if i % 16 < 8 { entropy - 0.3 } else { entropy + 0.3 };
+        entropy = if i % 16 < 8 {
+            entropy - 0.3
+        } else {
+            entropy + 0.3
+        };
         entropy = entropy.clamp(0.1, 10.0);
         let _ = ctrl.step(entropy, i);
     }
@@ -200,7 +203,11 @@ fn g3_step_perf_under_200ns_release() {
     const N: u32 = 100_000;
     let t0 = Instant::now();
     for i in 0..N {
-        entropy = if (i % 16) < 8 { entropy - 0.3 } else { entropy + 0.3 };
+        entropy = if (i % 16) < 8 {
+            entropy - 0.3
+        } else {
+            entropy + 0.3
+        };
         entropy = entropy.clamp(0.1, 10.0);
         let action = ctrl.step(entropy, i);
         // Prevent the compiler from optimising step() away.
@@ -423,7 +430,11 @@ fn g7_step_zero_allocation_debug() {
         katgpt_rs::alloc::reset_alloc_stats();
         let mut entropy = 5.0f32;
         for i in 1..1024u32 {
-            entropy = if (i % 16) < 8 { entropy - 0.3 } else { entropy + 0.3 };
+            entropy = if (i % 16) < 8 {
+                entropy - 0.3
+            } else {
+                entropy + 0.3
+            };
             entropy = entropy.clamp(0.1, 10.0);
             let _ = ctrl.step(entropy, i);
             let _ = ctrl.should_mix_signal();
@@ -664,7 +675,13 @@ fn g2p_efficiency_proxy_swir_terminates_earlier_than_fixed_budget() {
     let mut swir_steps = 0u32;
     for i in 0..FIXED_BUDGET {
         // Step 0: HIGH (sets ref=HIGH, Latent). Steps after: alternate LOW/HIGH.
-        let entropy = if i == 0 { HIGH } else if i % 2 == 1 { LOW } else { HIGH };
+        let entropy = if i == 0 {
+            HIGH
+        } else if i % 2 == 1 {
+            LOW
+        } else {
+            HIGH
+        };
         let action = ctrl.step(entropy, i);
         swir_steps += 1;
         if action == StepAction::Terminate {
@@ -808,7 +825,13 @@ fn drive_alternating(ctrl: &mut SwiRController, max_steps: u32) -> AblationRun {
     let mut switches = 0u32;
     let mut terminated_at: Option<u32> = None;
     for i in 0..max_steps {
-        let entropy = if i == 0 { HIGH } else if i % 2 == 1 { LOW } else { HIGH };
+        let entropy = if i == 0 {
+            HIGH
+        } else if i % 2 == 1 {
+            LOW
+        } else {
+            HIGH
+        };
         let prev_mode = ctrl.mode();
         let action = ctrl.step(entropy, i);
         let new_mode = ctrl.mode();
@@ -841,7 +864,10 @@ fn g9a_w_e_to_l_sweep_larger_dwall_fewer_switches() {
     let max_steps = 512u32;
     let mut prev_switches = u32::MAX;
     println!("G9a — W_E→L sweep (c_max=∞, {max_steps} steps):");
-    println!("  {:>10} {:>10} {:>12} {:>12}", "W_E→L", "switches", "latent_st", "explicit_st");
+    println!(
+        "  {:>10} {:>10} {:>12} {:>12}",
+        "W_E→L", "switches", "latent_st", "explicit_st"
+    );
     for &w_e_to_l in w_e_to_l_values {
         let mut ctrl = SwiRController::new(SwiRConfig {
             w_e_to_l,
@@ -915,7 +941,10 @@ fn g9b_c_max_sweep_termination_step_scales_monotonically() {
     let max_steps = 4096u32;
     let mut prev_term: u32 = 0;
     println!("G9b — C_max sweep (w_e_to_l=1, answer_budget=16):");
-    println!("  {:>6} {:>14} {:>10}", "C_max", "terminated_at", "switches");
+    println!(
+        "  {:>6} {:>14} {:>10}",
+        "C_max", "terminated_at", "switches"
+    );
     for &c_max in c_max_values {
         let mut ctrl = SwiRController::new(SwiRConfig {
             w_e_to_l: 1,
@@ -966,7 +995,10 @@ fn g9c_alpha_0_sweep_switch_decisions_are_alpha_independent() {
     let max_steps = 256u32;
     let mut baseline: Option<AblationRun> = None;
     println!("G9c — α_0 sweep (switch decisions must be α-independent):");
-    println!("  {:>6} {:>10} {:>14} {:>10}", "α_0", "switches", "terminated_at", "latent_st");
+    println!(
+        "  {:>6} {:>10} {:>14} {:>10}",
+        "α_0", "switches", "terminated_at", "latent_st"
+    );
     for &alpha_0 in alpha_values {
         let mut ctrl = SwiRController::new(SwiRConfig {
             w_e_to_l: 1,
@@ -982,7 +1014,10 @@ fn g9c_alpha_0_sweep_switch_decisions_are_alpha_independent() {
         let run = drive_alternating(&mut ctrl, max_steps);
         println!(
             "  {:>6} {:>10} {:>14} {:>10}",
-            alpha_0, run.switches, format!("{:?}", run.terminated_at), run.latent_steps
+            alpha_0,
+            run.switches,
+            format!("{:?}", run.terminated_at),
+            run.latent_steps
         );
         match &baseline {
             None => baseline = Some(run),
@@ -1003,8 +1038,7 @@ fn g9c_alpha_0_sweep_switch_decisions_are_alpha_independent() {
                     run.latent_steps, b.latent_steps,
                     "G9c FAIL: α_0={alpha_0} latent_steps={} vs baseline {} — \
                      mode distribution must be α-independent",
-                    run.latent_steps,
-                    b.latent_steps
+                    run.latent_steps, b.latent_steps
                 );
             }
         }
@@ -1051,7 +1085,13 @@ fn g9d_signal_mixing_on_off_decisions_identical() {
     let mut mix_steps = 0u32;
     let mut total_switches = 0u32;
     for i in 0..max_steps {
-        let entropy = if i == 0 { 5.0 } else if i % 2 == 1 { 1.0 } else { 5.0 };
+        let entropy = if i == 0 {
+            5.0
+        } else if i % 2 == 1 {
+            1.0
+        } else {
+            5.0
+        };
         let prev_mode = ctrl.mode();
         let action = ctrl.step(entropy, i);
         let new_mode = ctrl.mode();

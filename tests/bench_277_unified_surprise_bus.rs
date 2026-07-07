@@ -35,13 +35,13 @@
     feature = "cgsp"
 ))]
 
-use katgpt_core::sense::{ReconstructionConfig, ReconstructionState};
-use katgpt_core::traits::CollapseDetector;
 use katgpt_core::ThinkingBudget;
 use katgpt_core::cgsp::{
-    CgspConfig, DerivativeCuriosity, Direction, EntropyCollapse, HintDeltaBandit,
-    Priority, ScratchBuffers, Target, entropy_nats,
+    CgspConfig, DerivativeCuriosity, Direction, EntropyCollapse, HintDeltaBandit, Priority,
+    ScratchBuffers, Target, entropy_nats,
 };
+use katgpt_core::sense::{ReconstructionConfig, ReconstructionState};
+use katgpt_core::traits::CollapseDetector;
 use katgpt_rs::pruners::{DeltaMemoryConfig, DeltaMemoryState, S2FCollapseDetector};
 
 // ── α-grid ────────────────────────────────────────────────────────────────
@@ -422,10 +422,7 @@ fn within_higher(paper: f32, values: &[f32]) -> (f32, f32, bool) {
 /// For "lower is better" metrics: is the paper-default within `frac` of the
 /// best valid metric? Returns (paper_metric, best_metric, within).
 fn within_lower(paper: f32, values: &[f32]) -> (f32, f32, bool) {
-    let best = values
-        .iter()
-        .cloned()
-        .fold(f32::INFINITY, f32::min);
+    let best = values.iter().cloned().fold(f32::INFINITY, f32::min);
     let within = paper <= best * (1.0 + WITHIN_FRAC);
     (paper, best, within)
 }
@@ -438,8 +435,12 @@ fn within_lower(paper: f32, values: &[f32]) -> (f32, f32, bool) {
 fn unified_surprise_bus_sweep() {
     println!("\n══════════════════════════════════════════════════════════════════");
     println!("  Plan 277 Issue 026 — Unified Surprise Bus Super-GOAT Sweep");
-    println!("  Paper-default α-pair: ({}, {})  |  Pareto tolerance: ±{:.0}%",
-             PAPER_AF, PAPER_AS, WITHIN_FRAC * 100.0);
+    println!(
+        "  Paper-default α-pair: ({}, {})  |  Pareto tolerance: ±{:.0}%",
+        PAPER_AF,
+        PAPER_AS,
+        WITHIN_FRAC * 100.0
+    );
     println!("══════════════════════════════════════════════════════════════════");
 
     // ── F1: HLA companion ──────────────────────────────────────────────────
@@ -451,15 +452,26 @@ fn unified_surprise_bus_sweep() {
             }
         }
     }
-    let f1_flat: Vec<f32> = f1_grid.iter().flatten().filter(|v| !v.is_nan()).copied().collect();
+    let f1_flat: Vec<f32> = f1_grid
+        .iter()
+        .flatten()
+        .filter(|v| !v.is_nan())
+        .copied()
+        .collect();
     let f1_paper = f1_metric(PAPER_AF, PAPER_AS);
     let (f1_p, f1_best, f1_within) = within_higher(f1_paper, &f1_flat);
 
     println!("\n── F1: HLA Surprise Companion (N=8) ──");
     print_grid_f32("recall·(1−FPR)", "score", f1_metric);
-    println!("  paper ({},{}) = {:.4}  |  best = {:.4}  |  within ±{:.0}%: {}",
-             PAPER_AF, PAPER_AS, f1_p, f1_best, WITHIN_FRAC * 100.0,
-             if f1_within { "YES ✓" } else { "NO ✗" });
+    println!(
+        "  paper ({},{}) = {:.4}  |  best = {:.4}  |  within ±{:.0}%: {}",
+        PAPER_AF,
+        PAPER_AS,
+        f1_p,
+        f1_best,
+        WITHIN_FRAC * 100.0,
+        if f1_within { "YES ✓" } else { "NO ✗" }
+    );
 
     // ── F2: δ-Mem gate ─────────────────────────────────────────────────────
     let (stream, n_writes) = f2_build_stream();
@@ -472,14 +484,27 @@ fn unified_surprise_bus_sweep() {
             }
         }
     }
-    let f2_flat: Vec<f32> = f2_grid.iter().flatten().filter(|v| !v.is_nan()).copied().collect();
+    let f2_flat: Vec<f32> = f2_grid
+        .iter()
+        .flatten()
+        .filter(|v| !v.is_nan())
+        .copied()
+        .collect();
     let f2_paper = f2_metric(PAPER_AF, PAPER_AS, &stream);
     let (f2_p, f2_best, f2_within) = within_higher(f2_paper, &f2_flat);
 
-    print_grid_f32("suppression %", "frac", |af, as_| f2_metric(af, as_, &stream));
-    println!("  paper ({},{}) = {:.4}  |  best = {:.4}  |  within ±{:.0}%: {}",
-             PAPER_AF, PAPER_AS, f2_p, f2_best, WITHIN_FRAC * 100.0,
-             if f2_within { "YES ✓" } else { "NO ✗" });
+    print_grid_f32("suppression %", "frac", |af, as_| {
+        f2_metric(af, as_, &stream)
+    });
+    println!(
+        "  paper ({},{}) = {:.4}  |  best = {:.4}  |  within ±{:.0}%: {}",
+        PAPER_AF,
+        PAPER_AS,
+        f2_p,
+        f2_best,
+        WITHIN_FRAC * 100.0,
+        if f2_within { "YES ✓" } else { "NO ✗" }
+    );
 
     // ── F3: Collapse detector ──────────────────────────────────────────────
     let traces = f3_build_traces();
@@ -492,14 +517,27 @@ fn unified_surprise_bus_sweep() {
             }
         }
     }
-    let f3_flat: Vec<f32> = f3_grid.iter().flatten().filter(|v| !v.is_nan()).copied().collect();
+    let f3_flat: Vec<f32> = f3_grid
+        .iter()
+        .flatten()
+        .filter(|v| !v.is_nan())
+        .copied()
+        .collect();
     let f3_paper = f3_metric(PAPER_AF, PAPER_AS, &traces);
     let (f3_p, f3_best, f3_within) = within_higher(f3_paper, &f3_flat);
 
-    print_grid_f32("FN reduction", "frac", |af, as_| f3_metric(af, as_, &traces));
-    println!("  paper ({},{}) = {:.4}  |  best = {:.4}  |  within ±{:.0}%: {}",
-             PAPER_AF, PAPER_AS, f3_p, f3_best, WITHIN_FRAC * 100.0,
-             if f3_within { "YES ✓" } else { "NO ✗" });
+    print_grid_f32("FN reduction", "frac", |af, as_| {
+        f3_metric(af, as_, &traces)
+    });
+    println!(
+        "  paper ({},{}) = {:.4}  |  best = {:.4}  |  within ±{:.0}%: {}",
+        PAPER_AF,
+        PAPER_AS,
+        f3_p,
+        f3_best,
+        WITHIN_FRAC * 100.0,
+        if f3_within { "YES ✓" } else { "NO ✗" }
+    );
 
     // ── F4: Derivative curiosity ───────────────────────────────────────────
     println!("\n── F4: Derivative Curiosity (N=64) ──  recovery from one-hot collapse");
@@ -518,9 +556,15 @@ fn unified_surprise_bus_sweep() {
     let (_f4_p, f4_best, f4_within) = within_lower(f4_paper as f32, &f4_valid);
 
     print_grid_usize("recovery cycles", "cycles", f4_metric);
-    println!("  paper ({},{}) = {}  |  best = {}  |  within ±{:.0}%: {}",
-             PAPER_AF, PAPER_AS, f4_paper, f4_best as usize, WITHIN_FRAC * 100.0,
-             if f4_within { "YES ✓" } else { "NO ✗"});
+    println!(
+        "  paper ({},{}) = {}  |  best = {}  |  within ±{:.0}%: {}",
+        PAPER_AF,
+        PAPER_AS,
+        f4_paper,
+        f4_best as usize,
+        WITHIN_FRAC * 100.0,
+        if f4_within { "YES ✓" } else { "NO ✗" }
+    );
 
     // ── Pareto verdict ─────────────────────────────────────────────────────
     let n_pass = [f1_within, f2_within, f3_within, f4_within]
@@ -530,19 +574,39 @@ fn unified_surprise_bus_sweep() {
     let super_goat = n_pass == 4;
 
     println!("\n══════════════════════════════════════════════════════════════════");
-    println!("  PARETO ANALYSIS — is (0.3, 0.03) within ±{:.0}% of best for ALL 4?",
-             WITHIN_FRAC * 100.0);
-    println!("  F1 HLA companion   : {}", if f1_within { "YES ✓" } else { "NO ✗" });
-    println!("  F2 δ-Mem gate      : {}", if f2_within { "YES ✓" } else { "NO ✗" });
-    println!("  F3 Collapse detect : {}", if f3_within { "YES ✓" } else { "NO ✗" });
-    println!("  F4 Deriv curiosity : {}", if f4_within { "YES ✓" } else { "NO ✗"});
+    println!(
+        "  PARETO ANALYSIS — is (0.3, 0.03) within ±{:.0}% of best for ALL 4?",
+        WITHIN_FRAC * 100.0
+    );
+    println!(
+        "  F1 HLA companion   : {}",
+        if f1_within { "YES ✓" } else { "NO ✗" }
+    );
+    println!(
+        "  F2 δ-Mem gate      : {}",
+        if f2_within { "YES ✓" } else { "NO ✗" }
+    );
+    println!(
+        "  F3 Collapse detect : {}",
+        if f3_within { "YES ✓" } else { "NO ✗" }
+    );
+    println!(
+        "  F4 Deriv curiosity : {}",
+        if f4_within { "YES ✓" } else { "NO ✗" }
+    );
     println!("  ─────────────────────────────────────────────────────────");
-    println!("  {}/4 consumers have the paper-default in their Pareto region.", n_pass);
+    println!(
+        "  {}/4 consumers have the paper-default in their Pareto region.",
+        n_pass
+    );
     if super_goat {
         println!("  VERDICT: SUPER-GOAT ✓ — unified α-pair (0.3, 0.03) is universal.");
     } else {
         println!("  VERDICT: GOAT only — unified α-pair is NOT universal for all 4.");
-        println!("           Per-consumer tuning recommended for the {} outlier(s).", 4 - n_pass);
+        println!(
+            "           Per-consumer tuning recommended for the {} outlier(s).",
+            4 - n_pass
+        );
     }
     println!("══════════════════════════════════════════════════════════════════\n");
 }

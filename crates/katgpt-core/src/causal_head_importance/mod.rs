@@ -46,9 +46,9 @@ pub mod scorer;
 #[cfg(feature = "adaptive_causal_calibration")]
 pub mod adaptive;
 
+#[cfg(feature = "adaptive_causal_calibration")]
+pub use adaptive::{adaptive_partition, suspect_indices};
 pub use fusion::ScaleNormalizedFusion;
 pub use patching::{direct_effect_importance, indirect_effect_importance};
 pub use readout::SpanLogitDiffReadout;
 pub use scorer::{fuse_across_capabilities, partition_by_causal_score, per_capability_score};
-#[cfg(feature = "adaptive_causal_calibration")]
-pub use adaptive::{adaptive_partition, suspect_indices};

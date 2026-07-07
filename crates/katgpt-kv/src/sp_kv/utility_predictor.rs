@@ -68,7 +68,8 @@ pub fn predict_into(
     // Layer 1: hidden = SiLU(W1 · h + b1)
     for i in 0..hidden {
         let row_off = i * d_model;
-        let dot = katgpt_core::simd::simd_dot_f32(&weights.w1[row_off..row_off + d_model], h, d_model);
+        let dot =
+            katgpt_core::simd::simd_dot_f32(&weights.w1[row_off..row_off + d_model], h, d_model);
         buf[i] = silu(dot + weights.b1[i]);
     }
 
@@ -123,7 +124,8 @@ pub fn predict_single_head(
     // Layer 1: hidden = SiLU(W1 · h + b1)
     for i in 0..hidden {
         let row_off = i * d_model;
-        let dot = katgpt_core::simd::simd_dot_f32(&weights.w1[row_off..row_off + d_model], h, d_model);
+        let dot =
+            katgpt_core::simd::simd_dot_f32(&weights.w1[row_off..row_off + d_model], h, d_model);
         buf[i] = silu(dot + weights.b1[i]);
     }
 

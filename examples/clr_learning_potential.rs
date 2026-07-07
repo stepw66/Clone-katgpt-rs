@@ -14,7 +14,7 @@
 //! per-token log-probs.
 //!
 //! Run with:
- //! ```bash
+//! ```bash
 //! cargo run --release --example clr_learning_potential --features clr
 //! ```
 

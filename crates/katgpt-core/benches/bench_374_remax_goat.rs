@@ -44,9 +44,7 @@
 
 #![cfg(feature = "remax_aggregation")]
 
-use katgpt_core::pruners::remax::{
-    expected_improvement_per_action_inplace, expected_max_over_m,
-};
+use katgpt_core::pruners::remax::{expected_improvement_per_action_inplace, expected_max_over_m};
 use std::hint::black_box;
 use std::time::Instant;
 
@@ -136,7 +134,10 @@ impl BernoulliBandit {
 
     #[inline]
     fn optimal_mean(&self) -> f32 {
-        self.arm_means.iter().cloned().fold(f32::NEG_INFINITY, f32::max)
+        self.arm_means
+            .iter()
+            .cloned()
+            .fold(f32::NEG_INFINITY, f32::max)
     }
 }
 
@@ -313,7 +314,10 @@ impl Strategy for Softmax {
             .map(|i| self.sums[i] / self.counts[i] as f32)
             .collect();
         let max_m = means.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
-        let logits: Vec<f64> = means.iter().map(|&m| ((m - max_m) / self.tau) as f64).collect();
+        let logits: Vec<f64> = means
+            .iter()
+            .map(|&m| ((m - max_m) / self.tau) as f64)
+            .collect();
         let max_logit = logits.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
         let exps: Vec<f64> = logits.iter().map(|&l| (l - max_logit).exp()).collect();
         let sum_exp: f64 = exps.iter().sum();
@@ -453,20 +457,65 @@ fn gate_g2_bandit_regret() -> (bool, String) {
             let mut reward_rng = Rng::new(0x0E5_0001_0000_0000 + seed_u * 100 + idx_u);
 
             let regret = match idx {
-                0 => run_trial(&mut Ucb1::new(K), &bandit, &mut agent_rng, &mut reward_rng, T),
-                1 => run_trial(&mut Thompson::new(K), &bandit, &mut agent_rng, &mut reward_rng, T),
-                2 => run_trial(&mut Greedy::new(K), &bandit, &mut agent_rng, &mut reward_rng, T),
-                3 => run_trial(&mut Softmax::new(K, 0.1), &bandit, &mut agent_rng, &mut reward_rng, T),
-                4 => run_trial(&mut ReMaxGreedy::new(K, 1.2), &bandit, &mut agent_rng, &mut reward_rng, T),
-                5 => run_trial(&mut ReMaxGreedy::new(K, 1.4), &bandit, &mut agent_rng, &mut reward_rng, T),
-                6 => run_trial(&mut ReMaxGreedy::new(K, 2.0), &bandit, &mut agent_rng, &mut reward_rng, T),
+                0 => run_trial(
+                    &mut Ucb1::new(K),
+                    &bandit,
+                    &mut agent_rng,
+                    &mut reward_rng,
+                    T,
+                ),
+                1 => run_trial(
+                    &mut Thompson::new(K),
+                    &bandit,
+                    &mut agent_rng,
+                    &mut reward_rng,
+                    T,
+                ),
+                2 => run_trial(
+                    &mut Greedy::new(K),
+                    &bandit,
+                    &mut agent_rng,
+                    &mut reward_rng,
+                    T,
+                ),
+                3 => run_trial(
+                    &mut Softmax::new(K, 0.1),
+                    &bandit,
+                    &mut agent_rng,
+                    &mut reward_rng,
+                    T,
+                ),
+                4 => run_trial(
+                    &mut ReMaxGreedy::new(K, 1.2),
+                    &bandit,
+                    &mut agent_rng,
+                    &mut reward_rng,
+                    T,
+                ),
+                5 => run_trial(
+                    &mut ReMaxGreedy::new(K, 1.4),
+                    &bandit,
+                    &mut agent_rng,
+                    &mut reward_rng,
+                    T,
+                ),
+                6 => run_trial(
+                    &mut ReMaxGreedy::new(K, 2.0),
+                    &bandit,
+                    &mut agent_rng,
+                    &mut reward_rng,
+                    T,
+                ),
                 _ => unreachable!(),
             };
             results[idx].1.push(regret);
         }
     }
 
-    println!("  {:<20} {:>12} {:>12}", "Strategy", "Mean Regret", "Std Error");
+    println!(
+        "  {:<20} {:>12} {:>12}",
+        "Strategy", "Mean Regret", "Std Error"
+    );
     let mut ucb1_mean = 0.0f32;
     let mut greedy_mean = 0.0f32;
     let mut remax_means: Vec<f32> = Vec::new();
@@ -520,7 +569,9 @@ fn gate_g4_latency() -> (bool, String) {
     const BUDGET_PER_ACTION_FLOOR_NS: u64 = 150;
     let ks: &[usize] = &[8, 16, 32, 64, 128];
 
-    println!("\n--- G4: Latency (budget: max={BUDGET_MAX_NS} ns, per_action={BUDGET_PER_ACTION_NS_PER_ELEM} ns/elem) ---");
+    println!(
+        "\n--- G4: Latency (budget: max={BUDGET_MAX_NS} ns, per_action={BUDGET_PER_ACTION_NS_PER_ELEM} ns/elem) ---"
+    );
 
     let mut all_pass = true;
     let mut report = String::new();
@@ -533,7 +584,11 @@ fn gate_g4_latency() -> (bool, String) {
 
         // Warmup.
         for _ in 0..WARMUP {
-            let _ = black_box(expected_max_over_m(black_box(&pi), black_box(&q), black_box(1.5)));
+            let _ = black_box(expected_max_over_m(
+                black_box(&pi),
+                black_box(&q),
+                black_box(1.5),
+            ));
             expected_improvement_per_action_inplace(
                 black_box(&pi),
                 black_box(&q),
@@ -545,7 +600,11 @@ fn gate_g4_latency() -> (bool, String) {
         // Measure expected_max_over_m (O(K log K)).
         let start = Instant::now();
         for _ in 0..ITERS {
-            let _ = black_box(expected_max_over_m(black_box(&pi), black_box(&q), black_box(1.5)));
+            let _ = black_box(expected_max_over_m(
+                black_box(&pi),
+                black_box(&q),
+                black_box(1.5),
+            ));
         }
         let max_ns_per = start.elapsed().as_nanos() as u64 / ITERS as u64;
 

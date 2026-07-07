@@ -11,7 +11,7 @@
 //! Token values stay in range `0..FFT_STATE_VOCAB` (=10).
 
 use super::battle::BattleState;
-use super::types::{Class, Team, Unit, GRID_H, GRID_W};
+use super::types::{Class, GRID_H, GRID_W, Team, Unit};
 
 /// State vocab size for the public FFT benchmark domain (=10).
 /// Any downstream replay pipeline (private or public) must use this value or
@@ -124,11 +124,7 @@ fn encode_pos_axis(v: i32) -> u8 {
 /// Encode alive flag: 0=dead, 1=alive.
 #[inline]
 fn encode_alive(unit: &Unit) -> u8 {
-    if unit.alive {
-        1
-    } else {
-        0
-    }
+    if unit.alive { 1 } else { 0 }
 }
 
 #[cfg(test)]

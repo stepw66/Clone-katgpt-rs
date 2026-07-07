@@ -14,6 +14,8 @@ pub mod types;
 // katgpt-forward. Gated by the parent `gdn2_attention` feature in lib.rs.
 pub mod forward;
 
-pub use kernel::{gdn2_recurrent_step, gdn2_state_readout, gdn2_state_update, l2_normalize, sigmoid};
-pub use types::{Gdn2GateConfig, Gdn2HeadState, Gdn2LayerState, MultiLayerGdn2Cache};
 pub use forward::{forward_gdn2, generate_gdn2_into};
+pub use kernel::{
+    gdn2_recurrent_step, gdn2_state_readout, gdn2_state_update, l2_normalize, sigmoid,
+};
+pub use types::{Gdn2GateConfig, Gdn2HeadState, Gdn2LayerState, MultiLayerGdn2Cache};

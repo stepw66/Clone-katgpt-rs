@@ -223,7 +223,12 @@ pub fn batch_soft_reject_with_relax<P: ConstraintPruner, R: RelaxationStrategy>(
 ) {
     let len = candidates.len().min(results.len()).min(conf_scratch.len());
     // Phase 1: batched confidence query (amortizes pruner setup).
-    pruner.batch_reject_confidence(depth, &candidates[..len], parent_tokens, &mut conf_scratch[..len]);
+    pruner.batch_reject_confidence(
+        depth,
+        &candidates[..len],
+        parent_tokens,
+        &mut conf_scratch[..len],
+    );
     // Phase 2: per-candidate threshold + relaxation dispatch.
     for i in 0..len {
         results[i] = match soft_reject_decide(conf_scratch[i], cfg) {
@@ -268,7 +273,12 @@ mod tests {
             (token_idx as f32) < self.center
         }
 
-        fn reject_confidence(&self, _depth: usize, token_idx: usize, _parent_tokens: &[usize]) -> f32 {
+        fn reject_confidence(
+            &self,
+            _depth: usize,
+            token_idx: usize,
+            _parent_tokens: &[usize],
+        ) -> f32 {
             // sigmoid(β · (token_idx - center)). Below center → <0.5 → low reject.
             // Above center → >0.5 → high reject. At center → exactly 0.5.
             let x = self.beta * ((token_idx as f32) - self.center);
@@ -304,9 +314,15 @@ mod tests {
     #[test]
     fn decide_soft_reject_in_band() {
         let cfg = SoftRejectConfig::default();
-        assert_eq!(soft_reject_decide(0.41, &cfg), SoftRejectVerdict::SoftReject);
+        assert_eq!(
+            soft_reject_decide(0.41, &cfg),
+            SoftRejectVerdict::SoftReject
+        );
         assert_eq!(soft_reject_decide(0.5, &cfg), SoftRejectVerdict::SoftReject);
-        assert_eq!(soft_reject_decide(0.79, &cfg), SoftRejectVerdict::SoftReject);
+        assert_eq!(
+            soft_reject_decide(0.79, &cfg),
+            SoftRejectVerdict::SoftReject
+        );
     }
 
     #[test]
@@ -321,7 +337,10 @@ mod tests {
     fn decide_nan_falls_to_reject_safely() {
         // NaN must not silently accept — pick the safe (reject) side.
         let cfg = SoftRejectConfig::default();
-        assert_eq!(soft_reject_decide(f32::NAN, &cfg), SoftRejectVerdict::Reject);
+        assert_eq!(
+            soft_reject_decide(f32::NAN, &cfg),
+            SoftRejectVerdict::Reject
+        );
     }
 
     #[test]
@@ -376,7 +395,10 @@ mod tests {
     #[test]
     fn graded_pruner_soft_rejects_then_relaxes() {
         // center=5, beta=3.0: token 5 lands at exactly 0.5 (in the band).
-        let p = GradedThresholdPruner { center: 5.0, beta: 3.0 };
+        let p = GradedThresholdPruner {
+            center: 5.0,
+            beta: 3.0,
+        };
         let cfg = SoftRejectConfig::default();
         let mut scratch = [0u8; 16];
 
@@ -384,7 +406,10 @@ mod tests {
         let mut no_relax = NoRelaxation;
         // token 5 → conf 0.5 → SoftReject → NoRelaxation rejects → false
         let v_no_relax = soft_reject_with_relax(&p, &mut no_relax, &cfg, 0, 5, &[], &mut scratch);
-        assert!(!v_no_relax, "SoftReject + NoRelaxation must escalate to hard-reject");
+        assert!(
+            !v_no_relax,
+            "SoftReject + NoRelaxation must escalate to hard-reject"
+        );
 
         // AlwaysAcceptRelax: SoftReject becomes accept.
         let mut yes_relax = AlwaysAcceptRelax;
@@ -407,7 +432,10 @@ mod tests {
     fn graded_confidence_is_monotone_in_token_idx() {
         // Sigmoid(β·(x-center)) is monotone increasing in x by construction;
         // verify the impl actually exhibits it (no softmax crossover artifacts).
-        let p = GradedThresholdPruner { center: 5.0, beta: 3.0 };
+        let p = GradedThresholdPruner {
+            center: 5.0,
+            beta: 3.0,
+        };
         let mut prev = -f32::INFINITY;
         for tok in 0..20 {
             let c = p.reject_confidence(0, tok, &[]);
@@ -423,7 +451,10 @@ mod tests {
 
     #[test]
     fn batch_soft_reject_matches_single_calls() {
-        let p = GradedThresholdPruner { center: 5.0, beta: 3.0 };
+        let p = GradedThresholdPruner {
+            center: 5.0,
+            beta: 3.0,
+        };
         let cfg = SoftRejectConfig::default();
         let candidates: Vec<usize> = (0..12).collect();
         let mut relaxer = NoRelaxation;

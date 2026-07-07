@@ -189,7 +189,8 @@ impl SkillCatalog {
                 let mut new_d = d.clone();
                 new_d.test_status = status;
                 new_d
-            }).is_some()
+            })
+            .is_some()
         }
     }
 

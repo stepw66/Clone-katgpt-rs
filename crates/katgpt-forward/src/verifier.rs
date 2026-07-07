@@ -11,13 +11,17 @@
 use crate::dflash::{dflash_predict_ar_with, dflash_predict_with};
 use crate::drafter_lora::{DrafterForwardContext, DrafterLoraWeights};
 use crate::{ForwardContext, SpeculativeContext, forward};
-use katgpt_core::speculative::sampling::{sample_from_distribution, sample_residual_distribution_into};
+use katgpt_core::speculative::sampling::{
+    sample_from_distribution, sample_residual_distribution_into,
+};
 use katgpt_core::traits::NoPruner;
 use katgpt_speculative::dd_tree::{TreeBuilder, extract_best_path_into};
 // NOTE: `SpeculativeVerifier` trait is re-exported via `pub use` below —
 // both the concrete impls in this file and downstream consumers reference it
 // through that single re-export.
-use katgpt_transformer::{MultiLayerKVCache, TransformerWeights, preload_kv_cache, project_target_activation};
+use katgpt_transformer::{
+    MultiLayerKVCache, TransformerWeights, preload_kv_cache, project_target_activation,
+};
 use katgpt_types::{Config, Rng, softmax_scaled};
 
 // ── Speculative Verifier: Strategy Pattern ──────────────────
@@ -249,12 +253,7 @@ impl SpeculativeVerifier for LeviathanVerifier<'_> {
                 // the forecast drops near zero. The min is 1 so the draft loop
                 // always runs at least once.
                 let base = draft_config.draft_lookahead.max(1);
-                adaptive_gamma_override = Some(forecast.adaptive_gamma(
-                    base,
-                    alpha,
-                    1,
-                    base * 2,
-                ));
+                adaptive_gamma_override = Some(forecast.adaptive_gamma(base, alpha, 1, base * 2));
             }
             self.draft_sctx.probs_buf.copy_from_slice(logits);
             softmax_scaled(&mut self.draft_sctx.probs_buf, inv_target_temp);
@@ -284,13 +283,11 @@ impl SpeculativeVerifier for LeviathanVerifier<'_> {
         #[cfg(feature = "adaptive_gamma_forecast")]
         let draft_config_shadow: Option<Config> = adaptive_gamma_override.map(|gamma| {
             let mut cfg = draft_config.clone();
-            cfg.draft_lookahead = gamma
-                .min(draft_config.block_size.saturating_sub(pos));
+            cfg.draft_lookahead = gamma.min(draft_config.block_size.saturating_sub(pos));
             cfg
         });
         #[cfg(feature = "adaptive_gamma_forecast")]
-        let draft_config_eff: &Config =
-            draft_config_shadow.as_ref().unwrap_or(draft_config);
+        let draft_config_eff: &Config = draft_config_shadow.as_ref().unwrap_or(draft_config);
         #[cfg(not(feature = "adaptive_gamma_forecast"))]
         let draft_config_eff: &Config = draft_config;
 

@@ -19,8 +19,8 @@
 #![cfg(feature = "funcattn_structured_basis")]
 
 use katgpt_core::funcattn::{
-    funcattn_forward, make_dct_log_basis, make_haar_packet_basis, FuncAttnBasis, FuncAttnConfig,
-    FuncAttnScratch,
+    FuncAttnBasis, FuncAttnConfig, FuncAttnScratch, funcattn_forward, make_dct_log_basis,
+    make_haar_packet_basis,
 };
 
 const D: usize = 64;
@@ -167,8 +167,18 @@ fn funcattn_structured_basis_k_sweep() {
         };
         let mut scratch = FuncAttnScratch::new(N, D, k);
         let mut out = vec![0.0f32; N * D];
-        funcattn_forward(&x, &x, w_basis, &w_q, &w_k, &w_v, &cfg, &mut scratch, &mut out)
-            .expect("forward");
+        funcattn_forward(
+            &x,
+            &x,
+            w_basis,
+            &w_q,
+            &w_k,
+            &w_v,
+            &cfg,
+            &mut scratch,
+            &mut out,
+        )
+        .expect("forward");
         for v in &out {
             assert!(v.is_finite(), "non-finite forward output");
         }
@@ -176,8 +186,10 @@ fn funcattn_structured_basis_k_sweep() {
     };
 
     println!("\n=== Plan 332 Phase 3 — k-sweep (d={D}, n={N}, τ={tau}) ===");
-    println!("{:>4}  {:>10}  {:>10}  {:>12}  {:>10}  {:>10}  {:>10}", "k", "random", "DCT-log",
-        "Haar-packet", "hand-craft", "Δ(DCT-rand)", "Δ(Haar-r)");
+    println!(
+        "{:>4}  {:>10}  {:>10}  {:>12}  {:>10}  {:>10}  {:>10}",
+        "k", "random", "DCT-log", "Haar-packet", "hand-craft", "Δ(DCT-rand)", "Δ(Haar-r)"
+    );
 
     let mut random_curve = Vec::new();
     let mut dct_curve = Vec::new();
@@ -202,7 +214,13 @@ fn funcattn_structured_basis_k_sweep() {
 
         println!(
             "{:>4}  {:>+10.4}  {:>+10.4}  {:>+12.4}  {:>+10.4}  {:>+10.4}  {:>+10.4}",
-            k, cos_rand, cos_dct, cos_haar, cos_hand, cos_dct - cos_rand, cos_haar - cos_rand
+            k,
+            cos_rand,
+            cos_dct,
+            cos_haar,
+            cos_hand,
+            cos_dct - cos_rand,
+            cos_haar - cos_rand
         );
     }
 
@@ -214,15 +232,19 @@ fn funcattn_structured_basis_k_sweep() {
     for (idx, &k) in ks.iter().enumerate() {
         let best_principled = dct_curve[idx].max(haar_curve[idx]);
         let gap = best_principled - random_curve[idx];
-        println!("  k={k:>2}: best principled = {best_principled:+.4}, random = {:+.4}, gap = {gap:+.4}",
-            random_curve[idx]);
+        println!(
+            "  k={k:>2}: best principled = {best_principled:+.4}, random = {:+.4}, gap = {gap:+.4}",
+            random_curve[idx]
+        );
         if !found_elbow && gap < 0.02 {
-            println!("  ↑ elbow: at k={k}, random catches up to within 0.02 of principled.", );
+            println!("  ↑ elbow: at k={k}, random catches up to within 0.02 of principled.",);
             found_elbow = true;
         }
     }
     if !found_elbow {
-        println!("  no elbow found in k ∈ {{4, 8, 16, 32}} — principled beats random at all sizes.");
+        println!(
+            "  no elbow found in k ∈ {{4, 8, 16, 32}} — principled beats random at all sizes."
+        );
     }
 
     // Hypothesis check: principled should help MORE at small k.
@@ -230,8 +252,14 @@ fn funcattn_structured_basis_k_sweep() {
     let large_k_gap = (dct_curve[3] - random_curve[3]).max(haar_curve[3] - random_curve[3]);
     println!(
         "\nHypothesis (T3.3): principled helps more at small k. k=4 gap = {small_k_gap:+.4}, k=32 gap = {large_k_gap:+.4}. {}",
-        if small_k_gap > large_k_gap { "CONFIRMED" } else { "REJECTED" }
+        if small_k_gap > large_k_gap {
+            "CONFIRMED"
+        } else {
+            "REJECTED"
+        }
     );
 
-    println!("\nNext step (T3.4): transcribe this output into .benchmarks/332_structured_basis_k_sweep.md");
+    println!(
+        "\nNext step (T3.4): transcribe this output into .benchmarks/332_structured_basis_k_sweep.md"
+    );
 }

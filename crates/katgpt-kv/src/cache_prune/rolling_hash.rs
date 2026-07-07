@@ -265,7 +265,8 @@ impl KvSegmentPool {
                     // Phase 2: blake3 verification — slice into pre-encoded bytes.
                     let byte_start = pos * 4;
                     let byte_end = byte_start + seg_bytes;
-                    let window_hash: [u8; 32] = blake3::hash(&req_bytes[byte_start..byte_end]).into();
+                    let window_hash: [u8; 32] =
+                        blake3::hash(&req_bytes[byte_start..byte_end]).into();
 
                     for &seg_idx in candidates {
                         // Only compare against segments of the right length.

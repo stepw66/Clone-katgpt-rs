@@ -6,8 +6,8 @@
 //!
 //! Feature gate: `vortex_flow` (Plan 196, Phase 3, default-OFF).
 
-use katgpt_pruners::bandit::{BanditPruner, BanditStats, BanditStrategy};
 use katgpt_core::traits::ScreeningPruner;
+use katgpt_pruners::bandit::{BanditPruner, BanditStats, BanditStrategy};
 
 use super::block_topk::{BlockTopKCache, BlockTopKRouter};
 use super::channel_aware::ChannelAwareCache;

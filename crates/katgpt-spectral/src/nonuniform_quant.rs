@@ -155,9 +155,7 @@ impl NonUniformQuantizer {
         // each sample contributes `d_eff_int` semantic + `(head_dim − d_eff_int)` tail
         // values, so the totals are known up front.
         let n_samples = rotated_data.len();
-        let tail_len = self
-            .head_dim
-            .saturating_sub(self.d_eff_int);
+        let tail_len = self.head_dim.saturating_sub(self.d_eff_int);
         let mut semantic_data = Vec::with_capacity(n_samples * self.d_eff_int);
         let mut tail_data = Vec::with_capacity(n_samples * tail_len);
         for sample in rotated_data {

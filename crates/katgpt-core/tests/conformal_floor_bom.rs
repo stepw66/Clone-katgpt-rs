@@ -241,11 +241,7 @@ fn small_sigma_white_noise(n: usize, seed: u64) -> TrajectoryCorpus {
     for _ in 0..n {
         values.push(rng.gaussian() * 0.3);
     }
-    TrajectoryCorpus::from_slice(
-        format!("white_noise_sigma0p3_n{}", n),
-        &values,
-        64,
-    )
+    TrajectoryCorpus::from_slice(format!("white_noise_sigma0p3_n{}", n), &values, 64)
 }
 
 // ===== Tests =====
@@ -281,7 +277,10 @@ fn bom_vs_floor_on_small_amplitude_seasonal() {
     let report = run_and_print(&mut bom, &corpus, 0.05);
 
     assert!(report.n_scored > 400, "n_scored={}", report.n_scored);
-    assert_eq!(report.n_unscorable, 0, "BoM samples should always be scorable");
+    assert_eq!(
+        report.n_unscorable, 0,
+        "BoM samples should always be scorable"
+    );
     // The false-confidence signature: severe under-coverage (BoM's intervals
     // are σ-bound, NOT residual-calibrated). Nominal is 0.95; BoM lands near
     // 0.05–0.15. This is the policy-relevant failure, not the CRPS ratio.
@@ -311,7 +310,10 @@ fn bom_vs_floor_on_small_amplitude_seasonal() {
         "BoM should lose or mix on seasonal, got {:?}",
         report.overall
     );
-    assert!(!report.primitive_wins(), "BoM must not be declared a UQ win");
+    assert!(
+        !report.primitive_wins(),
+        "BoM must not be declared a UQ win"
+    );
 }
 
 #[test]
@@ -481,11 +483,19 @@ fn bom_full_report_for_benchmark_doc() {
     eprintln!("\n=== Summary ===");
     eprintln!(
         "seasonal: crps_ratio={:.4}, winkler_ratio={:.4}, coverage={:.4} (nominal {:.2}), verdict={:?}",
-        r1.crps_ratio, r1.winkler_ratio, r1.primitive.coverage, 1.0 - 0.05, r1.overall
+        r1.crps_ratio,
+        r1.winkler_ratio,
+        r1.primitive.coverage,
+        1.0 - 0.05,
+        r1.overall
     );
     eprintln!(
         "white noise: crps_ratio={:.4}, winkler_ratio={:.4}, coverage={:.4} (nominal {:.2}), verdict={:?}",
-        r2.crps_ratio, r2.winkler_ratio, r2.primitive.coverage, 1.0 - 0.05, r2.overall
+        r2.crps_ratio,
+        r2.winkler_ratio,
+        r2.primitive.coverage,
+        1.0 - 0.05,
+        r2.overall
     );
     eprintln!();
 

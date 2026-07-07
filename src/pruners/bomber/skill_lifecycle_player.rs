@@ -452,10 +452,11 @@ impl SkillLifecyclePlayer {
         }
         for arm_idx in 0..ACTION_COUNT {
             if let Some(desc) = self.catalog.get(arm_idx)
-                && desc.test_status == TestStatus::Validated {
-                    // Promote validated skills after sufficient experience
-                    self.catalog.update_status(arm_idx, TestStatus::Active);
-                }
+                && desc.test_status == TestStatus::Validated
+            {
+                // Promote validated skills after sufficient experience
+                self.catalog.update_status(arm_idx, TestStatus::Active);
+            }
         }
     }
 

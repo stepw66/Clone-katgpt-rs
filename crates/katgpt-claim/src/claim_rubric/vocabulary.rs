@@ -224,10 +224,7 @@ mod tests {
 
     #[test]
     fn scan_l3_verb_passes_at_l3() {
-        let v = scan(
-            "the probe causally controls behavior",
-            EvidenceLevel::L3,
-        );
+        let v = scan("the probe causally controls behavior", EvidenceLevel::L3);
         assert!(v.is_empty(), "L3 verb at L3 is permitted");
     }
 }

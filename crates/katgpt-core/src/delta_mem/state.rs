@@ -425,11 +425,7 @@ impl DeltaMemoryState {
 
     /// Install the surprise gate with custom EMA coefficients.
     /// No-op when `rank != 8`.
-    pub fn enable_surprise_gate_with_alphas(
-        &mut self,
-        alpha_fast: f32,
-        alpha_slow: f32,
-    ) -> bool {
+    pub fn enable_surprise_gate_with_alphas(&mut self, alpha_fast: f32, alpha_slow: f32) -> bool {
         match self.config.rank {
             8 => {
                 self.surprise_gate =
@@ -976,10 +972,7 @@ mod tests {
             gated.writes_gated(),
         );
         let pass = suppression >= 0.30 && recall_loss <= 0.05;
-        eprintln!(
-            "G3 OVERALL: {}",
-            if pass { "PASS" } else { "FAIL" }
-        );
+        eprintln!("G3 OVERALL: {}", if pass { "PASS" } else { "FAIL" });
 
         assert!(
             suppression >= 0.30,

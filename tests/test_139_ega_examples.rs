@@ -227,10 +227,7 @@ fn proof_t6_high_alpha_sharper_gate() {
     let energy = [0.1, 0.5, 1.0, 2.0, 5.0, 10.0, 20.0, 50.0f32];
     let gate = compute_energy_gate(&energy, 10.0, 0.35);
 
-    let sharp_count = gate
-        .iter()
-        .filter(|&&g| !(0.1..=0.9).contains(&g))
-        .count();
+    let sharp_count = gate.iter().filter(|&&g| !(0.1..=0.9).contains(&g)).count();
 
     // With high alpha, most values should be near-binary (at least 5 of 8)
     assert!(

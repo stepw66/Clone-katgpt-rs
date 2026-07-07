@@ -33,9 +33,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use crate::graph::types::{
-    DimId, DimensionKind, Expression, LookUp, LookupId, ProgramGraph,
-};
+use crate::graph::types::{DimId, DimensionKind, Expression, LookUp, LookupId, ProgramGraph};
 use crate::types::TieBreak;
 
 // ── Error Type ─────────────────────────────────────────────────
@@ -141,9 +139,10 @@ impl GraphEvaluator {
         let mut cumsum_accum = HashMap::new();
         for &dim_id in &dim_order {
             if let Some(dim) = graph.all_dims.get(&dim_id)
-                && matches!(dim.kind, DimensionKind::CumSum { .. }) {
-                    cumsum_accum.insert(dim_id, 0.0);
-                }
+                && matches!(dim.kind, DimensionKind::CumSum { .. })
+            {
+                cumsum_accum.insert(dim_id, 0.0);
+            }
         }
 
         let scratch_capacity = dim_order.len();
@@ -328,9 +327,7 @@ impl GraphEvaluator {
                     // avoiding a redundant `Vec<f64>` clone.
                     use std::collections::hash_map::Entry;
                     if let Entry::Vacant(e) = processed_lookups.entry(lookup_id) {
-                        let lookup = lookup_data
-                            .get(e.key())
-                            .expect("lookup_id exists in graph");
+                        let lookup = lookup_data.get(e.key()).expect("lookup_id exists in graph");
                         let result = Self::attention_insert_and_query(
                             &mut self.attention_entries,
                             self.position,
@@ -539,15 +536,14 @@ impl GraphEvaluator {
                 }
                 "halt" => break,
                 _ => {
-                    if draining
-                        && let Ok(bv) = u32::from_str_radix(tok, 16) {
-                            let ch = if (32..127).contains(&bv) {
-                                char::from_u32(bv).unwrap_or('.')
-                            } else {
-                                '.'
-                            };
-                            output_chars.push(ch);
-                        }
+                    if draining && let Ok(bv) = u32::from_str_radix(tok, 16) {
+                        let ch = if (32..127).contains(&bv) {
+                            char::from_u32(bv).unwrap_or('.')
+                        } else {
+                            '.'
+                        };
+                        output_chars.push(ch);
+                    }
                 }
             }
         }

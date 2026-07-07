@@ -41,9 +41,8 @@
 
 use katgpt_rs::{
     dllm::{
-        NoConstraint, PositionOffsetSchedule,
-        denoise_loop, denoise_loop_scheduled, denoising_accuracy,
-        generate_pattern_dataset, train_mini_dllm,
+        NoConstraint, PositionOffsetSchedule, denoise_loop, denoise_loop_scheduled,
+        denoising_accuracy, generate_pattern_dataset, train_mini_dllm,
     },
     types::{Config, Rng},
 };
@@ -58,8 +57,9 @@ fn generate_markov_dataset(
     vocab_size: usize,
 ) -> Vec<Vec<usize>> {
     // Build a random transition table
-    let transition: Vec<usize> =
-        (0..vocab_size).map(|_| (rng.next() as usize) % vocab_size).collect();
+    let transition: Vec<usize> = (0..vocab_size)
+        .map(|_| (rng.next() as usize) % vocab_size)
+        .collect();
 
     let mut data = Vec::with_capacity(n_sequences);
     for _ in 0..n_sequences {
@@ -133,12 +133,25 @@ fn test_g1_scheduled_w1_matches_unscheduled() {
     let mut constraint = NoConstraint;
     let schedule_w1 = PositionOffsetSchedule::new(1.0);
 
-    let (tokens_base, steps_base) =
-        denoise_loop(&weights, &target, &config, 20, 0.5, &mut constraint, &mut rng);
+    let (tokens_base, steps_base) = denoise_loop(
+        &weights,
+        &target,
+        &config,
+        20,
+        0.5,
+        &mut constraint,
+        &mut rng,
+    );
 
     let mut constraint2 = NoConstraint;
     let (tokens_sched, steps_sched) = denoise_loop_scheduled(
-        &weights, &target, &config, 20, 0.5, &mut constraint2, &mut rng,
+        &weights,
+        &target,
+        &config,
+        20,
+        0.5,
+        &mut constraint2,
+        &mut rng,
         &schedule_w1,
     );
 
@@ -186,10 +199,23 @@ fn test_g2_markov_lr_bias_improves_accuracy() {
             let mut constraint = NoConstraint;
             let (tokens, _) = match schedule {
                 None => denoise_loop(
-                    &weights, target, &config, 16, 0.5, &mut constraint, &mut rng,
+                    &weights,
+                    target,
+                    &config,
+                    16,
+                    0.5,
+                    &mut constraint,
+                    &mut rng,
                 ),
                 Some(s) => denoise_loop_scheduled(
-                    &weights, target, &config, 16, 0.5, &mut constraint, &mut rng, s,
+                    &weights,
+                    target,
+                    &config,
+                    16,
+                    0.5,
+                    &mut constraint,
+                    &mut rng,
+                    s,
                 ),
             };
             total_acc += denoising_accuracy(&tokens, target);

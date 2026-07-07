@@ -64,10 +64,9 @@ fn eq1_switching_dominates_static() {
     // LHS: Σ_z min_a ε_a(z)  — the switching policy picks the best action per state.
     let mut lhs = 0.0f32;
     for z in 0..N_STATES {
-        let min_err = (0..N_ACTIONS).map(|a| kernel_error(a, z)).fold(
-            f32::INFINITY,
-            f32::min,
-        );
+        let min_err = (0..N_ACTIONS)
+            .map(|a| kernel_error(a, z))
+            .fold(f32::INFINITY, f32::min);
         lhs += min_err;
     }
 
@@ -93,10 +92,9 @@ fn eq1_strict_inequality_when_no_single_action_dominates() {
     // (switching is strictly better than any static choice).
     let mut lhs = 0.0f32;
     for z in 0..N_STATES {
-        let min_err = (0..N_ACTIONS).map(|a| kernel_error(a, z)).fold(
-            f32::INFINITY,
-            f32::min,
-        );
+        let min_err = (0..N_ACTIONS)
+            .map(|a| kernel_error(a, z))
+            .fold(f32::INFINITY, f32::min);
         lhs += min_err;
     }
 
@@ -131,10 +129,9 @@ fn eq1_tight_when_one_action_dominates_everywhere() {
 
     let mut lhs = 0.0f32;
     for z in 0..N_STATES {
-        let min_err = (0..N_ACTIONS).map(|a| uniform_kernel(a, z)).fold(
-            f32::INFINITY,
-            f32::min,
-        );
+        let min_err = (0..N_ACTIONS)
+            .map(|a| uniform_kernel(a, z))
+            .fold(f32::INFINITY, f32::min);
         lhs += min_err;
     }
 

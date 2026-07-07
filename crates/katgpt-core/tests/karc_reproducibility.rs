@@ -29,7 +29,12 @@ fn synthetic_trajectory(n: usize) -> Vec<f32> {
 
 /// Build training pairs from a trajectory and fit a forecaster. Returns the
 /// forecaster (caller inspects `.wout`).
-fn fit_on_trajectory<B: katgpt_core::KarcBasis<M>, const D: usize, const M: usize, const K: usize>(
+fn fit_on_trajectory<
+    B: katgpt_core::KarcBasis<M>,
+    const D: usize,
+    const M: usize,
+    const K: usize,
+>(
     basis: B,
     traj: &[f32],
     lambda: f32,
@@ -62,8 +67,10 @@ fn g4_wout_byte_identical_across_instances_fourier() {
     const M: usize = 8;
     let traj = synthetic_trajectory(500);
     for &lambda in &[1e-8f32, 1e-6, 1e-4] {
-        let f1 = fit_on_trajectory::<FourierBasis<M>, D, M, K>(FourierBasis::new(4.0), &traj, lambda);
-        let f2 = fit_on_trajectory::<FourierBasis<M>, D, M, K>(FourierBasis::new(4.0), &traj, lambda);
+        let f1 =
+            fit_on_trajectory::<FourierBasis<M>, D, M, K>(FourierBasis::new(4.0), &traj, lambda);
+        let f2 =
+            fit_on_trajectory::<FourierBasis<M>, D, M, K>(FourierBasis::new(4.0), &traj, lambda);
         assert_eq!(
             f1.wout.len(),
             f2.wout.len(),
@@ -89,8 +96,10 @@ fn g4_wout_byte_identical_across_instances_chebyshev() {
     const M: usize = 6;
     let traj = synthetic_trajectory(500);
     for &lambda in &[1e-8f32, 1e-6, 1e-4] {
-        let f1 = fit_on_trajectory::<ChebyshevBasis<M>, D, M, K>(ChebyshevBasis::new(), &traj, lambda);
-        let f2 = fit_on_trajectory::<ChebyshevBasis<M>, D, M, K>(ChebyshevBasis::new(), &traj, lambda);
+        let f1 =
+            fit_on_trajectory::<ChebyshevBasis<M>, D, M, K>(ChebyshevBasis::new(), &traj, lambda);
+        let f2 =
+            fit_on_trajectory::<ChebyshevBasis<M>, D, M, K>(ChebyshevBasis::new(), &traj, lambda);
         let bits_a: Vec<u32> = f1.wout.iter().map(|x| x.to_bits()).collect();
         let bits_b: Vec<u32> = f2.wout.iter().map(|x| x.to_bits()).collect();
         assert_eq!(
@@ -109,8 +118,10 @@ fn g4_wout_changes_with_lambda() {
     const K: usize = 3;
     const M: usize = 8;
     let traj = synthetic_trajectory(500);
-    let f_small = fit_on_trajectory::<FourierBasis<M>, D, M, K>(FourierBasis::new(4.0), &traj, 1e-8);
-    let f_large = fit_on_trajectory::<FourierBasis<M>, D, M, K>(FourierBasis::new(4.0), &traj, 1e-2);
+    let f_small =
+        fit_on_trajectory::<FourierBasis<M>, D, M, K>(FourierBasis::new(4.0), &traj, 1e-8);
+    let f_large =
+        fit_on_trajectory::<FourierBasis<M>, D, M, K>(FourierBasis::new(4.0), &traj, 1e-2);
     let bits_small: Vec<u32> = f_small.wout.iter().map(|x| x.to_bits()).collect();
     let bits_large: Vec<u32> = f_large.wout.iter().map(|x| x.to_bits()).collect();
     assert_ne!(

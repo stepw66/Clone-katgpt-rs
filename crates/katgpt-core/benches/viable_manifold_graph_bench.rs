@@ -30,12 +30,12 @@
 #![cfg(feature = "viable_manifold_graph")]
 
 use criterion::{Criterion, Throughput, black_box, criterion_group, criterion_main};
+use fastrand::Rng;
+use katgpt_core::JacobianSvdScratch;
 use katgpt_core::viable_manifold_graph::{
     ClosurePredicate, GraphBuildConfig, SafeManifoldGraph, VolumeFieldConfig,
     build_safe_manifold_graph, manifold_random_walk, pullback_volume,
 };
-use katgpt_core::JacobianSvdScratch;
-use fastrand::Rng;
 
 const DIM: usize = 4;
 

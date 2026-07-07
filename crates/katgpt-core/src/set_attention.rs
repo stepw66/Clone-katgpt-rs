@@ -137,14 +137,12 @@ pub enum SetAttentionError {
 impl std::fmt::Display for SetAttentionError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::StatesLenMismatch { expected, got } => write!(
-                f,
-                "states.len() = {got}, expected n*d = {expected}"
-            ),
-            Self::OutputLenMismatch { expected, got } => write!(
-                f,
-                "output.len() = {got}, expected n*d = {expected}"
-            ),
+            Self::StatesLenMismatch { expected, got } => {
+                write!(f, "states.len() = {got}, expected n*d = {expected}")
+            }
+            Self::OutputLenMismatch { expected, got } => {
+                write!(f, "output.len() = {got}, expected n*d = {expected}")
+            }
             Self::WqLenMismatch { expected, got } => {
                 write!(f, "w_q.len() = {got}, expected d*k = {expected}")
             }
@@ -154,18 +152,15 @@ impl std::fmt::Display for SetAttentionError {
             Self::WvLenMismatch { expected, got } => {
                 write!(f, "w_v.len() = {got}, expected d*d = {expected}")
             }
-            Self::ScratchQLenMismatch { expected, got } => write!(
-                f,
-                "scratch_q.len() = {got}, expected n*k = {expected}"
-            ),
-            Self::ScratchKLenMismatch { expected, got } => write!(
-                f,
-                "scratch_k.len() = {got}, expected n*k = {expected}"
-            ),
-            Self::ScratchAlphaLenMismatch { expected, got } => write!(
-                f,
-                "scratch_alpha.len() = {got}, expected >= n = {expected}"
-            ),
+            Self::ScratchQLenMismatch { expected, got } => {
+                write!(f, "scratch_q.len() = {got}, expected n*k = {expected}")
+            }
+            Self::ScratchKLenMismatch { expected, got } => {
+                write!(f, "scratch_k.len() = {got}, expected n*k = {expected}")
+            }
+            Self::ScratchAlphaLenMismatch { expected, got } => {
+                write!(f, "scratch_alpha.len() = {got}, expected >= n = {expected}")
+            }
             Self::ZeroDim => write!(f, "n, d, or k is zero"),
         }
     }
@@ -354,12 +349,37 @@ pub fn set_sigmoid_attention_into(
 
     // ── For each query i, compute α_ij and accumulate ────────────────
     match cfg.top_k {
-        None => dense_accumulate(output, states, w_v, scratch_q, scratch_k, scratch_alpha, cfg, n, d, k, scale),
+        None => dense_accumulate(
+            output,
+            states,
+            w_v,
+            scratch_q,
+            scratch_k,
+            scratch_alpha,
+            cfg,
+            n,
+            d,
+            k,
+            scale,
+        ),
         Some(k_max) => {
             if k_max == 0 {
                 return Ok(()); // top-0 = no contribution; output = states (already copied)
             }
-            topk_accumulate(output, states, w_v, scratch_q, scratch_k, scratch_alpha, cfg, n, d, k, scale, k_max)
+            topk_accumulate(
+                output,
+                states,
+                w_v,
+                scratch_q,
+                scratch_k,
+                scratch_alpha,
+                cfg,
+                n,
+                d,
+                k,
+                scale,
+                k_max,
+            )
         }
     }
 }
@@ -397,7 +417,10 @@ fn dense_accumulate(
     // one subtract per (i, j, m) in the naive form — a ~N× speedup on the
     // inner product. The stack scratch `sum_av` is bounded at d=16 (covers
     // HLA d=8 and most latents; larger d would need a heap scratch).
-    debug_assert!(d <= 16, "dense_accumulate: d > 16 needs a larger stack scratch");
+    debug_assert!(
+        d <= 16,
+        "dense_accumulate: d > 16 needs a larger stack scratch"
+    );
     for i in 0..n {
         let q_row = &scratch_q[i * k..(i + 1) * k];
         // Compute α_ij for all j into scratch_alpha.
@@ -596,7 +619,11 @@ pub fn identity(d: usize) -> Vec<f32> {
 /// `out.len()` must be `d * k`. Column `m` of the projection is `e_m`
 /// (one-hot at dimension `m`), so `(W · h)[m] = h[m]` for `m < k`.
 pub fn identity_projection_into(out: &mut [f32], d: usize, k: usize) {
-    debug_assert_eq!(out.len(), d * k, "identity_projection_into: out.len() must be d*k");
+    debug_assert_eq!(
+        out.len(),
+        d * k,
+        "identity_projection_into: out.len() must be d*k"
+    );
     // Column-major: element (row a, col m) at index a + m*d. Identity projection
     // has column m = e_m (one-hot at row m). So out[m + m*d] = 1.0.
     for elem in out.iter_mut() {
@@ -637,7 +664,18 @@ mod tests {
         let mut sa = vec![0.0; n];
         let cfg = SetAttentionConfig::new(1.0, 0.0); // γ=0 → no update
         set_sigmoid_attention_into(
-            &states, &w, &w, None, &mut output, &cfg, n, d, k, &mut sq, &mut sk, &mut sa,
+            &states,
+            &w,
+            &w,
+            None,
+            &mut output,
+            &cfg,
+            n,
+            d,
+            k,
+            &mut sq,
+            &mut sk,
+            &mut sa,
         )
         .unwrap();
         // output should equal states bit-exactly (γ=0 → no contribution).
@@ -661,11 +699,26 @@ mod tests {
         let mut sa = vec![0.0; n];
         let cfg = SetAttentionConfig::new(1.0, 0.5); // γ=0.5 — but v_j−h_i=0
         set_sigmoid_attention_into(
-            &states, &w, &w, None, &mut output, &cfg, n, d, k, &mut sq, &mut sk, &mut sa,
+            &states,
+            &w,
+            &w,
+            None,
+            &mut output,
+            &cfg,
+            n,
+            d,
+            k,
+            &mut sq,
+            &mut sk,
+            &mut sa,
         )
         .unwrap();
         for (o, s) in output.iter().zip(states.iter()) {
-            assert!((o - s).abs() < 1e-6, "identical states → no-op, got Δ={}", o - s);
+            assert!(
+                (o - s).abs() < 1e-6,
+                "identical states → no-op, got Δ={}",
+                o - s
+            );
         }
     }
 
@@ -687,22 +740,67 @@ mod tests {
         // Wrong states length.
         let bad_states = vec![0.0f32; n * d + 1];
         let err = set_sigmoid_attention_into(
-            &bad_states, &w_q, &w_k, None, &mut output, &cfg, n, d, k, &mut sq, &mut sk, &mut sa,
+            &bad_states,
+            &w_q,
+            &w_k,
+            None,
+            &mut output,
+            &cfg,
+            n,
+            d,
+            k,
+            &mut sq,
+            &mut sk,
+            &mut sa,
         )
         .unwrap_err();
-        assert_eq!(err, SetAttentionError::StatesLenMismatch { expected: n*d, got: n*d+1 });
+        assert_eq!(
+            err,
+            SetAttentionError::StatesLenMismatch {
+                expected: n * d,
+                got: n * d + 1
+            }
+        );
 
         // Wrong w_q length.
         let bad_wq = vec![0.0f32; d * k + 1];
         let err = set_sigmoid_attention_into(
-            &states, &bad_wq, &w_k, None, &mut output, &cfg, n, d, k, &mut sq, &mut sk, &mut sa,
+            &states,
+            &bad_wq,
+            &w_k,
+            None,
+            &mut output,
+            &cfg,
+            n,
+            d,
+            k,
+            &mut sq,
+            &mut sk,
+            &mut sa,
         )
         .unwrap_err();
-        assert_eq!(err, SetAttentionError::WqLenMismatch { expected: d*k, got: d*k+1 });
+        assert_eq!(
+            err,
+            SetAttentionError::WqLenMismatch {
+                expected: d * k,
+                got: d * k + 1
+            }
+        );
 
         // Zero dim.
         let err = set_sigmoid_attention_into(
-            &states, &w_q, &w_k, None, &mut output, &cfg, 0, d, k, &mut sq, &mut sk, &mut sa,
+            &states,
+            &w_q,
+            &w_k,
+            None,
+            &mut output,
+            &cfg,
+            0,
+            d,
+            k,
+            &mut sq,
+            &mut sk,
+            &mut sa,
         )
         .unwrap_err();
         assert_eq!(err, SetAttentionError::ZeroDim);

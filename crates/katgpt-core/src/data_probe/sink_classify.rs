@@ -613,8 +613,7 @@ pub fn classify_all_sinks(
 /// callers invoke **after** a forward pass. Direct wiring into the forward
 /// paths is deferred — staged integration once the synthetic G2 + latency
 /// G3 gates pass on a real model.
-#[derive(Debug, Clone)]
-#[derive(Default)]
+#[derive(Debug, Clone, Default)]
 pub enum SinkAwarePolicy {
     /// Default behavior: uniform sigmoid attention, no classifier overhead.
     /// Equivalent to current `parallax_attn` / `funcattn` behavior.
@@ -624,7 +623,6 @@ pub enum SinkAwarePolicy {
     /// if Broadcast. Carries the classifier thresholds.
     DualPolicy(SinkClassifierConfig),
 }
-
 
 /// Apply the dual-policy sigmoid gate to an attention output `O = A · V`.
 ///
@@ -707,14 +705,7 @@ pub fn apply_dual_policy_gate(
 
     // Classify. Pass `o` as update_O so stable rank is computed.
     let col = [_dominant_strength];
-    let diag = classify_sink_at(
-        dominant_pos,
-        &col,
-        values,
-        Some(o),
-        cfg,
-        scratch,
-    );
+    let diag = classify_sink_at(dominant_pos, &col, values, Some(o), cfg, scratch);
 
     match diag.kind {
         SinkKind::Nop => {
@@ -828,14 +819,11 @@ pub fn apply_dual_policy_gate_cached(
     out: &mut [Vec<f32>],
 ) -> SinkKind {
     let cadence = cached.audit_every_n.max(1);
-    let needs_audit = cached.cached_kind.is_none()
-        || cached.calls_since_audit >= cadence;
+    let needs_audit = cached.cached_kind.is_none() || cached.calls_since_audit >= cadence;
 
     if needs_audit {
         let policy = SinkAwarePolicy::DualPolicy(cached.cfg);
-        let kind = apply_dual_policy_gate(
-            attn, values, o, &policy, gate_scale, scratch, out,
-        );
+        let kind = apply_dual_policy_gate(attn, values, o, &policy, gate_scale, scratch, out);
         cached.cached_kind = Some(kind);
         cached.calls_since_audit = 1;
         return kind;
@@ -946,7 +934,13 @@ pub fn stable_rank_update_into_flat(
     if n == 0 || d == 0 {
         return 0.0;
     }
-    debug_assert_eq!(o.len(), n * d, "flat stable_rank: o must be (n={}, d={}) flat", n, d);
+    debug_assert_eq!(
+        o.len(),
+        n * d,
+        "flat stable_rank: o must be (n={}, d={}) flat",
+        n,
+        d
+    );
     scratch.ensure_capacity_dn(d, n);
     let v = &mut scratch.v[..d];
     let w = &mut scratch.w[..d];
@@ -1151,8 +1145,16 @@ pub fn classify_all_sinks_flat(
     if n == 0 {
         return;
     }
-    debug_assert_eq!(attn.len(), n * n, "flat classify_all_sinks: attn must be (n, n)");
-    debug_assert_eq!(values.len(), n * d, "flat classify_all_sinks: values must be (n, d)");
+    debug_assert_eq!(
+        attn.len(),
+        n * n,
+        "flat classify_all_sinks: attn must be (n, n)"
+    );
+    debug_assert_eq!(
+        values.len(),
+        n * d,
+        "flat classify_all_sinks: values must be (n, d)"
+    );
 
     scratch.ensure_capacity_dn(d, n);
     let col_sums = &mut scratch.col_sums;
@@ -1322,9 +1324,8 @@ pub fn apply_dual_policy_gate_cached_flat(
 
     if needs_audit {
         let policy = SinkAwarePolicy::DualPolicy(cached.cfg);
-        let kind = apply_dual_policy_gate_flat(
-            attn, values, o, n, d, &policy, gate_scale, scratch, out,
-        );
+        let kind =
+            apply_dual_policy_gate_flat(attn, values, o, n, d, &policy, gate_scale, scratch, out);
         cached.cached_kind = Some(kind);
         cached.calls_since_audit = 1;
         return kind;

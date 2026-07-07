@@ -72,7 +72,12 @@ fn g1_correctness() -> bool {
     }
 
     // 4. Gate query at threshold = 0.5.
-    let g = functor_edge_gate(&[0.6, 0.8], &FunctorEdgeParams::new([0u8; 32], 0, 8.0, 0.6), &[1.0, 0.0], 2);
+    let g = functor_edge_gate(
+        &[0.6, 0.8],
+        &FunctorEdgeParams::new([0u8; 32], 0, 8.0, 0.6),
+        &[1.0, 0.0],
+        2,
+    );
     if (g - 0.5).abs() > 1e-6 {
         eprintln!("G1.4 FAIL: gate={g} expected ~0.5");
         return false;
@@ -134,7 +139,13 @@ fn g2_perf_apply_d64() -> (f64, f64) {
     let iters = 10_000;
     let start = std::time::Instant::now();
     for _ in 0..iters {
-        apply_functor_edge_into(black_box(&state), black_box(&params), black_box(&direction), d, black_box(&mut out));
+        apply_functor_edge_into(
+            black_box(&state),
+            black_box(&params),
+            black_box(&direction),
+            d,
+            black_box(&mut out),
+        );
     }
     let elapsed = start.elapsed();
     let ns_per_call = elapsed.as_nanos() as f64 / iters as f64;
@@ -176,24 +187,38 @@ fn main() {
 
     // G1
     let g1 = g1_correctness();
-    println!("G1 (correctness):     {}", if g1 { "✅ PASS" } else { "❌ FAIL" });
+    println!(
+        "G1 (correctness):     {}",
+        if g1 { "✅ PASS" } else { "❌ FAIL" }
+    );
 
     // G2
     let (apply_ns, _) = g2_perf_apply_d64();
     let g2 = apply_ns < 200.0;
-    println!("G2 (perf, apply D=64): {} — {apply_ns:.1} ns/call (target < 200 ns)", if g2 { "✅ PASS" } else { "❌ FAIL" });
+    println!(
+        "G2 (perf, apply D=64): {} — {apply_ns:.1} ns/call (target < 200 ns)",
+        if g2 { "✅ PASS" } else { "❌ FAIL" }
+    );
 
     // G2-alloc
     let g2a = g2_alloc_check();
-    println!("G2-alloc (0 hot alloc): {}", if g2a { "✅ PASS" } else { "❌ FAIL" });
+    println!(
+        "G2-alloc (0 hot alloc): {}",
+        if g2a { "✅ PASS" } else { "❌ FAIL" }
+    );
 
     // G3 — verified at command line (cargo check --all-features / --no-default)
-    println!("G3 (no-regression):   ✅ PASS (verified: default + --all-features + --no-default clean)");
+    println!(
+        "G3 (no-regression):   ✅ PASS (verified: default + --all-features + --no-default clean)"
+    );
 
     // G4
     let g4 = g4_struct_sizes();
     let sz = std::mem::size_of::<FunctorEdgeParams>();
-    println!("G4 (struct size ≤64): {} — size_of::<FunctorEdgeParams> = {sz} bytes", if g4 { "✅ PASS" } else { "❌ FAIL" });
+    println!(
+        "G4 (struct size ≤64): {} — size_of::<FunctorEdgeParams> = {sz} bytes",
+        if g4 { "✅ PASS" } else { "❌ FAIL" }
+    );
 
     // G5/G6
     println!("G5/G6 (modelless):    ✅ PASS (closed-form cosine + sigmoid + SAXPY, no training)");

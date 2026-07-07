@@ -142,14 +142,7 @@ impl HullHalf {
     ///
     /// `best_raw` is the score in *stored* (negated for lower hull) space;
     /// comparing against it avoids two `sign` multiplies per step.
-    fn walk_left(
-        &self,
-        best_idx: usize,
-        qx: f64,
-        qy: f64,
-        best_raw: f64,
-        combined: &mut HullMeta,
-    ) {
+    fn walk_left(&self, best_idx: usize, qx: f64, qy: f64, best_raw: f64, combined: &mut HullMeta) {
         let lines = self.cht.lines();
         let mut i = best_idx;
         while i > 0 {

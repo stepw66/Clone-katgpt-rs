@@ -102,11 +102,7 @@ fn attention_output_cosine_sim(logits: &[f32], gold_index: usize, d_model: usize
     // Cosine similarity.
     let dot: f32 = output.iter().zip(gold_vec.iter()).map(|(a, b)| a * b).sum();
     let norm_o: f32 = output.iter().map(|x| x * x).sum::<f32>().sqrt();
-    if norm_o > 1e-10 {
-        dot / norm_o
-    } else {
-        0.0
-    }
+    if norm_o > 1e-10 { dot / norm_o } else { 0.0 }
 }
 
 // ── main ──────────────────────────────────────────────────────────────────
@@ -142,10 +138,17 @@ fn main() {
         }
         println!(
             "{:>10}  {:>12.6}  {:>12.6}  {:>12.2}  {:>12}",
-            n, DELTA, est_delta, rel_err, if converged { "YES" } else { "NO" }
+            n,
+            DELTA,
+            est_delta,
+            rel_err,
+            if converged { "YES" } else { "NO" }
         );
     }
-    println!("\nG1 (convergence): {}\n", if g1_pass { "✅ PASS" } else { "❌ FAIL" });
+    println!(
+        "\nG1 (convergence): {}\n",
+        if g1_pass { "✅ PASS" } else { "❌ FAIL" }
+    );
 
     // ── G2: Retrieval parity — estimator vs analytical s_L=1/Δ ────────────
     println!("── G2 (retrieval parity): estimator vs analytical s_L=1/Δ ──────");
@@ -171,7 +174,9 @@ fn main() {
         // Analytical SSMax: s_L = 1/Δ (the oracle).
         let log_n = (n as f32).ln();
         let (mut analytical_logits, _) = build_retrieval_task(n, DELTA, 999);
-        let mode_analytical = SsmaxMode::Adaptive { rolling_delta: DELTA };
+        let mode_analytical = SsmaxMode::Adaptive {
+            rolling_delta: DELTA,
+        };
         apply_ssmax_inplace(&mut analytical_logits, &mode_analytical, log_n);
         let analytical_cos = attention_output_cosine_sim(&analytical_logits, gold_index, d_model);
 
@@ -193,10 +198,17 @@ fn main() {
 
         println!(
             "{:>10}  {:>14.6}  {:>14.6}  {:>14.6}  {:>10}",
-            n, base_cos, analytical_cos, est_cos, if parity { "✓" } else { "✗" }
+            n,
+            base_cos,
+            analytical_cos,
+            est_cos,
+            if parity { "✓" } else { "✗" }
         );
     }
-    println!("\nG2 (retrieval parity): {}\n", if g2_pass { "✅ PASS" } else { "❌ FAIL" });
+    println!(
+        "\nG2 (retrieval parity): {}\n",
+        if g2_pass { "✅ PASS" } else { "❌ FAIL" }
+    );
 
     // ── G3: Latency — observe_row + to_mode overhead ──────────────────────
     println!("── G3 (latency): observe_row + to_mode overhead ────────────────");
@@ -221,10 +233,15 @@ fn main() {
     let g3_pass = per_call_ns < 100_000.0; // < 100µs target
     println!(
         "  observe_row + to_mode at N={}: {:.1} ns/call ({:.2} µs/call)",
-        n, per_call_ns, per_call_ns / 1000.0
+        n,
+        per_call_ns,
+        per_call_ns / 1000.0
     );
     println!("  Target: < 100,000 ns (100 µs)");
-    println!("\nG3 (latency): {}\n", if g3_pass { "✅ PASS" } else { "❌ FAIL" });
+    println!(
+        "\nG3 (latency): {}\n",
+        if g3_pass { "✅ PASS" } else { "❌ FAIL" }
+    );
 
     // ── G4: Alloc-free — 0 allocations over 1000 observe_row calls ────────
     println!("── G4 (alloc-free): 0 allocations over 1000 calls ──────────────");
@@ -239,7 +256,10 @@ fn main() {
     let allocs = after - before;
     let g4_pass = allocs == 0;
     println!("  Allocations: {}", allocs);
-    println!("\nG4 (alloc-free): {}\n", if g4_pass { "✅ PASS" } else { "❌ FAIL" });
+    println!(
+        "\nG4 (alloc-free): {}\n",
+        if g4_pass { "✅ PASS" } else { "❌ FAIL" }
+    );
 
     // ── G5: No-regression — warm-start matches Fixed { s_l: 1.0 } ─────────
     println!("── G5 (no-regression): warm-start matches Fixed {{ s_l: 1.0 }} ──");
@@ -248,19 +268,47 @@ fn main() {
     let warm_s_l = warm_mode.resolve_s_l();
     let fixed_s_l = SsmaxMode::Fixed { s_l: 1.0 }.resolve_s_l();
     let g5_pass = (warm_s_l - fixed_s_l).abs() < 1e-6;
-    println!("  Warm-start s_L = {:.6}, Fixed s_L = {:.6}", warm_s_l, fixed_s_l);
-    println!("\nG5 (no-regression): {}\n", if g5_pass { "✅ PASS" } else { "❌ FAIL" });
+    println!(
+        "  Warm-start s_L = {:.6}, Fixed s_L = {:.6}",
+        warm_s_l, fixed_s_l
+    );
+    println!(
+        "\nG5 (no-regression): {}\n",
+        if g5_pass { "✅ PASS" } else { "❌ FAIL" }
+    );
 
     // ── Summary ───────────────────────────────────────────────────────────
     println!("══════════════════════════════════════════════════════════════════");
     println!("  Summary");
     println!("══════════════════════════════════════════════════════════════════");
-    println!("  G1 (convergence):     {}", if g1_pass { "✅ PASS" } else { "❌ FAIL" });
-    println!("  G2 (retrieval parity):{}", if g2_pass { "✅ PASS" } else { "❌ FAIL" });
-    println!("  G3 (latency):         {}", if g3_pass { "✅ PASS" } else { "❌ FAIL" });
-    println!("  G4 (alloc-free):      {}", if g4_pass { "✅ PASS" } else { "❌ FAIL" });
-    println!("  G5 (no-regression):   {}", if g5_pass { "✅ PASS" } else { "❌ FAIL" });
+    println!(
+        "  G1 (convergence):     {}",
+        if g1_pass { "✅ PASS" } else { "❌ FAIL" }
+    );
+    println!(
+        "  G2 (retrieval parity):{}",
+        if g2_pass { "✅ PASS" } else { "❌ FAIL" }
+    );
+    println!(
+        "  G3 (latency):         {}",
+        if g3_pass { "✅ PASS" } else { "❌ FAIL" }
+    );
+    println!(
+        "  G4 (alloc-free):      {}",
+        if g4_pass { "✅ PASS" } else { "❌ FAIL" }
+    );
+    println!(
+        "  G5 (no-regression):   {}",
+        if g5_pass { "✅ PASS" } else { "❌ FAIL" }
+    );
     let all_pass = g1_pass && g2_pass && g3_pass && g4_pass && g5_pass;
-    println!("\n  Overall: {}", if all_pass { "✅ ALL GATES PASS" } else { "❌ SOME GATES FAILED" });
+    println!(
+        "\n  Overall: {}",
+        if all_pass {
+            "✅ ALL GATES PASS"
+        } else {
+            "❌ SOME GATES FAILED"
+        }
+    );
     println!("\n══════════════════════════════════════════════════════════════════");
 }

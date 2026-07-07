@@ -413,14 +413,7 @@ impl<V: Clone> ZoneDensityCache<V> {
     /// Insert a value. **Sparse-tier zones are silently skipped** (never cached)
     /// — see the type-level invariant. Transitional/Dense tiers overwrite any
     /// prior entry for the same `zone_id`.
-    pub fn insert(
-        &self,
-        zone_id: u32,
-        density: f32,
-        tier: DensityTier,
-        tick: u64,
-        value: V,
-    ) {
+    pub fn insert(&self, zone_id: u32, density: f32, tier: DensityTier, tick: u64, value: V) {
         // Sparse-tier zones are NEVER cached.
         if tier == DensityTier::Sparse {
             return;
@@ -478,7 +471,9 @@ mod tests {
         // monotonically non-increasing. Sample 20 evenly-spaced points.
         let cfg = DensityClassifyConfig::default();
         let n = 20;
-        let pop: Vec<f32> = (0..n).map(|i| (i as f32) * (50.0 / (n - 1) as f32)).collect();
+        let pop: Vec<f32> = (0..n)
+            .map(|i| (i as f32) * (50.0 / (n - 1) as f32))
+            .collect();
         let mut mob = vec![0.0f32; n];
         let mut tier = vec![DensityTier::Transitional; n];
         let mut key = vec![0u64; n];
@@ -487,12 +482,24 @@ mod tests {
             assert!(
                 mob[i] <= mob[i - 1] + 1e-6,
                 "monotonicity broken at i={}: mob[{}]={} > mob[{}]={}",
-                i, i - 1, mob[i - 1], i, mob[i]
+                i,
+                i - 1,
+                mob[i - 1],
+                i,
+                mob[i]
             );
         }
         // Sanity: endpoints actually span the dynamic range.
-        assert!(mob[0] > 0.9, "ρ=0 should give mobility near 1.0, got {}", mob[0]);
-        assert!(mob[n - 1] < 0.05, "ρ=50 should give mobility near 0, got {}", mob[n - 1]);
+        assert!(
+            mob[0] > 0.9,
+            "ρ=0 should give mobility near 1.0, got {}",
+            mob[0]
+        );
+        assert!(
+            mob[n - 1] < 0.05,
+            "ρ=50 should give mobility near 0, got {}",
+            mob[n - 1]
+        );
     }
 
     // ── T2.1.2 Midpoint (mobility ≈ 0.5 at ρ = rho0) ──
@@ -541,19 +548,41 @@ mod tests {
         let mut key = [0u64; 4];
         let _ = zone_density_classify(&pop, &cfg, &mut mob, &mut tier, &mut key);
 
-        assert_eq!(tier[0], DensityTier::Sparse, "just-above-high must be Sparse (mob={})", mob[0]);
         assert_eq!(
-            tier[1], DensityTier::Transitional,
-            "mobility == tier_high must be Transitional (strict >), mob={}", mob[1]
+            tier[0],
+            DensityTier::Sparse,
+            "just-above-high must be Sparse (mob={})",
+            mob[0]
         );
         assert_eq!(
-            tier[2], DensityTier::Transitional,
-            "mobility == tier_low must be Transitional (strict <), mob={}", mob[2]
+            tier[1],
+            DensityTier::Transitional,
+            "mobility == tier_high must be Transitional (strict >), mob={}",
+            mob[1]
         );
-        assert_eq!(tier[3], DensityTier::Dense, "saturated dense (mob~0) must be Dense, mob={}", mob[3]);
+        assert_eq!(
+            tier[2],
+            DensityTier::Transitional,
+            "mobility == tier_low must be Transitional (strict <), mob={}",
+            mob[2]
+        );
+        assert_eq!(
+            tier[3],
+            DensityTier::Dense,
+            "saturated dense (mob~0) must be Dense, mob={}",
+            mob[3]
+        );
         // Sanity: the resolved boundaries actually produce the expected mobilities.
-        assert!((mob[1] - cfg.tier_high).abs() < 1e-4, "mob[1]={} ~= tier_high", mob[1]);
-        assert!((mob[2] - cfg.tier_low).abs() < 1e-4, "mob[2]={} ~= tier_low", mob[2]);
+        assert!(
+            (mob[1] - cfg.tier_high).abs() < 1e-4,
+            "mob[1]={} ~= tier_high",
+            mob[1]
+        );
+        assert!(
+            (mob[2] - cfg.tier_low).abs() < 1e-4,
+            "mob[2]={} ~= tier_low",
+            mob[2]
+        );
     }
 
     // ── T2.1.4 Cache key round-trip ──
@@ -632,9 +661,17 @@ mod tests {
         // Must not panic.
         let _ = zone_density_classify(&pop, &cfg, &mut mob, &mut tier, &mut key);
         // NaN propagates into mobility (sigmoid(NaN) = NaN).
-        assert!(mob[0].is_nan(), "NaN population → NaN mobility, got {}", mob[0]);
+        assert!(
+            mob[0].is_nan(),
+            "NaN population → NaN mobility, got {}",
+            mob[0]
+        );
         // NaN matches no `>` / `<` arm → falls through to Transitional.
-        assert_eq!(tier[0], DensityTier::Transitional, "NaN → Transitional fallback");
+        assert_eq!(
+            tier[0],
+            DensityTier::Transitional,
+            "NaN → Transitional fallback"
+        );
         // Infinity: -β·(∞ - ρ0) = -∞ → sigmoid(-∞) = 0.0 < 0.3 → Dense.
         assert_eq!(tier[2], DensityTier::Dense, "INFINITY → Dense");
         // Cache key bucket for NaN: `(NaN * 0.5).floor().max(0.0) as u64` → 0.
@@ -707,7 +744,11 @@ mod tests {
         let mut order = [99u32; 4]; // sentinel — must remain untouched
         let mut scratch = Vec::new();
         schedule_outer_first(&pop, &mut order, &mut scratch);
-        assert_eq!(order, [99, 99, 99, 99], "empty input must not write anything");
+        assert_eq!(
+            order,
+            [99, 99, 99, 99],
+            "empty input must not write anything"
+        );
         assert!(scratch.is_empty(), "scratch cleared after empty input");
     }
 
@@ -727,7 +768,11 @@ mod tests {
         // Third call with different population, same scratch — no stale state.
         let pop2 = [9.0f32, 0.0, 4.0];
         schedule_outer_first(&pop2, &mut order, &mut scratch);
-        assert_eq!(order, [1, 2, 0], "densities idx1=0, idx2=4, idx0=9 → [1,2,0]");
+        assert_eq!(
+            order,
+            [1, 2, 0],
+            "densities idx1=0, idx2=4, idx0=9 → [1,2,0]"
+        );
     }
 
     // ── ZoneDensityCache ──
@@ -848,7 +893,11 @@ mod tests {
             let mut total_hits = 0u32;
             let mut total_misses = 0u32;
             for i in 0..1000u32 {
-                let tier = if i % 2 == 0 { DensityTier::Dense } else { DensityTier::Transitional };
+                let tier = if i % 2 == 0 {
+                    DensityTier::Dense
+                } else {
+                    DensityTier::Transitional
+                };
                 match cache_reader.get_or_invalidate(i, (i % 20) as f32, tier, 0, 2.0) {
                     Some(_) => total_hits += 1,
                     None => total_misses += 1,
@@ -865,6 +914,9 @@ mod tests {
         assert_eq!(hits + misses, 1000, "reader must observe all 1000 zones");
         // Cache should have *some* non-sparse entries from the writer (666 of
         // 1000, modulo eviction races). At minimum it shouldn't be empty.
-        assert!(!cache.is_empty() || hits > 0, "cache should be non-empty or hits observed");
+        assert!(
+            !cache.is_empty() || hits > 0,
+            "cache should be non-empty or hits observed"
+        );
     }
 }

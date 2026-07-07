@@ -220,9 +220,10 @@ pub fn should_execute_layer(
     }
     // Second check: does Hydra skip this layer?
     if let Some(sp) = skip_plan
-        && sp.skip_layers.get(layer_idx) {
-            return false;
-        }
+        && sp.skip_layers.get(layer_idx)
+    {
+        return false;
+    }
     true
 }
 

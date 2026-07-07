@@ -125,7 +125,13 @@ fn main() {
 
     println!("=== KARC + Conformal Overlay (Plan 340 Phase 2 T2.2) ===");
     println!("System: Lorenz-63 (σ={}, ρ={}, β={:.4})", SIGMA, RHO, BETA);
-    println!("KARC shape: D={}, M={}, K={} (d_h = {})", D, M, K, K * D * M);
+    println!(
+        "KARC shape: D={}, M={}, K={} (d_h = {})",
+        D,
+        M,
+        K,
+        K * D * M
+    );
     println!("n_train={}, n_test={}, dt={}", n_train, n_test, dt);
     println!("Trajectory normalized to [-1, 1] per channel (Chebyshev requires |x| ≤ 1)");
     println!();
@@ -170,8 +176,9 @@ fn main() {
     use katgpt_core::KarcChannelForecaster;
 
     let alpha = 0.05_f32;
-    let mut calibrators: Vec<ConformalIntervalCalibrator<KarcChannelForecaster<ChebyshevBasis<M>, D, M, K>>> =
-        Vec::with_capacity(D);
+    let mut calibrators: Vec<
+        ConformalIntervalCalibrator<KarcChannelForecaster<ChebyshevBasis<M>, D, M, K>>,
+    > = Vec::with_capacity(D);
     for ch in 0..D {
         // Each channel gets its own KARC adapter (sharing the same fitted
         // Wout via clone). In production you'd keep ONE KARC forecaster and
@@ -181,9 +188,9 @@ fn main() {
         let adapter = KarcChannelForecaster::new(karc_clone, ch);
         let cal = ConformalIntervalCalibrator::new(
             adapter,
-            1, // 1 channel per calibrator (per-channel)
-            1, // max_h = 1 (KARC is h=1)
-            1, // m = 1 (non-seasonal)
+            1,   // 1 channel per calibrator (per-channel)
+            1,   // max_h = 1 (KARC is h=1)
+            1,   // m = 1 (non-seasonal)
             256, // capacity
             0.0, // no recency decay (stationary within the test window)
             DecayUnit::Step,
@@ -206,7 +213,10 @@ fn main() {
         let actual_row = &traj[(t + 1) * D..(t + 2) * D];
         // KARC forecast for this step (all D channels).
         let mut point = [0.0_f32; D];
-        calibrators[0].forecaster.karc.forecast_into(&ds, &mut point);
+        calibrators[0]
+            .forecaster
+            .karc
+            .forecast_into(&ds, &mut point);
         for ch in 0..D {
             calibrators[ch].update_residual(actual_row[ch], point[ch], 0, 1);
             calibrators[ch].step();
@@ -229,7 +239,10 @@ fn main() {
 
         // KARC forecasts all D channels in one matvec.
         let mut point = [0.0_f32; D];
-        calibrators[0].forecaster.karc.forecast_into(&ds, &mut point);
+        calibrators[0]
+            .forecaster
+            .karc
+            .forecast_into(&ds, &mut point);
 
         for ch in 0..D {
             // Read the calibrated interval (point-supplied path — the
@@ -258,7 +271,10 @@ fn main() {
     for ch in 0..D {
         let cov = empirical_coverage(&all_intervals[ch], &all_actuals[ch]);
         let crps = mean_crps_interval(&all_intervals[ch], &all_actuals[ch]);
-        let mean_half: f32 = all_intervals[ch].iter().map(|iv| iv.half_width()).sum::<f32>()
+        let mean_half: f32 = all_intervals[ch]
+            .iter()
+            .map(|iv| iv.half_width())
+            .sum::<f32>()
             / all_intervals[ch].len() as f32;
         let rmse: f32 = {
             let mut se = 0.0_f32;
@@ -269,11 +285,7 @@ fn main() {
         };
         println!(
             "{:<8} {:>12.4} {:>12.4} {:>12.4} {:>12.4}",
-            channel_names[ch],
-            cov,
-            crps,
-            mean_half,
-            rmse
+            channel_names[ch], cov, crps, mean_half, rmse
         );
         // Gate: coverage in [0.90, 1.00] (chaotic regime, widened lower bound).
         if !(0.90..=1.00).contains(&cov) {
@@ -285,9 +297,13 @@ fn main() {
     println!("Target coverage (1−α): {:.4}", target_cov);
     println!("Coverage gate: [0.90, 1.00] (chaotic regime, widened from Phase 1 [0.93, 0.97])");
     if all_pass {
-        println!("✅ All channels pass the coverage gate — KARC + conformal overlay is calibrated.");
+        println!(
+            "✅ All channels pass the coverage gate — KARC + conformal overlay is calibrated."
+        );
     } else {
-        println!("⚠ At least one channel outside [0.90, 1.00] — investigate residual distribution.");
+        println!(
+            "⚠ At least one channel outside [0.90, 1.00] — investigate residual distribution."
+        );
     }
 }
 

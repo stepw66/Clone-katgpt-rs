@@ -213,9 +213,7 @@ fn g7_blake3_commitment_clean_loads_and_tamper_refusal() {
         "G7 (a): clean-loaded probe must forecast identically to original \
          (orig={f_orig}, loaded={f_loaded})"
     );
-    println!(
-        "G7 (a) PASS: clean round-trip load serves, forecast probability = {f_loaded:.6}"
-    );
+    println!("G7 (a) PASS: clean round-trip load serves, forecast probability = {f_loaded:.6}");
 
     // ── (b) Tampered reload refuses ─────────────────────────────────────
     // The commitment bytes are `layer (LE u64) || bias (LE f32) || direction
@@ -317,7 +315,9 @@ fn refuses(candidate: &str) -> bool {
 /// bit-reproducible across runs.
 fn deterministic_noise(seed: usize, dim: usize) -> f32 {
     // Simple LCG-derived noise. Deterministic, zero-mean over seeds, bounded.
-    let s = (seed.wrapping_mul(2654435761_usize).wrapping_add(dim.wrapping_mul(40503))) as f32;
+    let s = (seed
+        .wrapping_mul(2654435761_usize)
+        .wrapping_add(dim.wrapping_mul(40503))) as f32;
     (s / 65536.0).fract() - 0.5
 }
 
@@ -577,7 +577,10 @@ fn g3_format_filter_rate_below_10pct() {
         let pool = make_candidate_pool(p, 5, 5);
         // Sanity: every candidate in the pool passes format (generator contract).
         for c in &pool {
-            assert!(passes_format(c), "generator produced malformed candidate {c:?}");
+            assert!(
+                passes_format(c),
+                "generator produced malformed candidate {c:?}"
+            );
         }
         let mut sel = FpcgSelector::new(
             CorpusGenerator {

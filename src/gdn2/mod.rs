@@ -71,6 +71,6 @@ pub use katgpt_attn::gdn2::forward::{forward_gdn2, generate_gdn2_into};
 // Re-export the substrate API at `crate::gdn2::*` for backward compatibility
 // with all existing call sites.
 pub use katgpt_attn::gdn2::{
-    gdn2_recurrent_step, gdn2_state_readout, gdn2_state_update, l2_normalize, sigmoid,
-    Gdn2GateConfig, Gdn2HeadState, Gdn2LayerState, MultiLayerGdn2Cache,
+    Gdn2GateConfig, Gdn2HeadState, Gdn2LayerState, MultiLayerGdn2Cache, gdn2_recurrent_step,
+    gdn2_state_readout, gdn2_state_update, l2_normalize, sigmoid,
 };

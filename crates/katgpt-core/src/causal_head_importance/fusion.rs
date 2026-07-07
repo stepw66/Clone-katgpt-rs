@@ -165,13 +165,13 @@ mod tests {
         };
         let rms0 = rms(&out[0..head_dim]);
         let rms1 = rms(&out[head_dim..2 * head_dim]);
-        assert!(
-            (rms0 - 1.0).abs() < 1e-3,
-            "FA head not ~unit-RMS: {rms0}"
-        );
+        assert!((rms0 - 1.0).abs() < 1e-3, "FA head not ~unit-RMS: {rms0}");
         assert!((rms1 - 1.0).abs() < 1e-3, "GDN head not ~unit-RMS: {rms1}");
         // Scale unification: the ~10× input magnitude difference (FA=10 vs
         // GDN=0.1) collapses to a small relative gap after RMSNorm.
-        assert!((rms0 - rms1).abs() < 1e-3, "scales not unified: {rms0} vs {rms1}");
+        assert!(
+            (rms0 - rms1).abs() < 1e-3,
+            "scales not unified: {rms0} vs {rms1}"
+        );
     }
 }

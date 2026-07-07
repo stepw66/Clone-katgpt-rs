@@ -47,27 +47,33 @@ use core::cmp::Ordering;
 /// fast path covers all realistic configs.
 const WEIGHTS_BUF_LEN: usize = 1024;
 
+#[cfg(all(
+    feature = "conformal_predictive_intervals",
+    feature = "karc_forecaster"
+))]
+mod karc_adapter;
 pub mod metrics;
 mod ring;
 mod seasonal;
-#[cfg(all(feature = "conformal_predictive_intervals", feature = "karc_forecaster"))]
-mod karc_adapter;
 // Issue 010 T2 — "Report the Floor" comparison harness. Gated on
 // `conformal_predictive_intervals` because it depends on the floor
 // (`ConformalIntervalCalibrator<SeasonalNaiveForecaster>`).
 #[cfg(feature = "conformal_predictive_intervals")]
 mod floor_harness;
 
-pub use metrics::{crps, empirical_coverage, winkler_score};
-pub use ring::{ResidualRingBuffer, RingBuffer};
-pub use seasonal::{seasonal_naive_floor, SeasonalNaiveForecaster, SeasonalPoolForecaster};
-#[cfg(all(feature = "conformal_predictive_intervals", feature = "karc_forecaster"))]
-pub use karc_adapter::KarcChannelForecaster;
 #[cfg(feature = "conformal_predictive_intervals")]
 pub use floor_harness::{
-    empirical_quantile_interval, FloorAdapter, FloorComparisonReport, OverallVerdict,
-    PredictiveOutput, TrajectoryCorpus, UqMetrics, UqPrimitiveUnderTest, run_floor_comparison,
+    FloorAdapter, FloorComparisonReport, OverallVerdict, PredictiveOutput, TrajectoryCorpus,
+    UqMetrics, UqPrimitiveUnderTest, empirical_quantile_interval, run_floor_comparison,
 };
+#[cfg(all(
+    feature = "conformal_predictive_intervals",
+    feature = "karc_forecaster"
+))]
+pub use karc_adapter::KarcChannelForecaster;
+pub use metrics::{crps, empirical_coverage, winkler_score};
+pub use ring::{ResidualRingBuffer, RingBuffer};
+pub use seasonal::{SeasonalNaiveForecaster, SeasonalPoolForecaster, seasonal_naive_floor};
 
 /// A point forecaster that produces a single deterministic forecast.
 ///
@@ -358,7 +364,8 @@ impl<F: PointForecaster> ConformalIntervalCalibrator<F> {
         let mut point = 0.0_f32;
         self.forecaster.forecast_into(&[], h, &mut point);
 
-        let (q_lo, q_hi) = self.weighted_quantile_pair(channel, bucket, 0.5 * alpha, 1.0 - 0.5 * alpha);
+        let (q_lo, q_hi) =
+            self.weighted_quantile_pair(channel, bucket, 0.5 * alpha, 1.0 - 0.5 * alpha);
 
         out.lower = point + q_lo;
         out.point = point;
@@ -382,7 +389,8 @@ impl<F: PointForecaster> ConformalIntervalCalibrator<F> {
             "alpha must be in [0, 0.5] for a two-tailed interval"
         );
         let bucket = self.bucket_index(h);
-        let (q_lo, q_hi) = self.weighted_quantile_pair(channel, bucket, 0.5 * alpha, 1.0 - 0.5 * alpha);
+        let (q_lo, q_hi) =
+            self.weighted_quantile_pair(channel, bucket, 0.5 * alpha, 1.0 - 0.5 * alpha);
         out.lower = point + q_lo;
         out.point = point;
         out.upper = point + q_hi;
@@ -448,8 +456,10 @@ impl<F: PointForecaster> ConformalIntervalCalibrator<F> {
                 let med = view.get_sorted(n / 2).0;
                 return (med, med);
             }
-            let q_lo = Self::quantile_from_weights(&view, &weights[..n], total_w, p_lo, self.orientation);
-            let q_hi = Self::quantile_from_weights(&view, &weights[..n], total_w, p_hi, self.orientation);
+            let q_lo =
+                Self::quantile_from_weights(&view, &weights[..n], total_w, p_lo, self.orientation);
+            let q_hi =
+                Self::quantile_from_weights(&view, &weights[..n], total_w, p_hi, self.orientation);
             return (q_lo, q_hi);
         }
 
@@ -652,11 +662,11 @@ mod tests {
         let f = ConstForecaster { value: 42.0 };
         let mut cal = ConformalIntervalCalibrator::new(
             f,
-            1,    // 1 channel
-            8,    // max_h
-            1,    // m
-            16,   // capacity
-            0.0,  // no decay
+            1,   // 1 channel
+            8,   // max_h
+            1,   // m
+            16,  // capacity
+            0.0, // no decay
             DecayUnit::Step,
             ResidualMode::HStep,
             false,
@@ -675,7 +685,15 @@ mod tests {
         // should straddle zero symmetrically.
         let f = ConstForecaster { value: 10.0 };
         let mut cal = ConformalIntervalCalibrator::new(
-            f, 1, 1, 1, 64, 0.0, DecayUnit::Step, ResidualMode::HStep, false,
+            f,
+            1,
+            1,
+            1,
+            64,
+            0.0,
+            DecayUnit::Step,
+            ResidualMode::HStep,
+            false,
         );
         // residuals: actual − forecast
         for &r in &[-2.0_f32, -1.0, 1.0, 2.0] {
@@ -696,13 +714,24 @@ mod tests {
     fn coverage_violation_flag() {
         let f = ConstForecaster { value: 0.0 };
         let mut cal = ConformalIntervalCalibrator::new(
-            f, 1, 1, 1, 64, 0.0, DecayUnit::Step, ResidualMode::HStep, false,
+            f,
+            1,
+            1,
+            1,
+            64,
+            0.0,
+            DecayUnit::Step,
+            ResidualMode::HStep,
+            false,
         );
         for &r in &[-1.0_f32, 1.0] {
             cal.update_residual(r, 0.0, 0, 1);
         }
         // α=0.5 → interval is roughly [−1, +1].
-        assert!(!cal.coverage_violation(0.0, 0, 1, 0.5), "0 should be inside");
+        assert!(
+            !cal.coverage_violation(0.0, 0, 1, 0.5),
+            "0 should be inside"
+        );
         assert!(
             cal.coverage_violation(5.0, 0, 1, 0.5),
             "5 should be outside"
@@ -715,7 +744,15 @@ mod tests {
         // should be the average of two consecutive sorted residuals.
         let f = ConstForecaster { value: 0.0 };
         let mut cal = ConformalIntervalCalibrator::new(
-            f, 1, 1, 1, 64, 0.0, DecayUnit::Step, ResidualMode::HStep, true,
+            f,
+            1,
+            1,
+            1,
+            64,
+            0.0,
+            DecayUnit::Step,
+            ResidualMode::HStep,
+            true,
         );
         for &r in &[0.0_f32, 10.0] {
             cal.update_residual(r, 0.0, 0, 1);
@@ -733,7 +770,15 @@ mod tests {
         let mk = || {
             let f = ConstForecaster { value: 1.0 };
             let mut cal = ConformalIntervalCalibrator::new(
-                f, 1, 1, 1, 32, 0.01, DecayUnit::Step, ResidualMode::HStep, false,
+                f,
+                1,
+                1,
+                1,
+                32,
+                0.01,
+                DecayUnit::Step,
+                ResidualMode::HStep,
+                false,
             );
             for i in 0..16 {
                 let r = (i as f32) * 0.5 - 4.0;
@@ -749,10 +794,22 @@ mod tests {
         for &alpha in &[0.01_f32, 0.05, 0.1, 0.2] {
             a.interval_into(0, 1, alpha, &mut iva);
             b.interval_into(0, 1, alpha, &mut ivb);
-            assert_eq!(iva.lower.to_bits(), ivb.lower.to_bits(),
-                "alpha={} lower mismatch {} vs {}", alpha, iva.lower, ivb.lower);
-            assert_eq!(iva.upper.to_bits(), ivb.upper.to_bits(),
-                "alpha={} upper mismatch {} vs {}", alpha, iva.upper, ivb.upper);
+            assert_eq!(
+                iva.lower.to_bits(),
+                ivb.lower.to_bits(),
+                "alpha={} lower mismatch {} vs {}",
+                alpha,
+                iva.lower,
+                ivb.lower
+            );
+            assert_eq!(
+                iva.upper.to_bits(),
+                ivb.upper.to_bits(),
+                "alpha={} upper mismatch {} vs {}",
+                alpha,
+                iva.upper,
+                ivb.upper
+            );
         }
     }
 
@@ -760,8 +817,15 @@ mod tests {
     fn bucket_index_clamps_beyond_max_h() {
         let f = ConstForecaster { value: 0.0 };
         let cal = ConformalIntervalCalibrator::new(
-            f, 1, 4, /* max_h */ 2, /* m */ 8, /* cap */ 0.0, DecayUnit::Step,
-            ResidualMode::HStep, false,
+            f,
+            1,
+            4,
+            /* max_h */ 2,
+            /* m */ 8,
+            /* cap */ 0.0,
+            DecayUnit::Step,
+            ResidualMode::HStep,
+            false,
         );
         // max_h=4, m=2 → n_buckets=2. h=1→bucket0, h=2→bucket0, h=3→bucket1,
         // h=4→bucket1, h=5 (beyond max_h)→clamp to bucket1.

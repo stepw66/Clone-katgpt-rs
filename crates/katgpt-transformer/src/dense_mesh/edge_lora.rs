@@ -74,7 +74,13 @@ impl LoraEdge {
     /// `rank_buf` is a caller-provided scratch of length `rank`.
     #[inline]
     #[allow(clippy::needless_range_loop)] // stride math: r indexes rank_buf[r] AND r*self.in_dim offset into lora_a
-    fn lora_row(&self, input_row: &[f32], out: &mut [f32], effective_scale: f32, rank_buf: &mut [f32]) {
+    fn lora_row(
+        &self,
+        input_row: &[f32],
+        out: &mut [f32],
+        effective_scale: f32,
+        rank_buf: &mut [f32],
+    ) {
         debug_assert_eq!(rank_buf.len(), self.rank);
         // rank_buf = A @ input  (rank-length)
         for r in 0..self.rank {
@@ -153,11 +159,16 @@ impl DenseEdge for LoraEdge {
         }
         let rank_buf_len = self.rank;
         // Split scratch to avoid double-borrow.
-        let MeshScratch { edge_output, rank_buf, .. } = scratch;
+        let MeshScratch {
+            edge_output,
+            rank_buf,
+            ..
+        } = scratch;
         for pos in 0..from.seq_len {
             let in_start = pos * self.in_dim;
             let out_start = pos * self.out_dim;
-            let effective_scale = self.effective_scale(&from.data[in_start..in_start + self.in_dim]);
+            let effective_scale =
+                self.effective_scale(&from.data[in_start..in_start + self.in_dim]);
             self.lora_row(
                 &from.data[in_start..in_start + self.in_dim],
                 &mut edge_output.data[out_start..out_start + self.out_dim],

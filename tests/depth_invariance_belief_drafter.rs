@@ -209,8 +209,7 @@ fn belief_drafter_magnitude_series_monotonic() {
     // Capture the chain via the public `capture_chain` API (no regularization)
     // so we can extract the magnitude series directly without re-running the
     // audit's classify pass.
-    let chain =
-        drafter.capture_chain(&h_0, &tokens, k, MagnitudeRegularization::None);
+    let chain = drafter.capture_chain(&h_0, &tokens, k, MagnitudeRegularization::None);
     let n = n_embd;
 
     let mags = magnitude_series(&chain, n);

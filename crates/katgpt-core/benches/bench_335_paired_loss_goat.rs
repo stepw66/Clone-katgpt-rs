@@ -111,8 +111,7 @@ fn g1_sanity() -> (bool, f32, f32) {
     let expected_mean = 1.25f32;
     let got_first = gap.deltas()[0];
     let got_mean = gap.mean_gap();
-    let pass = (got_first - expected_first).abs() < 1e-6
-        && (got_mean - expected_mean).abs() < 1e-6;
+    let pass = (got_first - expected_first).abs() < 1e-6 && (got_mean - expected_mean).abs() < 1e-6;
     (pass, got_first, got_mean)
 }
 
@@ -164,11 +163,8 @@ fn g2_perf() -> (bool, f64, f64, f64) {
     // Warm up.
     let warm_gap = PairedLossGap::from_log_probs(&a, &b);
     let mut warm_scratch = FilterScratch::with_capacity(l);
-    let warm_mean = warm_gap.filtered_mean_with_scratch(
-        &classes,
-        FilterKind::AllTokens,
-        &mut warm_scratch,
-    );
+    let warm_mean =
+        warm_gap.filtered_mean_with_scratch(&classes, FilterKind::AllTokens, &mut warm_scratch);
     let _ = black_box(warm_mean);
 
     // Bench 1: from_log_probs (includes the one necessary Vec allocation).
@@ -182,7 +178,10 @@ fn g2_perf() -> (bool, f64, f64, f64) {
     let mut filter_fn = || {
         gap.filtered_mean_with_scratch(
             &classes,
-            FilterKind::TopKNoCopy { k: 10, max_ngram: 4 },
+            FilterKind::TopKNoCopy {
+                k: 10,
+                max_ngram: 4,
+            },
             &mut scratch,
         )
     };
@@ -219,14 +218,13 @@ fn g2_alloc_free() -> (bool, usize, usize, usize) {
     let (_, filter_allocs) = alloc_delta(|| {
         let mut sink = 0.0f32;
         for _ in 0..1000 {
+            sink += gap.filtered_mean_with_scratch(&classes, FilterKind::AllTokens, &mut scratch);
             sink += gap.filtered_mean_with_scratch(
                 &classes,
-                FilterKind::AllTokens,
-                &mut scratch,
-            );
-            sink += gap.filtered_mean_with_scratch(
-                &classes,
-                FilterKind::TopKNoCopy { k: 10, max_ngram: 4 },
+                FilterKind::TopKNoCopy {
+                    k: 10,
+                    max_ngram: 4,
+                },
                 &mut scratch,
             );
             sink += gap.filtered_mean_with_scratch(
@@ -352,21 +350,17 @@ fn g4_gain() -> (bool, f64, f64, f64, f64, f64) {
     let gap = PairedLossGap::from_log_probs(&a, &b);
     let mut scratch = FilterScratch::with_capacity(l);
 
-    let all_tokens = gap.filtered_mean_with_scratch(
-        &classes,
-        FilterKind::AllTokens,
-        &mut scratch,
-    );
+    let all_tokens = gap.filtered_mean_with_scratch(&classes, FilterKind::AllTokens, &mut scratch);
     let topk_nocopy = gap.filtered_mean_with_scratch(
         &classes,
-        FilterKind::TopKNoCopy { k: 10, max_ngram: 4 },
+        FilterKind::TopKNoCopy {
+            k: 10,
+            max_ngram: 4,
+        },
         &mut scratch,
     );
-    let copy_only = gap.filtered_mean_with_scratch(
-        &classes,
-        FilterKind::CopyNOnly { n: 2 },
-        &mut scratch,
-    );
+    let copy_only =
+        gap.filtered_mean_with_scratch(&classes, FilterKind::CopyNOnly { n: 2 }, &mut scratch);
     let content_only = gap.mean_gap_for_class(&classes, TokenClass::Content);
 
     let amplification = if all_tokens.abs() < 1e-9 {
@@ -431,7 +425,10 @@ fn main() {
     println!("   Δ[0]:                  {g1_first:.6}  (expected 1.0)");
     println!("   mean_gap:              {g1_mean:.6}  (expected 1.25)");
     println!("   Threshold:             |Δ[0]-1| < 1e-6 AND |mean-1.25| < 1e-6");
-    println!("   Result:                {}", if g1_pass { "PASS ✓" } else { "FAIL ✗" });
+    println!(
+        "   Result:                {}",
+        if g1_pass { "PASS ✓" } else { "FAIL ✗" }
+    );
     println!();
 
     let (g2_pass, g2_from_us, g2_filter_us, g2_total_us) = g2_perf();
@@ -441,16 +438,24 @@ fn main() {
     println!("   Combined:              {g2_total_us:.4} µs");
     println!("   Gate:                  each op < 2µs (orig plan target < 1µs combined was");
     println!("                          structurally impossible for 2 memory-bound passes)");
-    println!("   Result:                {}", if g2_pass { "PASS ✓" } else { "FAIL ✗" });
+    println!(
+        "   Result:                {}",
+        if g2_pass { "PASS ✓" } else { "FAIL ✗" }
+    );
     println!();
 
     let (g2a_pass, g2a_filter, g2a_mean, g2a_construct) = g2_alloc_free();
     println!("── G2-alloc: zero-alloc hot path (1000 × 3 queries = 3000 calls) ──");
-    println!("   filtered_mean allocs:  {g2a_filter}  (across 3000 filter queries, scratch-reused)");
+    println!(
+        "   filtered_mean allocs:  {g2a_filter}  (across 3000 filter queries, scratch-reused)"
+    );
     println!("   mean_gap allocs:       {g2a_mean}  (across 1000 mean queries)");
     println!("   Construction allocs:   {g2a_construct}  (informational — the output Vec)");
     println!("   Threshold:             0 allocs on filter + mean hot paths");
-    println!("   Result:                {}", if g2a_pass { "PASS ✓" } else { "FAIL ✗" });
+    println!(
+        "   Result:                {}",
+        if g2a_pass { "PASS ✓" } else { "FAIL ✗" }
+    );
     println!();
 
     println!("── G3: no-regression (verified in Phase 1) ──");
@@ -465,11 +470,16 @@ fn main() {
     println!("── G4: gain (characterized-bias fixture, L=8192) ──");
     println!("   AllTokens mean:        {g4_all:+.6}");
     println!("   TopKNoCopy mean:       {g4_topk:+.6}");
-    println!("   CopyN(2) mean:         {g4_copy:+.6}  (should be small — visible-prefix retrieval)");
+    println!(
+        "   CopyN(2) mean:         {g4_copy:+.6}  (should be small — visible-prefix retrieval)"
+    );
     println!("   Content-only mean:     {g4_content:+.6}  (should be largest — state-conditioned)");
     println!("   Amplification:         {g4_amp:.3}×  (|TopKNoCopy| / |AllTokens|)");
     println!("   Threshold:             ≥ 1.5× (paper §6 Fig 7 shows ~2×)");
-    println!("   Result:                {}", if g4_pass { "PASS ✓" } else { "FAIL ✗" });
+    println!(
+        "   Result:                {}",
+        if g4_pass { "PASS ✓" } else { "FAIL ✗" }
+    );
     println!();
 
     prop1_demo();

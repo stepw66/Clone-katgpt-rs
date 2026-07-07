@@ -97,8 +97,7 @@ impl InferenceRouter {
         // Demotion only fires under low load (matches trust_signal semantics).
         // Snapshot gate config once to avoid repeated method calls.
         let cfg = self.gate.config();
-        let low_load =
-            self.gate.estimated_qps() < cfg.gpu_activate_qps * cfg.hysteresis_factor;
+        let low_load = self.gate.estimated_qps() < cfg.gpu_activate_qps * cfg.hysteresis_factor;
         let decision = tvp_tier_decision(
             self.tvp_signal,
             self.tvp_config.promote_at,

@@ -1069,9 +1069,9 @@ mod tests {
     /// (acceptance criterion #3 — zero behavioral change for non-adopters).
     #[test]
     fn test_dd_tree_lodestar_nopruner_matches_pruned() {
+        use katgpt_core::traits::NoPruner;
         use katgpt_speculative::dd_tree::{build_dd_tree_lodestar, build_dd_tree_pruned};
         use katgpt_types::Config;
-        use katgpt_core::traits::NoPruner;
 
         let mut config = Config::draft();
         config.vocab_size = 4;
@@ -1264,9 +1264,9 @@ mod tests {
     /// A* with default λ = 0 produces identical tree to build_dd_tree_pruned.
     #[test]
     fn test_astar_lambda_zero_matches_default() {
+        use katgpt_core::traits::NoPruner;
         use katgpt_speculative::dd_tree::{build_dd_tree_lodestar, build_dd_tree_pruned};
         use katgpt_types::Config;
-        use katgpt_core::traits::NoPruner;
 
         let mut config = Config::draft();
         config.vocab_size = 4;

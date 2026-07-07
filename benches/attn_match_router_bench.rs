@@ -14,7 +14,9 @@
 //! cargo run --release --bench attn_match_router_bench --features attn_match
 //! ```
 
-use katgpt_rs::attn_match::router::{pick_backend, SolverBackend, SolverRouter, SolverRouterConfig};
+use katgpt_rs::attn_match::router::{
+    SolverBackend, SolverRouter, SolverRouterConfig, pick_backend,
+};
 
 fn main() {
     println!("=== Attention Matching Router Benchmark (Plan 271 Phase 2) ===\n");
@@ -58,10 +60,7 @@ fn main() {
 
     println!(
         "pick_backend: {} calls in {:?} → {:.2} ns/call (last backend: {:?})",
-        iters,
-        elapsed,
-        ns_per_call,
-        last
+        iters, elapsed, ns_per_call, last
     );
     println!();
 

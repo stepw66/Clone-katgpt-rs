@@ -10,8 +10,8 @@
 #![cfg(all(feature = "sink_aware_attn", feature = "gold_share_probe"))]
 
 use katgpt_core::data_probe::{
-    GoldShareReport, GoldShareScratch, SinkClassifierConfig, StableRankScratch,
-    classify_all_sinks, gold_share_flat,
+    GoldShareReport, GoldShareScratch, SinkClassifierConfig, StableRankScratch, classify_all_sinks,
+    gold_share_flat,
 };
 
 /// Run gold_share_flat with scratch allocated internally.
@@ -100,7 +100,13 @@ fn joint_classifier_gold_share_broadcast_that_failed_signature() {
             .map(|t| values[t * d_head..(t + 1) * d_head].to_vec())
             .collect();
         let mut head_diags = Vec::new();
-        classify_all_sinks(&head_row, &values_2d, &cfg, &mut sink_scratch, &mut head_diags);
+        classify_all_sinks(
+            &head_row,
+            &values_2d,
+            &cfg,
+            &mut sink_scratch,
+            &mut head_diags,
+        );
         sink_diags.extend(head_diags);
     }
 

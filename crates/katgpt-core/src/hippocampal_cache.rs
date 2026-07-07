@@ -775,7 +775,10 @@ mod tests {
         cache.read_cache_into(&q, &gamma, block, &mut out2);
 
         for d in 0..16 {
-            assert!(out1[d].to_bits() == out2[d].to_bits(), "dim {d}: not byte-identical");
+            assert!(
+                out1[d].to_bits() == out2[d].to_bits(),
+                "dim {d}: not byte-identical"
+            );
         }
     }
 
@@ -831,7 +834,10 @@ mod tests {
 
         // Check the min score in cache is a needle score (≥ 0.72).
         let min = cache.min_score().unwrap();
-        assert!(min >= 0.7, "min cache score {min} is too low — a distractor leaked in");
+        assert!(
+            min >= 0.7,
+            "min cache score {min} is too low — a distractor leaked in"
+        );
     }
 
     #[test]
@@ -854,10 +860,7 @@ mod tests {
 
         // All 4 slots must have high scores.
         for (_, _, _, score) in cache.slots() {
-            assert!(
-                score > 0.5,
-                "distractor leaked in with score {score}"
-            );
+            assert!(score > 0.5, "distractor leaked in with score {score}");
         }
     }
 
@@ -952,7 +955,7 @@ mod tests {
             target_v[d] = rng.f32() * 2.0 - 1.0;
         }
         let kn = (target_k.iter().map(|x| x * x).sum::<f32>()).sqrt();
-        let vn = (target_v.iter().map(|x| x).sum::<f32>()).sqrt();
+        let vn = (target_v.iter().sum::<f32>()).sqrt();
         for d in 0..32 {
             target_k[d] /= kn;
             target_v[d] /= vn;

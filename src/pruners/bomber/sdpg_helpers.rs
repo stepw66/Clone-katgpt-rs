@@ -4,11 +4,9 @@
 
 use std::path::Path;
 
-use katgpt_pruners::bandit::BanditPruner;
-use katgpt_pruners::sdpg::{
-    AdvantageMode, BetaSchedule, KlAnchor, SdpgBanditPruner,
-};
 use katgpt_core::traits::ScreeningPruner;
+use katgpt_pruners::bandit::BanditPruner;
+use katgpt_pruners::sdpg::{AdvantageMode, BetaSchedule, KlAnchor, SdpgBanditPruner};
 
 use super::replay::ReplaySample;
 
@@ -17,10 +15,7 @@ use super::replay::ReplaySample;
 /// Aggregates quality scores by action (template) index.
 /// For each template: teacher_q[i] = mean(quality where action == i).
 /// Templates with no samples get 0.0.
-pub fn load_teacher_q_from_replay(
-    path: &Path,
-    num_arms: usize,
-) -> std::io::Result<Vec<f32>> {
+pub fn load_teacher_q_from_replay(path: &Path, num_arms: usize) -> std::io::Result<Vec<f32>> {
     let contents = std::fs::read(path)?;
     let mut offset = 0usize;
 

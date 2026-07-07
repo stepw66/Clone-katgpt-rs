@@ -1100,16 +1100,15 @@ impl ReconstructionState {
 
     /// Shared inner loop — dispatches to SIMD `evolve_hla_simd()` when available.
     /// Detects SIMD availability once at entry, not per-step.
-    fn reconstruct_inner(
-        &mut self,
-        modules: &[SenseModule],
-        use_simd: bool,
-    ) -> [f32; 6] {
+    fn reconstruct_inner(&mut self, modules: &[SenseModule], use_simd: bool) -> [f32; 6] {
         // Resolve SIMD availability once at entry. Without `sense_composition`
         // both bindings are unused — consume the param to satisfy clippy.
         #[cfg(feature = "sense_composition")]
-        let simd_available =
-            use_simd && !matches!(katgpt_types::simd::simd_level(), katgpt_types::simd::SimdLevel::Scalar);
+        let simd_available = use_simd
+            && !matches!(
+                katgpt_types::simd::simd_level(),
+                katgpt_types::simd::SimdLevel::Scalar
+            );
         #[cfg(not(feature = "sense_composition"))]
         let _ = use_simd;
 
@@ -1220,7 +1219,12 @@ fn argmax6(v: &[f32; 6]) -> usize {
 /// within this function — no allocation.
 #[cfg(feature = "self_advantage_gate")]
 #[inline]
-fn advantage_margin_hla(prev: &[f32; 6], curr: &[f32; 6], candidate: usize, scratch: &mut [f32; 18]) -> f32 {
+fn advantage_margin_hla(
+    prev: &[f32; 6],
+    curr: &[f32; 6],
+    candidate: usize,
+    scratch: &mut [f32; 18],
+) -> f32 {
     debug_assert!(candidate < 6);
 
     // Scratch layout: [pre_lsm(6) | post_lsm(6) | advantage(6)] = 18 f32s.
@@ -1312,10 +1316,7 @@ pub struct ReconstructionResult {
 
 /// Run side-by-side comparison: passive vs active reconstruction.
 /// Used for GOAT proof tests and benchmarks.
-pub fn compare_reconstruction(
-    modules: &[SenseModule],
-    hla: [f32; 8],
-) -> ReconstructionResult {
+pub fn compare_reconstruction(modules: &[SenseModule], hla: [f32; 8]) -> ReconstructionResult {
     // Passive: single-shot projection
     let passive = {
         let mut acts = [0.0f32; 6];
@@ -1617,7 +1618,11 @@ mod tests {
             if surprise_trace[t] <= DETECT_THRESHOLD {
                 continue;
             }
-            let prev = if t == 0 { f32::MIN } else { surprise_trace[t - 1] };
+            let prev = if t == 0 {
+                f32::MIN
+            } else {
+                surprise_trace[t - 1]
+            };
             let next = if t + 1 == TRACE_LEN {
                 f32::MIN
             } else {
@@ -1685,9 +1690,7 @@ mod tests {
             .expect("non-empty trace");
 
         // Raw norm peaks at (or near) the last tick — never at an event.
-        let raw_near_event = EVENTS
-            .iter()
-            .any(|&e| raw_argmax.abs_diff(e) <= WINDOW);
+        let raw_near_event = EVENTS.iter().any(|&e| raw_argmax.abs_diff(e) <= WINDOW);
         assert!(
             !raw_near_event,
             "G2: raw HLA norm must NOT peak near an event; raw_argmax={raw_argmax}, events={EVENTS:?}"
@@ -1783,7 +1786,6 @@ mod tests {
         assert_eq!(TripleEvidence::KIND_MAP, [0, 1, 2, 3, 4, 5, 0, 1]);
     }
 
-
     /// Verify route_simd produces same selection as scalar route.
     #[cfg(feature = "sense_composition")]
     #[test]
@@ -1801,9 +1803,6 @@ mod tests {
             "route_simd should produce same selection as scalar route"
         );
     }
-
-
-
 
     #[test]
     fn adaptive_budget_reduces_steps_when_slow() {
@@ -1831,7 +1830,6 @@ mod tests {
         assert_eq!(adapted.max_steps, 1, "Should not go below 1");
     }
 
-
     // ── Plan 283 T5.1: self-advantage gate tests ──────────────────
 
     #[cfg(feature = "self_advantage_gate")]
@@ -1851,7 +1849,10 @@ mod tests {
         let mut out = [0.0f32; 6];
         log_softmax_into6(&x, &mut out);
         let sum: f32 = out.iter().map(|&v| v.exp()).sum();
-        assert!((sum - 1.0).abs() < 1e-5, "exp(log_softmax) must sum to 1, got {sum}");
+        assert!(
+            (sum - 1.0).abs() < 1e-5,
+            "exp(log_softmax) must sum to 1, got {sum}"
+        );
         for &v in &out {
             assert!(v <= 0.0, "log-prob must be ≤ 0, got {v}");
         }
@@ -1865,7 +1866,10 @@ mod tests {
         let mut scratch = [0.0f32; 18];
         for candidate in 0..6 {
             let m = advantage_margin_hla(&prev, &curr, candidate, &mut scratch);
-            assert!(m.abs() < 1e-6, "identical steps → zero margin, got {m} for candidate {candidate}");
+            assert!(
+                m.abs() < 1e-6,
+                "identical steps → zero margin, got {m} for candidate {candidate}"
+            );
         }
     }
 
@@ -1876,7 +1880,10 @@ mod tests {
         let curr = [0.1, 0.1, 0.9, 0.1, 0.1, 0.1];
         let mut scratch = [0.0f32; 18];
         let m = advantage_margin_hla(&prev, &curr, 2, &mut scratch);
-        assert!(m > 0.0, "sharpening the candidate must give positive margin, got {m}");
+        assert!(
+            m > 0.0,
+            "sharpening the candidate must give positive margin, got {m}"
+        );
     }
 
     #[cfg(feature = "self_advantage_gate")]
@@ -1886,7 +1893,10 @@ mod tests {
         let curr = [0.1, 0.1, 0.9, 0.1, 0.1, 0.1];
         let mut scratch = [0.0f32; 18];
         let m = advantage_margin_hla(&prev, &curr, 0, &mut scratch);
-        assert!(m < 0.0, "shifting away from candidate must give negative margin, got {m}");
+        assert!(
+            m < 0.0,
+            "shifting away from candidate must give negative margin, got {m}"
+        );
     }
 
     #[cfg(feature = "self_advantage_gate")]
@@ -1900,7 +1910,10 @@ mod tests {
         let state = ReconstructionState::with_config([0.0; 8], config);
         let prev = [0.3, 0.3, 0.3, 0.3, 0.3, 0.3];
         let curr = [0.1, 0.1, 0.9, 0.1, 0.1, 0.1];
-        assert!(!state.advantage_gate_halt(Some(&prev), &curr), "disabled gate never halts");
+        assert!(
+            !state.advantage_gate_halt(Some(&prev), &curr),
+            "disabled gate never halts"
+        );
     }
 
     #[cfg(feature = "self_advantage_gate")]
@@ -1909,8 +1922,11 @@ mod tests {
         // Plan 283 T5.1.4: promoted to default-on after GOAT gate passed
         // (2.50× steps saved, 100% argmax match, 0ns overhead).
         let config = ReconstructionConfig::default();
-        assert!((config.advantage_margin_threshold - 0.01).abs() < 1e-6,
-            "default threshold should be 0.01 after T5.1.4 promotion, got {}", config.advantage_margin_threshold);
+        assert!(
+            (config.advantage_margin_threshold - 0.01).abs() < 1e-6,
+            "default threshold should be 0.01 after T5.1.4 promotion, got {}",
+            config.advantage_margin_threshold
+        );
     }
 
     #[cfg(feature = "self_advantage_gate")]
@@ -1922,7 +1938,10 @@ mod tests {
         };
         let state = ReconstructionState::with_config([0.0; 8], config);
         let curr = [0.1, 0.1, 0.9, 0.1, 0.1, 0.1];
-        assert!(!state.advantage_gate_halt(None, &curr), "first step (prev=None) never halts");
+        assert!(
+            !state.advantage_gate_halt(None, &curr),
+            "first step (prev=None) never halts"
+        );
     }
 
     #[cfg(feature = "self_advantage_gate")]
@@ -1935,7 +1954,10 @@ mod tests {
         let state = ReconstructionState::with_config([0.0; 8], config);
         let prev = [0.5, 0.2, 0.8, 0.1, 0.3, 0.4];
         let curr = prev;
-        assert!(state.advantage_gate_halt(Some(&prev), &curr), "identical steps must trigger halt");
+        assert!(
+            state.advantage_gate_halt(Some(&prev), &curr),
+            "identical steps must trigger halt"
+        );
     }
 
     #[cfg(feature = "self_advantage_gate")]
@@ -1948,8 +1970,9 @@ mod tests {
         let state = ReconstructionState::with_config([0.0; 8], config);
         let prev = [0.3, 0.3, 0.3, 0.3, 0.3, 0.3];
         let curr = [0.1, 0.1, 0.9, 0.1, 0.1, 0.1];
-        assert!(!state.advantage_gate_halt(Some(&prev), &curr), "improving step must not halt");
+        assert!(
+            !state.advantage_gate_halt(Some(&prev), &curr),
+            "improving step must not halt"
+        );
     }
-
-
 }

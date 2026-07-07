@@ -394,10 +394,7 @@ fn test_f6_compile_hello_program() {
 
     // Must end with halt
     assert!(
-        compiled
-            .program
-            .last()
-            .is_some_and(|(op, _)| *op == "halt"),
+        compiled.program.last().is_some_and(|(op, _)| *op == "halt"),
         "program should end with halt, last: {:?}",
         compiled.program.last()
     );
@@ -566,12 +563,7 @@ fn test_f6_runner_compile_rust_template() {
 
     let compiled = result.unwrap();
     assert!(compiled.program.iter().any(|(op, _)| *op == "output"));
-    assert!(
-        compiled
-            .program
-            .last()
-            .is_some_and(|(op, _)| *op == "halt")
-    );
+    assert!(compiled.program.last().is_some_and(|(op, _)| *op == "halt"));
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -672,12 +664,7 @@ fn test_h5_hello_compile_through_runner() {
 
     // Verify the dispatch table is well-formed
     assert!(compiled.program.iter().any(|(op, _)| *op == "output"));
-    assert!(
-        compiled
-            .program
-            .last()
-            .is_some_and(|(op, _)| *op == "halt")
-    );
+    assert!(compiled.program.last().is_some_and(|(op, _)| *op == "halt"));
 
     // Verify prefix format
     assert!(compiled.prefix.starts_with("{\n"));

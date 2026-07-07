@@ -321,7 +321,9 @@ fn forward_rt_turbo_decode_with_scratch(
         // extend does not alias it.
         let sink_indices = &scratch.sink_indices;
         scratch.merged_buf.clear();
-        scratch.merged_buf.extend_from_slice(&top_p_result.selected_indices);
+        scratch
+            .merged_buf
+            .extend_from_slice(&top_p_result.selected_indices);
         scratch.merged_buf.extend_from_slice(sink_indices);
         scratch.merged_buf.sort_unstable();
         scratch.merged_buf.dedup();
@@ -527,11 +529,7 @@ mod tests {
         config: &RtTurboConfig,
     ) -> HeadCalibration {
         let mut scores = vec![0.0f32; n_heads];
-        for (i, s) in scores
-            .iter_mut()
-            .enumerate()
-            .take(n_retrieval.min(n_heads))
-        {
+        for (i, s) in scores.iter_mut().enumerate().take(n_retrieval.min(n_heads)) {
             *s = 1.0 - i as f32 * 0.01;
         }
         calibrate_from_scores(&scores, config)

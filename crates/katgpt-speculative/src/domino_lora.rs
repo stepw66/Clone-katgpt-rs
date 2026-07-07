@@ -385,7 +385,10 @@ impl DominoLoraCorrection {
         );
 
         // Add ΔL to base logits
-        simd_add_inplace(&mut logits_out[..self.vocab_size], &delta[..self.vocab_size]);
+        simd_add_inplace(
+            &mut logits_out[..self.vocab_size],
+            &delta[..self.vocab_size],
+        );
     }
 
     /// Run a GRU forward step for causal state tracking.

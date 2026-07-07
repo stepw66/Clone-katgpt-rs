@@ -60,6 +60,6 @@ pub use handoff::HiddenHandoff;
 pub use topology::{LayerwiseTopology, TopologyError};
 pub use traits::{DenseEdge, DenseNode};
 pub use types::{
-    latent_to_raw_scalar, raw_to_latent_projection, ComputeTarget, DenseHidden, LayerRole,
-    MeshConfig, MeshScratch, Topology,
+    ComputeTarget, DenseHidden, LayerRole, MeshConfig, MeshScratch, Topology, latent_to_raw_scalar,
+    raw_to_latent_projection,
 };

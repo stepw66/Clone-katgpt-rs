@@ -130,11 +130,7 @@ impl SeasonalPoolForecaster {
                 break;
             }
         }
-        let pool = if wtotal > 0.0 {
-            wsum / wtotal
-        } else {
-            anchor
-        };
+        let pool = if wtotal > 0.0 { wsum / wtotal } else { anchor };
         self.pool_weight * pool + (1.0 - self.pool_weight) * anchor
     }
 }

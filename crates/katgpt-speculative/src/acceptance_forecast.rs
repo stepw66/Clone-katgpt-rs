@@ -170,8 +170,7 @@ impl AcceptanceForecast {
     #[inline]
     pub fn observe_and_forecast(&mut self, logits: &[f32]) -> f32 {
         let h = entropy_nats_zero_alloc(logits);
-        self.ema_entropy =
-            self.alpha_decay * h + (1.0 - self.alpha_decay) * self.ema_entropy;
+        self.ema_entropy = self.alpha_decay * h + (1.0 - self.alpha_decay) * self.ema_entropy;
         let alpha = (self.a - self.b * self.ema_entropy).clamp(ALPHA_FLOOR, 1.0);
         self.ema_alpha = alpha;
         alpha
@@ -306,7 +305,10 @@ mod tests {
         // Very peaked: logit 20 vs 0 → near-deterministic.
         let logits = [20.0f32, 0.0, 0.0, 0.0];
         let h = entropy_nats_zero_alloc(&logits);
-        assert!(h < 0.01, "peaked distribution entropy should be ≈ 0, got {h}");
+        assert!(
+            h < 0.01,
+            "peaked distribution entropy should be ≈ 0, got {h}"
+        );
     }
 
     #[test]
@@ -446,7 +448,11 @@ mod tests {
         let samples = vec![(1.0f32, 0.8f32), (1.0, 0.6), (1.0, 0.7)];
         let f = AcceptanceForecast::fit_from_warmup(&samples);
         assert!((f.a - 0.7).abs() < 1e-4, "mean α = 0.7, got a = {}", f.a);
-        assert!(f.b.abs() < 1e-4, "degenerate fit should have b ≈ 0, got {}", f.b);
+        assert!(
+            f.b.abs() < 1e-4,
+            "degenerate fit should have b ≈ 0, got {}",
+            f.b
+        );
     }
 
     #[test]
@@ -466,11 +472,7 @@ mod tests {
             "intercept should be 1.0, got {}",
             f.a
         );
-        assert!(
-            (f.b - 0.3).abs() < 1e-3,
-            "slope should be 0.3, got {}",
-            f.b
-        );
+        assert!((f.b - 0.3).abs() < 1e-3, "slope should be 0.3, got {}", f.b);
     }
 
     #[test]

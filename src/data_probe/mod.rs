@@ -54,19 +54,17 @@ pub mod sink_classify;
 // historical root structure before Plan 404).
 
 pub use katgpt_core::data_probe::{
-    ClaimCard, Intervention, ValidityVerdict, average_nll, classify_regime,
-    consecutive_adjacency, functor_adjacency, generate_markov_chain,
+    ClaimCard, Intervention, MarkovChain, Regime, RegimeDistribution, ValidityVerdict, average_nll,
+    classify_regime, consecutive_adjacency, functor_adjacency, generate_markov_chain,
     kv_cache_dirichlet_energy, nll_profile, regime_distribution, sample_sequence,
-    MarkovChain, Regime, RegimeDistribution,
 };
 
 #[cfg(feature = "sink_aware_attn")]
 pub use katgpt_core::data_probe::{
-    GeometryReport, LayerSinkSummary, avg_cosine_similarity, effective_rank,
-    representation_geometry_report, summarize_layer_sinks,
-    CachedSinkClassification, SinkAwarePolicy, SinkClassifierConfig, SinkDiagnostic, SinkKind,
-    StableRankScratch, apply_dual_policy_gate, apply_dual_policy_gate_cached,
-    apply_dual_policy_gate_cached_flat, apply_dual_policy_gate_flat, classify_all_sinks,
-    classify_all_sinks_flat, classify_sink_at, classify_sink_at_flat, stable_rank_update_into,
-    stable_rank_update_into_flat,
+    CachedSinkClassification, GeometryReport, LayerSinkSummary, SinkAwarePolicy,
+    SinkClassifierConfig, SinkDiagnostic, SinkKind, StableRankScratch, apply_dual_policy_gate,
+    apply_dual_policy_gate_cached, apply_dual_policy_gate_cached_flat, apply_dual_policy_gate_flat,
+    avg_cosine_similarity, classify_all_sinks, classify_all_sinks_flat, classify_sink_at,
+    classify_sink_at_flat, effective_rank, representation_geometry_report, stable_rank_update_into,
+    stable_rank_update_into_flat, summarize_layer_sinks,
 };

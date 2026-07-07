@@ -125,7 +125,13 @@ fn g1_coverage_m1_hstep_nonseasonal() {
     // intervals (the residual pool at h=1 is just the lag-1 residuals).
     let alpha = 0.05_f32;
     for &sigma in &[0.1_f32, 0.5, 1.0] {
-        let cov = run_coverage(1, sigma, alpha, 10_000, 0xBEEF_0000 | (sigma.to_bits() as u64));
+        let cov = run_coverage(
+            1,
+            sigma,
+            alpha,
+            10_000,
+            0xBEEF_0000 | (sigma.to_bits() as u64),
+        );
         eprintln!("m=1 sigma={sigma} alpha={alpha} → coverage {cov:.4}");
         assert!(
             (0.90..=0.99).contains(&cov),
@@ -142,7 +148,13 @@ fn g1_coverage_varying_alpha() {
     let m = 24;
     let sigma = 0.5;
     for &alpha in &[0.01_f32, 0.05, 0.1, 0.2] {
-        let cov = run_coverage(m, sigma, alpha, 10_000, 0xF00D_0000 | ((alpha.to_bits()) as u64));
+        let cov = run_coverage(
+            m,
+            sigma,
+            alpha,
+            10_000,
+            0xF00D_0000 | ((alpha.to_bits()) as u64),
+        );
         let target = 1.0 - alpha;
         eprintln!("m={m} sigma={sigma} alpha={alpha} → coverage {cov:.4} (target {target:.2})");
         // Allow a wider tolerance band for the more extreme alpha levels.

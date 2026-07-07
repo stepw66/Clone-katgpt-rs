@@ -48,7 +48,12 @@ use katgpt_types::simd;
 #[inline(always)]
 fn transpose_matvec_into(out: &mut [f32], vec: &[f32], mat: &[f32], hd: usize) {
     debug_assert!(vec.len() >= hd, "vec too short: {} < {hd}", vec.len());
-    debug_assert!(mat.len() >= hd * hd, "mat too short: {} < {}", mat.len(), hd * hd);
+    debug_assert!(
+        mat.len() >= hd * hd,
+        "mat too short: {} < {}",
+        mat.len(),
+        hd * hd
+    );
     debug_assert!(out.len() >= hd, "out too short: {} < {hd}", out.len());
     // Zero the output prefix (callers expect accumulation from zero).
     out[..hd].fill(0.0);
@@ -282,14 +287,14 @@ pub fn hla_readout(
         for c in 0..chunks {
             let j = c * 4;
             unsafe {
-                *out.get_unchecked_mut(j) += u_i * *cqv_row.get_unchecked(j)
-                    - q_i * *g_row.get_unchecked(j);
-                *out.get_unchecked_mut(j + 1) += u_i * *cqv_row.get_unchecked(j + 1)
-                    - q_i * *g_row.get_unchecked(j + 1);
-                *out.get_unchecked_mut(j + 2) += u_i * *cqv_row.get_unchecked(j + 2)
-                    - q_i * *g_row.get_unchecked(j + 2);
-                *out.get_unchecked_mut(j + 3) += u_i * *cqv_row.get_unchecked(j + 3)
-                    - q_i * *g_row.get_unchecked(j + 3);
+                *out.get_unchecked_mut(j) +=
+                    u_i * *cqv_row.get_unchecked(j) - q_i * *g_row.get_unchecked(j);
+                *out.get_unchecked_mut(j + 1) +=
+                    u_i * *cqv_row.get_unchecked(j + 1) - q_i * *g_row.get_unchecked(j + 1);
+                *out.get_unchecked_mut(j + 2) +=
+                    u_i * *cqv_row.get_unchecked(j + 2) - q_i * *g_row.get_unchecked(j + 2);
+                *out.get_unchecked_mut(j + 3) +=
+                    u_i * *cqv_row.get_unchecked(j + 3) - q_i * *g_row.get_unchecked(j + 3);
             }
         }
         for j in (chunks * 4)..hd {
@@ -370,14 +375,14 @@ pub fn hla_readout_normalized(
         for c in 0..chunks {
             let j = c * 4;
             unsafe {
-                *out.get_unchecked_mut(j) += u_i * *cqv_row.get_unchecked(j)
-                    - q_i * *g_row.get_unchecked(j);
-                *out.get_unchecked_mut(j + 1) += u_i * *cqv_row.get_unchecked(j + 1)
-                    - q_i * *g_row.get_unchecked(j + 1);
-                *out.get_unchecked_mut(j + 2) += u_i * *cqv_row.get_unchecked(j + 2)
-                    - q_i * *g_row.get_unchecked(j + 2);
-                *out.get_unchecked_mut(j + 3) += u_i * *cqv_row.get_unchecked(j + 3)
-                    - q_i * *g_row.get_unchecked(j + 3);
+                *out.get_unchecked_mut(j) +=
+                    u_i * *cqv_row.get_unchecked(j) - q_i * *g_row.get_unchecked(j);
+                *out.get_unchecked_mut(j + 1) +=
+                    u_i * *cqv_row.get_unchecked(j + 1) - q_i * *g_row.get_unchecked(j + 1);
+                *out.get_unchecked_mut(j + 2) +=
+                    u_i * *cqv_row.get_unchecked(j + 2) - q_i * *g_row.get_unchecked(j + 2);
+                *out.get_unchecked_mut(j + 3) +=
+                    u_i * *cqv_row.get_unchecked(j + 3) - q_i * *g_row.get_unchecked(j + 3);
             }
         }
         for j in (chunks * 4)..hd {
@@ -751,16 +756,7 @@ mod tests {
         let v = [0.0, 0.0, 1.0, 0.0];
 
         // First token: G should be zero (no previous CQV)
-        hla_state_update(
-            &mut sk,
-            &mut q_head,
-            &q,
-            &k,
-            &v,
-            hd,
-            1.0,
-            &mut tmp_k_cqv,
-        );
+        hla_state_update(&mut sk, &mut q_head, &q, &k, &v, hd, 1.0, &mut tmp_k_cqv);
 
         // G should be zero because CQV was zero before this update
         assert!(
@@ -776,16 +772,7 @@ mod tests {
         let k2 = [1.0, 0.0, 0.0, 0.0];
         let v2 = [0.0, 0.0, 0.0, 1.0];
 
-        hla_state_update(
-            &mut sk,
-            &mut q_head,
-            &q2,
-            &k2,
-            &v2,
-            hd,
-            1.0,
-            &mut tmp_k_cqv,
-        );
+        hla_state_update(&mut sk, &mut q_head, &q2, &k2, &v2, hd, 1.0, &mut tmp_k_cqv);
 
         // G should now have k2 · (k2ᵀ · CQV_old)
         // k2ᵀ · CQV_old: row 0 of CQV = [0,0,1,0], dot with k2=[1,0,0,0] → [0,0,1,0]
@@ -952,45 +939,18 @@ mod tests {
         let v = [1.0, 1.0];
 
         // Update with gamma=1.0
-        hla_state_update(
-            &mut sk,
-            &mut q_head,
-            &q,
-            &k,
-            &v,
-            hd,
-            1.0,
-            &mut tmp_k_cqv,
-        );
+        hla_state_update(&mut sk, &mut q_head, &q, &k, &v, hd, 1.0, &mut tmp_k_cqv);
         let _sk_no_decay = sk[0];
 
         // Reset and update with gamma=0.5
         sk.fill(0.0);
         q_head.reset();
-        hla_state_update(
-            &mut sk,
-            &mut q_head,
-            &q,
-            &k,
-            &v,
-            hd,
-            0.5,
-            &mut tmp_k_cqv,
-        );
+        hla_state_update(&mut sk, &mut q_head, &q, &k, &v, hd, 0.5, &mut tmp_k_cqv);
         // With gamma=0.5, state is decayed before adding. Since initial state is 0,
         // first update is same as no decay. Let's do a second update.
         let sk_after_first = sk[0];
 
-        hla_state_update(
-            &mut sk,
-            &mut q_head,
-            &q,
-            &k,
-            &v,
-            hd,
-            0.5,
-            &mut tmp_k_cqv,
-        );
+        hla_state_update(&mut sk, &mut q_head, &q, &k, &v, hd, 0.5, &mut tmp_k_cqv);
         let sk_after_second = sk[0];
 
         // sk[0] should be: 0.5 * sk_after_first + 1.0 (kkᵀ[0,0] = 1)
@@ -1017,16 +977,7 @@ mod tests {
             let k: Vec<f32> = (0..hd).map(|i| (t * hd + i + 1) as f32 * 0.1).collect();
             let v: Vec<f32> = (0..hd).map(|i| (t * hd + i + 2) as f32 * 0.1).collect();
 
-            hla_state_update(
-                &mut sk,
-                &mut q_head,
-                &q,
-                &k,
-                &v,
-                hd,
-                1.0,
-                &mut tmp_k_cqv,
-            );
+            hla_state_update(&mut sk, &mut q_head, &q, &k, &v, hd, 1.0, &mut tmp_k_cqv);
         }
 
         let q_test = vec![0.5; hd];

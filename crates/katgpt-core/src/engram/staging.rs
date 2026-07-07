@@ -28,8 +28,8 @@
 //! - `commit`: one `Box<[f32]>` allocation for the COW slot array copy. Same
 //!   memory cost as a full table rebuild — the win is CPU + API, not memory.
 
-use super::table::InMemoryEngramTable;
 use super::EngramTable;
+use super::table::InMemoryEngramTable;
 use std::fmt;
 
 /// Error returned by [`StagingEngramTable`] mutation methods.
@@ -141,7 +141,11 @@ impl<'a> StagingEngramTable<'a> {
     /// Queueing two UPDATEs on the same slot is allowed — the later one wins
     /// at commit time (last-write semantics, same as `add_pattern`).
     #[inline]
-    pub fn update_slot(&mut self, slot_idx: usize, pattern: &[f32]) -> Result<&mut Self, StagingError> {
+    pub fn update_slot(
+        &mut self,
+        slot_idx: usize,
+        pattern: &[f32],
+    ) -> Result<&mut Self, StagingError> {
         let n_slots = self.source.num_slots();
         if slot_idx >= n_slots {
             return Err(StagingError::SlotOutOfBounds { slot_idx, n_slots });
@@ -235,7 +239,9 @@ impl<'a> StagingEngramTable<'a> {
         // boxed array) and construct the new table via the crate-visible
         // `from_parts` constructor.
         let new_heads = Box::new(*self.source.heads());
-        Ok(InMemoryEngramTable::from_parts(new_slots, new_heads, n_slots, d))
+        Ok(InMemoryEngramTable::from_parts(
+            new_slots, new_heads, n_slots, d,
+        ))
     }
 
     /// Number of pending mutations queued (not yet committed).
@@ -314,7 +320,10 @@ mod tests {
 
         // Sanity: slot 7 should be non-zero in the source.
         let src_slot_7 = read_slot(&source, 7);
-        assert!(src_slot_7.iter().any(|&v| v != 0.0), "slot 7 non-zero in source");
+        assert!(
+            src_slot_7.iter().any(|&v| v != 0.0),
+            "slot 7 non-zero in source"
+        );
 
         let new_table = StagingEngramTable::from_table(&source)
             .delete_slot(7)
@@ -324,7 +333,10 @@ mod tests {
 
         // New table: slot 7 is all zeros.
         let new_slot_7 = read_slot(&new_table, 7);
-        assert!(new_slot_7.iter().all(|&v| v == 0.0), "slot 7 zero in new table");
+        assert!(
+            new_slot_7.iter().all(|&v| v == 0.0),
+            "slot 7 zero in new table"
+        );
         // Source still non-zero at slot 7.
         assert_eq!(read_slot(&source, 7), src_slot_7);
     }
@@ -470,7 +482,10 @@ mod tests {
             .unwrap();
 
         let slot_7 = read_slot(&new_table, 7);
-        assert!(slot_7.iter().all(|&v| v == 0.0), "double-delete zeros the slot");
+        assert!(
+            slot_7.iter().all(|&v| v == 0.0),
+            "double-delete zeros the slot"
+        );
     }
 
     #[test]
@@ -484,7 +499,11 @@ mod tests {
         staging.update_slot(0, &[1.0f32; 4]).unwrap();
         staging.update_slot(1, &[2.0f32; 4]).unwrap();
         staging.update_slot(2, &[3.0f32; 4]).unwrap();
-        assert_eq!(staging.pending.capacity(), cap_before, "no realloc within hint");
+        assert_eq!(
+            staging.pending.capacity(),
+            cap_before,
+            "no realloc within hint"
+        );
     }
 
     #[test]
@@ -548,7 +567,11 @@ mod tests {
         staging.delete_slot(1).unwrap();
         assert_eq!(staging.pending_count(), 2);
         staging.update_slot(0, &[2.0f32; 4]).unwrap(); // same slot, new entry
-        assert_eq!(staging.pending_count(), 3, "duplicate slot adds a new entry");
+        assert_eq!(
+            staging.pending_count(),
+            3,
+            "duplicate slot adds a new entry"
+        );
     }
 
     #[test]
@@ -575,17 +598,29 @@ mod tests {
         let source = EngramTableBuilder::new(0, 4).build();
         let mut staging = StagingEngramTable::from_table(&source);
         let err = staging.update_slot(0, &[0.0f32; 4]).unwrap_err();
-        assert_eq!(err, StagingError::SlotOutOfBounds { slot_idx: 0, n_slots: 0 });
+        assert_eq!(
+            err,
+            StagingError::SlotOutOfBounds {
+                slot_idx: 0,
+                n_slots: 0
+            }
+        );
     }
 
     #[test]
     fn staging_error_display_is_human_readable() {
         // Sanity: Display impl produces a useful message (not just `Debug`).
-        let e1 = StagingError::SlotOutOfBounds { slot_idx: 99, n_slots: 16 };
+        let e1 = StagingError::SlotOutOfBounds {
+            slot_idx: 99,
+            n_slots: 16,
+        };
         assert!(format!("{e1}").contains("99"));
         assert!(format!("{e1}").contains("16"));
 
-        let e2 = StagingError::WrongPatternLen { actual: 5, expected: 4 };
+        let e2 = StagingError::WrongPatternLen {
+            actual: 5,
+            expected: 4,
+        };
         assert!(format!("{e2}").contains("5"));
         assert!(format!("{e2}").contains("4"));
 

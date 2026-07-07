@@ -128,12 +128,7 @@ where
 /// LoRA gauge path the PSD operator is `A^T·A` (or `B^T·B`) — but formed
 /// implicitly, so that path composes its own matvec.
 #[inline]
-pub fn matvec_psd_into(
-    v: &[f32],
-    psd_op: &[f32],
-    dim: usize,
-    scratch: &mut PowerRetractScratch,
-) {
+pub fn matvec_psd_into(v: &[f32], psd_op: &[f32], dim: usize, scratch: &mut PowerRetractScratch) {
     debug_assert_eq!(v.len(), dim, "v length mismatch");
     debug_assert_eq!(psd_op.len(), dim * dim, "psd_op size mismatch");
     debug_assert!(scratch.mv_out.len() >= dim, "scratch.mv_out too small");
@@ -308,7 +303,10 @@ mod tests {
         let mut scratch = PowerRetractScratch::new(dim);
         power_iter_retract(&mut v, &psd, dim, 1.0, 3, &mut scratch);
         for i in 0..dim {
-            assert!((v[i] - original[i]).abs() < 1e-20, "v[{i}] changed on zero PSD");
+            assert!(
+                (v[i] - original[i]).abs() < 1e-20,
+                "v[{i}] changed on zero PSD"
+            );
         }
     }
 
@@ -325,7 +323,10 @@ mod tests {
         power_iter_retract(&mut v1, &psd, dim, target, 3, &mut scratch);
         power_iter_retract(&mut v2, &psd, dim, target, 3, &mut scratch);
         for i in 0..dim {
-            assert!(v1[i].to_bits() == v2[i].to_bits(), "non-deterministic at [{i}]");
+            assert!(
+                v1[i].to_bits() == v2[i].to_bits(),
+                "non-deterministic at [{i}]"
+            );
         }
     }
 
@@ -343,7 +344,10 @@ mod tests {
             7.0 * 1.0 + 8.0 * 0.5 + 9.0 * (-0.5),
         ];
         for (i, expected_val) in expected.iter().enumerate().take(dim) {
-            assert!((scratch.mv_out[i] - expected_val).abs() < 1e-6, "matvec mismatch at [{i}]");
+            assert!(
+                (scratch.mv_out[i] - expected_val).abs() < 1e-6,
+                "matvec mismatch at [{i}]"
+            );
         }
     }
 

@@ -47,15 +47,25 @@ fn main() {
     println!();
 
     // Synthetic pre-recursion logits (π̂): broad, uncertain.
-    let pre: Vec<f32> = vec![1.0, 2.0, 1.5, 3.0, 2.5, 1.0, 0.5, 2.0, 1.5, 1.0, 0.5, 2.5, 1.0, 0.5, 1.0, 1.5];
+    let pre: Vec<f32> = vec![
+        1.0, 2.0, 1.5, 3.0, 2.5, 1.0, 0.5, 2.0, 1.5, 1.0, 0.5, 2.5, 1.0, 0.5, 1.0, 1.5,
+    ];
 
     // Synthetic post-recursion logits (π+): sharpened toward token 3.
-    let post: Vec<f32> = vec![-1.0, 0.5, 1.0, 6.0, 2.0, -0.5, -1.0, 1.0, 0.5, -0.5, -1.5, 1.5, -0.5, -1.0, -0.5, 0.5];
+    let post: Vec<f32> = vec![
+        -1.0, 0.5, 1.0, 6.0, 2.0, -0.5, -1.0, 1.0, 0.5, -0.5, -1.5, 1.5, -0.5, -1.0, -0.5, 0.5,
+    ];
 
-    println!("📊 Pre-recursion logits (π̂):  argmax={}, entropy={:.3} bits",
-        argmax_from_logits(&pre), entropy_from_logits(&pre));
-    println!("📊 Post-recursion logits (π+): argmax={}, entropy={:.3} bits",
-        argmax_from_logits(&post), entropy_from_logits(&post));
+    println!(
+        "📊 Pre-recursion logits (π̂):  argmax={}, entropy={:.3} bits",
+        argmax_from_logits(&pre),
+        entropy_from_logits(&pre)
+    );
+    println!(
+        "📊 Post-recursion logits (π+): argmax={}, entropy={:.3} bits",
+        argmax_from_logits(&post),
+        entropy_from_logits(&post)
+    );
     println!();
 
     // ── Sweep trust weight w ─────────────────────────────────────
@@ -76,8 +86,10 @@ fn main() {
             w if w > 1.0 => "  (extrapolation)",
             _ => "",
         };
-        println!("│ {:<8.2} │ {:<12} │ {:<13.4} │ {:<16.3} │{}",
-            w, top, max_p, h, label);
+        println!(
+            "│ {:<8.2} │ {:<12} │ {:<13.4} │ {:<16.3} │{}",
+            w, top, max_p, h, label
+        );
     }
     println!("└──────────┴──────────────┴───────────────┴──────────────────┘");
     println!();

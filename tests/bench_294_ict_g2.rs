@@ -24,10 +24,7 @@
 
 #![cfg(feature = "ict_branching")]
 
-use katgpt_core::ict::{
-    detector::BranchingDetector,
-    math::js_divergence_batch,
-};
+use katgpt_core::ict::{detector::BranchingDetector, math::js_divergence_batch};
 
 const N_DECISION_POINTS: usize = 1000;
 const K_TRAJECTORIES: usize = 8;
@@ -45,7 +42,10 @@ impl Lcg {
     }
     fn next_u64(&mut self) -> u64 {
         // Numerical Recipes LCG constants.
-        self.state = self.state.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+        self.state = self
+            .state
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
         self.state
     }
     fn next_f32(&mut self) -> f32 {
@@ -224,9 +224,18 @@ fn g2_inflection_at_approximately_10_percent() {
         let label = format!("{:.1}", bin as f32 / 10.0);
         println!("  {label:>4} | {bar:<40} ({count})");
     }
-    println!("\nMedian inflection location = {:.4} ({:.1}%)", median, 100.0 * median);
-    println!("IQR                        = [{:.4}, {:.4}]  ({:.1}% – {:.1}%)",
-        q1, q3, 100.0 * q1, 100.0 * q3);
+    println!(
+        "\nMedian inflection location = {:.4} ({:.1}%)",
+        median,
+        100.0 * median
+    );
+    println!(
+        "IQR                        = [{:.4}, {:.4}]  ({:.1}% – {:.1}%)",
+        q1,
+        q3,
+        100.0 * q1,
+        100.0 * q3
+    );
 
     // ── Plan 294 T3.2 / T3.3 verdict. ──
     // The paper's ~10% claim is LLM-token-specific (§A.4.1). Plan §Risks
@@ -241,7 +250,10 @@ fn g2_inflection_at_approximately_10_percent() {
     // k_percent empirically rather than hard-coding 0.10.
     let pass = (0.05..=0.20).contains(&median);
     if pass {
-        println!("\nG2 PASS: median inflection location {:.1}% ∈ [5%, 20%]", 100.0 * median);
+        println!(
+            "\nG2 PASS: median inflection location {:.1}% ∈ [5%, 20%]",
+            100.0 * median
+        );
     } else {
         // Document honestly. Sweep k_percent to the empirical median for
         // downstream consumers (BranchingDetector default k_percent stays

@@ -203,8 +203,8 @@ pub use feedback_bandit::{
 };
 #[cfg(feature = "sia_feedback")]
 pub use trace_informed_feedback_bandit::{
-    ActiveStateTrace, EmptyTrace, TraceInformedConfig, TraceInformedFeedbackBandit,
-    DEFAULT_TRACE_SIGNAL_THRESHOLD, trace_signal,
+    ActiveStateTrace, DEFAULT_TRACE_SIGNAL_THRESHOLD, EmptyTrace, TraceInformedConfig,
+    TraceInformedFeedbackBandit, trace_signal,
 };
 
 #[cfg(feature = "posterior_evolution")]
@@ -1165,7 +1165,7 @@ pub mod thicket_variance_probe;
 #[cfg(feature = "thicket_variance_probe")]
 pub use thicket_variance_probe::{
     ProbeOutput, SyntheticProbeSource, TvpAggregator, TvpConfig, TvpProbeCountBandit,
-    TvpProbeSource, TvpSignal, TvpSignalFrozen, TvpTierDecision, TvpThresholdAdapter,
+    TvpProbeSource, TvpSignal, TvpSignalFrozen, TvpThresholdAdapter, TvpTierDecision,
     canonical_format_hash, tvp_tier_decision,
 };
 

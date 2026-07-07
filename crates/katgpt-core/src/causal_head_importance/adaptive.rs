@@ -208,7 +208,11 @@ pub fn adaptive_partition(
             sus_idx += 1;
         }
     }
-    debug_assert_eq!(sus_idx, suspects.len(), "suspect count mismatch in fused build");
+    debug_assert_eq!(
+        sus_idx,
+        suspects.len(),
+        "suspect count mismatch in fused build"
+    );
 
     partition_by_causal_score(&fused, critical_ratio, layer_ids, min_one_per_layer)
 }
@@ -299,7 +303,10 @@ mod tests {
         let am = [0.9, 0.1, 0.8, 0.2, 0.7, 0.3, 0.6, 0.4];
         let expected = partition_by_causal_score(&am, 0.25, None, false);
         let got = adaptive_partition(&am, &[], &[], 0.25, None, false);
-        assert_eq!(got, expected, "G3 violated: no-suspect must equal attention-mass");
+        assert_eq!(
+            got, expected,
+            "G3 violated: no-suspect must equal attention-mass"
+        );
     }
 
     #[test]
@@ -338,7 +345,10 @@ mod tests {
         // Fused: [0.001, 0.8, 0.7, 0.6, 0.5]. Top-2 by score: head1 (0.8), head2 (0.7).
         // head0 (bystander, 0.001) is demoted to convertible.
         assert!(!critical.contains(&0), "bystander head0 must be demoted");
-        assert!(convertible.contains(&0), "bystander head0 must be in convertible");
+        assert!(
+            convertible.contains(&0),
+            "bystander head0 must be in convertible"
+        );
         assert_eq!(critical.len(), 2);
     }
 
@@ -366,7 +376,10 @@ mod tests {
         // Fused: [0.001, 0.8, 0.7, 0.6, 0.5, 0.95]. Top-3: head5 (0.95), head1 (0.8), head2 (0.7).
         // head0 (bystander) demoted to convertible.
         assert!(critical.contains(&5), "load-bearing head5 must be critical");
-        assert!(!critical.contains(&0), "bystander head0 must not be critical");
+        assert!(
+            !critical.contains(&0),
+            "bystander head0 must not be critical"
+        );
         assert!(convertible.contains(&0), "bystander head0 in convertible");
         assert_eq!(critical.len(), 3);
         assert_eq!(convertible.len(), 3);

@@ -164,11 +164,8 @@ mod tests {
 
     #[test]
     fn test_schedule_roundtrip() {
-        let original = HeadBudgetSchedule::with_version(
-            "test-model".into(),
-            vec![0.1, 0.2, 0.3, 0.4, 0.0],
-            7,
-        );
+        let original =
+            HeadBudgetSchedule::with_version("test-model".into(), vec![0.1, 0.2, 0.3, 0.4, 0.0], 7);
         let bytes = original.to_postcard().expect("serialize");
         let recovered = HeadBudgetSchedule::from_postcard(&bytes).expect("deserialize");
         assert_eq!(recovered.model_id, original.model_id);

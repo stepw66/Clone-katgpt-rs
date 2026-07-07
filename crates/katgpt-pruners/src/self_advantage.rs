@@ -159,7 +159,12 @@ pub fn self_advantage_margin(
     scratch: &mut [f32],
 ) -> f32 {
     let n = pre_logits.len();
-    assert!(candidate < n, "candidate {} out of range (n={})", candidate, n);
+    assert!(
+        candidate < n,
+        "candidate {} out of range (n={})",
+        candidate,
+        n
+    );
 
     // Populate scratch: [pre_lsm | post_lsm | advantage].
     // We discard the returned &mut to release the borrow before reading.
@@ -222,9 +227,16 @@ pub fn product_policy_log(pre_logits: &[f32], post_logits: &[f32], w: f32, out: 
 
     // Compute log partition functions for both distributions.
     let pre_max = pre_logits.iter().copied().fold(f32::NEG_INFINITY, f32::max);
-    let post_max = post_logits.iter().copied().fold(f32::NEG_INFINITY, f32::max);
+    let post_max = post_logits
+        .iter()
+        .copied()
+        .fold(f32::NEG_INFINITY, f32::max);
 
-    let pre_lse: f32 = pre_logits.iter().map(|&v| (v - pre_max).exp()).sum::<f32>().ln();
+    let pre_lse: f32 = pre_logits
+        .iter()
+        .map(|&v| (v - pre_max).exp())
+        .sum::<f32>()
+        .ln();
     let post_lse: f32 = post_logits
         .iter()
         .map(|&v| (v - post_max).exp())
@@ -370,8 +382,7 @@ impl AdvantageMarginGate {
             return true;
         }
         self.ensure_scratch(pre_logits.len());
-        let margin =
-            self_advantage_margin(pre_logits, post_logits, candidate, &mut self.scratch);
+        let margin = self_advantage_margin(pre_logits, post_logits, candidate, &mut self.scratch);
         margin >= self.margin_threshold
     }
 
@@ -379,12 +390,7 @@ impl AdvantageMarginGate {
     ///
     /// Useful for logging, debugging, or adaptive threshold tuning.
     #[inline]
-    pub fn margin(
-        &mut self,
-        pre_logits: &[f32],
-        post_logits: &[f32],
-        candidate: usize,
-    ) -> f32 {
+    pub fn margin(&mut self, pre_logits: &[f32], post_logits: &[f32], candidate: usize) -> f32 {
         self.ensure_scratch(pre_logits.len());
         self_advantage_margin(pre_logits, post_logits, candidate, &mut self.scratch)
     }
@@ -567,7 +573,8 @@ impl AdvantageDirectionAccumulator {
             let chunks = n / 4;
             let mut i = 0;
             while i < chunks * 4 {
-                self.direction[i] = one_minus_lambda * self.direction[i] + self.lambda * advantage[i];
+                self.direction[i] =
+                    one_minus_lambda * self.direction[i] + self.lambda * advantage[i];
                 self.direction[i + 1] =
                     one_minus_lambda * self.direction[i + 1] + self.lambda * advantage[i + 1];
                 self.direction[i + 2] =
@@ -577,7 +584,8 @@ impl AdvantageDirectionAccumulator {
                 i += 4;
             }
             while i < n {
-                self.direction[i] = one_minus_lambda * self.direction[i] + self.lambda * advantage[i];
+                self.direction[i] =
+                    one_minus_lambda * self.direction[i] + self.lambda * advantage[i];
                 i += 1;
             }
         }
@@ -674,7 +682,14 @@ impl AdvantageDirectionSnapshot {
         blake3: [u8; 32],
         version: u64,
     ) -> Self {
-        Self { dim, lambda, updates, weights_blob, blake3, version }
+        Self {
+            dim,
+            lambda,
+            updates,
+            weights_blob,
+            blake3,
+            version,
+        }
     }
 
     /// Compute (or recompute) the BLAKE3 commitment over
@@ -718,7 +733,9 @@ impl AdvantageDirectionSnapshot {
         let mut out = Vec::with_capacity(self.dim);
         for i in 0..self.dim {
             let start = i * 4;
-            let bytes: [u8; 4] = self.weights_blob[start..start + 4].try_into().map_err(|_| "slice conversion")?;
+            let bytes: [u8; 4] = self.weights_blob[start..start + 4]
+                .try_into()
+                .map_err(|_| "slice conversion")?;
             out.push(f32::from_le_bytes(bytes));
         }
         Ok(out)
@@ -763,7 +780,13 @@ mod advantage_freeze_thaw_tests {
         // After 200 updates with λ=0.1, EMA is essentially at the target.
         for (i, &t) in target.iter().enumerate() {
             let diff = (acc.direction()[i] - t).abs();
-            assert!(diff < 0.01, "idx {}: EMA {} not converged to {}", i, acc.direction()[i], t);
+            assert!(
+                diff < 0.01,
+                "idx {}: EMA {} not converged to {}",
+                i,
+                acc.direction()[i],
+                t
+            );
         }
     }
 
@@ -779,7 +802,11 @@ mod advantage_freeze_thaw_tests {
             acc.update(&[v]);
         }
         let d = acc.direction()[0];
-        assert!(d.abs() < 0.2, "alternating input should smooth toward 0, got {}", d);
+        assert!(
+            d.abs() < 0.2,
+            "alternating input should smooth toward 0, got {}",
+            d
+        );
     }
 
     #[test]
@@ -793,7 +820,10 @@ mod advantage_freeze_thaw_tests {
         assert!(snap.verify(), "freshly-committed snapshot must verify");
         assert_eq!(snap.dim, 3);
         assert_eq!(snap.updates, 2);
-        assert_ne!(snap.blake3, [0u8; 32], "blake3 must be non-zero after commit");
+        assert_ne!(
+            snap.blake3, [0u8; 32],
+            "blake3 must be non-zero after commit"
+        );
     }
 
     #[test]
@@ -854,13 +884,16 @@ mod advantage_freeze_thaw_tests {
         let mut acc1 = AdvantageDirectionAccumulator::new(0.1);
         let mut acc2 = AdvantageDirectionAccumulator::new(0.5);
         acc1.update(&[1.0, 2.0]);
-        acc2.update(&[1.0, 2.0]);  // same initial direction, different λ
+        acc2.update(&[1.0, 2.0]); // same initial direction, different λ
 
         let mut snap1 = acc1.snapshot(1);
         let mut snap2 = acc2.snapshot(1);
         snap1.commit();
         snap2.commit();
-        assert_ne!(snap1.blake3, snap2.blake3, "different λ must yield different commitments");
+        assert_ne!(
+            snap1.blake3, snap2.blake3,
+            "different λ must yield different commitments"
+        );
     }
 }
 
@@ -904,8 +937,16 @@ mod tests {
             adv[1]
         );
         // Others should be negative (mass moved away from them).
-        assert!(adv[0] < -EPS, "candidate 0 should be negative, got {}", adv[0]);
-        assert!(adv[2] < -EPS, "candidate 2 should be negative, got {}", adv[2]);
+        assert!(
+            adv[0] < -EPS,
+            "candidate 0 should be negative, got {}",
+            adv[0]
+        );
+        assert!(
+            adv[2] < -EPS,
+            "candidate 2 should be negative, got {}",
+            adv[2]
+        );
     }
 
     #[test]
@@ -947,7 +988,11 @@ mod tests {
         let post = [99.0_f32];
         let mut scratch = make_scratch(1);
         let adv = self_advantage(&pre, &post, &mut scratch);
-        assert!(adv[0].abs() < EPS, "singleton advantage must be 0, got {}", adv[0]);
+        assert!(
+            adv[0].abs() < EPS,
+            "singleton advantage must be 0, got {}",
+            adv[0]
+        );
     }
 
     // ── T1.3: self_advantage_margin correctness ─────────────────
@@ -1193,7 +1238,11 @@ mod tests {
         let mut lsm = vec![0.0; logits.len()];
         log_softmax_into(&logits, &mut lsm);
         let sum: f32 = lsm.iter().map(|&v| v.exp()).sum();
-        assert!((sum - 1.0).abs() < EPS, "exp(log_softmax) must sum to 1, got {}", sum);
+        assert!(
+            (sum - 1.0).abs() < EPS,
+            "exp(log_softmax) must sum to 1, got {}",
+            sum
+        );
     }
 
     // ── Phase 2: AdvantageMarginGate tests ─────────────────────
@@ -1209,8 +1258,14 @@ mod tests {
         let mut gate = AdvantageMarginGate::default();
         let pre = [1.0, 2.0, 3.0];
         let post = [1.0, 2.0, 3.0];
-        assert!(!gate.should_recurse(&pre, &post, 0), "zero-margin step must be rejected by default");
-        assert!(!gate.should_recurse(&pre, &post, 1), "zero-margin step must be rejected by default");
+        assert!(
+            !gate.should_recurse(&pre, &post, 0),
+            "zero-margin step must be rejected by default"
+        );
+        assert!(
+            !gate.should_recurse(&pre, &post, 1),
+            "zero-margin step must be rejected by default"
+        );
     }
 
     #[cfg(feature = "self_advantage_gate")]
@@ -1233,18 +1288,30 @@ mod tests {
         let mut gate = AdvantageMarginGate::default();
         let pre = [5.0, 1.0, 1.0];
         let post = [1.0, 5.0, 1.0];
-        assert!(!gate.should_recurse(&pre, &post, 0), "dead compute for candidate 0");
+        assert!(
+            !gate.should_recurse(&pre, &post, 0),
+            "dead compute for candidate 0"
+        );
         // Candidate 1 was boosted → should pass.
-        assert!(gate.should_recurse(&pre, &post, 1), "improvement for candidate 1");
+        assert!(
+            gate.should_recurse(&pre, &post, 1),
+            "improvement for candidate 1"
+        );
     }
 
     #[cfg(feature = "self_advantage_gate")]
     #[test]
     fn test_gate_disabled_always_passes() {
-        let mut gate = AdvantageMarginGate { enabled: false, ..Default::default() };
+        let mut gate = AdvantageMarginGate {
+            enabled: false,
+            ..Default::default()
+        };
         let pre = [5.0, 1.0];
         let post = [1.0, 5.0]; // shifts away from 0
-        assert!(gate.should_recurse(&pre, &post, 0), "disabled gate must pass");
+        assert!(
+            gate.should_recurse(&pre, &post, 0),
+            "disabled gate must pass"
+        );
     }
 
     #[cfg(feature = "self_advantage_gate")]
@@ -1254,7 +1321,10 @@ mod tests {
         let mut gate = AdvantageMarginGate::new(5.0);
         let pre = [1.0, 1.0, 1.0];
         let post = [1.5, 1.0, 1.0]; // small boost to candidate 0
-        assert!(!gate.should_recurse(&pre, &post, 0), "small improvement below strict threshold");
+        assert!(
+            !gate.should_recurse(&pre, &post, 0),
+            "small improvement below strict threshold"
+        );
     }
 
     #[cfg(feature = "self_advantage_gate")]
@@ -1313,7 +1383,11 @@ mod tests {
         let mut out = vec![0.0; pre.len()];
         sharpener.sharpen_normalized(&pre, &post, &mut out);
         let sum: f32 = out.iter().sum();
-        assert!((sum - 1.0).abs() < EPS, "normalized output must sum to 1, got {}", sum);
+        assert!(
+            (sum - 1.0).abs() < EPS,
+            "normalized output must sum to 1, got {}",
+            sum
+        );
     }
 
     #[cfg(feature = "product_policy_sharpen")]
@@ -1328,7 +1402,9 @@ mod tests {
 
         // Post alone: softmax([3,1,1]) → index 0 prob
         let max = 3.0_f32;
-        let sum: f32 = [(3.0 - max).exp(), (1.0 - max).exp(), (1.0 - max).exp()].iter().sum();
+        let sum: f32 = [(3.0 - max).exp(), (1.0 - max).exp(), (1.0 - max).exp()]
+            .iter()
+            .sum();
         let post_prob_0 = (3.0 - max).exp() / sum;
 
         assert!(

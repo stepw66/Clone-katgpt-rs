@@ -118,7 +118,13 @@ pub struct InfoUnit {
 impl InfoUnit {
     /// Construct a unit with minimal fields (provenance defaulted).
     #[inline]
-    pub fn new(key: InfoKey, payload_hash: PayloadHash, c_info: f32, outcome: InfoOutcomeStatus, ts: u64) -> Self {
+    pub fn new(
+        key: InfoKey,
+        payload_hash: PayloadHash,
+        c_info: f32,
+        outcome: InfoOutcomeStatus,
+        ts: u64,
+    ) -> Self {
         InfoUnit {
             key,
             payload_hash,
@@ -346,9 +352,10 @@ impl InfoRegistry {
             let by_key = self.by_key.pin();
             for &k in keys.iter() {
                 if k != unit.key
-                    && let Some(u) = by_key.get(&k) {
-                        scratch.grey.push(*u);
-                    }
+                    && let Some(u) = by_key.get(&k)
+                {
+                    scratch.grey.push(*u);
+                }
             }
             if !scratch.grey.is_empty() {
                 return MatchResult::GreyZone(scratch.grey.clone());
@@ -382,7 +389,13 @@ mod tests {
     }
 
     fn unit(key_n: u8, payload_n: u8, ts: u64) -> InfoUnit {
-        InfoUnit::new(key(key_n, 1), payload(payload_n), 0.9, InfoOutcomeStatus::InfoConfirmedSuccess, ts)
+        InfoUnit::new(
+            key(key_n, 1),
+            payload(payload_n),
+            0.9,
+            InfoOutcomeStatus::InfoConfirmedSuccess,
+            ts,
+        )
     }
 
     fn fresh_scratch() -> MatchScratch {
@@ -402,7 +415,10 @@ mod tests {
         let u2 = unit(1, 100, 20);
         let mut scratch = fresh_scratch();
         let result = reg.canonicalize(&u2, &mut scratch);
-        assert!(result.is_strong(), "same key + same payload must be StrongMatch");
+        assert!(
+            result.is_strong(),
+            "same key + same payload must be StrongMatch"
+        );
         if let MatchResult::StrongMatch(canonical) = result {
             // Canonical is the lowest-ts representative.
             assert_eq!(canonical.ts, 10);
@@ -415,10 +431,19 @@ mod tests {
         let u1 = unit(1, 100, 10); // key=1, payload=100
         reg.insert(u1);
         // Same key, different payload → GreyZone (version drift).
-        let u2 = InfoUnit::new(key(1, 1), payload(200), 0.5, InfoOutcomeStatus::InfoLowConfidence, 20);
+        let u2 = InfoUnit::new(
+            key(1, 1),
+            payload(200),
+            0.5,
+            InfoOutcomeStatus::InfoLowConfidence,
+            20,
+        );
         let mut scratch = fresh_scratch();
         let result = reg.canonicalize(&u2, &mut scratch);
-        assert!(result.is_grey(), "same key + different payload must be GreyZone");
+        assert!(
+            result.is_grey(),
+            "same key + different payload must be GreyZone"
+        );
     }
 
     #[test]
@@ -427,10 +452,19 @@ mod tests {
         let u1 = unit(1, 100, 10); // key=1, payload=100
         reg.insert(u1);
         // Different key, same payload → GreyZone (cross-key collision).
-        let u2 = InfoUnit::new(key(2, 1), payload(100), 0.9, InfoOutcomeStatus::InfoConfirmedSuccess, 20);
+        let u2 = InfoUnit::new(
+            key(2, 1),
+            payload(100),
+            0.9,
+            InfoOutcomeStatus::InfoConfirmedSuccess,
+            20,
+        );
         let mut scratch = fresh_scratch();
         let result = reg.canonicalize(&u2, &mut scratch);
-        assert!(result.is_grey(), "different key + same payload must be GreyZone");
+        assert!(
+            result.is_grey(),
+            "different key + same payload must be GreyZone"
+        );
         if let MatchResult::GreyZone(cands) = result {
             assert!(!cands.is_empty());
             // The candidate is the existing unit (key=1).
@@ -447,7 +481,10 @@ mod tests {
         let u2 = unit(2, 200, 20);
         let mut scratch = fresh_scratch();
         let result = reg.canonicalize(&u2, &mut scratch);
-        assert!(result.is_none(), "different key + different payload must be NoMatch");
+        assert!(
+            result.is_none(),
+            "different key + different payload must be NoMatch"
+        );
     }
 
     #[test]
@@ -520,7 +557,13 @@ mod tests {
         let reg = InfoRegistry::new();
         let u1 = unit(1, 100, 10);
         reg.insert(u1);
-        let u2 = InfoUnit::new(key(1, 1), payload(100), 0.95, InfoOutcomeStatus::InfoConfirmedSuccess, 20);
+        let u2 = InfoUnit::new(
+            key(1, 1),
+            payload(100),
+            0.95,
+            InfoOutcomeStatus::InfoConfirmedSuccess,
+            20,
+        );
         reg.insert(u2); // same key, same payload, higher c_info + ts
         assert_eq!(reg.len(), 1); // still one canonical
         let got = reg.get(&u1.key).expect("must be present");

@@ -339,7 +339,6 @@ fn bench_hybrid_oct_pq(
 // ══════════════════════════════════════════════════════════════
 
 #[test]
-
 #[ignore = "pure measurement benchmark (no assertions), slow in debug; run with --release --ignored"]
 fn goat_block_diagonal_quality_sweep() {
     let dim = 128usize;
@@ -518,7 +517,6 @@ fn goat_block_diagonal_quality_sweep() {
 // ══════════════════════════════════════════════════════════════
 
 #[test]
-
 #[ignore = "pure measurement benchmark (no assertions), slow in debug; run with --release --ignored"]
 fn goat_block_diagonal_pairwise_comparison() {
     let dim = 128usize;
@@ -717,7 +715,6 @@ fn goat_block_diagonal_pairwise_comparison() {
 // ══════════════════════════════════════════════════════════════
 
 #[test]
-
 #[ignore = "pure measurement benchmark (no assertions), slow in debug; run with --release --ignored"]
 fn goat_rotation_cost_comparison() {
     println!("\n⚡ GOAT 023: Rotation Cost Comparison");
@@ -793,7 +790,6 @@ fn goat_rotation_cost_comparison() {
 // ══════════════════════════════════════════════════════════════
 
 #[test]
-
 #[ignore = "pure measurement benchmark (no assertions), slow in debug; run with --release --ignored"]
 fn goat_planar_quant_vs_octopus_head_to_head() {
     let dim = 128usize;
@@ -875,7 +871,6 @@ fn goat_planar_quant_vs_octopus_head_to_head() {
 // ══════════════════════════════════════════════════════════════
 
 #[test]
-
 #[ignore = "pure measurement benchmark (no assertions), slow in debug; run with --release --ignored"]
 #[cfg(feature = "iso_quant")]
 fn goat_iso_quant_full_vs_fast() {
@@ -952,7 +947,6 @@ fn goat_iso_quant_full_vs_fast() {
 // ══════════════════════════════════════════════════════════════
 
 #[test]
-
 #[ignore = "pure measurement benchmark (no assertions), slow in debug; run with --release --ignored"]
 fn goat_dimension_scaling() {
     let dims = [64usize, 128, 256];
@@ -1037,7 +1031,6 @@ fn goat_dimension_scaling() {
 // ══════════════════════════════════════════════════════════════
 
 #[test]
-
 #[ignore = "pure measurement benchmark (no assertions), slow in debug; run with --release --ignored"]
 fn goat_three_way_matrix() {
     let dim = 128usize;
@@ -1273,7 +1266,6 @@ fn goat_three_way_matrix() {
 // ══════════════════════════════════════════════════════════════
 
 #[test]
-
 #[ignore = "pure measurement benchmark (no assertions), slow in debug; run with --release --ignored"]
 fn goat_production_stack_verdict() {
     println!("\n🏆 GOAT 023: Production Stack Verdict");
@@ -1821,7 +1813,6 @@ fn goat_maxsim_late_interaction() {
 // ══════════════════════════════════════════════════════════════
 
 #[test]
-
 #[ignore = "pure measurement benchmark (no assertions), slow in debug; run with --release --ignored"]
 fn goat_hybrid_oct_pq_quality_sweep() {
     let dim = 128usize;

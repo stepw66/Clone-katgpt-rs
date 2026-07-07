@@ -11,7 +11,8 @@
 //! Varies `α ∈ {0.01, 0.05, 0.1, 0.2}` and `h ∈ {1, 8, 24}`.
 
 use katgpt_core::{
-    ConformalIntervalCalibrator, DecayUnit, PredictiveInterval, ResidualMode, SeasonalPoolForecaster,
+    ConformalIntervalCalibrator, DecayUnit, PredictiveInterval, ResidualMode,
+    SeasonalPoolForecaster,
 };
 
 /// Build a calibrator, push a deterministic residual stream, return it.
@@ -20,9 +21,9 @@ fn build_calibrator() -> ConformalIntervalCalibrator<SeasonalPoolForecaster> {
     let mut cal = ConformalIntervalCalibrator::new(
         forecaster,
         1,
-        24, // max_h
-        12, // m
-        128, // capacity
+        24,   // max_h
+        12,   // m
+        128,  // capacity
         0.02, // exp_lambda
         DecayUnit::Step,
         ResidualMode::HStep,
@@ -32,7 +33,9 @@ fn build_calibrator() -> ConformalIntervalCalibrator<SeasonalPoolForecaster> {
     let mut state: u64 = 0x1234_5678_9ABC_DEF0;
     for t in 0..200 {
         // LCG step.
-        state = state.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+        state = state
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
         let r = (((state >> 33) as f32) / (1u64 << 31) as f32) * 2.0 - 1.0; // [-1, 1]
         let forecast = 0.0_f32; // forecast is constant for this reproducibility test
         cal.update_residual(r, forecast, 0, 1);
@@ -95,7 +98,15 @@ fn g4_reproducible_across_pool_states() {
     let mk = || {
         let forecaster = SeasonalPoolForecaster::new(32, 1, 0.0, 0.0);
         let mut cal = ConformalIntervalCalibrator::new(
-            forecaster, 1, 1, 1, 64, 0.0, DecayUnit::Step, ResidualMode::HStep, false,
+            forecaster,
+            1,
+            1,
+            1,
+            64,
+            0.0,
+            DecayUnit::Step,
+            ResidualMode::HStep,
+            false,
         );
         for i in 0..50 {
             let r = (i as f32) * 0.1 - 2.5;
@@ -122,7 +133,15 @@ fn g4_reproducible_across_pool_states() {
 fn g4_sample_predictive_distribution_deterministic_with_seed() {
     let forecaster = SeasonalPoolForecaster::new(32, 1, 0.0, 0.0);
     let mut cal = ConformalIntervalCalibrator::new(
-        forecaster, 1, 1, 1, 64, 0.0, DecayUnit::Step, ResidualMode::HStep, false,
+        forecaster,
+        1,
+        1,
+        1,
+        64,
+        0.0,
+        DecayUnit::Step,
+        ResidualMode::HStep,
+        false,
     );
     for i in 0..30 {
         let r = (i as f32) * 0.2 - 3.0;

@@ -102,7 +102,10 @@ fn g2_synthetic_broadcast_dual_preserves_more_than_uniform() {
     );
 
     // Uniform path is a pure copy — no classification.
-    assert_eq!(kind_uniform, katgpt_rs::data_probe::sink_classify::SinkKind::None);
+    assert_eq!(
+        kind_uniform,
+        katgpt_rs::data_probe::sink_classify::SinkKind::None
+    );
 
     // Dual path should classify the dominant sink as Broadcast.
     assert_eq!(
@@ -217,7 +220,10 @@ fn g2_synthetic_nop_dual_gates_uniform_does_not() {
         &mut out_dual,
     );
 
-    assert_eq!(kind_uniform, katgpt_rs::data_probe::sink_classify::SinkKind::None);
+    assert_eq!(
+        kind_uniform,
+        katgpt_rs::data_probe::sink_classify::SinkKind::None
+    );
     assert_eq!(
         kind_dual,
         katgpt_rs::data_probe::sink_classify::SinkKind::Nop,

@@ -275,8 +275,8 @@ mod tests {
 
     #[test]
     fn test_echo_consistency_budget_adaptation() {
-        use katgpt_speculative::budget::adaptive_tree_budget;
         use katgpt_core::speculative::types::BudgetAdaptation;
+        use katgpt_speculative::budget::adaptive_tree_budget;
 
         let base = 100;
 

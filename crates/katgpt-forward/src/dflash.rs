@@ -18,15 +18,15 @@
 // `sample_from_distribution` is only used by the feature-gated dflash variants
 // (`domino_lora`, `dflare_kv_routing`); the three shared-core `_with` delegations
 // do their sampling inside `katgpt_speculative::dflash`.
+use crate::{ForwardContext, SpeculativeContext, forward};
 #[cfg(any(feature = "domino_lora", feature = "dflare_kv_routing"))]
 use katgpt_core::speculative::sampling::sample_from_distribution;
-use crate::{ForwardContext, SpeculativeContext, forward};
 use katgpt_core::speculative::types::DraftResult;
+use katgpt_speculative::dflash::DflashCache;
 use katgpt_transformer::{MultiLayerKVCache, TransformerWeights};
-use katgpt_types::{Config, Rng, softmax_scaled};
 #[cfg(feature = "dflare_kv_routing")]
 use katgpt_types::kv_dim;
-use katgpt_speculative::dflash::DflashCache;
+use katgpt_types::{Config, Rng, softmax_scaled};
 // NOTE: `DflashCtx<TransformerWeights> for ForwardContext` now lives in
 // katgpt-forward (Issue 007 Phase F) — the impl travels with the type. The
 // trait import is intentionally dropped here; the impl is auto-discovered.

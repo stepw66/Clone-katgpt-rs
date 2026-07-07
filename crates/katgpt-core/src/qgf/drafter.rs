@@ -226,11 +226,8 @@ where
             return false;
         }
         let confidence = self.oracle.confidence(condition);
-        let weight = crate::qgf::adaptive::adaptive_guidance_weight(
-            confidence,
-            threshold,
-            steepness,
-        );
+        let weight =
+            crate::qgf::adaptive::adaptive_guidance_weight(confidence, threshold, steepness);
         if weight <= 0.0 {
             return false;
         }
@@ -421,13 +418,8 @@ where
         // (project_one_step would re-call generate; we already have candidates.)
         let projected = candidates.remove(0);
         // Step 3 + 4: tilt logits in place.
-        let _applied = self.tilt_logits(
-            condition,
-            &projected,
-            logits_buffer,
-            gradient_buffer,
-            step,
-        );
+        let _applied =
+            self.tilt_logits(condition, &projected, logits_buffer, gradient_buffer, step);
         // Step 5: sample from tilted logits.
         Ok(sample(logits_buffer))
     }
@@ -499,10 +491,13 @@ mod tests {
     }
 
     fn make_drafter(weight: f32, period: usize) -> QGuidedDrafter<MockGen, MockOracle> {
-        QGuidedDrafter::new(MockGen { calls: 0 }, MockOracle {
-            gradient: vec![1.0, 2.0, 3.0],
-            confidence: 0.9,
-        })
+        QGuidedDrafter::new(
+            MockGen { calls: 0 },
+            MockOracle {
+                gradient: vec![1.0, 2.0, 3.0],
+                confidence: 0.9,
+            },
+        )
         .with_weight(weight)
         .with_period(period)
     }
@@ -572,10 +567,7 @@ mod tests {
         // Step 1: 1 % 2 == 1 → skip.
         let mut logits2 = [0.0f32; 3];
         let applied1 = drafter.tilt_logits(&(), &10u32, &mut logits2, &mut grad, 1);
-        assert!(
-            !applied1,
-            "step 1 with period 2 should skip guidance"
-        );
+        assert!(!applied1, "step 1 with period 2 should skip guidance");
         assert_eq!(logits2, [0.0, 0.0, 0.0], "no tilt applied at step 1");
 
         // Step 2: 2 % 2 == 0 → apply.
@@ -592,7 +584,10 @@ mod tests {
         assert!(!d0.should_apply_guidance(0), "zero weight → never apply");
 
         let d1 = make_drafter(1.0, 1);
-        assert!(d1.should_apply_guidance(0), "weight>0, period 1, step 0 → apply");
+        assert!(
+            d1.should_apply_guidance(0),
+            "weight>0, period 1, step 0 → apply"
+        );
         assert!(d1.should_apply_guidance(99), "period 1 applies every step");
 
         let d2 = make_drafter(1.0, 3);
@@ -620,7 +615,11 @@ mod tests {
         drafter
             .generate_guided_into(&(), &mut rng, 1, &mut out)
             .unwrap();
-        assert_eq!(out, vec![10, 20, 30], "buffer should be cleared and refilled");
+        assert_eq!(
+            out,
+            vec![10, 20, 30],
+            "buffer should be cleared and refilled"
+        );
     }
 
     // ── Test: full pipeline generate_project_tilt_sample ───────────────────
@@ -635,25 +634,18 @@ mod tests {
         let mut grad = [0.0f32; 3];
 
         let result = drafter
-            .generate_project_tilt_sample(
-                &(),
-                &mut rng,
-                0,
-                &mut logits,
-                &mut grad,
-                |l| {
-                    // Greedy argmax.
-                    let mut best = 0u32;
-                    let mut best_v = f32::MIN;
-                    for (i, &v) in l.iter().enumerate() {
-                        if v > best_v {
-                            best_v = v;
-                            best = i as u32;
-                        }
+            .generate_project_tilt_sample(&(), &mut rng, 0, &mut logits, &mut grad, |l| {
+                // Greedy argmax.
+                let mut best = 0u32;
+                let mut best_v = f32::MIN;
+                for (i, &v) in l.iter().enumerate() {
+                    if v > best_v {
+                        best_v = v;
+                        best = i as u32;
                     }
-                    best
-                },
-            )
+                }
+                best
+            })
             .unwrap();
 
         assert_eq!(result, 2, "greedy on tilted logits should pick index 2");
@@ -663,10 +655,13 @@ mod tests {
 
     #[test]
     fn test_builder_setters() {
-        let d = QGuidedDrafter::new(MockGen { calls: 0 }, MockOracle {
-            gradient: vec![],
-            confidence: 0.0,
-        })
+        let d = QGuidedDrafter::new(
+            MockGen { calls: 0 },
+            MockOracle {
+                gradient: vec![],
+                confidence: 0.0,
+            },
+        )
         .with_weight(2.5)
         .with_period(4);
 
@@ -674,10 +669,13 @@ mod tests {
         assert_eq!(d.guidance_period, 4);
 
         // period 0 coerces to 1 (avoid div-by-zero).
-        let d0 = QGuidedDrafter::new(MockGen { calls: 0 }, MockOracle {
-            gradient: vec![],
-            confidence: 0.0,
-        })
+        let d0 = QGuidedDrafter::new(
+            MockGen { calls: 0 },
+            MockOracle {
+                gradient: vec![],
+                confidence: 0.0,
+            },
+        )
         .with_period(0);
         assert_eq!(d0.guidance_period, 1, "period 0 must coerce to 1");
     }
@@ -717,7 +715,14 @@ mod tests {
         let mut grad = [0.0f32; 3];
         // Low disagreement (0.05) → confidence 0.95 → strong guidance.
         let applied = drafter.tilt_logits_adaptive_with_signal(
-            &(), &10u32, &mut logits, &mut grad, 0, &MockSignal(0.05), 0.5, 6.0,
+            &(),
+            &10u32,
+            &mut logits,
+            &mut grad,
+            0,
+            &MockSignal(0.05),
+            0.5,
+            6.0,
         );
         assert!(applied, "low disagreement → guidance applied");
         // MockOracle.gradient = [1,2,3], weight ≈ sigmoid(6·0.45) ≈ 0.931
@@ -734,7 +739,14 @@ mod tests {
         // High disagreement (0.95) → confidence 0.05 → weight ≈ sigmoid(6·-0.45) ≈ 0.067
         // weight is > 0 so guidance IS applied (weakly). Verify it's weak.
         let applied = drafter.tilt_logits_adaptive_with_signal(
-            &(), &10u32, &mut logits, &mut grad, 0, &MockSignal(0.95), 0.5, 6.0,
+            &(),
+            &10u32,
+            &mut logits,
+            &mut grad,
+            0,
+            &MockSignal(0.95),
+            0.5,
+            6.0,
         );
         assert!(applied, "weight ~0.067 is still > 0, so applied");
         assert!(
@@ -754,7 +766,14 @@ mod tests {
         // Still > 0 strictly. To force a true skip we'd need weight ≤ 0, which
         // sigmoid never reaches. Verify guidance is negligibly weak instead.
         let applied = drafter.tilt_logits_adaptive_with_signal(
-            &(), &10u32, &mut logits, &mut grad, 0, &MockSignal(1.0), 0.5, 6.0,
+            &(),
+            &10u32,
+            &mut logits,
+            &mut grad,
+            0,
+            &MockSignal(1.0),
+            0.5,
+            6.0,
         );
         assert!(applied);
         assert!(
@@ -772,7 +791,14 @@ mod tests {
         let mut grad = [0.0f32; 3];
         // Step 1 with period 2 → skip regardless of signal.
         let applied = drafter.tilt_logits_adaptive_with_signal(
-            &(), &10u32, &mut logits, &mut grad, 1, &MockSignal(0.0), 0.5, 6.0,
+            &(),
+            &10u32,
+            &mut logits,
+            &mut grad,
+            1,
+            &MockSignal(0.0),
+            0.5,
+            6.0,
         );
         assert!(!applied, "off-period step must skip guidance");
         assert_eq!(logits, [0.0f32; 3], "no tilt applied");
@@ -790,13 +816,26 @@ mod tests {
         let mut logits_signal = [0.0f32; 3];
         let mut grad_signal = [0.0f32; 3];
         drafter.tilt_logits_adaptive_with_signal(
-            &(), &10u32, &mut logits_signal, &mut grad_signal, 0, &signal, 0.5, 6.0,
+            &(),
+            &10u32,
+            &mut logits_signal,
+            &mut grad_signal,
+            0,
+            &signal,
+            0.5,
+            6.0,
         );
 
         let mut logits_oracle = [0.0f32; 3];
         let mut grad_oracle = [0.0f32; 3];
         drafter.tilt_logits_adaptive(
-            &(), &10u32, &mut logits_oracle, &mut grad_oracle, 0, 0.5, 6.0,
+            &(),
+            &10u32,
+            &mut logits_oracle,
+            &mut grad_oracle,
+            0,
+            0.5,
+            6.0,
         );
 
         assert_eq!(
@@ -854,7 +893,9 @@ mod tests {
         // Start in Freeze tier (plasma_active = false → zero gradient).
         let mut drafter = QGuidedDrafter::new(
             MockGen { calls: 0 },
-            SwappableOracle { plasma_active: false },
+            SwappableOracle {
+                plasma_active: false,
+            },
         )
         .with_weight(1.0)
         .with_period(1);
@@ -865,7 +906,8 @@ mod tests {
         let applied_pre = drafter.tilt_logits(&(), &10u32, &mut logits_pre, &mut grad, 0);
         assert!(applied_pre, "tilt applied (weight > 0)");
         assert_eq!(
-            logits_pre, [5.0, 5.0, 5.0],
+            logits_pre,
+            [5.0, 5.0, 5.0],
             "Freeze tier (zero gradient) must not alter logits"
         );
 
@@ -879,13 +921,15 @@ mod tests {
         let applied_post = drafter.tilt_logits(&(), &10u32, &mut logits_post, &mut grad_post, 1);
         assert!(applied_post);
         assert_eq!(
-            logits_post, [6.0, 7.0, 8.0],
+            logits_post,
+            [6.0, 7.0, 8.0],
             "Plasma tier after promotion must tilt logits by the gradient"
         );
 
         // ── The pre-swap logits are unaffected (no aliasing / corruption) ──
         assert_eq!(
-            logits_pre, [5.0, 5.0, 5.0],
+            logits_pre,
+            [5.0, 5.0, 5.0],
             "pre-swap logits must be untouched by the post-swap tilt"
         );
 
@@ -895,7 +939,8 @@ mod tests {
         let mut grad_demote = [0.0f32; 3];
         let _ = drafter.tilt_logits(&(), &10u32, &mut logits_demote, &mut grad_demote, 2);
         assert_eq!(
-            logits_demote, [5.0, 5.0, 5.0],
+            logits_demote,
+            [5.0, 5.0, 5.0],
             "demotion back to Freeze must restore zero-tilt behaviour"
         );
     }
@@ -907,7 +952,9 @@ mod tests {
         // regression where a tier switch accidentally reconstructs the drafter.
         let mut drafter = QGuidedDrafter::new(
             MockGen { calls: 0 },
-            SwappableOracle { plasma_active: false },
+            SwappableOracle {
+                plasma_active: false,
+            },
         )
         .with_weight(1.0);
 
@@ -917,7 +964,9 @@ mod tests {
         assert_eq!(drafter.generator.calls, 1, "generator called once");
 
         // Reassign the oracle (simulating a tier switch to a fresh oracle instance).
-        drafter.oracle = SwappableOracle { plasma_active: true };
+        drafter.oracle = SwappableOracle {
+            plasma_active: true,
+        };
 
         // Generator call count must survive the oracle reassignment.
         assert_eq!(
@@ -927,6 +976,9 @@ mod tests {
 
         // Run another generation — generator call count increments to 2.
         let _ = drafter.generate_guided(&(), &mut rng, 1).unwrap();
-        assert_eq!(drafter.generator.calls, 2, "generator called again after tier switch");
+        assert_eq!(
+            drafter.generator.calls, 2,
+            "generator called again after tier switch"
+        );
     }
 }

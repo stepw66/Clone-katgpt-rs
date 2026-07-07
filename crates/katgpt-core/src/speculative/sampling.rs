@@ -429,7 +429,8 @@ mod tests {
                     let t2 = sample_from_distribution_qmc(&q, &mut u1);
 
                     assert_eq!(
-                        (t1, t2), (i, j),
+                        (t1, t2),
+                        (i, j),
                         "u0={u0:.6} (frac={frac}, cell ({i},{j})): \
                          two-step gave ({t1},{t2})"
                     );
@@ -561,7 +562,10 @@ mod tests {
         }
         for (j, &p) in p0.iter().enumerate() {
             let emp = c0[j] as f32 / k as f32;
-            assert!((emp - p).abs() < 0.02, "pos 0 tok {j}: emp={emp:.4} vs p={p:.4}");
+            assert!(
+                (emp - p).abs() < 0.02,
+                "pos 0 tok {j}: emp={emp:.4} vs p={p:.4}"
+            );
         }
 
         // Position 1 marginal (carried coordinate — arithmetic coding guarantee)
@@ -571,7 +575,10 @@ mod tests {
         }
         for (j, &p) in p1.iter().enumerate() {
             let emp = c1[j] as f32 / k as f32;
-            assert!((emp - p).abs() < 0.02, "pos 1 tok {j}: emp={emp:.4} vs p={p:.4}");
+            assert!(
+                (emp - p).abs() < 0.02,
+                "pos 1 tok {j}: emp={emp:.4} vs p={p:.4}"
+            );
         }
     }
 

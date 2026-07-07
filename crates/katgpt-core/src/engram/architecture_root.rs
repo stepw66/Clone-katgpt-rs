@@ -261,19 +261,37 @@ mod tests {
     fn from_parts_is_deterministic() {
         // Same inputs → same root, every time.
         let root_a = CognitiveArchitectureRoot::from_parts(
-            &[0xAA; 32], &eid(1), &[0xBB; 32], &[0xCC; 32], 42, 99,
+            &[0xAA; 32],
+            &eid(1),
+            &[0xBB; 32],
+            &[0xCC; 32],
+            42,
+            99,
         );
         let root_b = CognitiveArchitectureRoot::from_parts(
-            &[0xAA; 32], &eid(1), &[0xBB; 32], &[0xCC; 32], 42, 99,
+            &[0xAA; 32],
+            &eid(1),
+            &[0xBB; 32],
+            &[0xCC; 32],
+            42,
+            99,
         );
-        assert_eq!(root_a, root_b, "identical inputs must produce identical roots");
+        assert_eq!(
+            root_a, root_b,
+            "identical inputs must produce identical roots"
+        );
     }
 
     #[test]
     fn verify_round_trip_passes_on_identical_inputs() {
         // The canonical happy path: verify() returns true when nothing changed.
         let root = CognitiveArchitectureRoot::from_parts(
-            &[0x11; 32], &eid(2), &[0x22; 32], &[0x33; 32], 100, 7,
+            &[0x11; 32],
+            &eid(2),
+            &[0x22; 32],
+            &[0x33; 32],
+            100,
+            7,
         );
         assert!(
             root.verify(&[0x11; 32], &eid(2), &[0x22; 32], &[0x33; 32], 100, 7),
@@ -285,10 +303,23 @@ mod tests {
     fn verify_free_function_matches_method() {
         // verify_parts must agree with the method form bit-identically.
         let root = CognitiveArchitectureRoot::from_parts(
-            &[0x11; 32], &eid(2), &[0x22; 32], &[0x33; 32], 100, 7,
+            &[0x11; 32],
+            &eid(2),
+            &[0x22; 32],
+            &[0x33; 32],
+            100,
+            7,
         );
         let method = root.verify(&[0x11; 32], &eid(2), &[0x22; 32], &[0x33; 32], 100, 7);
-        let free_fn = verify_parts(&root.0, &[0x11; 32], &eid(2), &[0x22; 32], &[0x33; 32], 100, 7);
+        let free_fn = verify_parts(
+            &root.0,
+            &[0x11; 32],
+            &eid(2),
+            &[0x22; 32],
+            &[0x33; 32],
+            100,
+            7,
+        );
         assert_eq!(method, free_fn, "method and free-fn forms must agree");
         assert!(method);
     }
@@ -298,9 +329,8 @@ mod tests {
     #[test]
     fn ptg_root_single_bit_flip_breaks_verify() {
         let ptg = [0x55; 32];
-        let root = CognitiveArchitectureRoot::from_parts(
-            &ptg, &eid(1), &[0xBB; 32], &[0xCC; 32], 42, 99,
-        );
+        let root =
+            CognitiveArchitectureRoot::from_parts(&ptg, &eid(1), &[0xBB; 32], &[0xCC; 32], 42, 99);
         let mut tampered = ptg;
         tampered[0] ^= 1; // flip the LSB of byte 0
         assert!(
@@ -312,7 +342,12 @@ mod tests {
     #[test]
     fn engram_table_id_single_bit_flip_breaks_verify() {
         let root = CognitiveArchitectureRoot::from_parts(
-            &[0x55; 32], &eid(1), &[0xBB; 32], &[0xCC; 32], 42, 99,
+            &[0x55; 32],
+            &eid(1),
+            &[0xBB; 32],
+            &[0xCC; 32],
+            42,
+            99,
         );
         let tampered = EngramTableId({
             let mut b = [1u8; 32];
@@ -329,7 +364,12 @@ mod tests {
     fn shard_set_root_single_bit_flip_breaks_verify() {
         let shard = [0xBB; 32];
         let root = CognitiveArchitectureRoot::from_parts(
-            &[0x55; 32], &eid(1), &shard, &[0xCC; 32], 42, 99,
+            &[0x55; 32],
+            &eid(1),
+            &shard,
+            &[0xCC; 32],
+            42,
+            99,
         );
         let mut tampered = shard;
         tampered[10] ^= 0x40;
@@ -342,9 +382,8 @@ mod tests {
     #[test]
     fn functor_sig_root_single_bit_flip_breaks_verify() {
         let sig = [0xCC; 32];
-        let root = CognitiveArchitectureRoot::from_parts(
-            &[0x55; 32], &eid(1), &[0xBB; 32], &sig, 42, 99,
-        );
+        let root =
+            CognitiveArchitectureRoot::from_parts(&[0x55; 32], &eid(1), &[0xBB; 32], &sig, 42, 99);
         let mut tampered = sig;
         tampered[5] ^= 0x01;
         assert!(
@@ -356,7 +395,12 @@ mod tests {
     #[test]
     fn tick_change_breaks_verify() {
         let root = CognitiveArchitectureRoot::from_parts(
-            &[0x55; 32], &eid(1), &[0xBB; 32], &[0xCC; 32], 42, 99,
+            &[0x55; 32],
+            &eid(1),
+            &[0xBB; 32],
+            &[0xCC; 32],
+            42,
+            99,
         );
         assert!(
             !root.verify(&[0x55; 32], &eid(1), &[0xBB; 32], &[0xCC; 32], 43, 99),
@@ -367,7 +411,12 @@ mod tests {
     #[test]
     fn npc_id_change_breaks_verify() {
         let root = CognitiveArchitectureRoot::from_parts(
-            &[0x55; 32], &eid(1), &[0xBB; 32], &[0xCC; 32], 42, 99,
+            &[0x55; 32],
+            &eid(1),
+            &[0xBB; 32],
+            &[0xCC; 32],
+            42,
+            99,
         );
         assert!(
             !root.verify(&[0x55; 32], &eid(1), &[0xBB; 32], &[0xCC; 32], 42, 100),
@@ -384,13 +433,17 @@ mod tests {
         // ~128 ± 12 bits; the floor guards against catastrophic regression
         // to a near-collision.
         let ptg = [0x55; 32];
-        let root_a = CognitiveArchitectureRoot::from_parts(
-            &ptg, &eid(1), &[0xBB; 32], &[0xCC; 32], 42, 99,
-        );
+        let root_a =
+            CognitiveArchitectureRoot::from_parts(&ptg, &eid(1), &[0xBB; 32], &[0xCC; 32], 42, 99);
         let mut tampered = ptg;
         tampered[0] ^= 1;
         let root_b = CognitiveArchitectureRoot::from_parts(
-            &tampered, &eid(1), &[0xBB; 32], &[0xCC; 32], 42, 99,
+            &tampered,
+            &eid(1),
+            &[0xBB; 32],
+            &[0xCC; 32],
+            42,
+            99,
         );
         let dist = hamming_distance(&root_a.0, &root_b.0);
         assert!(
@@ -405,10 +458,20 @@ mod tests {
         // differ by npc_id — this is the binding-pair contract that prevents
         // cross-NPC conflation.
         let r1 = CognitiveArchitectureRoot::from_parts(
-            &[0x55; 32], &eid(1), &[0xBB; 32], &[0xCC; 32], 42, 1,
+            &[0x55; 32],
+            &eid(1),
+            &[0xBB; 32],
+            &[0xCC; 32],
+            42,
+            1,
         );
         let r2 = CognitiveArchitectureRoot::from_parts(
-            &[0x55; 32], &eid(1), &[0xBB; 32], &[0xCC; 32], 42, 2,
+            &[0x55; 32],
+            &eid(1),
+            &[0xBB; 32],
+            &[0xCC; 32],
+            42,
+            2,
         );
         assert_ne!(r1, r2, "distinct npc_ids must produce distinct roots");
     }
@@ -419,15 +482,30 @@ mod tests {
         // well-defined: an NPC with no shard set today must verify against
         // the same zero-root tomorrow.
         let root_a = CognitiveArchitectureRoot::from_parts(
-            &[0x55; 32], &eid(1), &[0u8; 32], &[0xCC; 32], 42, 99,
+            &[0x55; 32],
+            &eid(1),
+            &[0u8; 32],
+            &[0xCC; 32],
+            42,
+            99,
         );
         let root_b = CognitiveArchitectureRoot::from_parts(
-            &[0x55; 32], &eid(1), &[0u8; 32], &[0xCC; 32], 42, 99,
+            &[0x55; 32],
+            &eid(1),
+            &[0u8; 32],
+            &[0xCC; 32],
+            42,
+            99,
         );
         assert_eq!(root_a, root_b);
         // And it differs from an NPC that DOES have a shard set.
         let root_with_shard = CognitiveArchitectureRoot::from_parts(
-            &[0x55; 32], &eid(1), &[0xBB; 32], &[0xCC; 32], 42, 99,
+            &[0x55; 32],
+            &eid(1),
+            &[0xBB; 32],
+            &[0xCC; 32],
+            42,
+            99,
         );
         assert_ne!(root_a, root_with_shard);
     }

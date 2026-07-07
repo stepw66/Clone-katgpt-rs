@@ -113,7 +113,10 @@ fn g1_cs_ranking_beats_random() {
     println!("\n=== G1: CS ranking vs random ===");
     println!("  signal_heads = {:?}", signal_heads);
     println!("  CS top-3     = {:?}", cs_top3);
-    println!("  overlap      = {overlap}/3 ({:.0}%)", overlap_frac * 100.0);
+    println!(
+        "  overlap      = {overlap}/3 ({:.0}%)",
+        overlap_frac * 100.0
+    );
 
     assert!(
         overlap_frac >= 0.8,
@@ -270,7 +273,11 @@ fn g2_sparse_dense_duality_shape() {
     let plateau_drift = (ceiling_acc - plateau_acc).abs();
     println!(
         "  ctx-aware plateau: acc[K={}]={:.3}, ceiling[K={}]={:.3}, drift={:.3}",
-        ks[plateau_idx], plateau_acc, ks[ks.len() - 1], ceiling_acc, plateau_drift
+        ks[plateau_idx],
+        plateau_acc,
+        ks[ks.len() - 1],
+        ceiling_acc,
+        plateau_drift
     );
     assert!(
         plateau_drift <= 0.05,
@@ -359,7 +366,10 @@ fn g3_ca_monotone_and_bounded() {
         for i in 0..=steps {
             let ca = i as f32 / steps as f32;
             let k = b.k_for(ca);
-            assert!(k >= prev, "G3 FAIL: non-monotone at d={d}, ca={ca}: {k} < {prev}");
+            assert!(
+                k >= prev,
+                "G3 FAIL: non-monotone at d={d}, ca={ca}: {k} < {prev}"
+            );
             assert!(k >= 1, "G3 FAIL: below 1 at d={d}, ca={ca}");
             assert!(k <= b.d_total, "G3 FAIL: above d_total at d={d}, ca={ca}");
             assert!(
@@ -368,21 +378,39 @@ fn g3_ca_monotone_and_bounded() {
             );
             prev = k;
         }
-        assert_eq!(b.k_for(1.0), b.k_dense, "K(1) should anchor at k_dense for d={d}");
+        assert_eq!(
+            b.k_for(1.0),
+            b.k_dense,
+            "K(1) should anchor at k_dense for d={d}"
+        );
 
         // Edge cases.
         assert_eq!(b.k_for(0.0), b.k_sparse, "edge ca=0 for d={d}");
         assert_eq!(b.k_for(1.0), b.k_dense, "edge ca=1 for d={d}");
         let mid = b.k_for(0.5);
-        assert!(mid >= b.k_sparse && mid <= b.k_dense, "edge ca=0.5 for d={d}");
+        assert!(
+            mid >= b.k_sparse && mid <= b.k_dense,
+            "edge ca=0.5 for d={d}"
+        );
 
         // Out-of-range clamping.
         assert_eq!(b.k_for(-0.5), b.k_sparse, "ca=-0.5 clamps for d={d}");
         assert_eq!(b.k_for(2.0), b.k_dense, "ca=2.0 clamps for d={d}");
-        assert_eq!(b.k_for(f32::NAN), b.k_sparse, "NaN clamps to ca=0 for d={d}");
-        assert_eq!(b.k_for(f32::INFINITY), b.k_dense, "+inf clamps to ca=1 for d={d}");
+        assert_eq!(
+            b.k_for(f32::NAN),
+            b.k_sparse,
+            "NaN clamps to ca=0 for d={d}"
+        );
+        assert_eq!(
+            b.k_for(f32::INFINITY),
+            b.k_dense,
+            "+inf clamps to ca=1 for d={d}"
+        );
 
-        println!("  d={:<4} k_sparse={:<3} k_dense={:<3} mid={mid:<3} OK", d, b.k_sparse, b.k_dense);
+        println!(
+            "  d={:<4} k_sparse={:<3} k_dense={:<3} mid={mid:<3} OK",
+            d, b.k_sparse, b.k_dense
+        );
     }
 }
 

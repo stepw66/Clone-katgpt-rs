@@ -94,7 +94,7 @@
 #![cfg(feature = "funcattn")]
 
 use katgpt_core::attention::tiled_attention_forward_with_scores;
-use katgpt_core::funcattn::{funcattn_forward, FuncAttnBasis, FuncAttnConfig, FuncAttnScratch};
+use katgpt_core::funcattn::{FuncAttnBasis, FuncAttnConfig, FuncAttnScratch, funcattn_forward};
 use katgpt_core::simd;
 
 // ── Model dimensions ─────────────────────────────────────────────────
@@ -153,7 +153,11 @@ struct Rng {
 impl Rng {
     fn new(seed: u64) -> Self {
         Self {
-            s: if seed == 0 { 0x9E37_79B9_7F4A_7C15 } else { seed },
+            s: if seed == 0 {
+                0x9E37_79B9_7F4A_7C15
+            } else {
+                seed
+            },
         }
     }
     fn next_u64(&mut self) -> u64 {
@@ -247,7 +251,9 @@ fn generate_pattern_dataset(
         if effective_vocab > 1 && b == a {
             b = (b + 1) % effective_vocab;
         }
-        let seq: Vec<usize> = (0..seq_len).map(|i| if i % 2 == 0 { a } else { b }).collect();
+        let seq: Vec<usize> = (0..seq_len)
+            .map(|i| if i % 2 == 0 { a } else { b })
+            .collect();
         out.push(seq);
     }
     out
@@ -257,12 +263,7 @@ fn generate_pattern_dataset(
 
 /// Embed tokens + add positional encoding.
 /// `x[n, d] = w_emb[token[n]*D + d] + w_pos[n*D + d]`.
-fn embed_add_pos(
-    tokens: &[usize],
-    w_emb: &[f32],
-    w_pos: &[f32],
-    out: &mut [f32],
-) {
+fn embed_add_pos(tokens: &[usize], w_emb: &[f32], w_pos: &[f32], out: &mut [f32]) {
     for n in 0..N {
         let tok = tokens[n];
         let emb_row = &w_emb[tok * D..(tok + 1) * D];
@@ -378,10 +379,10 @@ struct FuncattnPredictor {
     w_head: Vec<f32>,  // (V, D)
     // Scratch
     scratch: FuncAttnScratch,
-    x_buf: Vec<f32>,    // (N, D)
-    o_buf: Vec<f32>,    // (N, D)
-    logits: Vec<f32>,   // (N, V)
-    probs: Vec<f32>,    // (N, V)
+    x_buf: Vec<f32>,  // (N, D)
+    o_buf: Vec<f32>,  // (N, D)
+    logits: Vec<f32>, // (N, V)
+    probs: Vec<f32>,  // (N, V)
 }
 
 impl FuncattnPredictor {
@@ -569,21 +570,21 @@ impl FuncattnPredictor {
 // ── SDPA predictor ───────────────────────────────────────────────────────
 
 struct SdpaPredictor {
-    w_emb: Vec<f32>,   // (V, D)
-    w_pos: Vec<f32>,   // (N, D)
-    w_q: Vec<f32>,     // (D, D)
-    w_k: Vec<f32>,     // (D, D)
-    w_v: Vec<f32>,     // (D, D)
-    w_head: Vec<f32>,  // (V, D)
+    w_emb: Vec<f32>,  // (V, D)
+    w_pos: Vec<f32>,  // (N, D)
+    w_q: Vec<f32>,    // (D, D)
+    w_k: Vec<f32>,    // (D, D)
+    w_v: Vec<f32>,    // (D, D)
+    w_head: Vec<f32>, // (V, D)
     // Scratch
-    x_buf: Vec<f32>,    // (N, D)
-    q_buf: Vec<f32>,    // (N, D)
-    k_buf: Vec<f32>,    // (N, D)
-    v_buf: Vec<f32>,    // (N, D)
-    o_buf: Vec<f32>,    // (N, D)
+    x_buf: Vec<f32>,      // (N, D)
+    q_buf: Vec<f32>,      // (N, D)
+    k_buf: Vec<f32>,      // (N, D)
+    v_buf: Vec<f32>,      // (N, D)
+    o_buf: Vec<f32>,      // (N, D)
     scores_buf: Vec<f32>, // (N, N)
-    logits: Vec<f32>,   // (N, V)
-    probs: Vec<f32>,    // (N, V)
+    logits: Vec<f32>,     // (N, V)
+    probs: Vec<f32>,      // (N, V)
 }
 
 impl SdpaPredictor {
@@ -871,7 +872,11 @@ fn g6_token_prediction_lm_domain() {
     eprintln!("  Plan 286 T4.4 promotion gate (hard, not asserted in this test):");
     eprintln!(
         "    FUNCATTN acc ≥ SDPA acc   → {} (fa {:.4} vs sd {:.4}, Δ {:+.4})",
-        if fa_acc >= sd_acc { "PASS — eligible for default-on promotion" } else { "FAIL — stays opt-in" },
+        if fa_acc >= sd_acc {
+            "PASS — eligible for default-on promotion"
+        } else {
+            "FAIL — stays opt-in"
+        },
         fa_acc,
         sd_acc,
         acc_delta,
@@ -889,11 +894,23 @@ fn g6_token_prediction_lm_domain() {
         "  training loss: funcattn {:.4}→{:.4} ({:.1}%), sdpa {:.4}→{:.4} ({:.1}%){}",
         fa_init_loss,
         fa_last_loss,
-        if fa_finite { (1.0 - fa_last_loss / fa_init_loss.max(1e-20)) * 100.0 } else { f32::NAN },
+        if fa_finite {
+            (1.0 - fa_last_loss / fa_init_loss.max(1e-20)) * 100.0
+        } else {
+            f32::NAN
+        },
         sd_init_loss,
         sd_last_loss,
-        if sd_finite { (1.0 - sd_last_loss / sd_init_loss.max(1e-20)) * 100.0 } else { f32::NAN },
-        if fa_finite && sd_finite { "" } else { "  [at least one DNF]" },
+        if sd_finite {
+            (1.0 - sd_last_loss / sd_init_loss.max(1e-20)) * 100.0
+        } else {
+            f32::NAN
+        },
+        if fa_finite && sd_finite {
+            ""
+        } else {
+            "  [at least one DNF]"
+        },
     );
 
     assert!(

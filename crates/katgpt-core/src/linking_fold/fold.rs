@@ -205,7 +205,10 @@ mod tests {
         for &alpha in &[1.0_f32, 5.0, 10.0] {
             for &x in &[-2.0_f32, -1.0, -0.5, 0.5, 1.0, 2.0] {
                 let (xp, xn) = (gelu_smoothed_abs(x, alpha), gelu_smoothed_abs(-x, alpha));
-                assert!((xp - xn).abs() < 1e-6, "not symmetric at x={x}, alpha={alpha}");
+                assert!(
+                    (xp - xn).abs() < 1e-6,
+                    "not symmetric at x={x}, alpha={alpha}"
+                );
             }
         }
     }

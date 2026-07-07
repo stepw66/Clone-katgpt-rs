@@ -24,8 +24,8 @@
 #![cfg(feature = "sheaf_admm")]
 
 use katgpt_dec::{
-    AdmmScratch, CellComplex, CochainField, LocalObjective, SheafMaps,
-    sheaf_admm_step_cg_into, sheaf_admm_step_into, sheaf_admm_step_soft_into,
+    AdmmScratch, CellComplex, CochainField, LocalObjective, SheafMaps, sheaf_admm_step_cg_into,
+    sheaf_admm_step_into, sheaf_admm_step_soft_into,
 };
 use std::hint::black_box;
 use std::time::Instant;
@@ -58,7 +58,9 @@ impl SplitMix64 {
 
 /// Build a path-graph workload with K vertices, d_v=8, d_e=5.
 /// Returns (cx, primal, consensus, dual, objective, scratch).
-fn build_path_graph_workload(k: usize) -> (
+fn build_path_graph_workload(
+    k: usize,
+) -> (
     CellComplex,
     CochainField,
     CochainField,
@@ -98,10 +100,16 @@ fn build_selector_maps_pair(cx: &CellComplex, d_v: usize, d_e: usize) -> (SheafM
     // side (identity dims [0..d_e] would take the identity grid-stencil path).
     let dims_uniform: Vec<usize> = (d_v - d_e..d_v).collect(); // [3,4,5,6,7] for d_v=8,d_e=5
     let dense = SheafMaps::selector(cx, d_v, &dims_uniform);
-    assert!(!dense.is_identity, "dense selector should NOT be identity (non-standard dims)");
+    assert!(
+        !dense.is_identity,
+        "dense selector should NOT be identity (non-standard dims)"
+    );
     let dims_per_edge: Vec<&[usize]> = vec![&dims_uniform; cx.n_edges()];
     let compact = SheafMaps::selector_per_edge(cx, d_v, &dims_per_edge);
-    assert!(!compact.is_identity, "compact selector should NOT be identity");
+    assert!(
+        !compact.is_identity,
+        "compact selector should NOT be identity"
+    );
     (dense, compact)
 }
 
@@ -145,9 +153,16 @@ fn t32_sparse_selector_latency() -> (f64, f64, bool) {
 
     let dense_ns = measure_latency("dense selector", n_iters, || {
         sheaf_admm_step_into(
-            black_box(&cx), black_box(&dense_maps),
-            black_box(&mut px_d), black_box(&mut cz_d), black_box(&mut du_d),
-            black_box(&obj_d), 1.0, 0.2, 5, black_box(&mut sc_d),
+            black_box(&cx),
+            black_box(&dense_maps),
+            black_box(&mut px_d),
+            black_box(&mut cz_d),
+            black_box(&mut du_d),
+            black_box(&obj_d),
+            1.0,
+            0.2,
+            5,
+            black_box(&mut sc_d),
         );
     });
 
@@ -157,9 +172,16 @@ fn t32_sparse_selector_latency() -> (f64, f64, bool) {
     let mut sc_c = sc_c;
     let compact_ns = measure_latency("compact selector", n_iters, || {
         sheaf_admm_step_into(
-            black_box(&cx), black_box(&compact_maps),
-            black_box(&mut px_c), black_box(&mut cz_c), black_box(&mut du_c),
-            black_box(&obj_c), 1.0, 0.2, 5, black_box(&mut sc_c),
+            black_box(&cx),
+            black_box(&compact_maps),
+            black_box(&mut px_c),
+            black_box(&mut cz_c),
+            black_box(&mut du_c),
+            black_box(&obj_c),
+            1.0,
+            0.2,
+            5,
+            black_box(&mut sc_c),
         );
     });
 
@@ -206,8 +228,7 @@ fn t31_cg_vs_gd_residual() -> (f64, f64, bool) {
     );
 
     // Measure residual ‖L_F z‖ for both.
-    let mut sc_r = AdmmScratch::new(&cx, d_v, d_e);
-    katgpt_dec::sheaf_admm_step_into; // noop to use import; the real matvec is internal
+    let sc_r = AdmmScratch::new(&cx, d_v, d_e);
     // We approximate the residual by computing the max-edge disagreement of z.
     let gd_res = max_edge_disagreement_l1(&cx, &cz_gd);
     let cg_res = max_edge_disagreement_l1(&cx, &cz_cg);
@@ -257,9 +278,16 @@ fn t33_soft_constraint_overhead() -> (f64, f64, bool) {
 
     let hard_ns = measure_latency("hard constraint", n_iters, || {
         sheaf_admm_step_into(
-            black_box(&cx), black_box(&maps),
-            black_box(&mut px_h), black_box(&mut cz_h), black_box(&mut du_h),
-            black_box(&obj), 1.0, 0.2, 5, black_box(&mut sc_h),
+            black_box(&cx),
+            black_box(&maps),
+            black_box(&mut px_h),
+            black_box(&mut cz_h),
+            black_box(&mut du_h),
+            black_box(&obj),
+            1.0,
+            0.2,
+            5,
+            black_box(&mut sc_h),
         );
     });
 
@@ -269,9 +297,17 @@ fn t33_soft_constraint_overhead() -> (f64, f64, bool) {
     let mut sc_s = sc_s;
     let soft_ns = measure_latency("soft constraint (γ=0.5)", n_iters, || {
         sheaf_admm_step_soft_into(
-            black_box(&cx), black_box(&maps),
-            black_box(&mut px_s), black_box(&mut cz_s), black_box(&mut du_s),
-            black_box(&obj_s), 1.0, 0.2, 0.5, 5, black_box(&mut sc_s),
+            black_box(&cx),
+            black_box(&maps),
+            black_box(&mut px_s),
+            black_box(&mut cz_s),
+            black_box(&mut du_s),
+            black_box(&obj_s),
+            1.0,
+            0.2,
+            0.5,
+            5,
+            black_box(&mut sc_s),
         );
     });
 
@@ -315,6 +351,10 @@ fn main() {
     let all_pass = t32_pass && t31_pass && t33_pass;
     println!(
         "\n══ Phase 3 {} ══",
-        if all_pass { "ALL GATES PASS ✅" } else { "SOME GATES FAILED ❌" }
+        if all_pass {
+            "ALL GATES PASS ✅"
+        } else {
+            "SOME GATES FAILED ❌"
+        }
     );
 }

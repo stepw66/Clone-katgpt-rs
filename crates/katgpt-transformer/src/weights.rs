@@ -23,7 +23,7 @@ pub struct LayerWeights {
     #[cfg(feature = "kog_cpu_fusion")]
     pub attn_norm_gamma: Vec<f32>, // [n_embd] pre-attention RMSNorm gamma (identity=1.0)
     #[cfg(feature = "kog_cpu_fusion")]
-    pub mlp_norm_gamma: Vec<f32>,  // [n_embd] pre-MLP RMSNorm gamma (identity=1.0)
+    pub mlp_norm_gamma: Vec<f32>, // [n_embd] pre-MLP RMSNorm gamma (identity=1.0)
     // Kog CPU fusion (Plan 160): fused QKV weight storage
     #[cfg(feature = "kog_cpu_fusion")]
     pub attn_qkv_fused: Option<Vec<f32>>, // [(n_embd + 2*kv_dim), n_embd] interleaved

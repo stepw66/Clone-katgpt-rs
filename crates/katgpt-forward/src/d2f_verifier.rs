@@ -12,14 +12,14 @@
 //! `katgpt_speculative::SpeculativeVerifier`. Root's `src/speculative/d2f_verifier.rs`
 //! is now a thin re-export shim.
 
-use crate::d2f_context::D2fContext;
 use crate::d2f::{D2fDecodeConfig, d2f_decode_block_with_prompt_with};
+use crate::d2f_context::D2fContext;
+use crate::{ForwardContext, forward};
 use katgpt_core::speculative::sampling::sample_from_distribution;
 use katgpt_core::traits::{NoPruner, NoScreeningPruner};
 use katgpt_speculative::SpeculativeVerifier;
-use katgpt_transformer::TransformerWeights;
 use katgpt_transformer::MultiLayerKVCache;
-use crate::{ForwardContext, forward};
+use katgpt_transformer::TransformerWeights;
 use katgpt_types::{Config, Rng, softmax_scaled};
 
 /// Speculative verifier that uses D2F diffusion as drafter, AR as verifier.

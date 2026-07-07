@@ -255,7 +255,9 @@ impl AdaptiveTraceCompactor {
     /// Forwards to [`FrequencyBandit::update`] with the last-selected arm.
     /// No-op if the bandit has not yet selected an arm this trace.
     pub fn update_reward(&mut self, reward: f32) {
-        if let Some(band) = self.bandit.last_selected() { self.bandit.update(band, reward as f64) }
+        if let Some(band) = self.bandit.last_selected() {
+            self.bandit.update(band, reward as f64)
+        }
     }
 
     /// Current `(theta_low, theta_high)`.
@@ -328,8 +330,8 @@ impl AdaptiveTraceCompactor {
             }
             FrequencyBand::Mid => {}
             FrequencyBand::High => {
-                self.theta_low = (self.theta_low + BANDIT_ADJUST_STEP)
-                    .min(self.theta_high - BANDIT_ADJUST_STEP);
+                self.theta_low =
+                    (self.theta_low + BANDIT_ADJUST_STEP).min(self.theta_high - BANDIT_ADJUST_STEP);
             }
         }
     }
@@ -438,10 +440,7 @@ mod tests {
         // Peaked → near-zero entropy.
         let peaked = peaked_logits(n);
         let h_peak = entropy_from_logits(&peaked);
-        assert!(
-            h_peak < 1e-3,
-            "peaked entropy {h_peak} should be near 0"
-        );
+        assert!(h_peak < 1e-3, "peaked entropy {h_peak} should be near 0");
 
         // Empty → 0.
         assert_eq!(entropy_from_logits(&[]), 0.0);
@@ -574,7 +573,8 @@ mod tests {
         assert!(
             low1 < low0,
             "theta_low should have dropped after 5 Low adjustments: {} -> {}",
-            low0, low1
+            low0,
+            low1
         );
         // theta_high is never touched by the bandit.
         assert!((high1 - high0).abs() < 1e-6);
@@ -685,7 +685,10 @@ mod tests {
         // Reversed order → should swap.
         c.set_thresholds(2.0, 0.5);
         let (low, high) = c.thresholds();
-        assert!(low <= high, "low ({low}) should be <= high ({high}) after swap");
+        assert!(
+            low <= high,
+            "low ({low}) should be <= high ({high}) after swap"
+        );
         assert!((low - 0.5).abs() < 1e-6);
         assert!((high - 2.0).abs() < 1e-6);
 

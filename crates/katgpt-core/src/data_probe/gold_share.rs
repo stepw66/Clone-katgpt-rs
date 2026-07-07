@@ -550,9 +550,9 @@ mod tests {
         // Identity W_O: 8×2 matrix, rows 0,1 are identity, rest zero.
         let concat_len = n_heads * d_head; // 8
         let mut w_o = vec![0.0_f32; concat_len * d_model];
-        w_o[0 * d_model + 0] = 1.0; // row 0 = [1, 0]
-        w_o[1 * d_model + 1] = 1.0; // row 1 = [0, 1]
-                                    // rows 2-7 are zero.
+        w_o[0] = 1.0; // row 0 = [1, 0]
+        w_o[d_model + 1] = 1.0; // row 1 = [0, 1]
+        // rows 2-7 are zero.
 
         let mut scratch = make_scratch(n_heads, d_head, d_model);
         let report = gold_share(

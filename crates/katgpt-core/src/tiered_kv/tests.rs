@@ -3,7 +3,12 @@ use crate::tiered_kv::in_memory::InMemoryTieredKvStore;
 
 /// Simple group summarizer: just mean-pool the group's keys (no RoPE awareness).
 /// Used as the injection function for the reference store.
-fn mean_summarizer(keys_flat: &[f32], _positions: &[usize], group_start: usize, n_tokens: usize) -> Vec<f32> {
+fn mean_summarizer(
+    keys_flat: &[f32],
+    _positions: &[usize],
+    group_start: usize,
+    n_tokens: usize,
+) -> Vec<f32> {
     let d = keys_flat.len() / _positions.len().max(1);
     // NOTE: d is inferred from the keys_flat length / positions length. In
     // practice the caller passes the correct d. For tests we use d=8.
@@ -66,8 +71,12 @@ fn in_memory_store_append_and_fetch_full() {
 
     // Append 3 chunks (12 tokens total).
     for chunk_idx in 0..3 {
-        let keys: Vec<f32> = (0..c * d).map(|i| chunk_idx as f32 * 100.0 + i as f32).collect();
-        let values: Vec<f32> = (0..c * d).map(|i| chunk_idx as f32 * 200.0 + i as f32).collect();
+        let keys: Vec<f32> = (0..c * d)
+            .map(|i| chunk_idx as f32 * 100.0 + i as f32)
+            .collect();
+        let values: Vec<f32> = (0..c * d)
+            .map(|i| chunk_idx as f32 * 200.0 + i as f32)
+            .collect();
         let positions: Vec<usize> = (0..c).map(|t| chunk_idx * c + t).collect();
         store.append_chunk(&keys, &values, &positions);
     }

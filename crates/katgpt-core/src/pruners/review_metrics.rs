@@ -1109,7 +1109,10 @@ mod tests {
         let summary = metrics.feature_read_summary();
         let s = format!("{summary}");
         assert!(s.contains("detection=1"), "display missing detection: {s}");
-        assert!(s.contains("prediction=1"), "display missing prediction: {s}");
+        assert!(
+            s.contains("prediction=1"),
+            "display missing prediction: {s}"
+        );
         assert!(s.contains("50.0%"), "display missing pct: {s}");
     }
 }

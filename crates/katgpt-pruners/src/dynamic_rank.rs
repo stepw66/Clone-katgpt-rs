@@ -255,9 +255,10 @@ impl<P: ScreeningPruner> DynamicRankPruner<P> {
         let hash = Self::prefix_hash(parent);
         let corrections = self.corrections.pin();
         if let Some(vec) = corrections.get(&hash)
-            && token_idx < vec.len() {
-                return vec[token_idx];
-            }
+            && token_idx < vec.len()
+        {
+            return vec[token_idx];
+        }
         0.0
     }
 

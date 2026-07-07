@@ -43,8 +43,8 @@
 #![cfg(feature = "non_interference_branches")]
 
 use katgpt_core::{
-    BranchBank, BranchId, BranchRouter, CognitiveBranch, NonInterferenceProjection,
-    VerifierGate, WriteDecision,
+    BranchBank, BranchId, BranchRouter, CognitiveBranch, NonInterferenceProjection, VerifierGate,
+    WriteDecision,
 };
 use std::hint::black_box;
 use std::time::Instant;
@@ -63,10 +63,18 @@ struct GateResult {
 
 impl GateResult {
     fn pass(name: &'static str, detail: impl Into<String>) -> Self {
-        Self { name, passed: true, detail: detail.into() }
+        Self {
+            name,
+            passed: true,
+            detail: detail.into(),
+        }
     }
     fn fail(name: &'static str, detail: impl Into<String>) -> Self {
-        Self { name, passed: false, detail: detail.into() }
+        Self {
+            name,
+            passed: false,
+            detail: detail.into(),
+        }
     }
 }
 
@@ -184,7 +192,9 @@ fn gate_g1b_write_does_not_contaminate_sibling() -> GateResult {
     let mut bank: BranchBank<Option<u64>> = BranchBank::new(N);
     for k in 0..N {
         let anchor = basis_vec(k, D);
-        let id = bank.spawn(anchor).expect("spawn must succeed below capacity");
+        let id = bank
+            .spawn(anchor)
+            .expect("spawn must succeed below capacity");
         assert_eq!(id, BranchId::new(k as u32));
     }
 
@@ -198,9 +208,9 @@ fn gate_g1b_write_does_not_contaminate_sibling() -> GateResult {
         BranchId::new(0),
         basis_vec(0, D), // embedding aligned with branch 0's anchor
         Some(42u64),
-        0.9,             // reward
-        None,            // scope (no scope tag)
-        1,               // tick
+        0.9,  // reward
+        None, // scope (no scope tag)
+        1,    // tick
     );
     if !wrote {
         return GateResult::fail("G1b", "write_episodic(b_0) returned false (expected true)");
@@ -298,7 +308,10 @@ fn gate_g1c_ninth_direction_must_interfere() -> GateResult {
             "G1c",
             format!("9th direction rejected with wrong error {other:?} (expected Interferes)"),
         ),
-        None => GateResult::fail("G1c", "9th direction reported Ok but is_ok() == false (inconsistent)"),
+        None => GateResult::fail(
+            "G1c",
+            "9th direction reported Ok but is_ok() == false (inconsistent)",
+        ),
     }
 }
 
@@ -553,7 +566,9 @@ fn main() {
     println!();
 
     if all_pass {
-        println!("=== ALL G1+G2+G4 GATES PASS — combined with G3+G5 build-matrix, eligible for default promotion ===");
+        println!(
+            "=== ALL G1+G2+G4 GATES PASS — combined with G3+G5 build-matrix, eligible for default promotion ==="
+        );
         std::process::exit(0);
     } else {
         println!("=== ONE OR MORE GATES FAILED — keep opt-in, investigate ===");

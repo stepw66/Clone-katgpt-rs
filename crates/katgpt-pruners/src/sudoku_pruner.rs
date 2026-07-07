@@ -662,7 +662,10 @@ mod tests {
         // {2,3,4,5,6,7,8,9}. Union of peers = {2,3,4,5,6,7,8,9} → only 1 fits.
         assert!(pruner.is_valid(0, 1, &[]), "naked single 1 must be valid");
         for d in 2..=9u8 {
-            assert!(!pruner.is_valid(0, d as usize, &[]), "digit {d} must be pruned at the naked single");
+            assert!(
+                !pruner.is_valid(0, d as usize, &[]),
+                "digit {d} must be pruned at the naked single"
+            );
         }
         // sanity: count via the shared helper (4 candidates → not naked-single,
         // confirms the helper returns sensible counts on a multi-candidate cell).
@@ -691,7 +694,10 @@ mod tests {
                 probs
             })
             .collect();
-        let config = Config { tree_budget: 50, ..Config::draft() };
+        let config = Config {
+            tree_budget: 50,
+            ..Config::draft()
+        };
         let mv: Vec<&[f32]> = marginals.iter().map(|s| s.as_slice()).collect();
         let tree = build_dd_tree_pruned(&mv, &config, &pruner, false);
         assert!(!tree.is_empty(), "MRV tree should have nodes");
@@ -728,7 +734,10 @@ mod tests {
             assert!(margs[0][d as usize] == 0.0, "digit {d} must get 0");
         }
         let sum: f32 = margs[0][1..=9].iter().sum();
-        assert!((sum - 1.0).abs() < 1e-6, "marginal must sum to 1, got {sum}");
+        assert!(
+            (sum - 1.0).abs() < 1e-6,
+            "marginal must sum to 1, got {sum}"
+        );
     }
 
     #[cfg(feature = "sudoku_cp")]
@@ -743,12 +752,18 @@ mod tests {
         let p = &margs[0];
         // Valid digits at (0,1) per the existing test: 1,2,4,6.
         for d in [1u8, 2, 4, 6] {
-            assert!((p[d as usize] - 0.25).abs() < 1e-6, "digit {d} should get 1/4");
+            assert!(
+                (p[d as usize] - 0.25).abs() < 1e-6,
+                "digit {d} should get 1/4"
+            );
         }
         for d in [3u8, 5, 7, 8, 9] {
             assert!(p[d as usize] == 0.0, "digit {d} should get 0");
         }
         let sum: f32 = p[1..=9].iter().sum();
-        assert!((sum - 1.0).abs() < 1e-6, "marginal must sum to 1, got {sum}");
+        assert!(
+            (sum - 1.0).abs() < 1e-6,
+            "marginal must sum to 1, got {sum}"
+        );
     }
 }

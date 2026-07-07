@@ -25,13 +25,13 @@
 
 #![allow(clippy::too_many_arguments, clippy::needless_range_loop)]
 
-use crate::d2f_context::D2fContext;
 use crate::d2f::{D2fDecodeConfig, d2f_decode_block_with_prompt_with};
+use crate::d2f_context::D2fContext;
+use crate::{ForwardContext, forward};
 use katgpt_core::speculative::sampling::sample_from_distribution;
 use katgpt_core::traits::{NoPruner, NoScreeningPruner};
 use katgpt_speculative::SpeculativeVerifier;
 use katgpt_transformer::{MultiLayerKVCache, TransformerWeights};
-use crate::{ForwardContext, forward};
 use katgpt_types::{Config, Rng, softmax_scaled};
 
 // ---------------------------------------------------------------------------
@@ -369,10 +369,7 @@ impl<'a> FlashARConsensusVerifier<'a> {
             target_cache: MultiLayerKVCache::new(target_config),
             d2f_ctx: D2fContext::new(target_config),
             probs_buf: vec![0.0f32; target_config.vocab_size],
-            p_flat: vec![
-                0.0f32;
-                (MAX_DRAFT_WIDTH + 1) * target_config.vocab_size
-            ],
+            p_flat: vec![0.0f32; (MAX_DRAFT_WIDTH + 1) * target_config.vocab_size],
             forward_scratch: vec![0.0f32; target_config.vocab_size],
         }
     }
@@ -498,7 +495,11 @@ impl SpeculativeVerifier for FlashARConsensusVerifier<'_> {
             }
 
             h_tokens[i] = best_idx;
-            h_conf[i] = if best_prob == f32::NEG_INFINITY { 0.0 } else { best_prob };
+            h_conf[i] = if best_prob == f32::NEG_INFINITY {
+                0.0
+            } else {
+                best_prob
+            };
             target_argmax[i] = best_idx;
 
             // Persist this distribution into p_flat slot (i+1).
@@ -533,10 +534,12 @@ impl SpeculativeVerifier for FlashARConsensusVerifier<'_> {
 
         // Helper: flush a cold segment [start..end) using cached target_argmax.
         // Returns false on first mismatch (caller breaks out).
-        let flush_cold = |start: usize, end: usize,
+        let flush_cold = |start: usize,
+                          end: usize,
                           consensus_tokens: &[usize; MAX_DRAFT_WIDTH],
                           target_argmax: &[usize; MAX_DRAFT_WIDTH],
-                          accepted: &mut Vec<usize>| -> bool {
+                          accepted: &mut Vec<usize>|
+         -> bool {
             for j in start..end {
                 let draft_tok = consensus_tokens[j];
                 let target_tok = target_argmax[j];
@@ -555,7 +558,8 @@ impl SpeculativeVerifier for FlashARConsensusVerifier<'_> {
                 ThermalPath::Plasma | ThermalPath::Hot => {
                     // Flush any pending cold segment
                     if let Some(start) = cold_start.take()
-                        && !flush_cold(start, i, &consensus_tokens, &target_argmax, &mut accepted) {
+                        && !flush_cold(start, i, &consensus_tokens, &target_argmax, &mut accepted)
+                    {
                         all_accepted = false;
                         break;
                     }
@@ -565,7 +569,8 @@ impl SpeculativeVerifier for FlashARConsensusVerifier<'_> {
                 ThermalPath::Warm => {
                     // Flush any pending cold segment
                     if let Some(start) = cold_start.take()
-                        && !flush_cold(start, i, &consensus_tokens, &target_argmax, &mut accepted) {
+                        && !flush_cold(start, i, &consensus_tokens, &target_argmax, &mut accepted)
+                    {
                         all_accepted = false;
                         break;
                     }
@@ -596,7 +601,14 @@ impl SpeculativeVerifier for FlashARConsensusVerifier<'_> {
         // Flush trailing cold segment
         if all_accepted {
             if let Some(start) = cold_start.take()
-                && !flush_cold(start, k_bounded, &consensus_tokens, &target_argmax, &mut accepted) {
+                && !flush_cold(
+                    start,
+                    k_bounded,
+                    &consensus_tokens,
+                    &target_argmax,
+                    &mut accepted,
+                )
+            {
                 all_accepted = false;
             }
 

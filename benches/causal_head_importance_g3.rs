@@ -51,7 +51,9 @@ fn time_ns<F: FnMut()>(iters: usize, mut f: F) -> f64 {
 
 fn main() {
     println!("=== CausalHeadImportance G3 (calibration latency) Bench (Plan 358) ===\n");
-    println!("Compares partition_by_causal_score (causal) vs calibrate_from_scores (attention-mass).");
+    println!(
+        "Compares partition_by_causal_score (causal) vs calibrate_from_scores (attention-mass)."
+    );
     println!("Target: causal partition ≤ 2× of attention-mass partition.\n");
 
     let config = RtTurboConfig::default();
@@ -70,7 +72,12 @@ fn main() {
 
         // Causal partition step (this plan).
         let causal_ns = time_ns(iters, || {
-            let _ = partition_by_causal_score(black_box(&scores), black_box(critical_ratio), None, false);
+            let _ = partition_by_causal_score(
+                black_box(&scores),
+                black_box(critical_ratio),
+                None,
+                false,
+            );
         });
 
         // Attention-mass partition step (RTPurbo / Plan 126).
@@ -108,7 +115,12 @@ fn main() {
     let g4_ns = {
         let scores = synthetic_scores(144, 0xABCD_1234);
         time_ns(iters, || {
-            let _ = partition_by_causal_score(black_box(&scores), black_box(critical_ratio), None, false);
+            let _ = partition_by_causal_score(
+                black_box(&scores),
+                black_box(critical_ratio),
+                None,
+                false,
+            );
         })
     };
     println!("  partition_by_causal_score at n=144: {g4_ns:.0} ns/call (sub-microsecond).");

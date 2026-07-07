@@ -103,8 +103,17 @@ impl BandConditioningSet {
     /// Indices returned by [`state_indices`](Self::state_indices) are
     /// **1-indexed** (i.e., `s_1 = 1`, `s_T = T`) to match paper notation.
     #[allow(clippy::cast_possible_truncation)]
-    pub fn from_segments(k: usize, v: usize, task: usize, segment_len: usize, total_steps: usize) -> Self {
-        debug_assert!(segment_len >= 2, "segment length L must be >= 2 (paper Thm 1)");
+    pub fn from_segments(
+        k: usize,
+        v: usize,
+        task: usize,
+        segment_len: usize,
+        total_steps: usize,
+    ) -> Self {
+        debug_assert!(
+            segment_len >= 2,
+            "segment length L must be >= 2 (paper Thm 1)"
+        );
         debug_assert!(k >= 1 && v >= 1, "segment indices k, v must be >= 1");
         debug_assert!(k < v, "must have k < v (paper Thm 1, segment ordering)");
         debug_assert!(task >= 1, "task index must be >= 1");
@@ -378,9 +387,9 @@ pub use katgpt_core::sigmoid;
 /// Returns `Phi^{-1}(1 - alpha/2)` — the rejection threshold on |z|.
 fn inverse_normal_cdf_two_sided(alpha: f32) -> f32 {
     match alpha {
-        a if (a - 0.10).abs() < 1e-3 => 1.644_853_6, // 90%
-        a if (a - 0.05).abs() < 1e-3 => 1.959_964, // 95%
-        a if (a - 0.01).abs() < 1e-3 => 2.575_829_3, // 99%
+        a if (a - 0.10).abs() < 1e-3 => 1.644_853_6,  // 90%
+        a if (a - 0.05).abs() < 1e-3 => 1.959_964,    // 95%
+        a if (a - 0.01).abs() < 1e-3 => 2.575_829_3,  // 99%
         a if (a - 0.001).abs() < 1e-3 => 3.290_526_7, // 99.9%
         // Default to 95%.
         _ => 1.959_964,
@@ -645,9 +654,8 @@ mod tests {
         }
 
         // Test 1: Without conditioning on g, x ⊭ y (dependent).
-        let result_marginal = conditional_dependence_fisher_z(
-            &x, &y, &[], n, CiTestConfig::default(),
-        );
+        let result_marginal =
+            conditional_dependence_fisher_z(&x, &y, &[], n, CiTestConfig::default());
         // Expect strong dependence: |z| >> 1.96, score > 0.5.
         assert!(
             result_marginal.z_stat.abs() > 1.96,
@@ -663,9 +671,8 @@ mod tests {
         );
 
         // Test 2: With conditioning on g (the collider), x ⊥ y.
-        let result_conditioned = conditional_dependence_fisher_z(
-            &x, &y, &[&g], n, CiTestConfig::default(),
-        );
+        let result_conditioned =
+            conditional_dependence_fisher_z(&x, &y, &[&g], n, CiTestConfig::default());
         // Wait — the paper says conditioning on a collider OPENS dependence,
         // not closes it. So with a collider g, conditioning on g should NOT
         // remove the dependence between x and y.
@@ -706,9 +713,7 @@ mod tests {
                 x[i] = g + rng.standard_normal();
                 y[i] = g + rng.standard_normal();
             }
-            let result = conditional_dependence_fisher_z(
-                &x, &y, &[], n, CiTestConfig::default(),
-            );
+            let result = conditional_dependence_fisher_z(&x, &y, &[], n, CiTestConfig::default());
             if result.rejects_at(0.05) {
                 rejections += 1;
             }
@@ -733,9 +738,7 @@ mod tests {
         for _ in 0..trials {
             let x: Vec<f32> = (0..n).map(|_| rng.standard_normal()).collect();
             let y: Vec<f32> = (0..n).map(|_| rng.standard_normal()).collect();
-            let result = conditional_dependence_fisher_z(
-                &x, &y, &[], n, CiTestConfig::default(),
-            );
+            let result = conditional_dependence_fisher_z(&x, &y, &[], n, CiTestConfig::default());
             if result.rejects_at(0.05) {
                 false_positives += 1;
             }
@@ -779,7 +782,12 @@ mod tests {
         let n2 = [0.0f32, 0.1, 0.0];
         let negatives: &[&[f32]] = &[&n1, &n2];
         let score = conditional_dependence_infonce(
-            &x, &y, &z, negatives, default_dot_critic, InfoNceConfig::default(),
+            &x,
+            &y,
+            &z,
+            negatives,
+            default_dot_critic,
+            InfoNceConfig::default(),
         );
         assert!(score > 0.0 && score < 1.0);
     }
@@ -794,12 +802,22 @@ mod tests {
         let n3 = [0.0f32, 0.0, 0.1];
         let negatives: &[&[f32]] = &[&n1, &n2, &n3];
         let score_similar = conditional_dependence_infonce(
-            &x, &y, &z, negatives, default_dot_critic, InfoNceConfig::default(),
+            &x,
+            &y,
+            &z,
+            negatives,
+            default_dot_critic,
+            InfoNceConfig::default(),
         );
 
         let y_dissimilar = [-1.0f32, -1.0, -1.0];
         let score_dissimilar = conditional_dependence_infonce(
-            &x, &y_dissimilar, &z, negatives, default_dot_critic, InfoNceConfig::default(),
+            &x,
+            &y_dissimilar,
+            &z,
+            negatives,
+            default_dot_critic,
+            InfoNceConfig::default(),
         );
 
         assert!(

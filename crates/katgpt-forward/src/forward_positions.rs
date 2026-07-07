@@ -474,7 +474,11 @@ mod tests {
         // and MLP, producing differences up to ~1e-4 on logit magnitudes ~10.)
         assert_eq!(logits_bc.len(), logits_sc.len(), "logits length mismatch");
         for q in 0..tokens.len() {
-            assert_eq!(logits_bc[q].len(), logits_sc[q].len(), "vocab length mismatch");
+            assert_eq!(
+                logits_bc[q].len(),
+                logits_sc[q].len(),
+                "vocab length mismatch"
+            );
             for v in 0..logits_bc[q].len() {
                 let diff = (logits_bc[q][v] - logits_sc[q][v]).abs();
                 let max_abs = logits_bc[q][v].abs().max(logits_sc[q][v].abs());
@@ -529,8 +533,7 @@ mod tests {
         // Compare against forward_bidirectional_positions (the existing
         // unconstrained attention implementation). They should match closely
         // (both compute full attention over all positions).
-        let (logits_bi, attn_bi) =
-            forward_bidirectional_positions(&weights, &tokens, &config);
+        let (logits_bi, attn_bi) = forward_bidirectional_positions(&weights, &tokens, &config);
 
         // Attention weights should match within SIMD-vs-scalar exp tolerance.
         // (bidirectional uses SIMD Cephes polynomial exp; set-causal uses scalar

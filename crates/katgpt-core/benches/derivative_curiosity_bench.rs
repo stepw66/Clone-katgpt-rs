@@ -187,10 +187,17 @@ fn g5_functional_gate(c: &mut Criterion) {
 
     println!("\n═══ G5 Functional Gate (cycles-to-recover) ═══");
     println!("  τ_low                       = {tau_low:.3} nats");
-    println!("  CGSP cycles-to-recover      = {cgsp_cycles}  (collapse_triggered={cgsp_triggered})");
-    println!("  Derivative cycles-to-recover= {deriv_cycles}  (collapse_triggered={deriv_triggered})");
+    println!(
+        "  CGSP cycles-to-recover      = {cgsp_cycles}  (collapse_triggered={cgsp_triggered})"
+    );
+    println!(
+        "  Derivative cycles-to-recover= {deriv_cycles}  (collapse_triggered={deriv_triggered})"
+    );
     println!("  Derivative / CGSP ratio     = {ratio:.2}×  (target ≤ 2.0×)");
-    println!("  G5 (a) functional verdict   = {}", if pass { "PASS" } else { "FAIL" });
+    println!(
+        "  G5 (a) functional verdict   = {}",
+        if pass { "PASS" } else { "FAIL" }
+    );
     println!("═══════════════════════════════════════════════\n");
 
     // Wrap in a single-iter benchmark so criterion records it.

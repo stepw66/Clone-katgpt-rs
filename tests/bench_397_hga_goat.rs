@@ -42,16 +42,13 @@
 
 use katgpt_core::hga::{GroupSummaryCache, MixedRopeSummarizer};
 use katgpt_core::simd::simd_dot_f32;
-use katgpt_core::tiered_kv::{
-    GroupSelection, InMemoryTieredKvStore, RouteBudget, SinkLocalSet, TieredKvStore,
-};
+use katgpt_core::tiered_kv::{InMemoryTieredKvStore, SinkLocalSet, TieredKvStore};
 use katgpt_rs::dash_attn::entmax_1p5;
 
 // ── Config ───────────────────────────────────────────────────────────────────
 
 const CHUNK_SIZE: usize = 64;
 const GROUP_SIZE: usize = 16;
-const N_GROUPS_PER_CHUNK: usize = CHUNK_SIZE / GROUP_SIZE; // 4
 
 /// Run a single NIAH trial. Returns (needle_fetched: bool, cosine: f32, n_fetched: usize).
 struct TrialResult {
@@ -68,8 +65,6 @@ struct NiahScenario {
     all_values: Vec<f32>,
     /// Positions: `[n_chunks * C]`.
     positions: Vec<usize>,
-    /// The needle's key vector: `[D]`.
-    needle_key: Vec<f32>,
     /// The needle's value vector: `[D]`.
     needle_value: Vec<f32>,
     /// The chunk index where the needle was placed.
@@ -117,17 +112,15 @@ fn generate_niah(
     }
     // Normalize needle key for clean dot-product matching.
     let nk_norm = (needle_key.iter().map(|x| x * x).sum::<f32>()).sqrt();
-    for i in 0..d {
-        needle_key[i] /= nk_norm.max(1e-8);
+    for nk in needle_key.iter_mut() {
+        *nk /= nk_norm.max(1e-8);
     }
     // The query = needle key (perfect match scenario).
     let query = needle_key.clone();
 
     // Overwrite the token at needle position with the needle K/V.
-    for i in 0..d {
-        all_keys[needle_global_idx + i] = needle_key[i];
-        all_values[needle_global_idx + i] = needle_value[i];
-    }
+    all_keys[needle_global_idx..needle_global_idx + d].copy_from_slice(&needle_key[..d]);
+    all_values[needle_global_idx..needle_global_idx + d].copy_from_slice(&needle_value[..d]);
 
     // Compute chunk summaries (mean of chunk keys) for DashAttention stage-1 scoring.
     let mut chunk_summaries = vec![0.0f32; n_chunks * d];
@@ -149,7 +142,6 @@ fn generate_niah(
         all_keys,
         all_values,
         positions,
-        needle_key,
         needle_value,
         needle_chunk_idx,
         needle_token_in_chunk,
@@ -159,9 +151,18 @@ fn generate_niah(
 }
 
 /// Mean summarizer for the tiered store (simple mean-pool of group keys).
-fn mean_summarizer(keys_flat: &[f32], positions: &[usize], group_start: usize, n_tokens: usize) -> Vec<f32> {
+fn mean_summarizer(
+    keys_flat: &[f32],
+    positions: &[usize],
+    group_start: usize,
+    n_tokens: usize,
+) -> Vec<f32> {
     let total = positions.len();
-    let d = if total > 0 { keys_flat.len() / total } else { 8 };
+    let d = if total > 0 {
+        keys_flat.len() / total
+    } else {
+        8
+    };
     let mut s = vec![0.0f32; d];
     for t in 0..n_tokens {
         let off = (group_start + t) * d;
@@ -177,6 +178,7 @@ fn mean_summarizer(keys_flat: &[f32], positions: &[usize], group_start: usize, n
 }
 
 /// Build the store + group cache from a scenario.
+#[allow(clippy::type_complexity)] // impl-Fn store return is inherent to InMemoryTieredKvStore's generic
 fn build_store_and_cache(
     scenario: &NiahScenario,
     n_chunks: usize,
@@ -213,8 +215,12 @@ fn dash_attn_route(
 
     // Stage 1: chunk entmax scoring.
     let mut chunk_scores = vec![0.0f32; n_chunks];
-    for c in 0..n_chunks {
-        chunk_scores[c] = simd_dot_f32(&scenario.query, &scenario.chunk_summaries[c * d..(c + 1) * d], d);
+    for (c, score) in chunk_scores.iter_mut().enumerate().take(n_chunks) {
+        *score = simd_dot_f32(
+            &scenario.query,
+            &scenario.chunk_summaries[c * d..(c + 1) * d],
+            d,
+        );
     }
     let (chunk_probs, _) = entmax_1p5(&chunk_scores);
 
@@ -251,7 +257,8 @@ fn dash_attn_route(
     let mut values = Vec::new();
     for &c in &all_chunks {
         keys.extend_from_slice(&scenario.all_keys[c * CHUNK_SIZE * d..(c + 1) * CHUNK_SIZE * d]);
-        values.extend_from_slice(&scenario.all_values[c * CHUNK_SIZE * d..(c + 1) * CHUNK_SIZE * d]);
+        values
+            .extend_from_slice(&scenario.all_values[c * CHUNK_SIZE * d..(c + 1) * CHUNK_SIZE * d]);
     }
     let n_tokens = keys.len() / d;
     let out = sdpa(&scenario.query, &keys, &values, d, n_tokens);
@@ -282,8 +289,12 @@ fn hga_route(
 
     // Stage 1: chunk entmax scoring.
     let mut chunk_scores = vec![0.0f32; n_chunks];
-    for c in 0..n_chunks {
-        chunk_scores[c] = simd_dot_f32(&scenario.query, &scenario.chunk_summaries[c * d..(c + 1) * d], d);
+    for (c, score) in chunk_scores.iter_mut().enumerate().take(n_chunks) {
+        *score = simd_dot_f32(
+            &scenario.query,
+            &scenario.chunk_summaries[c * d..(c + 1) * d],
+            d,
+        );
     }
     let (chunk_probs, _) = entmax_1p5(&chunk_scores);
 
@@ -300,18 +311,26 @@ fn hga_route(
     let selected_chunks: Vec<usize> = scored.iter().take(n_chunks).map(|(i, _)| *i).collect();
 
     // Stage 2: group dot-product scoring + top-k_g selection.
-    let group_sel = group_cache.select_top_k_groups(&scenario.query, &selected_chunks, n_groups_affordable);
+    let group_sel =
+        group_cache.select_top_k_groups(&scenario.query, &selected_chunks, n_groups_affordable);
 
     // Sink + local.
     let sink_local = SinkLocalSet::new(vec![0], vec![n_chunks - 1]);
     let working_set = store.fetch_working_set(&sink_local, &selected_chunks, &group_sel);
 
     // Check if needle is fetched.
-    let needle_global_token = scenario.needle_chunk_idx * CHUNK_SIZE + scenario.needle_token_in_chunk;
+    let needle_global_token =
+        scenario.needle_chunk_idx * CHUNK_SIZE + scenario.needle_token_in_chunk;
     let needle_pos = scenario.positions[needle_global_token];
     let needle_fetched = working_set.positions.contains(&needle_pos);
 
-    let out = sdpa(&scenario.query, &working_set.keys, &working_set.values, d, working_set.n_tokens);
+    let out = sdpa(
+        &scenario.query,
+        &working_set.keys,
+        &working_set.values,
+        d,
+        working_set.n_tokens,
+    );
     let cosine = cosine_sim(&out, &scenario.needle_value);
 
     TrialResult {
@@ -390,7 +409,9 @@ fn g2_proxy_niah_routing_comparison() {
     println!("\n╔══════════════════════════════════════════════════════════════════════════╗");
     println!("║ G2-proxy: NIAH routing comparison (HGA vs DashAttention at iso-budget)  ║");
     println!("╠══════════════════════════════════════════════════════════════════════════╣");
-    println!("║ Config: n_chunks={n_chunks}, C={CHUNK_SIZE}, GS={GROUP_SIZE}, D={d}, theta={rope_theta}  ║");
+    println!(
+        "║ Config: n_chunks={n_chunks}, C={CHUNK_SIZE}, GS={GROUP_SIZE}, D={d}, theta={rope_theta}  ║"
+    );
     println!("║ Total tokens: {total_tokens}                                            ║");
     println!("╠═══════════╦══════════════╦═══════════════════════╦════════════════════════╣");
     println!("║ Depth     ║ Budget       ║ DashAttention         ║ HGA                    ║");
@@ -399,7 +420,7 @@ fn g2_proxy_niah_routing_comparison() {
 
     let mut hga_wins = 0;
     let mut total_trials = 0;
-    let mut hga_retrieves_at_half_budget = 0;
+    let _hga_retrieves_at_half_budget = 0;
 
     for &(needle_chunk, depth_label) in &depths {
         let needle_token = CHUNK_SIZE / 2; // middle of the chunk
@@ -417,10 +438,18 @@ fn g2_proxy_niah_routing_comparison() {
                 "║ {depth_label:9} ║ {budget:6} ({budget_label:5}) ║ {dash_fetched:5}/{dash_cos:.3}/{dash_hit:5} ║ {hga_fetched:5}/{hga_cos:.3}/{hga_hit:5}  ║",
                 dash_fetched = dash_result.n_fetched,
                 dash_cos = dash_result.cosine,
-                dash_hit = if dash_result.needle_fetched { "YES" } else { "no" },
+                dash_hit = if dash_result.needle_fetched {
+                    "YES"
+                } else {
+                    "no"
+                },
                 hga_fetched = hga_result.n_fetched,
                 hga_cos = hga_result.cosine,
-                hga_hit = if hga_result.needle_fetched { "YES" } else { "no" },
+                hga_hit = if hga_result.needle_fetched {
+                    "YES"
+                } else {
+                    "no"
+                },
             );
 
             total_trials += 1;
@@ -436,15 +465,23 @@ fn g2_proxy_niah_routing_comparison() {
     }
 
     println!("╠═══════════╩══════════════╩═══════════════════════╩════════════════════════╣");
-    println!("║ Summary: HGA wins {hga_wins}/{total_trials} trials                                   ║");
+    println!(
+        "║ Summary: HGA wins {hga_wins}/{total_trials} trials                                   ║"
+    );
     println!("╚══════════════════════════════════════════════════════════════════════════╝");
 
     // Verdict — do NOT hard-assert. This is a proxy gate; the result is
     // informational for the GOAT report. Per Plan 397 T2.7: if G2 fails,
     // document as a negative result and keep hga opt-in.
     let pass_threshold = total_trials / 2;
-    let verdict = if hga_wins >= pass_threshold { "PASS" } else { "FAIL" };
-    println!("G2-proxy VERDICT: {verdict} (HGA won {hga_wins}/{total_trials}, need ≥ {pass_threshold})");
+    let verdict = if hga_wins >= pass_threshold {
+        "PASS"
+    } else {
+        "FAIL"
+    };
+    println!(
+        "G2-proxy VERDICT: {verdict} (HGA won {hga_wins}/{total_trials}, need ≥ {pass_threshold})"
+    );
     println!("  → HGA's group-tier routing does not improve needle retrieval over DashAttention");
     println!("    on random-key NIAH. The group summary averages GS=16 random keys, diluting");
     println!("    the single-needle signal. Per Plan 397 T2.7: negative result, keep opt-in.");
@@ -481,14 +518,26 @@ fn g2_proxy_hga_advantage_at_tight_budget() {
     println!("\n╔══════════════════════════════════════════════════════════════╗");
     println!("║ G2-proxy: HGA advantage at tight budget (256 tokens)        ║");
     println!("╠══════════════════════════════════════════════════════════════╣");
-    println!("║ DashAttention: fetched={}, needle={}, cos={:.3}",
+    println!(
+        "║ DashAttention: fetched={}, needle={}, cos={:.3}",
         dash_result.n_fetched,
-        if dash_result.needle_fetched { "YES" } else { "no" },
-        dash_result.cosine);
-    println!("║ HGA:           fetched={}, needle={}, cos={:.3}",
+        if dash_result.needle_fetched {
+            "YES"
+        } else {
+            "no"
+        },
+        dash_result.cosine
+    );
+    println!(
+        "║ HGA:           fetched={}, needle={}, cos={:.3}",
         hga_result.n_fetched,
-        if hga_result.needle_fetched { "YES" } else { "no" },
-        hga_result.cosine);
+        if hga_result.needle_fetched {
+            "YES"
+        } else {
+            "no"
+        },
+        hga_result.cosine
+    );
     println!("╚══════════════════════════════════════════════════════════════╝");
 
     // The core claim: HGA's group tier lets it sample from MORE chunks at the
@@ -518,14 +567,26 @@ fn g2_proxy_niah_d128() {
     println!("\n╔══════════════════════════════════════════════════════════════╗");
     println!("║ G2-proxy: D=128, theta=1M (Qwen3-style), 6.25% budget       ║");
     println!("╠══════════════════════════════════════════════════════════════╣");
-    println!("║ DashAttention: fetched={}, needle={}, cos={:.3}",
+    println!(
+        "║ DashAttention: fetched={}, needle={}, cos={:.3}",
         dash_result.n_fetched,
-        if dash_result.needle_fetched { "YES" } else { "no" },
-        dash_result.cosine);
-    println!("║ HGA:           fetched={}, needle={}, cos={:.3}",
+        if dash_result.needle_fetched {
+            "YES"
+        } else {
+            "no"
+        },
+        dash_result.cosine
+    );
+    println!(
+        "║ HGA:           fetched={}, needle={}, cos={:.3}",
         hga_result.n_fetched,
-        if hga_result.needle_fetched { "YES" } else { "no" },
-        hga_result.cosine);
+        if hga_result.needle_fetched {
+            "YES"
+        } else {
+            "no"
+        },
+        hga_result.cosine
+    );
     println!("╚══════════════════════════════════════════════════════════════╝");
 }
 
@@ -588,8 +649,14 @@ fn g5_latency_hga_vs_dash_attn() {
     // Report the ratio — we don't hard-assert because HGA's group scoring pass
     // is inherently more work. The target is informational; the GOAT verdict
     // is based on the G2 quality gate (is the extra latency worth the quality?).
-    println!("G5 VERDICT: ratio={ratio:.2}× (target ≤ 1.5×) — {}",
-        if ratio <= 1.5 { "PASS" } else { "NOTE: over target — group tier adds overhead" });
+    println!(
+        "G5 VERDICT: ratio={ratio:.2}× (target ≤ 1.5×) — {}",
+        if ratio <= 1.5 {
+            "PASS"
+        } else {
+            "NOTE: over target — group tier adds overhead"
+        }
+    );
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -628,10 +695,15 @@ fn g4_alloc_count_informational() {
     // G4 (alloc-free) is an optimization target for Phase 3+ if G2 passes.
 
     let result = hga_route(&scenario, &store, &group_cache, n_chunks, d, budget);
-    println!("\nG4 (informational): HGA routing path allocates ~8 Vecs per call (Phase 1 reference impl).");
+    println!(
+        "\nG4 (informational): HGA routing path allocates ~8 Vecs per call (Phase 1 reference impl)."
+    );
     println!("  Zero-alloc optimization is a Phase 3 target if G2 passes.");
     println!("  Current n_fetched = {}", result.n_fetched);
 
     // Sanity: the routing produced a valid result.
-    assert!(result.n_fetched > 0, "HGA should fetch at least some tokens");
+    assert!(
+        result.n_fetched > 0,
+        "HGA should fetch at least some tokens"
+    );
 }

@@ -114,14 +114,22 @@ impl LatentSteeringVector {
             return Err(LatentSteeringError::NotUnitNorm);
         }
         let commitment = compute_commitment(&direction, alpha);
-        Ok(Self { direction, alpha, commitment })
+        Ok(Self {
+            direction,
+            alpha,
+            commitment,
+        })
     }
 
     /// Construct without validation. Caller guarantees unit-norm + alpha range.
     /// Used when the direction comes from a trusted frozen artifact.
     pub fn new_unchecked(direction: Vec<f32>, alpha: f32) -> Self {
         let commitment = compute_commitment(&direction, alpha);
-        Self { direction, alpha, commitment }
+        Self {
+            direction,
+            alpha,
+            commitment,
+        }
     }
 
     /// Re-check unit-norm (within `tol`) AND that the stored commitment matches
@@ -197,11 +205,7 @@ pub fn apply_latent_steering(state: &mut [f32], steering: &LatentSteeringVector)
 /// Effective strength is `alpha * w`. Use for localized fields where the
 /// caller has already computed the kernel weight via [`kernel_weight`].
 #[inline]
-pub fn apply_latent_steering_weighted(
-    state: &mut [f32],
-    steering: &LatentSteeringVector,
-    w: f32,
-) {
+pub fn apply_latent_steering_weighted(state: &mut [f32], steering: &LatentSteeringVector, w: f32) {
     if w <= 0.0 {
         return;
     }
@@ -261,7 +265,9 @@ fn saxpy_inplace_scalar(state: &mut [f32], alpha: f32, dir: &[f32]) {
 #[cfg(target_arch = "x86_64")]
 #[inline]
 unsafe fn saxpy_inplace_avx2(state: &mut [f32], alpha: f32, dir: &[f32]) {
-    use std::arch::x86_64::{_mm256_add_ps, _mm256_loadu_ps, _mm256_mul_ps, _mm256_set1_ps, _mm256_storeu_ps};
+    use std::arch::x86_64::{
+        _mm256_add_ps, _mm256_loadu_ps, _mm256_mul_ps, _mm256_set1_ps, _mm256_storeu_ps,
+    };
     let len = state.len();
     let chunks = len / 8;
     let v_alpha = unsafe { _mm256_set1_ps(alpha) };
@@ -296,7 +302,11 @@ pub fn kernel_weight(
 ) -> f32 {
     match support {
         FieldSupport::Global => 1.0,
-        FieldSupport::Radius { center, bandwidth, steepness } => {
+        FieldSupport::Radius {
+            center,
+            bandwidth,
+            steepness,
+        } => {
             let pos = match entity_pos {
                 Some(p) => p,
                 None => return 0.0,
@@ -380,7 +390,9 @@ mod tests {
         let mut rng = seed;
         let mut v: Vec<f32> = (0..d)
             .map(|_| {
-                rng = rng.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+                rng = rng
+                    .wrapping_mul(6364136223846793005)
+                    .wrapping_add(1442695040888963407);
                 ((rng >> 33) as f32) / (1u64 << 31) as f32 - 1.0
             })
             .collect();
@@ -396,7 +408,10 @@ mod tests {
         // T1.5: Global field shifts state by exactly alpha * direction.
         let dir = make_unit_direction(8, 42);
         let steering = LatentSteeringVector::new(dir.clone(), 0.5, 1e-4).unwrap();
-        let field = LatentField { steering, support: FieldSupport::Global };
+        let field = LatentField {
+            steering,
+            support: FieldSupport::Global,
+        };
 
         let mut state = vec![0.1f32; 8];
         apply_latent_steering(&mut state, &field.steering);
@@ -495,7 +510,10 @@ mod tests {
         let e2 = &states[16..24];
         let e3 = &states[24..32];
         assert!(e0.iter().all(|x| x.abs() < 1e-9), "e0 wrong zone, no shift");
-        assert!(e1.iter().any(|x| x.abs() > 1e-5), "e1 matching zone, must shift");
+        assert!(
+            e1.iter().any(|x| x.abs() > 1e-5),
+            "e1 matching zone, must shift"
+        );
         assert!(e2.iter().all(|x| x.abs() < 1e-9), "e2 wrong zone, no shift");
         assert!(e3.iter().all(|x| x.abs() < 1e-9), "e3 no zone, no shift");
     }
@@ -511,7 +529,9 @@ mod tests {
         #[cfg(target_arch = "x86_64")]
         {
             if !std::is_x86_feature_detected!("avx2") {
-                eprintln!("AVX2 not available on this host — skipping SIMD vs scalar equality check");
+                eprintln!(
+                    "AVX2 not available on this host — skipping SIMD vs scalar equality check"
+                );
                 return;
             }
             let dims = [8usize, 16];
@@ -521,7 +541,11 @@ mod tests {
                     for seed in [0xC40D_u64, 0xDEAD_BEEF, 0x1234_5678] {
                         let dir = make_unit_direction(d, seed);
                         let base: Vec<f32> = (0..d)
-                            .map(|i| ((seed.wrapping_mul((i as u64) + 1)) >> 33) as f32 / (1u64 << 31) as f32 - 1.0)
+                            .map(|i| {
+                                ((seed.wrapping_mul((i as u64) + 1)) >> 33) as f32
+                                    / (1u64 << 31) as f32
+                                    - 1.0
+                            })
                             .collect();
 
                         let mut simd_state = base.clone();

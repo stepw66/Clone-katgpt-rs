@@ -27,15 +27,18 @@ use katgpt_rs::speculative::types::NoScreeningPruner;
 
 /// Build a traced absorb-compress layer with `n_arms` arms.
 fn traced_layer(n_arms: usize) -> PtgTracedPruner<AbsorbCompressLayer<NoScreeningPruner>> {
-    let inner =
-        AbsorbCompressLayer::new(NoScreeningPruner, n_arms, CompressConfig::default());
+    let inner = AbsorbCompressLayer::new(NoScreeningPruner, n_arms, CompressConfig::default());
     PtgTracedPruner::new(inner)
 }
 
 /// Run one synthetic episode on `traced`: absorb each arm once with a
 /// pseudo-random reward, then call compress. Returns the finished PTG
 /// (or `None` if the wrapper produced nothing).
-fn run_episode(traced: &mut PtgTracedPruner<AbsorbCompressLayer<NoScreeningPruner>>, family: u32, arms: &[usize]) -> Option<katgpt_core::closure::PrimitiveTransitionGraph> {
+fn run_episode(
+    traced: &mut PtgTracedPruner<AbsorbCompressLayer<NoScreeningPruner>>,
+    family: u32,
+    arms: &[usize],
+) -> Option<katgpt_core::closure::PrimitiveTransitionGraph> {
     traced.start_episode(family);
     for &arm in arms {
         // Pseudo-deterministic reward in [0, 1).
@@ -83,7 +86,11 @@ fn wake_sleep_admit_loop_promotes_motif() {
     assert!(
         !cross_family_motifs.is_empty(),
         "expected at least one motif across all 3 task families; got {:?}",
-        report.motifs.iter().map(|m| (m.node_count, m.task_family_ids.len())).collect::<Vec<_>>()
+        report
+            .motifs
+            .iter()
+            .map(|m| (m.node_count, m.task_family_ids.len()))
+            .collect::<Vec<_>>()
     );
 
     // The admitter should have admitted at least one of them.
@@ -132,11 +139,11 @@ fn tar_proxy_distinguishes_baseline_and_perturbed() {
     let tar_same = compute_tar_score(&base, &base);
     assert!((tar_same - 1.0).abs() < 1e-6, "same corpus tar={tar_same}");
     // Perturbed should drop below 1.0 (some overlap from arms 0,1; arm 2 vs 3 diverges).
+    assert!(tar < 1.0, "perturbed tar should be < 1.0, got {tar}");
     assert!(
-        tar < 1.0,
-        "perturbed tar should be < 1.0, got {tar}"
+        tar > 0.0,
+        "perturbed tar should still have some overlap, got {tar}"
     );
-    assert!(tar > 0.0, "perturbed tar should still have some overlap, got {tar}");
 }
 
 /// The wrapper's `relevance()` is unaffected by tracing — verifies the
@@ -167,8 +174,8 @@ fn manual_trace_captures_bandit_update_events() {
     traced.start_episode(42);
     // Simulate: prepare_episode (Recurse from root), then two updates.
     traced.trace(PrimitiveKind::UserDefined(50), OperatorKind::Sequence); // prepare
-    traced.trace(PrimitiveKind::UserDefined(0), OperatorKind::Sequence);  // update arm 0
-    traced.trace(PrimitiveKind::UserDefined(1), OperatorKind::Sequence);  // update arm 1
+    traced.trace(PrimitiveKind::UserDefined(0), OperatorKind::Sequence); // update arm 0
+    traced.trace(PrimitiveKind::UserDefined(1), OperatorKind::Sequence); // update arm 1
     let ptg = traced.finish_episode().expect("episode produced a PTG");
     assert_eq!(ptg.nodes.len(), 3);
     assert_eq!(ptg.nodes[0].primitive, PrimitiveKind::UserDefined(50));
@@ -189,7 +196,10 @@ fn compress_event_uses_reserved_primitive_id() {
         .nodes
         .iter()
         .any(|n| n.primitive == PrimitiveKind::UserDefined(COMPRESS_PRIMITIVE_ID));
-    assert!(has_compress, "compress event should emit reserved primitive id");
+    assert!(
+        has_compress,
+        "compress event should emit reserved primitive id"
+    );
 }
 
 /// `MotifAdmitter::evaluate` on a mined motif returns either Admitted or
@@ -215,12 +225,11 @@ fn admitter_evaluates_mined_motifs_without_panic() {
         let _ = MotifAdmitter::new().evaluate(motif, 3, 10_000.0);
     }
     // And confirm the GateResult variants are reachable.
-    let any_admitted = report
-        .motifs
-        .iter()
-        .any(|m| matches!(
+    let any_admitted = report.motifs.iter().any(|m| {
+        matches!(
             MotifAdmitter::new().evaluate(m, 3, 10_000.0),
             GateResult::Admitted { .. }
-        ));
+        )
+    });
     let _ = any_admitted; // informational; main loop already counts admissions
 }

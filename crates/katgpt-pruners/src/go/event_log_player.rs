@@ -7,9 +7,7 @@
 //! Plan 124: Event-sourced game traces with fork-and-diff.
 //! Feature gate: `event_log`
 
-use crate::event_log::{
-    Actor, DiffEvent, EventId, EventLog, EventType, ForkDiff, GameOutcome,
-};
+use crate::event_log::{Actor, DiffEvent, EventId, EventLog, EventType, ForkDiff, GameOutcome};
 use crate::go::GoAction;
 
 /// Go event log wrapper for recording game traces.

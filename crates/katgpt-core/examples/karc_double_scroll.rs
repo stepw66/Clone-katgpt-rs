@@ -36,8 +36,8 @@ fn double_scroll_rhs(state: &[f64; 3], out: &mut [f64; 3]) {
     let dv = v1 - v2;
     let sinh_term = 2.0 * I_R * (BETA * dv).sinh();
     out[0] = v1 / R1 - dv / R2 - sinh_term; // V̇₁
-    out[1] = dv / R2 + sinh_term - i;        // V̇₂
-    out[2] = v2 - R4 * i;                    // İ
+    out[1] = dv / R2 + sinh_term - i; // V̇₂
+    out[2] = v2 - R4 * i; // İ
 }
 
 /// Classical RK4 step (f64) for the double-scroll ODE.
@@ -168,9 +168,18 @@ fn main() {
     const SAMPLES_PER_LT: f64 = LYAPUNOV_TIME_UNITS / DT;
 
     println!("KARC double-scroll GOAT gate G1 (Plan 308, arXiv:2606.19984)");
-    println!("  params: R1={}, R2={}, R4={}, β={}, I_r={}", R1, R2, R4, BETA, I_R);
-    println!("  dt={}, N_train={}, K={}, M={}, D={}", DT, N_TRAIN, K, M, D);
-    println!("  Lyapunov time ≈ {} units ≈ {} samples", LYAPUNOV_TIME_UNITS, SAMPLES_PER_LT);
+    println!(
+        "  params: R1={}, R2={}, R4={}, β={}, I_r={}",
+        R1, R2, R4, BETA, I_R
+    );
+    println!(
+        "  dt={}, N_train={}, K={}, M={}, D={}",
+        DT, N_TRAIN, K, M, D
+    );
+    println!(
+        "  Lyapunov time ≈ {} units ≈ {} samples",
+        LYAPUNOV_TIME_UNITS, SAMPLES_PER_LT
+    );
 
     // 1. Generate trajectory. 10 RK4 sub-steps per sample for stiff-system
     //    stability (β=11.6 makes sinh(β·ΔV) explosive if the integrator overshoots).
@@ -188,8 +197,12 @@ fn main() {
         let mut hi = f32::NEG_INFINITY;
         for i in 0..(traj.len() / D) {
             let v = traj[i * D + d];
-            if v < lo { lo = v; }
-            if v > hi { hi = v; }
+            if v < lo {
+                lo = v;
+            }
+            if v > hi {
+                hi = v;
+            }
         }
         let range = (hi - lo).max(1e-6);
         offset[d] = (hi + lo) * 0.5;
@@ -198,7 +211,11 @@ fn main() {
             traj[i * D + d] = (traj[i * D + d] - offset[d]) * scale[d];
         }
     }
-    println!("  normalization: scale={:?}, offset={:?}", &scale[..D], &offset[..D]);
+    println!(
+        "  normalization: scale={:?}, offset={:?}",
+        &scale[..D],
+        &offset[..D]
+    );
 
     // 2. Build training pairs: (x_t = u_t ⊕ u_{t-1} ⊕ … ⊕ u_{t-K+1}, target = u_{t+1}).
     type F = KarcForecaster<ChebyshevBasis<M>, D, M, K>;
@@ -238,7 +255,11 @@ fn main() {
     //    16.7 LT) uses second-order Fourier features (d_h=1891) — Phase 2.
     let lambda = 5e-3f32;
     forecaster.fit_ridge(lambda).expect("fit_ridge");
-    println!("  fit_ridge(λ={}) OK, Wout {} entries", lambda, forecaster.wout.len());
+    println!(
+        "  fit_ridge(λ={}) OK, Wout {} entries",
+        lambda,
+        forecaster.wout.len()
+    );
 
     // 4. Autonomous rollout over a horizon of ~20 LT for the threshold scan.
     //    KARC operates in normalized space; the truth is the raw trajectory.
@@ -292,11 +313,7 @@ fn main() {
     // NRMSE over the first Lyapunov time.
     let n_one_lt = SAMPLES_PER_LT.ceil() as usize;
     let n_one_lt = n_one_lt.max(1).min(pred_traj.len() / D);
-    let nrmse_one_lt = nrmse(
-        &pred_traj[..n_one_lt * D],
-        &truth_traj[..n_one_lt * D],
-        D,
-    );
+    let nrmse_one_lt = nrmse(&pred_traj[..n_one_lt * D], &truth_traj[..n_one_lt * D], D);
     // Threshold time at ε=0.1.
     let sigma = {
         let mut mean = [0.0f64; D];
@@ -347,20 +364,49 @@ fn main() {
     let one_step_nrmse = {
         let mut sum = 0.0f32;
         for d in 0..D {
-            let mean = (0..one_step_count).map(|i| traj[(K - 1 + i) * D + d] as f64).sum::<f64>() / one_step_count as f64;
-            let var = (0..one_step_count).map(|i| { let dx = traj[(K - 1 + i) * D + d] as f64 - mean; dx*dx }).sum::<f64>() / one_step_count as f64;
+            let mean = (0..one_step_count)
+                .map(|i| traj[(K - 1 + i) * D + d] as f64)
+                .sum::<f64>()
+                / one_step_count as f64;
+            let var = (0..one_step_count)
+                .map(|i| {
+                    let dx = traj[(K - 1 + i) * D + d] as f64 - mean;
+                    dx * dx
+                })
+                .sum::<f64>()
+                / one_step_count as f64;
             let std = (var.sqrt() as f32).max(1e-12);
             sum += (one_step_err_sq[d] / one_step_count as f32).sqrt() / std;
         }
         sum / D as f32
     };
     println!("  one-step NRMSE (train fit): {:.6e}", one_step_nrmse);
-    println!("  NRMSE over 1 LT ({} samples): {:.6e}", n_one_lt, nrmse_one_lt);
-    println!("  threshold (ε=0.1): {} samples = {:.2} LT", thr_sample, thr_lt);
+    println!(
+        "  NRMSE over 1 LT ({} samples): {:.6e}",
+        n_one_lt, nrmse_one_lt
+    );
+    println!(
+        "  threshold (ε=0.1): {} samples = {:.2} LT",
+        thr_sample, thr_lt
+    );
     println!("  σ(u) mean per-coord: {:.4}", sigma);
     println!();
-    println!("  G1 NRMSE   ≤ 1.0e-3 : {}", if nrmse_one_lt <= 1.0e-3 { "PASS ✅" } else { "FAIL ❌" });
-    println!("  G1 thresh  ≥ 8 LT   : {}", if thr_lt >= 8.0 { "PASS ✅" } else { "FAIL ❌" });
+    println!(
+        "  G1 NRMSE   ≤ 1.0e-3 : {}",
+        if nrmse_one_lt <= 1.0e-3 {
+            "PASS ✅"
+        } else {
+            "FAIL ❌"
+        }
+    );
+    println!(
+        "  G1 thresh  ≥ 8 LT   : {}",
+        if thr_lt >= 8.0 {
+            "PASS ✅"
+        } else {
+            "FAIL ❌"
+        }
+    );
     println!();
     println!("  paper reference: NRMSE 5.3e-4, threshold 16.7 LT");
     println!("  (Phase 1 accepts ≥ 8 LT; riir-ai Plan 332 targets the full 16 LT.)");

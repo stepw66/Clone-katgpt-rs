@@ -24,9 +24,7 @@
 
 #![cfg(feature = "cce_moderator")]
 
-use katgpt_rs::cce::{
-    CceLp, Deviation, DeviationClass, OccupationMeasure, PayoffTensor,
-};
+use katgpt_rs::cce::{CceLp, Deviation, DeviationClass, OccupationMeasure, PayoffTensor};
 
 // ---------------------------------------------------------------------------
 // RPS — zero-sum game, CCE = Nash, no Pareto gain.
@@ -86,9 +84,7 @@ fn g1_rps_cce_equals_nash_no_pareto_gain() {
     // Nash welfare (analytic): uniform mixed Nash, γ = 0 (zero-sum symmetric).
     let gamma0_nash = 0.0_f32;
 
-    eprintln!(
-        "RPS: γ₀(CCE) = {gamma0_cce:.4}, γ₀(Nash) = {gamma0_nash:.4} (zero-sum, equal)"
-    );
+    eprintln!("RPS: γ₀(CCE) = {gamma0_cce:.4}, γ₀(Nash) = {gamma0_nash:.4} (zero-sum, equal)");
 
     // RPS with γ₀ = γ (player-1 cost) and no state-distribution constraint:
     // the LP is free to concentrate on the most favorable state-action pair.

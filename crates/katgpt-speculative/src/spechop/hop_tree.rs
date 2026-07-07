@@ -534,20 +534,23 @@ pub fn extract_best_hop_path(tree: &[HopTreeNode]) -> Vec<(String, String)> {
 
     // Single-pass: track max_depth and best (highest-score) node at that depth together.
     // Replaces 3 tree traversals (max → filter → max_by) with one.
-    let best = tree.iter().reduce(|acc, n| {
-        use std::cmp::Ordering;
-        match n.depth.cmp(&acc.depth) {
-            Ordering::Greater => n,
-            Ordering::Less => acc,
-            Ordering::Equal => {
-                if n.score > acc.score {
-                    n
-                } else {
-                    acc
+    let best = tree
+        .iter()
+        .reduce(|acc, n| {
+            use std::cmp::Ordering;
+            match n.depth.cmp(&acc.depth) {
+                Ordering::Greater => n,
+                Ordering::Less => acc,
+                Ordering::Equal => {
+                    if n.score > acc.score {
+                        n
+                    } else {
+                        acc
+                    }
                 }
             }
-        }
-    }).expect("non-empty tree has at least one node");
+        })
+        .expect("non-empty tree has at least one node");
 
     reconstruct_path(tree, best)
 }
@@ -563,20 +566,23 @@ pub fn extract_deepest_hop_path(tree: &[HopTreeNode]) -> Vec<(String, String)> {
 
     // Single-pass: track max_depth and best (highest-score) node at that depth together.
     // Replaces 3 tree traversals (max → filter → max_by) with one.
-    let best_at_max = tree.iter().reduce(|acc, n| {
-        use std::cmp::Ordering;
-        match n.depth.cmp(&acc.depth) {
-            Ordering::Greater => n,
-            Ordering::Less => acc,
-            Ordering::Equal => {
-                if n.score > acc.score {
-                    n
-                } else {
-                    acc
+    let best_at_max = tree
+        .iter()
+        .reduce(|acc, n| {
+            use std::cmp::Ordering;
+            match n.depth.cmp(&acc.depth) {
+                Ordering::Greater => n,
+                Ordering::Less => acc,
+                Ordering::Equal => {
+                    if n.score > acc.score {
+                        n
+                    } else {
+                        acc
+                    }
                 }
             }
-        }
-    }).expect("non-empty tree has at least one node");
+        })
+        .expect("non-empty tree has at least one node");
 
     reconstruct_path(tree, best_at_max)
 }
@@ -1304,7 +1310,8 @@ mod tests {
         ];
 
         let standard = build_hop_dd_tree(&marginals, &config);
-        let uniform = build_hop_dd_tree_with_schedule(&marginals, &config, SpechopSchedule::Uniform);
+        let uniform =
+            build_hop_dd_tree_with_schedule(&marginals, &config, SpechopSchedule::Uniform);
         let frozen =
             build_hop_dd_tree_with_schedule(&marginals, &config, SpechopSchedule::FrozenBaseGuard);
 

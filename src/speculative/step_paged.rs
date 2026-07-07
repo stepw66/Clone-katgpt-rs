@@ -12,14 +12,16 @@
 //! keeps resolving for any legacy caller and so the 3 paged-KV tests have a
 //! home. The non-paged speculative-step pipeline moved to katgpt-forward.
 
+use crate::speculative::dd_tree::build_dd_tree;
 use crate::speculative::types::DDTreeBranchCache;
 use crate::transformer::{ForwardContext, MultiLayerKVCache, TransformerWeights, forward};
 use crate::types::{Config, Rng, softmax_scaled};
-use katgpt_core::speculative::sampling::{sample_from_distribution, sample_residual_distribution_into};
+use katgpt_core::speculative::sampling::{
+    sample_from_distribution, sample_residual_distribution_into,
+};
 use katgpt_forward::dflash::dflash_predict;
 #[cfg(feature = "stability_metrics")]
 use std::time::Instant;
-use crate::speculative::dd_tree::build_dd_tree;
 
 /// Deprecated paged-KV-cache speculative step.
 ///

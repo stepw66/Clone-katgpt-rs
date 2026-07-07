@@ -61,7 +61,12 @@ fn bench_read(c: &mut Criterion) {
         let gamma = [1.0f32; 256];
         let mut out = [0.0f32; 256];
         b.iter(|| {
-            cache.read_cache_into(black_box(&q), black_box(&gamma), black_box(&[]), black_box(&mut out));
+            cache.read_cache_into(
+                black_box(&q),
+                black_box(&gamma),
+                black_box(&[]),
+                black_box(&mut out),
+            );
         });
     });
 
@@ -77,7 +82,12 @@ fn bench_read(c: &mut Criterion) {
         let gamma = [1.0f32; 8];
         let mut out = [0.0f32; 8];
         b.iter(|| {
-            cache.read_cache_into(black_box(&q), black_box(&gamma), black_box(&[]), black_box(&mut out));
+            cache.read_cache_into(
+                black_box(&q),
+                black_box(&gamma),
+                black_box(&[]),
+                black_box(&mut out),
+            );
         });
     });
 
@@ -108,7 +118,12 @@ fn bench_read(c: &mut Criterion) {
         let gamma = [1.0f32; 256];
         let mut out = [0.0f32; 256];
         b.iter(|| {
-            cache.read_cache_into_sigmoid(black_box(&q), black_box(&gamma), black_box(&[]), black_box(&mut out));
+            cache.read_cache_into_sigmoid(
+                black_box(&q),
+                black_box(&gamma),
+                black_box(&[]),
+                black_box(&mut out),
+            );
         });
     });
 

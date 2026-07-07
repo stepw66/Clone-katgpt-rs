@@ -33,11 +33,9 @@
 
 #![cfg(feature = "indicator_probe_bank")]
 
+use katgpt_core::pruners::indicator_cascade::{IndicatorCascade, IndicatorVerifier};
 use katgpt_core::pruners::indicator_probe_bank::{
     BankLoadError, IndicatorLabel, IndicatorProbeBank,
-};
-use katgpt_core::pruners::indicator_cascade::{
-    IndicatorCascade, IndicatorVerifier,
 };
 use katgpt_core::pruners::indicator_similarity::IndicatorSimilarityMatrix;
 use std::hint::black_box;
@@ -249,8 +247,7 @@ fn gate_g1_indicator_au_roc() -> GateResult {
     let mut worst = 1.0f64;
     let mut per_indicator = Vec::with_capacity(SyntheticIndicator::COUNT);
     for i in 0..SyntheticIndicator::COUNT {
-        let (states, labels) =
-            generate_states_for_indicator(&bank, i, n_per, 0xBADC0FFE);
+        let (states, labels) = generate_states_for_indicator(&bank, i, n_per, 0xBADC0FFE);
         let scores: Vec<f32> = states
             .iter()
             .map(|s| {
@@ -273,7 +270,10 @@ fn gate_g1_indicator_au_roc() -> GateResult {
             .join(", ");
         GateResult::pass(
             "G1",
-            format!("all 8 indicators AU-ROC ≥ {:.2}; worst = {:.3}; {}", threshold, worst, detail),
+            format!(
+                "all 8 indicators AU-ROC ≥ {:.2}; worst = {:.3}; {}",
+                threshold, worst, detail
+            ),
         )
     } else {
         let detail = per_indicator
@@ -519,7 +519,12 @@ fn gate_g3_cascade_fpr_reduction() -> GateResult {
             "G3",
             format!(
                 "cascade reduces turn-FPR {:.3}→{:.3} ({:.1}× reduction) at tau={:.2}; transcript-TPR {:.3}→{:.3} (cost {:.1}pp ≤ 10pp)",
-                best_fpr_s1, best_fpr_s2, best_ratio, best_tau, best_tpr_s1, best_tpr_s2,
+                best_fpr_s1,
+                best_fpr_s2,
+                best_ratio,
+                best_tau,
+                best_tpr_s1,
+                best_tpr_s2,
                 (best_tpr_s1 - best_tpr_s2) * 100.0
             ),
         )
@@ -588,7 +593,10 @@ fn gate_g4_hot_path_latency_and_alloc() -> GateResult {
             reasons.push(format!("{:.1} ns/call ≥ 200ns", ns_per_call));
         }
         if !alloc_pass {
-            reasons.push(format!("{} allocs / {} calls (need 0)", allocs, ALLOC_ITERS));
+            reasons.push(format!(
+                "{} allocs / {} calls (need 0)",
+                allocs, ALLOC_ITERS
+            ));
         }
         GateResult::fail("G4", reasons.join("; "))
     }
@@ -653,10 +661,21 @@ fn adjusted_rand_index(a: &[Vec<usize>], b: &[Vec<usize>]) -> f64 {
             nij[ia * nb + ib] += 1;
         }
     }
-    let comb2 = |n: u64| -> f64 { if n < 2 { 0.0 } else { let n = n as f64; n * (n - 1.0) / 2.0 } };
+    let comb2 = |n: u64| -> f64 {
+        if n < 2 {
+            0.0
+        } else {
+            let n = n as f64;
+            n * (n - 1.0) / 2.0
+        }
+    };
     let sum_comb_nij: f64 = nij.iter().map(|&n| comb2(n)).sum();
-    let ai_sums: Vec<u64> = (0..na).map(|i| (0..nb).map(|j| nij[i * nb + j]).sum()).collect();
-    let bj_sums: Vec<u64> = (0..nb).map(|j| (0..na).map(|i| nij[i * nb + j]).sum()).collect();
+    let ai_sums: Vec<u64> = (0..na)
+        .map(|i| (0..nb).map(|j| nij[i * nb + j]).sum())
+        .collect();
+    let bj_sums: Vec<u64> = (0..nb)
+        .map(|j| (0..na).map(|i| nij[i * nb + j]).sum())
+        .collect();
     let sum_comb_a: f64 = ai_sums.iter().map(|&n| comb2(n)).sum();
     let sum_comb_b: f64 = bj_sums.iter().map(|&n| comb2(n)).sum();
     let total: u64 = all.len() as u64;
@@ -683,12 +702,18 @@ fn gate_g5_similarity_block_recovery() -> GateResult {
     if ari >= 0.9 {
         GateResult::pass(
             "G5",
-            format!("cluster(0.6, 0.6) ARI = {:.3} ≥ 0.9 vs planted 4×2 blocks", ari),
+            format!(
+                "cluster(0.6, 0.6) ARI = {:.3} ≥ 0.9 vs planted 4×2 blocks",
+                ari
+            ),
         )
     } else {
         GateResult::fail(
             "G5",
-            format!("cluster(0.6, 0.6) ARI = {:.3} < 0.9; clusters = {:?}", ari, clusters),
+            format!(
+                "cluster(0.6, 0.6) ARI = {:.3} < 0.9; clusters = {:?}",
+                ari, clusters
+            ),
         )
     }
 }
@@ -701,7 +726,10 @@ fn gate_g7_wire_integrity() -> GateResult {
     // Round-trip OK.
     let reloaded = IndicatorProbeBank::<SyntheticIndicator, D>::from_frozen_bytes(&bytes);
     if reloaded.is_err() {
-        return GateResult::fail("G7", format!("clean round-trip failed: {:?}", reloaded.err()));
+        return GateResult::fail(
+            "G7",
+            format!("clean round-trip failed: {:?}", reloaded.err()),
+        );
     }
     // Tamper: flip one byte in the directions body.
     let mut tampered = bytes.clone();
@@ -713,11 +741,11 @@ fn gate_g7_wire_integrity() -> GateResult {
             "G7",
             "tampered direction byte correctly rejected with HashMismatch",
         ),
-        Err(other) => GateResult::fail(
+        Err(other) => GateResult::fail("G7", format!("expected HashMismatch, got {:?}", other)),
+        Ok(_) => GateResult::fail(
             "G7",
-            format!("expected HashMismatch, got {:?}", other),
+            "tampered bytes loaded without error (tamper NOT evident)",
         ),
-        Ok(_) => GateResult::fail("G7", "tampered bytes loaded without error (tamper NOT evident)"),
     }
 }
 

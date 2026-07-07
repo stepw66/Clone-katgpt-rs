@@ -13,7 +13,7 @@
 #![cfg(feature = "gauge_invariant")]
 
 use katgpt_rs::gauge_invariant::{
-    gauge_invariant_compose, gauge_rebalance, GaugePair, GaugeRebalanceScratch,
+    GaugePair, GaugeRebalanceScratch, gauge_invariant_compose, gauge_rebalance,
 };
 
 /// Deterministic pseudo-random matrix (xorshift64).
@@ -116,8 +116,22 @@ fn main() {
     let mut out_a = vec![0.0_f32; m * merged_r];
     let mut out_b = vec![0.0_f32; n * merged_r];
     let pairs = [
-        GaugePair { eta: 1.0, a: &a1_skewed, b: &b1_skewed, a_rows: m, b_rows: n, rank: r },
-        GaugePair { eta: 1.0, a: &a2_skewed, b: &b2_skewed, a_rows: m, b_rows: n, rank: r },
+        GaugePair {
+            eta: 1.0,
+            a: &a1_skewed,
+            b: &b1_skewed,
+            a_rows: m,
+            b_rows: n,
+            rank: r,
+        },
+        GaugePair {
+            eta: 1.0,
+            a: &a2_skewed,
+            b: &b2_skewed,
+            a_rows: m,
+            b_rows: n,
+            rank: r,
+        },
     ];
     gauge_invariant_compose(&pairs, &mut out_a, &mut out_b);
     let w_gauge = abt(&out_a, &out_b, m, merged_r, n);
@@ -163,13 +177,11 @@ fn main() {
     // ─── Verdict ──────────────────────────────────────────────────────
     let improvement = naive_err / gauge_err.max(1e-9);
     println!("── Verdict ────────────────────────────────────────────────────");
-    println!(
-        "  Gauge-invariant compose improves result by {improvement:.0}× in this scenario"
-    );
-    println!(
-        "  (naive err {naive_err:.2}% → gauge err {gauge_err:.4}%)"
-    );
+    println!("  Gauge-invariant compose improves result by {improvement:.0}× in this scenario");
+    println!("  (naive err {naive_err:.2}% → gauge err {gauge_err:.4}%)");
     println!();
-    println!("  Paper Prop 1 holds: rebalance preserves A·B^T, so compose([(η₁, A₁, B₁), (η₂, A₂, B₂)])");
+    println!(
+        "  Paper Prop 1 holds: rebalance preserves A·B^T, so compose([(η₁, A₁, B₁), (η₂, A₂, B₂)])"
+    );
     println!("  recovers the gauge-invariant merged weight Σᵢ ηᵢ · Aᵢ · Bᵢᵀ.");
 }

@@ -132,7 +132,8 @@ impl<P: ScreeningPruner> MemorySteeredPruner<P> {
                 let s = &mut *self.scratch.lock().unwrap();
 
                 ctx.to_vec_into(&mut s.feature_buf);
-                self.key_hasher.hash_key_into(&s.feature_buf, &mut s.key_buf);
+                self.key_hasher
+                    .hash_key_into(&s.feature_buf, &mut s.key_buf);
                 outcome.to_vec_into(&mut s.outcome_buf);
                 self.val_hasher
                     .hash_value_into(&s.outcome_buf, &mut s.val_buf);
@@ -173,7 +174,7 @@ impl<P: ScreeningPruner> MemorySteeredPruner<P> {
                 .hash_key_into(&s.feature_buf, &mut self.segment_keys[i]);
             outcome.to_vec_into(&mut s.outcome_buf);
             self.val_hasher
-                .hash_value_into(&mut s.outcome_buf, &mut self.segment_values[i]);
+                .hash_value_into(&s.outcome_buf, &mut self.segment_values[i]);
         }
         drop(s);
 

@@ -323,7 +323,10 @@ enum GoActionBin {
 impl From<&GoActionSer> for GoActionBin {
     fn from(a: &GoActionSer) -> Self {
         match a {
-            GoActionSer::Place { row, col } => Self::Place { row: *row, col: *col },
+            GoActionSer::Place { row, col } => Self::Place {
+                row: *row,
+                col: *col,
+            },
             GoActionSer::Pass => Self::Pass,
         }
     }

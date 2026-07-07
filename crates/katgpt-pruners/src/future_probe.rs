@@ -142,7 +142,12 @@ impl FutureBehaviorProbe {
     /// computed from `(direction, bias, layer)` immediately.
     ///
     /// Panics only if `direction` is empty (a zero-dim probe is meaningless).
-    pub fn new(direction: Vec<f32>, bias: f32, layer: usize, behavior: impl Into<Box<str>>) -> Self {
+    pub fn new(
+        direction: Vec<f32>,
+        bias: f32,
+        layer: usize,
+        behavior: impl Into<Box<str>>,
+    ) -> Self {
         assert!(
             !direction.is_empty(),
             "FutureBehaviorProbe::new: direction must be non-empty"
@@ -384,7 +389,10 @@ pub enum ProbeLoadError {
     UnsupportedVersion { got: u8 },
     /// Recomputed BLAKE3 hash does not match the embedded hash — tampered or
     /// corrupted artifact. Refuses to serve forecasts.
-    HashMismatch { embedded: [u8; 32], computed: [u8; 32] },
+    HashMismatch {
+        embedded: [u8; 32],
+        computed: [u8; 32],
+    },
     /// Behavior label is not valid UTF-8.
     BadBehaviorLabel(String),
     /// Direction vector has zero dimensions.
@@ -403,7 +411,10 @@ impl std::fmt::Display for ProbeLoadError {
                 write!(f, "probe artifact unsupported version {got} (expected 1)")
             }
             Self::HashMismatch { .. } => {
-                write!(f, "probe artifact BLAKE3 hash mismatch — tampered or corrupted")
+                write!(
+                    f,
+                    "probe artifact BLAKE3 hash mismatch — tampered or corrupted"
+                )
             }
             Self::BadBehaviorLabel(s) => write!(f, "probe behavior label not UTF-8: {s}"),
             Self::EmptyDirection => write!(f, "probe direction has zero dimensions"),
@@ -626,7 +637,9 @@ mod tests {
     /// Forecast display formatter works.
     #[test]
     fn forecast_display() {
-        let f = BehaviorForecast { probability: 0.1234 };
+        let f = BehaviorForecast {
+            probability: 0.1234,
+        };
         let s = format!("{f}");
         assert!(s.contains("0.1234"), "display missing probability: {s}");
     }

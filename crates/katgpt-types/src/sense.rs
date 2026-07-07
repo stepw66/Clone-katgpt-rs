@@ -155,7 +155,12 @@ impl SenseModule {
         // bool-as-u32 then cast to f32 is zero-extend (no int-to-float conversion).
         // Zip iteration elides bounds checks on `self.directions[i]` (verified safe
         // by `n_directions ≤ 8` but the runtime bound `n` defeats LLVM's elision).
-        for (i, (hla_val, dir)) in hla_state.iter().zip(self.directions.iter()).enumerate().take(n) {
+        for (i, (hla_val, dir)) in hla_state
+            .iter()
+            .zip(self.directions.iter())
+            .enumerate()
+            .take(n)
+        {
             let pos = ((dir.pos_bits >> i) & 1) as u32 as f32;
             let neg = ((dir.neg_bits >> i) & 1) as u32 as f32;
             // sign ∈ {-1, 0, +1} — single FMA: dot += (sign * hla_val) * scale.

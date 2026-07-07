@@ -19,7 +19,11 @@ fn main() {
     let decisive = [0.6_f32, 0.3, 0.1, 0.0]; // β = 0.46 — one action dominates
     let uniform = [0.25_f32; 4]; // β = 0.25 — maximum entropy
 
-    for (name, p) in [("degenerate", &degenerate[..]), ("decisive  ", &decisive[..]), ("uniform   ", &uniform[..])] {
+    for (name, p) in [
+        ("degenerate", &degenerate[..]),
+        ("decisive  ", &decisive[..]),
+        ("uniform   ", &uniform[..]),
+    ] {
         let beta = collision_purity(p);
         let h2 = renyi_h2(p);
         let h1 = shannon_h1(p);

@@ -28,16 +28,15 @@ mod tests;
 // continue to resolve for root consumers (transformer.rs, inference_router.rs,
 // benchmark/, and the root-kept tests.rs).
 pub use katgpt_attn::dash_attn::{
-    chunk_summary, entmax, forward, routing,
-    adaptive_k, block_topk, channel_aware, entmax_router, kv_outer_prefill,
-    meta_router, msa_distill, sat_analysis, value_energy, vortex_flow,
+    adaptive_k, block_topk, channel_aware, chunk_summary, entmax, entmax_router, forward,
+    kv_outer_prefill, meta_router, msa_distill, routing, sat_analysis, value_energy, vortex_flow,
 };
 
 // Flat symbol re-exports (preserved for back-compat with `katgpt_rs::dash_attn::Symbol` callers).
 pub use katgpt_attn::dash_attn::chunk_summary::{ChunkSummaryCache, ChunkSummaryQuery};
 pub use katgpt_attn::dash_attn::entmax::{entmax_1p5, entmax_gqa_aggregate, entmax_support};
-pub use katgpt_attn::dash_attn::routing::{compute_routing_bias, score_blocks_entmax};
 pub use katgpt_attn::dash_attn::forward::{forward_dash_attn_decode, forward_dash_attn_prefill};
+pub use katgpt_attn::dash_attn::routing::{compute_routing_bias, score_blocks_entmax};
 
 #[cfg(feature = "msa_adaptive_k")]
 pub use katgpt_attn::dash_attn::adaptive_k::{AdaptiveKConfig, AdaptiveKRouter};
@@ -55,9 +54,13 @@ pub use katgpt_attn::dash_attn::entmax_router::{EntmaxCache, EntmaxRouter};
 #[cfg(feature = "msa_kv_outer")]
 pub use katgpt_attn::dash_attn::kv_outer_prefill::{KvOuterIndex, KvOuterPrefill};
 #[cfg(feature = "vortex_flow")]
-pub use katgpt_attn::dash_attn::meta_router::{DynPolicy, DynRoutingCache, MetaRouter, compute_reward};
+pub use katgpt_attn::dash_attn::meta_router::{
+    DynPolicy, DynRoutingCache, MetaRouter, compute_reward,
+};
 #[cfg(feature = "msa_sparse")]
-pub use katgpt_attn::dash_attn::msa_distill::{MaxPoolBlockScorer, MaxStdDevBlockScorer, MsaBlockCache};
+pub use katgpt_attn::dash_attn::msa_distill::{
+    MaxPoolBlockScorer, MaxStdDevBlockScorer, MsaBlockCache,
+};
 #[cfg(all(feature = "dash_attn", feature = "cache_prune"))]
 pub use katgpt_attn::dash_attn::sat_analysis::{HeadSparsityInfo, head_sparsity_profile};
 #[cfg(feature = "vortex_flow")]

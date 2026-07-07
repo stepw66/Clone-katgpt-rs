@@ -59,8 +59,8 @@
 //! architecture. BLAKE3 commitments are therefore cross-architecture-stable
 //! by construction.
 
-use crate::babel_codec::commitment::BabelCommitment;
 use crate::babel_codec::BabelCodec;
+use crate::babel_codec::commitment::BabelCommitment;
 use core::fmt::Write as _;
 
 /// BT-P8 fixed-rule text codec. Owns reusable emit scratch buffers so the
@@ -122,9 +122,18 @@ pub enum BabelRecord {
     /// `S[topic/abbrev]` — section anchor.
     Section { anchor: String },
     /// `@entity(key=value)` — entity attribute binding.
-    Attribute { entity: String, key: String, value: String },
+    Attribute {
+        entity: String,
+        key: String,
+        value: String,
+    },
     /// `Config[target]:key=value(unit)` — exact-value config.
-    Config { target: String, key: String, value: String, unit: String },
+    Config {
+        target: String,
+        key: String,
+        value: String,
+        unit: String,
+    },
     /// `A>B>C` — pipeline / containment chain.
     Pipeline { stages: Vec<String> },
     /// `?[cond]=>[act]` — conditional branch.
@@ -132,7 +141,11 @@ pub enum BabelRecord {
     /// `!obj:detail` — exception.
     Exception { object: String, detail: String },
     /// `A<>B:conclusion` — comparison.
-    Comparison { a: String, b: String, conclusion: String },
+    Comparison {
+        a: String,
+        b: String,
+        conclusion: String,
+    },
     /// A raw opaque line — preserved verbatim (placeholders, NULL, ?, etc.).
     /// Used when a line does not match any schema element.
     Raw { text: String },
@@ -178,7 +191,9 @@ pub fn parse(input: &str) -> BabelAst {
             ast.records.push(rec);
         } else {
             // Unrecognized line: preserve verbatim as Raw.
-            ast.records.push(BabelRecord::Raw { text: line.to_string() });
+            ast.records.push(BabelRecord::Raw {
+                text: line.to_string(),
+            });
         }
     }
     ast
@@ -202,27 +217,46 @@ fn parse_line(line: &str) -> Option<BabelRecord> {
 
     // Config: `Config[target]:key=value(unit)` (both forms identical).
     if let Some(c) = parse_config(line) {
-        return Some(BabelRecord::Config { target: c.0, key: c.1, value: c.2, unit: c.3 });
+        return Some(BabelRecord::Config {
+            target: c.0,
+            key: c.1,
+            value: c.2,
+            unit: c.3,
+        });
     }
 
     // Conditional: `?[cond]=>[act]`  (compressed)  or  `if cond then act`  (verbose)
     if let Some(c) = parse_conditional(line) {
-        return Some(BabelRecord::Conditional { condition: c.0, action: c.1 });
+        return Some(BabelRecord::Conditional {
+            condition: c.0,
+            action: c.1,
+        });
     }
 
     // Exception: `!obj:detail`  (compressed)  or  `except obj : detail`  (verbose)
     if let Some(e) = parse_exception(line) {
-        return Some(BabelRecord::Exception { object: e.0, detail: e.1 });
+        return Some(BabelRecord::Exception {
+            object: e.0,
+            detail: e.1,
+        });
     }
 
     // Comparison: `A<>B:conclusion`  (compressed)  or  `A versus B : conclusion`  (verbose)
     if let Some(c) = parse_comparison(line) {
-        return Some(BabelRecord::Comparison { a: c.0, b: c.1, conclusion: c.2 });
+        return Some(BabelRecord::Comparison {
+            a: c.0,
+            b: c.1,
+            conclusion: c.2,
+        });
     }
 
     // Attribute: `@entity(key=value)`  (compressed)  or  `entity has key = value`  (verbose)
     if let Some(a) = parse_attribute(line) {
-        return Some(BabelRecord::Attribute { entity: a.0, key: a.1, value: a.2 });
+        return Some(BabelRecord::Attribute {
+            entity: a.0,
+            key: a.1,
+            value: a.2,
+        });
     }
 
     // Pipeline: `A>B>C`  (compressed)  or  `A then B then C`  (verbose)
@@ -275,7 +309,12 @@ fn parse_config(line: &str) -> Option<(String, String, String, String)> {
     if target.is_empty() || key.is_empty() {
         return None;
     }
-    Some((target.to_string(), key.to_string(), value.to_string(), unit.to_string()))
+    Some((
+        target.to_string(),
+        key.to_string(),
+        value.to_string(),
+        unit.to_string(),
+    ))
 }
 
 /// `?[cond]=>[act]` or `if cond then act`.
@@ -437,7 +476,12 @@ fn emit_record_compressed(rec: &BabelRecord, out: &mut String) {
         BabelRecord::Attribute { entity, key, value } => {
             let _ = write!(out, "@{entity}({key}={value})");
         }
-        BabelRecord::Config { target, key, value, unit } => {
+        BabelRecord::Config {
+            target,
+            key,
+            value,
+            unit,
+        } => {
             let _ = write!(out, "Config[{target}]:{key}={value}({unit})");
         }
         BabelRecord::Pipeline { stages } => {
@@ -481,7 +525,12 @@ fn emit_record_verbose(rec: &BabelRecord, out: &mut String) {
         BabelRecord::Attribute { entity, key, value } => {
             let _ = write!(out, "{entity} has {key} = {value}");
         }
-        BabelRecord::Config { target, key, value, unit } => {
+        BabelRecord::Config {
+            target,
+            key,
+            value,
+            unit,
+        } => {
             let _ = write!(out, "Config[{target}]: {key} = {value}({unit})");
         }
         BabelRecord::Pipeline { stages } => {
@@ -520,7 +569,8 @@ impl BabelCodec for FixedRuleTextCodec {
 
     fn decompress(_reader: &Self::Reader, c: &Self::Compressed) -> Self::Input {
         // The compressed payload is UTF-8 of the BT-P8 string.
-        let as_str = std::str::from_utf8(c).expect("BabelCodec compressed payload must be valid UTF-8");
+        let as_str =
+            std::str::from_utf8(c).expect("BabelCodec compressed payload must be valid UTF-8");
         let ast = parse(as_str);
         let mut out = String::new();
         emit_verbose(&ast, &mut out);
@@ -557,7 +607,8 @@ impl FixedRuleTextCodec {
         let ast = parse(input);
         self.emit_scratch.clear();
         emit_compressed(&ast, &mut self.emit_scratch);
-        self.compress_buf.extend_from_slice(self.emit_scratch.as_bytes());
+        self.compress_buf
+            .extend_from_slice(self.emit_scratch.as_bytes());
 
         // Record ratio (UTF-8 byte counts) + commitment.
         let in_bytes = input.len();
@@ -601,7 +652,8 @@ impl FixedRuleTextCodec {
     /// Decompress straight into a caller-provided `String`.
     pub fn decompress_into(_reader: &(), c: &[u8], out: &mut String) {
         out.clear();
-        let as_str = std::str::from_utf8(c).expect("BabelCodec compressed payload must be valid UTF-8");
+        let as_str =
+            std::str::from_utf8(c).expect("BabelCodec compressed payload must be valid UTF-8");
         let ast = parse(as_str);
         emit_verbose(&ast, out);
     }
@@ -629,7 +681,10 @@ mod tests {
         // Entity-attribute pair (the KG-triple / S-V-O shape).
         let input = "Wang_Nianfang has appellant_of = Hubei_Longan_Real_Estate";
         let rt = roundtrip_verbose(input);
-        assert_eq!(rt, input, "canonical verbose attribute must round-trip bit-identically");
+        assert_eq!(
+            rt, input,
+            "canonical verbose attribute must round-trip bit-identically"
+        );
     }
 
     #[test]
@@ -643,7 +698,10 @@ mod tests {
     fn t03_round_trip_config_string() {
         let input = "Config[engine]: max_fps = 60(hz)";
         let rt = roundtrip_verbose(input);
-        assert_eq!(rt, input, "config with unit must round-trip bit-identically");
+        assert_eq!(
+            rt, input,
+            "config with unit must round-trip bit-identically"
+        );
     }
 
     #[test]
@@ -670,7 +728,10 @@ mod tests {
         let input2 = "Report has table = TABREF3 and figure = FIGREF1";
         // ^ this won't parse as a single attribute; it'll be Raw. Verify Raw round-trips.
         let rt2 = roundtrip_verbose(input2);
-        assert_eq!(rt2, input2, "Raw line with placeholders must round-trip verbatim");
+        assert_eq!(
+            rt2, input2,
+            "Raw line with placeholders must round-trip verbatim"
+        );
     }
 
     #[test]
@@ -678,7 +739,10 @@ mod tests {
         // NULL / ? pass through as Raw lines.
         let input = "NULL\n?\nunknown_field has value = ?";
         let rt = roundtrip_verbose(input);
-        assert_eq!(rt, input, "NULL and ? must round-trip verbatim as Raw lines");
+        assert_eq!(
+            rt, input,
+            "NULL and ? must round-trip verbatim as Raw lines"
+        );
     }
 
     #[test]
@@ -701,7 +765,10 @@ mod tests {
     fn t09_empty_input() {
         let mut codec = FixedRuleTextCodec::new();
         let compressed = codec.compress_str("");
-        assert!(compressed.is_empty(), "empty input → empty compressed payload");
+        assert!(
+            compressed.is_empty(),
+            "empty input → empty compressed payload"
+        );
         let decompressed = FixedRuleTextCodec::decompress(&(), &compressed);
         assert_eq!(decompressed, "");
         // Ratio for empty input is defined as 1.0 (no-op).
@@ -743,7 +810,10 @@ load then parse then validate";
         let mut codec = FixedRuleTextCodec::new();
         let compressed = codec.compress_str(input);
         let compressed_str = std::str::from_utf8(&compressed).unwrap();
-        assert!(compressed_str.starts_with("S["), "compressed section must start with S[: {compressed_str}");
+        assert!(
+            compressed_str.starts_with("S["),
+            "compressed section must start with S[: {compressed_str}"
+        );
     }
 
     #[test]
@@ -762,7 +832,10 @@ load then parse then validate";
         let original = "player has hp = 100";
         let c1 = codec.compress_str(original);
         let c2 = codec.compress_str(std::str::from_utf8(&c1).unwrap());
-        assert_eq!(c1, c2, "compress(compress(x)) must equal compress(x) for BT-P8 payloads");
+        assert_eq!(
+            c1, c2,
+            "compress(compress(x)) must equal compress(x) for BT-P8 payloads"
+        );
     }
 
     #[test]
@@ -803,7 +876,10 @@ load then parse then validate";
         let mut buf = Vec::new();
         codec.compress_into("player has hp = 100", &mut buf);
         let s = std::str::from_utf8(&buf).unwrap();
-        assert!(s.contains("@player("), "compress_into must write BT-P8 form into the caller buffer: {s}");
+        assert!(
+            s.contains("@player("),
+            "compress_into must write BT-P8 form into the caller buffer: {s}"
+        );
         // Ratio + commitment recorded.
         assert!(codec.last_ratio() < 1.0);
         assert!(!codec.commit().is_zero());

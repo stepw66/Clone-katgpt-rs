@@ -13,9 +13,7 @@
 
 #![cfg(feature = "dmax_spd")]
 
-use katgpt_rs::dllm::{
-    D2fContext, denoising_accuracy, generate_pattern_dataset, train_mini_dllm,
-};
+use katgpt_rs::dllm::{D2fContext, denoising_accuracy, generate_pattern_dataset, train_mini_dllm};
 use katgpt_rs::speculative::d2f::{
     D2fDecodeConfig, SoftDecodeConfig, d2f_decode_block, d2f_decode_block_soft,
 };
@@ -86,7 +84,14 @@ fn proof_1_spd_quality_vs_binary() {
         // Binary D2F decode
         {
             let mut rng = Rng::new(i as u64 * 100 + 1);
-            let result = d2f_decode_block(&weights, &config, &decode_config, &NoPruner, &NoScreeningPruner, &mut rng);
+            let result = d2f_decode_block(
+                &weights,
+                &config,
+                &decode_config,
+                &NoPruner,
+                &NoScreeningPruner,
+                &mut rng,
+            );
             assert_valid_tokens(&result.tokens, config.vocab_size);
             let acc = block_accuracy(&result.tokens, target, block_size);
             binary_correct += (acc * block_size as f32) as usize;
@@ -460,7 +465,14 @@ fn summary_dmax_spd_goat_results() {
         for (i, target) in test_data.iter().take(n_p1).enumerate() {
             {
                 let mut rng = Rng::new(i as u64 * 100 + 1);
-                let r = d2f_decode_block(&weights, &config, &decode_config, &NoPruner, &NoScreeningPruner, &mut rng);
+                let r = d2f_decode_block(
+                    &weights,
+                    &config,
+                    &decode_config,
+                    &NoPruner,
+                    &NoScreeningPruner,
+                    &mut rng,
+                );
                 let a = block_accuracy(&r.tokens, target, block_size);
                 bin_c += (a * block_size as f32) as usize;
                 bin_t += block_size;

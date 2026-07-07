@@ -92,10 +92,16 @@ fn none_path_is_byte_identical_across_runs() {
             "[C1] None path not deterministic at pos {pos} — plumbing perturbs state"
         );
         for (i, &l) in a.iter().enumerate() {
-            assert!(l.is_finite(), "[C1] non-finite logit at pos {pos}, idx {i}: {l}");
+            assert!(
+                l.is_finite(),
+                "[C1] non-finite logit at pos {pos}, idx {i}: {l}"
+            );
         }
     }
-    println!("[C1] ✅ None path byte-identical across {} decode steps", config.block_size);
+    println!(
+        "[C1] ✅ None path byte-identical across {} decode steps",
+        config.block_size
+    );
 }
 
 // ── Acceptance Criterion 2: Config exposes loop_min / loop_max defaults ──
@@ -244,7 +250,14 @@ fn thousand_calls_per_l_no_panic_no_nan_deterministic() {
         );
 
         // First-call logits establish the deterministic reference for this L.
-        let reference = run_once(&config, &weights, &residual_gate, &sdpa_gate, 0, Some(requested_l));
+        let reference = run_once(
+            &config,
+            &weights,
+            &residual_gate,
+            &sdpa_gate,
+            0,
+            Some(requested_l),
+        );
 
         for (i, &l) in reference.iter().enumerate() {
             assert!(
@@ -255,7 +268,14 @@ fn thousand_calls_per_l_no_panic_no_nan_deterministic() {
 
         // 999 more calls at the same L (1000 total) — all must match byte-for-byte.
         for call in 1..1000 {
-            let actual = run_once(&config, &weights, &residual_gate, &sdpa_gate, 0, Some(requested_l));
+            let actual = run_once(
+                &config,
+                &weights,
+                &residual_gate,
+                &sdpa_gate,
+                0,
+                Some(requested_l),
+            );
             assert_eq!(
                 actual, reference,
                 "[C4] non-deterministic at L={requested_l}, call {call} — outputs diverged"
@@ -296,7 +316,10 @@ fn kv_cache_well_formed_across_varying_l() {
     for (i, &l) in sequence.iter().enumerate() {
         let out = run_once(&config, &weights, &residual_gate, &sdpa_gate, 0, Some(l));
         for (j, &v) in out.iter().enumerate() {
-            assert!(v.is_finite(), "[C5] non-finite at step {i}, L={l}, idx {j}: {v}");
+            assert!(
+                v.is_finite(),
+                "[C5] non-finite at step {i}, L={l}, idx {j}: {v}"
+            );
         }
         let expected = refs.get(&l).expect("reference must exist");
         assert_eq!(
@@ -304,7 +327,10 @@ fn kv_cache_well_formed_across_varying_l() {
             "[C5] L={l} diverged at sequence step {i} — variable-L dispatch corrupts state"
         );
     }
-    println!("[C5] ✅ KV cache well-formed across {} variable-L dispatches", sequence.len());
+    println!(
+        "[C5] ✅ KV cache well-formed across {} variable-L dispatches",
+        sequence.len()
+    );
 }
 
 // ── Acceptance Criterion 6: None path overhead < 1% ───────────────────────
@@ -340,9 +366,7 @@ fn none_path_overhead_is_noise_floor() {
     // real — but no pathological slowdown). The 1% overhead claim is about the
     // *plumbing cost* (a match + clamp), which is sub-nanosecond and well below
     // measurement noise. We assert the more meaningful "no outlier stall".
-    println!(
-        "[C6] None path: p50={p50}ns p99={p99}ns max={max}ns (n={n_iters})"
-    );
+    println!("[C6] None path: p50={p50}ns p99={p99}ns max={max}ns (n={n_iters})");
     assert!(
         p99 <= p50 * 5,
         "[C6] p99 ({p99}ns) > 5× p50 ({p50}ns) — plumbing introduces stall"
@@ -382,7 +406,10 @@ fn full_spectrum_some_loop_count_matches_none() {
             "[C7] None ≠ Some(4) at pos {pos} — byte-identity broken"
         );
     }
-    println!("[C7] ✅ Some(loop_count) ≡ None across {} positions", config.block_size);
+    println!(
+        "[C7] ✅ Some(loop_count) ≡ None across {} positions",
+        config.block_size
+    );
 }
 
 // ── Summary ──────────────────────────────────────────────────────────────

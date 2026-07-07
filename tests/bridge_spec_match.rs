@@ -45,9 +45,7 @@ fn spec_fast_sigmoid_matches_mathlib_real_sigmoid() {
     // across the non-saturating domain (|x| ≤ 40, per simd/activations.rs).
     // `Real.sigmoid x = (1 + Real.exp (-x))⁻¹` (Mathlib definition) — the Rust
     // `fast_sigmoid` must agree to libm precision.
-    for &x in &[
-        -39.0_f32, -10.0, -1.0, -0.1, 0.1, 1.0, 3.0, 10.0, 39.0,
-    ] {
+    for &x in &[-39.0_f32, -10.0, -1.0, -0.1, 0.1, 1.0, 3.0, 10.0, 39.0] {
         let expected = 1.0 / (1.0 + (-x).exp());
         let got = fast_sigmoid(x);
         assert!(
@@ -76,7 +74,11 @@ fn spec_fast_sigmoid_saturation_boundary() {
         "fast_sigmoid(40) must saturate near 1.0, got {}",
         fast_sigmoid(40.0)
     );
-    assert_eq!(fast_sigmoid(50.0), 1.0, "fast_sigmoid(>40) must clamp to 1.0");
+    assert_eq!(
+        fast_sigmoid(50.0),
+        1.0,
+        "fast_sigmoid(>40) must clamp to 1.0"
+    );
 
     // Below -40 → saturates to 0.0.
     assert!(
@@ -84,7 +86,11 @@ fn spec_fast_sigmoid_saturation_boundary() {
         "fast_sigmoid(-40) must saturate near 0.0, got {}",
         fast_sigmoid(-40.0)
     );
-    assert_eq!(fast_sigmoid(-50.0), 0.0, "fast_sigmoid(<-40) must clamp to 0.0");
+    assert_eq!(
+        fast_sigmoid(-50.0),
+        0.0,
+        "fast_sigmoid(<-40) must clamp to 0.0"
+    );
 }
 
 /// Static call-graph check: `ActionBridge::select_action` must route through
@@ -243,10 +249,16 @@ fn empirical_ranking_preserved_within_f32_precision() {
         checked += 1;
     }
     // Sanity: we must have checked a meaningful number of strict-ordering pairs.
-    assert!(checked > 8000, "must have checked >8000 strict pairs (got {checked})");
+    assert!(
+        checked > 8000,
+        "must have checked >8000 strict pairs (got {checked})"
+    );
     // Ties are expected but should be a minority (else sigmoid is saturating
     // too aggressively — a sign the domain or the function changed).
-    assert!(ties < 2000, "too many f32-saturation ties ({ties}) — domain too wide?");
+    assert!(
+        ties < 2000,
+        "too many f32-saturation ties ({ties}) — domain too wide?"
+    );
 }
 
 // ── Sentinel: .proofs/ directory integrity ──────────────────────────────
@@ -264,9 +276,7 @@ fn proofs_directory_exists() {
          See .plans/293_action_bridge_lean4_monotonicity_proof.md"
     );
     assert!(
-        proofs_dir
-            .join("KatgptProof/Bridge/Basic.lean")
-            .exists(),
+        proofs_dir.join("KatgptProof/Bridge/Basic.lean").exists(),
         "Lean spec file missing: .proofs/KatgptProof/Bridge/Basic.lean"
     );
     assert!(

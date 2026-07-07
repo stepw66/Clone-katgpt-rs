@@ -58,7 +58,18 @@ fn g1_permutation_equivariance() {
         let mut sk = vec![0.0; n * k];
         let mut sa = vec![0.0; n];
         set_sigmoid_attention_into(
-            &states, &w, &w, None, &mut baseline, &cfg, n, d, k, &mut sq, &mut sk, &mut sa,
+            &states,
+            &w,
+            &w,
+            None,
+            &mut baseline,
+            &cfg,
+            n,
+            d,
+            k,
+            &mut sq,
+            &mut sk,
+            &mut sa,
         )
         .unwrap();
     }
@@ -179,7 +190,18 @@ fn g2_identity_floor_meaningful_2cluster() {
     let mut sk = vec![0.0; n * k];
     let mut sa = vec![0.0; n];
     set_sigmoid_attention_into(
-        &states, &w, &w, None, &mut output, &cfg, n, d, k, &mut sq, &mut sk, &mut sa,
+        &states,
+        &w,
+        &w,
+        None,
+        &mut output,
+        &cfg,
+        n,
+        d,
+        k,
+        &mut sq,
+        &mut sk,
+        &mut sa,
     )
     .unwrap();
 
@@ -221,10 +243,7 @@ fn g2_identity_floor_meaningful_2cluster() {
     // (c) Outputs are bounded — no magnitude explosion. With identity V and
     //     N-normalisation, each output stays within ~γ of the input range.
     for v in &output {
-        assert!(
-            v.is_finite(),
-            "G2 FAIL: non-finite output {v}"
-        );
+        assert!(v.is_finite(), "G2 FAIL: non-finite output {v}");
         // Generous bound: input range is [0.25, 0.75]; γ=0.5 → max excursion 0.5.
         assert!(
             (-1.0..=2.0).contains(v),
@@ -269,7 +288,18 @@ fn g4_dense_path_by_construction_no_alloc_primitives() {
     // from any hidden allocation state).
     for _ in 0..100 {
         set_sigmoid_attention_into(
-            &states, &w, &w, None, &mut output, &cfg, n, d, k, &mut sq, &mut sk, &mut sa,
+            &states,
+            &w,
+            &w,
+            None,
+            &mut output,
+            &cfg,
+            n,
+            d,
+            k,
+            &mut sq,
+            &mut sk,
+            &mut sa,
         )
         .unwrap();
     }
@@ -313,7 +343,18 @@ fn g5_lonely_query_is_near_identity() {
     let mut sk = vec![0.0; n * k];
     let mut sa = vec![0.0; n];
     set_sigmoid_attention_into(
-        &states, &w, &w, None, &mut output, &cfg, n, d, k, &mut sq, &mut sk, &mut sa,
+        &states,
+        &w,
+        &w,
+        None,
+        &mut output,
+        &cfg,
+        n,
+        d,
+        k,
+        &mut sq,
+        &mut sk,
+        &mut sa,
     )
     .unwrap();
 
@@ -398,7 +439,18 @@ fn g5_gamma_zero_is_identity_bit_exact() {
     let mut sa = vec![0.0f32; n];
     let cfg = SetAttentionConfig::new(1.0, 0.0); // γ = 0
     set_sigmoid_attention_into(
-        &states, &w, &w, None, &mut output, &cfg, n, d, k, &mut sq, &mut sk, &mut sa,
+        &states,
+        &w,
+        &w,
+        None,
+        &mut output,
+        &cfg,
+        n,
+        d,
+        k,
+        &mut sq,
+        &mut sk,
+        &mut sa,
     )
     .unwrap();
     for (o, s) in output.iter().zip(states.iter()) {
@@ -428,7 +480,18 @@ fn supplement_topk_equals_dense_when_kmax_ge_n() {
         let mut sa = vec![0.0; n];
         let cfg = SetAttentionConfig::new(1.0, 0.1);
         set_sigmoid_attention_into(
-            &states, &w, &w, None, &mut dense_out, &cfg, n, d, k, &mut sq, &mut sk, &mut sa,
+            &states,
+            &w,
+            &w,
+            None,
+            &mut dense_out,
+            &cfg,
+            n,
+            d,
+            k,
+            &mut sq,
+            &mut sk,
+            &mut sa,
         )
         .unwrap();
     }
@@ -441,7 +504,18 @@ fn supplement_topk_equals_dense_when_kmax_ge_n() {
         let mut sa = vec![0.0; n];
         let cfg = SetAttentionConfig::new(1.0, 0.1).with_top_k(n);
         set_sigmoid_attention_into(
-            &states, &w, &w, None, &mut topk_out, &cfg, n, d, k, &mut sq, &mut sk, &mut sa,
+            &states,
+            &w,
+            &w,
+            None,
+            &mut topk_out,
+            &cfg,
+            n,
+            d,
+            k,
+            &mut sq,
+            &mut sk,
+            &mut sa,
         )
         .unwrap();
     }

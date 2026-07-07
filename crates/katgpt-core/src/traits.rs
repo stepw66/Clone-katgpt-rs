@@ -1015,7 +1015,8 @@ pub trait AutocurriculumSampler {
                     // Union matching: normalized cosine-like similarity.
                     // Threshold > 0.9 ensures only near-exact matches count.
                     // JAX uses binary match_sum > 0 on discretized observations.
-                    let dot: f32 = crate::simd::simd_dot_f32(obs, goal_obs, obs.len().min(goal_obs.len()));
+                    let dot: f32 =
+                        crate::simd::simd_dot_f32(obs, goal_obs, obs.len().min(goal_obs.len()));
                     let norm_goal = norm_goals[g];
                     let denom = norm_obs * norm_goal;
                     if denom > 0.0 && dot / denom > 0.9 {
@@ -2003,14 +2004,20 @@ mod tests_reject_confidence {
             let valid = p.is_valid(0, tok, &[]);
             let conf = p.reject_confidence(0, tok, &[]);
             assert!(valid, "token {tok} should be valid");
-            assert_eq!(conf, 0.0, "valid token {tok} should have 0.0 reject confidence");
+            assert_eq!(
+                conf, 0.0,
+                "valid token {tok} should have 0.0 reject confidence"
+            );
         }
         // Invalid tokens map to 1.0 confidence
         for tok in 5..10 {
             let valid = p.is_valid(0, tok, &[]);
             let conf = p.reject_confidence(0, tok, &[]);
             assert!(!valid, "token {tok} should be invalid");
-            assert_eq!(conf, 1.0, "invalid token {tok} should have 1.0 reject confidence");
+            assert_eq!(
+                conf, 1.0,
+                "invalid token {tok} should have 1.0 reject confidence"
+            );
         }
     }
 
@@ -2137,7 +2144,12 @@ mod recursion_logits_tests {
         assert_eq!(pre.len(), 4);
         assert_eq!(post.len(), 4);
         // Post sharpened toward index 0 (target 3.0), pre did not have that boost.
-        assert!(post[0] > pre[0], "post[0]={} should exceed pre[0]={}", post[0], pre[0]);
+        assert!(
+            post[0] > pre[0],
+            "post[0]={} should exceed pre[0]={}",
+            post[0],
+            pre[0]
+        );
     }
 
     #[test]
@@ -2161,7 +2173,11 @@ mod recursion_logits_tests {
         g.sharpen_step();
         let margin = compute_margin_sign(&g, 0);
         // Index 0 is the candidate being sharpened toward, so margin should be positive.
-        assert!(margin > 0.0, "sharpened candidate must have positive margin, got {}", margin);
+        assert!(
+            margin > 0.0,
+            "sharpened candidate must have positive margin, got {}",
+            margin
+        );
     }
 
     #[test]
@@ -2170,8 +2186,12 @@ mod recursion_logits_tests {
         // The trait explicitly allows this.
         struct NoRecursionYet;
         impl RecursionLogits for NoRecursionYet {
-            fn pre_recursion_logits(&self) -> &[f32] { &[] }
-            fn post_recursion_logits(&self) -> &[f32] { &[] }
+            fn pre_recursion_logits(&self) -> &[f32] {
+                &[]
+            }
+            fn post_recursion_logits(&self) -> &[f32] {
+                &[]
+            }
         }
         let g = NoRecursionYet;
         assert_eq!(g.pre_recursion_logits().len(), 0);

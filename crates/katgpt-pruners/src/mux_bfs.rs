@@ -92,10 +92,12 @@ impl MuxBfs {
 
         // Check separation using only the valid peaks
         if valid_count < logits.len() {
-            let valid_peaks: Vec<(usize, f32)> =
-                peaks.iter().take(valid_count).copied().collect();
+            let valid_peaks: Vec<(usize, f32)> = peaks.iter().take(valid_count).copied().collect();
             let bg_level = mean_of_remaining(logits, &valid_peaks);
-            let last_val = valid_peaks.last().map(|&(_, v)| v).unwrap_or(f32::NEG_INFINITY);
+            let last_val = valid_peaks
+                .last()
+                .map(|&(_, v)| v)
+                .unwrap_or(f32::NEG_INFINITY);
             if last_val - bg_level < self.separation {
                 // No clear separation from background → noise
                 return 0;

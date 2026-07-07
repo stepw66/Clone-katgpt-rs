@@ -29,8 +29,8 @@
 #![cfg(feature = "funcattn_structured_basis")]
 
 use katgpt_core::funcattn::{
-    funcattn_forward, make_dct_log_basis, make_haar_packet_basis, FuncAttnBasis, FuncAttnConfig,
-    FuncAttnScratch,
+    FuncAttnBasis, FuncAttnConfig, FuncAttnScratch, funcattn_forward, make_dct_log_basis,
+    make_haar_packet_basis,
 };
 
 const D: usize = 64;
@@ -191,8 +191,18 @@ fn funcattn_structured_basis_goat_gate() {
         };
         let mut scratch = FuncAttnScratch::new(N, D, K);
         let mut out = vec![0.0f32; N * D];
-        funcattn_forward(&x, &x, w_basis, &w_q, &w_k, &w_v, &cfg, &mut scratch, &mut out)
-            .expect("forward");
+        funcattn_forward(
+            &x,
+            &x,
+            w_basis,
+            &w_q,
+            &w_k,
+            &w_v,
+            &cfg,
+            &mut scratch,
+            &mut out,
+        )
+        .expect("forward");
         for v in &out {
             assert!(v.is_finite(), "{label}: non-finite forward output");
         }
@@ -259,8 +269,14 @@ fn funcattn_structured_basis_goat_gate() {
     }
 
     println!("\n=== Verdict ===");
-    println!("G1 (principled ≥ random + 0.05): {}", if g1_pass { "PASS" } else { "FAIL/KILL" });
-    println!("G2 (captures ≥ 50% of achievable): {}", if g2_pass { "PASS" } else { "FAIL/KILL" });
+    println!(
+        "G1 (principled ≥ random + 0.05): {}",
+        if g1_pass { "PASS" } else { "FAIL/KILL" }
+    );
+    println!(
+        "G2 (captures ≥ 50% of achievable): {}",
+        if g2_pass { "PASS" } else { "FAIL/KILL" }
+    );
     if g1_pass && g2_pass {
         println!("→ GOAT gate PASSED. Promote `funcattn_structured_basis` per Plan 332 T4.1.");
     } else if !g1_pass {
@@ -297,8 +313,9 @@ fn dct_log_constructor_validated_on_aligned_signal() {
             for (si, &f) in aligned_freqs.iter().enumerate() {
                 let amp = 1.0 / (si + 1) as f32;
                 // Frequency `f` cycles across d samples, phase rotates with token index.
-                v += amp * (2.0 * core::f32::consts::PI * f as f32 * j as f32 / D as f32
-                    + 0.3 * t).cos();
+                v += amp
+                    * (2.0 * core::f32::consts::PI * f as f32 * j as f32 / D as f32 + 0.3 * t)
+                        .cos();
             }
             x[i * D + j] = v;
         }
@@ -331,8 +348,18 @@ fn dct_log_constructor_validated_on_aligned_signal() {
         };
         let mut scratch = FuncAttnScratch::new(N, D, K);
         let mut out = vec![0.0f32; N * D];
-        funcattn_forward(&x, &x, w_basis, &w_q, &w_k, &w_v, &cfg, &mut scratch, &mut out)
-            .expect("forward");
+        funcattn_forward(
+            &x,
+            &x,
+            w_basis,
+            &w_q,
+            &w_k,
+            &w_v,
+            &cfg,
+            &mut scratch,
+            &mut out,
+        )
+        .expect("forward");
         for v in &out {
             assert!(v.is_finite(), "{label}: non-finite forward output");
         }
@@ -496,8 +523,18 @@ fn structured_basis_on_pde_like_broadband_signal() {
         };
         let mut scratch = FuncAttnScratch::new(N, D, K);
         let mut out = vec![0.0f32; N * D];
-        funcattn_forward(&x, &x, w_basis, &w_q, &w_k, &w_v, &cfg, &mut scratch, &mut out)
-            .expect("forward");
+        funcattn_forward(
+            &x,
+            &x,
+            w_basis,
+            &w_q,
+            &w_k,
+            &w_v,
+            &cfg,
+            &mut scratch,
+            &mut out,
+        )
+        .expect("forward");
         for v in &out {
             assert!(v.is_finite(), "{label}: non-finite forward output");
         }
@@ -507,8 +544,10 @@ fn structured_basis_on_pde_like_broadband_signal() {
     };
 
     println!("\n=== Supplementary: PDE-like broadband signal ===");
-    println!("    traveling-wave, 4 modes, j-cycles {:.2},{:.2},{:.2},{:.2} ~ broadband",
-        j_cycles[0], j_cycles[1], j_cycles[2], j_cycles[3]);
+    println!(
+        "    traveling-wave, 4 modes, j-cycles {:.2},{:.2},{:.2},{:.2} ~ broadband",
+        j_cycles[0], j_cycles[1], j_cycles[2], j_cycles[3]
+    );
     let cos_rand = run(&random_orthonormal_w(100, K, D), "random-orth");
     let cos_dct = run(&make_dct_log_basis(K, D), "DCT-log     ");
     let cos_haar = run(&make_haar_packet_basis(K, D), "Haar-packet ");
@@ -533,7 +572,9 @@ fn structured_basis_on_pde_like_broadband_signal() {
 
     println!("\nInterpretation (Plan 332 follow-up: fair PDE-like evaluation):");
     if dct_delta >= 0.05 {
-        println!("  DCT-log beats random by {dct_delta:+.4} (≥+0.05) on broadband PDE-like signal.");
+        println!(
+            "  DCT-log beats random by {dct_delta:+.4} (≥+0.05) on broadband PDE-like signal."
+        );
         println!("  → DCT-log is COMPETITIVE on realistic spectral-rich signals, not just");
         println!("    DCT-aligned inputs. Strengthens the case for DCT-log as a documented");
         println!("    option for broadband transport tasks. Consistent with FUNCATTN Table 7.");
@@ -558,14 +599,24 @@ fn structured_basis_on_pde_like_broadband_signal() {
     // broadband signals because DCT-log's 8 log-spaced rows cover more of the
     // spectrum than the hand-crafted basis's n_modes signal-matched rows.
     if cos_dct > cos_hand {
-        println!("  Note: DCT-log ({:+.4}) > hand-crafted ({:+.4}) on broadband — DCT-log's", cos_dct, cos_hand);
+        println!(
+            "  Note: DCT-log ({:+.4}) > hand-crafted ({:+.4}) on broadband — DCT-log's",
+            cos_dct, cos_hand
+        );
         println!("    8 log-spaced rows cover more spectrum than the hand-crafted basis's");
-        println!("    {} signal-matched rows. The hand-crafted 'upper bound' assumption breaks", n_modes);
+        println!(
+            "    {} signal-matched rows. The hand-crafted 'upper bound' assumption breaks",
+            n_modes
+        );
         println!("    for broadband signals (it only holds when the basis can fully span");
-        println!("    the signal's spectral modes, which requires n_modes ≥ signal rank).", );
+        println!("    the signal's spectral modes, which requires n_modes ≥ signal rank).",);
     }
     if (dct_delta - haar_delta).abs() > 0.03 {
-        let winner = if dct_delta > haar_delta { "DCT-log" } else { "Haar-packet" };
+        let winner = if dct_delta > haar_delta {
+            "DCT-log"
+        } else {
+            "Haar-packet"
+        };
         let gap = dct_delta - haar_delta;
         println!("  Note: {winner} wins on broadband (Δ gap {gap:+.4}); basis choice should");
         println!("    depend on expected signal spectral structure (broadband → DCT,");
@@ -636,8 +687,18 @@ fn funcattn_structured_basis_per_basis_gate() {
         };
         let mut scratch = FuncAttnScratch::new(N, D, K);
         let mut out = vec![0.0f32; N * D];
-        funcattn_forward(&x, &x, w_basis, &w_q, &w_k, &w_v, &cfg, &mut scratch, &mut out)
-            .expect("forward");
+        funcattn_forward(
+            &x,
+            &x,
+            w_basis,
+            &w_q,
+            &w_k,
+            &w_v,
+            &cfg,
+            &mut scratch,
+            &mut out,
+        )
+        .expect("forward");
         for v in &out {
             assert!(v.is_finite(), "{label}: non-finite forward output");
         }
@@ -681,9 +742,7 @@ fn funcattn_structured_basis_per_basis_gate() {
          If this regressed, Haar-packet's localized multi-scale advantage no longer \
          holds on realistic PDE-like signals — investigate before re-enabling promotion."
     );
-    println!(
-        "\n  G1 PASS: DCT-log Δ={dct_delta:+.4} (≥+0.05), Haar Δ={haar_delta:+.4} (≥+0.05)"
-    );
+    println!("\n  G1 PASS: DCT-log Δ={dct_delta:+.4} (≥+0.05), Haar Δ={haar_delta:+.4} (≥+0.05)");
 
     // --- G2 (per-basis): each principled basis captures ≥50% of the
     //     achievable gain (hand-crafted − random). On broadband this is a

@@ -60,7 +60,10 @@ const TARGET_LATENCY_NS: f64 = 1_000.0; // <1µs
 fn main() {
     println!("══════════════════════════════════════════════════════════════════");
     println!("  Plan 377 Phase 3 — Local Branch Routing GOAT gate");
-    println!("  K={}, D={}, ITERS={}, ALLOC_ITERS={}", K, D, ITERS, ALLOC_ITERS);
+    println!(
+        "  K={}, D={}, ITERS={}, ALLOC_ITERS={}",
+        K, D, ITERS, ALLOC_ITERS
+    );
     println!("══════════════════════════════════════════════════════════════════\n");
 
     // ── Fixture: K=3 candidate hidden states + frozen direction. ────────
@@ -149,8 +152,7 @@ fn main() {
     // ── Verdict ─────────────────────────────────────────────────────────
     let argmax_pass = argmax_ns < TARGET_LATENCY_NS;
     let sampled_pass = sampled_ns < TARGET_LATENCY_NS;
-    let alloc_pass =
-        argmax_allocs == 0 && sampled_allocs == 0 && construct_allocs == 1;
+    let alloc_pass = argmax_allocs == 0 && sampled_allocs == 0 && construct_allocs == 1;
 
     println!("── G2: router latency ──");
     println!(
@@ -185,9 +187,7 @@ fn main() {
 
     println!("\n── G1 (correctness ≥ 90%) ──");
     println!("  verified by 22 unit tests in branch_routing::tests::*");
-    println!(
-        "  (dot_product_argmax_*, collider_adapter_*, sample_logistic_*, object-safety)"
-    );
+    println!("  (dot_product_argmax_*, collider_adapter_*, sample_logistic_*, object-safety)");
 
     println!("\n── G3 (K=1 bit-identical to standard decode) ──");
     println!("  verified by dot_product_argmax_k1_returns_zero + collider_adapter_k1_returns_zero");
@@ -205,7 +205,11 @@ fn main() {
     let overall_pass = argmax_pass && sampled_pass && alloc_pass;
     println!(
         "  OVERALL: {}",
-        if overall_pass { "✓ ALL GATES PASS" } else { "✗ SOME GATES FAILED" }
+        if overall_pass {
+            "✓ ALL GATES PASS"
+        } else {
+            "✗ SOME GATES FAILED"
+        }
     );
     println!("══════════════════════════════════════════════════════════════════");
     if !overall_pass {
@@ -214,9 +218,5 @@ fn main() {
 }
 
 fn pass_fail(ok: bool) -> &'static str {
-    if ok {
-        "✓ PASS"
-    } else {
-        "✗ FAIL"
-    }
+    if ok { "✓ PASS" } else { "✗ FAIL" }
 }

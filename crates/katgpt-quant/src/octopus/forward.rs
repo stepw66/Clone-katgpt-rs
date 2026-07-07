@@ -102,9 +102,7 @@ pub fn attention_octopus(
 
     // Pass 1: Q·K scores + find max
     // Hoist the invariant q_slice out of the loop — it does not depend on t.
-    let q_slice = unsafe {
-        std::slice::from_raw_parts(q.as_ptr().add(q_head_offset), head_dim)
-    };
+    let q_slice = unsafe { std::slice::from_raw_parts(q.as_ptr().add(q_head_offset), head_dim) };
     let mut max_score = f32::NEG_INFINITY;
     for t in 0..t_n {
         let k_off = t * kv_dim + kv_group_offset;

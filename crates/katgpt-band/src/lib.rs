@@ -29,7 +29,7 @@
 //!   `PreservationScorer` traits (collider_pruner only).
 //! - `fastrand`: deterministic RNG for `bckvss::SyntheticScm`'s AR(1) sampler.
 
-#![allow(unexpected_cfgs)]  // root may pass-through `full` and other aggregate features
+#![allow(unexpected_cfgs)] // root may pass-through `full` and other aggregate features
 
 #[cfg(feature = "band_conditioner")]
 pub mod band_conditioner;

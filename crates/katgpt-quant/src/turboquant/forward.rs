@@ -242,8 +242,8 @@ pub fn maxsim_score_turboquant(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use katgpt_transformer::TransformerWeights;
     use katgpt_core::types::{Config, Rng};
+    use katgpt_transformer::TransformerWeights;
 
     #[test]
     fn test_cosine_similarity_identical() {

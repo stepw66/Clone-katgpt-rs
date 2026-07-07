@@ -170,10 +170,8 @@ pub fn load_mtp_projection(path: &std::path::Path) -> Result<MtpProjection, Stri
     let weights_offset = header_size;
     let bias_offset = weights_offset + weights_bytes;
 
-    let weights: Vec<f32> =
-        bytemuck::pod_collect_to_vec(&data[weights_offset..bias_offset]);
-    let bias: Vec<f32> =
-        bytemuck::pod_collect_to_vec(&data[bias_offset..file_size - 4]);
+    let weights: Vec<f32> = bytemuck::pod_collect_to_vec(&data[weights_offset..bias_offset]);
+    let bias: Vec<f32> = bytemuck::pod_collect_to_vec(&data[bias_offset..file_size - 4]);
 
     debug_assert_eq!(weights.len(), out_dim * in_dim, "weights count mismatch");
     debug_assert_eq!(bias.len(), out_dim, "bias count mismatch");

@@ -35,7 +35,7 @@
 #![cfg(feature = "cross_resolution_transport")]
 
 use katgpt_core::cross_resolution::{
-    CrossResolutionBases, CrossResScratch, transport_cross_resolution_into,
+    CrossResScratch, CrossResolutionBases, transport_cross_resolution_into,
 };
 use katgpt_core::simd;
 
@@ -70,7 +70,9 @@ impl Rng {
 #[allow(clippy::needless_range_loop)] // orthonormalization math, explicit indexing clearer
 fn random_orthonormal(dim: usize, k: usize, rng: &mut Rng) -> Vec<f32> {
     assert!(k <= dim);
-    let mut cols: Vec<Vec<f32>> = (0..k).map(|_| (0..dim).map(|_| rng.next_f32()).collect()).collect();
+    let mut cols: Vec<Vec<f32>> = (0..k)
+        .map(|_| (0..dim).map(|_| rng.next_f32()).collect())
+        .collect();
     for i in 0..k {
         for j in 0..i {
             let dot: f32 = cols[i].iter().zip(cols[j].iter()).map(|(a, b)| a * b).sum();
@@ -180,7 +182,10 @@ fn g1_reconstruction_cosine() {
     let psi_dst = random_orthonormal(D_DST, K, &mut rng);
     let forward = CrossResolutionBases::new(phi_src, psi_dst, D_SRC, D_DST, K)
         .expect("forward bases should construct");
-    assert!(forward.verify_orthonormal(1e-4), "Φ_src / Ψ_dst must be column-orthonormal");
+    assert!(
+        forward.verify_orthonormal(1e-4),
+        "Φ_src / Ψ_dst must be column-orthonormal"
+    );
 
     // Reverse bases: 16 → 64 (swap roles).
     let reverse = CrossResolutionBases::new(
@@ -220,8 +225,10 @@ fn g1_reconstruction_cosine() {
     let p10 = cosines[(cosines.len() as f32 * 0.10) as usize];
     let median = cosines[cosines.len() / 2];
 
-    println!("\nG1 RECONSTRUCTION RESULTS (n={}, d_src={}, d_dst={}, k={}, band_frac={}):",
-        N_SAMPLES, D_SRC, D_DST, K, BAND_ENERGY_FRAC);
+    println!(
+        "\nG1 RECONSTRUCTION RESULTS (n={}, d_src={}, d_dst={}, k={}, band_frac={}):",
+        N_SAMPLES, D_SRC, D_DST, K, BAND_ENERGY_FRAC
+    );
     println!("  min cos:    {min:.4}");
     println!("  p10 cos:    {p10:.4}");
     println!("  median cos: {median:.4}");

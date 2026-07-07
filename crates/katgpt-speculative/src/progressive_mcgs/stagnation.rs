@@ -94,7 +94,8 @@ impl StagnationGate {
         }
         let idx = branch.idx();
         if idx >= self.branch_states.len() {
-            self.branch_states.resize(idx + 1, BranchStagnationState::default());
+            self.branch_states
+                .resize(idx + 1, BranchStagnationState::default());
         }
     }
 
@@ -262,7 +263,10 @@ mod tests {
         let mut gate = StagnationGate::new(2, 3, 6);
         gate.observe_expansion(BranchId(0), Reward::Failure);
         gate.observe_expansion(BranchId(0), Reward::Neutral);
-        assert_eq!(gate.branch_state(BranchId(0)).unwrap().since_last_improve, 2);
+        assert_eq!(
+            gate.branch_state(BranchId(0)).unwrap().since_last_improve,
+            2
+        );
         assert!(gate.check(BranchId(0)).is_empty());
     }
 
@@ -282,7 +286,10 @@ mod tests {
         gate.observe_expansion(BranchId(0), Reward::Neutral);
         gate.observe_expansion(BranchId(0), Reward::Neutral);
         gate.observe_expansion(BranchId(0), Reward::Progress); // reset
-        assert_eq!(gate.branch_state(BranchId(0)).unwrap().since_last_improve, 0);
+        assert_eq!(
+            gate.branch_state(BranchId(0)).unwrap().since_last_improve,
+            0
+        );
         assert!(gate.check(BranchId(0)).is_empty());
     }
 
@@ -337,7 +344,10 @@ mod tests {
         let mut gate = StagnationGate::new(1, 3, 6);
         gate.observe_expansion(BranchId(5), Reward::Neutral); // grow to branch 5
         assert!(gate.branch_state(BranchId(5)).is_some());
-        assert_eq!(gate.branch_state(BranchId(5)).unwrap().since_last_improve, 1);
+        assert_eq!(
+            gate.branch_state(BranchId(5)).unwrap().since_last_improve,
+            1
+        );
     }
 
     #[test]

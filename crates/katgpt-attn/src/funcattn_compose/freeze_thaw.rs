@@ -107,8 +107,15 @@ impl FuncAttnWeightsSnapshot {
         debug_assert_eq!(w_k.len(), d * d, "w_k must be (d, d)");
         debug_assert_eq!(w_v.len(), d * d, "w_v must be (d, d)");
         let mut snap = Self {
-            d, k, basis, alpha, temperature,
-            w_basis, w_q, w_k, w_v,
+            d,
+            k,
+            basis,
+            alpha,
+            temperature,
+            w_basis,
+            w_q,
+            w_k,
+            w_v,
             blake3: [0u8; 32],
             version,
         };
@@ -135,7 +142,19 @@ impl FuncAttnWeightsSnapshot {
         blake3: [u8; 32],
         version: u64,
     ) -> Self {
-        Self { d, k, basis, alpha, temperature, w_basis, w_q, w_k, w_v, blake3, version }
+        Self {
+            d,
+            k,
+            basis,
+            alpha,
+            temperature,
+            w_basis,
+            w_q,
+            w_k,
+            w_v,
+            blake3,
+            version,
+        }
     }
 
     /// Streaming hash helper. Pushes every logical field (except `blake3` and
@@ -214,7 +233,9 @@ pub struct FuncAttnSnapshotStore {
 impl FuncAttnSnapshotStore {
     /// Create a store seeded with `initial` (typically version 0).
     pub fn new(initial: FuncAttnWeightsSnapshot) -> Self {
-        Self { inner: RwLock::new(Arc::new(initial)) }
+        Self {
+            inner: RwLock::new(Arc::new(initial)),
+        }
     }
 
     /// Get a cheap `Arc` handle to the current snapshot.
@@ -223,7 +244,10 @@ impl FuncAttnSnapshotStore {
     /// `Arc` keeps the snapshot valid for as long as the caller holds it, even
     /// across a subsequent [`Self::swap`].
     pub fn current(&self) -> Result<Arc<FuncAttnWeightsSnapshot>, FuncAttnSnapshotStoreError> {
-        let guard = self.inner.read().map_err(|_| FuncAttnSnapshotStoreError::Poisoned)?;
+        let guard = self
+            .inner
+            .read()
+            .map_err(|_| FuncAttnSnapshotStoreError::Poisoned)?;
         Ok(Arc::clone(&guard))
     }
 
@@ -241,7 +265,10 @@ impl FuncAttnSnapshotStore {
         if !next.verify() {
             return Err(FuncAttnSnapshotStoreError::CommitmentMismatch);
         }
-        let mut guard = self.inner.write().map_err(|_| FuncAttnSnapshotStoreError::Poisoned)?;
+        let mut guard = self
+            .inner
+            .write()
+            .map_err(|_| FuncAttnSnapshotStoreError::Poisoned)?;
         let new_arc = Arc::new(next);
         let old = std::mem::replace(&mut *guard, new_arc);
         Ok(old)
@@ -280,7 +307,16 @@ mod tests {
         let k = 4;
         let (wb, wq, wk, wv) = make_weights(d, k, 1.0);
         let snap = FuncAttnWeightsSnapshot::from_weights(
-            d, k, FuncAttnBasis::Sigmoid, 0.5, 0.1, wb, wq, wk, wv, 1,
+            d,
+            k,
+            FuncAttnBasis::Sigmoid,
+            0.5,
+            0.1,
+            wb,
+            wq,
+            wk,
+            wv,
+            1,
         );
         assert!(snap.verify(), "freshly-committed snapshot must verify");
         assert_ne!(snap.blake3, [0u8; 32], "blake3 must be non-zero");
@@ -293,7 +329,16 @@ mod tests {
         let k = 4;
         let (wb, wq, wk, wv) = make_weights(d, k, 2.0);
         let mut snap = FuncAttnWeightsSnapshot::from_weights(
-            d, k, FuncAttnBasis::Sigmoid, 0.5, 0.1, wb, wq, wk, wv, 1,
+            d,
+            k,
+            FuncAttnBasis::Sigmoid,
+            0.5,
+            0.1,
+            wb,
+            wq,
+            wk,
+            wv,
+            1,
         );
         let h1 = snap.blake3;
         let h2 = snap.commit();
@@ -306,7 +351,16 @@ mod tests {
         let k = 4;
         let (wb, wq, wk, wv) = make_weights(d, k, 3.0);
         let mut snap = FuncAttnWeightsSnapshot::from_weights(
-            d, k, FuncAttnBasis::Sigmoid, 0.5, 0.1, wb, wq, wk, wv, 1,
+            d,
+            k,
+            FuncAttnBasis::Sigmoid,
+            0.5,
+            0.1,
+            wb,
+            wq,
+            wk,
+            wv,
+            1,
         );
         assert!(snap.verify());
         snap.w_basis[0] += 1.0; // tamper
@@ -320,10 +374,28 @@ mod tests {
         let (wb1, wq1, wk1, wv1) = make_weights(d, k, 1.0);
         let (wb2, wq2, wk2, wv2) = make_weights(d, k, 2.0);
         let s1 = FuncAttnWeightsSnapshot::from_weights(
-            d, k, FuncAttnBasis::Sigmoid, 0.5, 0.1, wb1, wq1, wk1, wv1, 1,
+            d,
+            k,
+            FuncAttnBasis::Sigmoid,
+            0.5,
+            0.1,
+            wb1,
+            wq1,
+            wk1,
+            wv1,
+            1,
         );
         let s2 = FuncAttnWeightsSnapshot::from_weights(
-            d, k, FuncAttnBasis::Sigmoid, 0.5, 0.1, wb2, wq2, wk2, wv2, 1,
+            d,
+            k,
+            FuncAttnBasis::Sigmoid,
+            0.5,
+            0.1,
+            wb2,
+            wq2,
+            wk2,
+            wv2,
+            1,
         );
         assert_ne!(s1.blake3, s2.blake3, "different weights → different hash");
     }
@@ -334,10 +406,28 @@ mod tests {
         let k = 4;
         let (wb, wq, wk, wv) = make_weights(d, k, 5.0);
         let s1 = FuncAttnWeightsSnapshot::from_weights(
-            d, k, FuncAttnBasis::Sigmoid, 0.5, 0.1, wb.clone(), wq.clone(), wk.clone(), wv.clone(), 1,
+            d,
+            k,
+            FuncAttnBasis::Sigmoid,
+            0.5,
+            0.1,
+            wb.clone(),
+            wq.clone(),
+            wk.clone(),
+            wv.clone(),
+            1,
         );
         let s2 = FuncAttnWeightsSnapshot::from_weights(
-            d, k, FuncAttnBasis::Sigmoid, 0.5, 0.1, wb, wq, wk, wv, 999,
+            d,
+            k,
+            FuncAttnBasis::Sigmoid,
+            0.5,
+            0.1,
+            wb,
+            wq,
+            wk,
+            wv,
+            999,
         );
         assert_eq!(s1.blake3, s2.blake3, "version must not affect blake3");
     }
@@ -348,12 +438,33 @@ mod tests {
         let k = 4;
         let (wb, wq, wk, wv) = make_weights(d, k, 5.0);
         let s_sig = FuncAttnWeightsSnapshot::from_weights(
-            d, k, FuncAttnBasis::Sigmoid, 0.5, 0.1, wb.clone(), wq.clone(), wk.clone(), wv.clone(), 1,
+            d,
+            k,
+            FuncAttnBasis::Sigmoid,
+            0.5,
+            0.1,
+            wb.clone(),
+            wq.clone(),
+            wk.clone(),
+            wv.clone(),
+            1,
         );
         let s_sft = FuncAttnWeightsSnapshot::from_weights(
-            d, k, FuncAttnBasis::Softmax, 0.5, 0.1, wb, wq, wk, wv, 1,
+            d,
+            k,
+            FuncAttnBasis::Softmax,
+            0.5,
+            0.1,
+            wb,
+            wq,
+            wk,
+            wv,
+            1,
         );
-        assert_ne!(s_sig.blake3, s_sft.blake3, "different basis → different hash");
+        assert_ne!(
+            s_sig.blake3, s_sft.blake3,
+            "different basis → different hash"
+        );
     }
 
     #[test]
@@ -362,7 +473,16 @@ mod tests {
         let k = 4;
         let (wb, wq, wk, wv) = make_weights(d, k, 1.0);
         let snap0 = FuncAttnWeightsSnapshot::from_weights(
-            d, k, FuncAttnBasis::Sigmoid, 0.5, 0.1, wb, wq, wk, wv, 0,
+            d,
+            k,
+            FuncAttnBasis::Sigmoid,
+            0.5,
+            0.1,
+            wb,
+            wq,
+            wk,
+            wv,
+            0,
         );
         let store = FuncAttnSnapshotStore::new(snap0);
 
@@ -373,7 +493,16 @@ mod tests {
         // Swap in v1.
         let (wb1, wq1, wk1, wv1) = make_weights(d, k, 2.0);
         let snap1 = FuncAttnWeightsSnapshot::from_weights(
-            d, k, FuncAttnBasis::Sigmoid, 0.5, 0.1, wb1, wq1, wk1, wv1, 1,
+            d,
+            k,
+            FuncAttnBasis::Sigmoid,
+            0.5,
+            0.1,
+            wb1,
+            wq1,
+            wk1,
+            wv1,
+            1,
         );
         let displaced = store.swap(snap1).unwrap();
         assert_eq!(displaced.version, 0, "displaced = previous current");
@@ -392,14 +521,32 @@ mod tests {
         let k = 4;
         let (wb, wq, wk, wv) = make_weights(d, k, 1.0);
         let snap0 = FuncAttnWeightsSnapshot::from_weights(
-            d, k, FuncAttnBasis::Sigmoid, 0.5, 0.1, wb, wq, wk, wv, 0,
+            d,
+            k,
+            FuncAttnBasis::Sigmoid,
+            0.5,
+            0.1,
+            wb,
+            wq,
+            wk,
+            wv,
+            0,
         );
         let store = FuncAttnSnapshotStore::new(snap0);
 
         // Build a snapshot then corrupt its weights without recomitting.
         let (wb1, wq1, wk1, wv1) = make_weights(d, k, 2.0);
         let mut bad = FuncAttnWeightsSnapshot::from_weights(
-            d, k, FuncAttnBasis::Sigmoid, 0.5, 0.1, wb1, wq1, wk1, wv1, 1,
+            d,
+            k,
+            FuncAttnBasis::Sigmoid,
+            0.5,
+            0.1,
+            wb1,
+            wq1,
+            wk1,
+            wv1,
+            1,
         );
         bad.w_basis[0] += 100.0; // tamper after commit
         let err = store.swap(bad).unwrap_err();
@@ -415,7 +562,16 @@ mod tests {
         let k = 4;
         let (wb, wq, wk, wv) = make_weights(d, k, 7.0);
         let snap = FuncAttnWeightsSnapshot::from_weights(
-            d, k, FuncAttnBasis::Sigmoid, 0.5, 0.1, wb, wq, wk, wv, 3,
+            d,
+            k,
+            FuncAttnBasis::Sigmoid,
+            0.5,
+            0.1,
+            wb,
+            wq,
+            wk,
+            wv,
+            3,
         );
         let json = serde_json::to_string(&snap).expect("serialize");
         let back: FuncAttnWeightsSnapshot = serde_json::from_str(&json).expect("deserialize");

@@ -23,7 +23,7 @@
 #![cfg(feature = "zone_affective_manifold")]
 
 use katgpt_core::zone_manifold::{
-    zone_affective_manifold, ZoneManifoldConfig, ZoneManifoldScratch,
+    ZoneManifoldConfig, ZoneManifoldScratch, zone_affective_manifold,
 };
 use std::mem::size_of_val;
 use std::time::{Duration, Instant};
@@ -103,8 +103,14 @@ fn main() {
     println!("=== Zone Affective Manifold GOAT Gate (Issue 001) ===\n");
 
     let cfg_single = ZoneManifoldConfig::default(); // n_groups=1
-    let cfg_grouped = ZoneManifoldConfig { n_groups: 0, ..ZoneManifoldConfig::default() }; // auto: ~1 group per rayon worker
-    let cfg_grouped_8 = ZoneManifoldConfig { n_groups: 8, ..ZoneManifoldConfig::default() }; // fixed 8 groups (perf cores on Apple Silicon)
+    let cfg_grouped = ZoneManifoldConfig {
+        n_groups: 0,
+        ..ZoneManifoldConfig::default()
+    }; // auto: ~1 group per rayon worker
+    let cfg_grouped_8 = ZoneManifoldConfig {
+        n_groups: 8,
+        ..ZoneManifoldConfig::default()
+    }; // fixed 8 groups (perf cores on Apple Silicon)
 
     let n_workers = rayon::current_num_threads();
     println!("rayon threads: {}\n", n_workers);
@@ -141,16 +147,52 @@ fn main() {
 
     // Warmup both.
     for _ in 0..WARMUP {
-        run_once(&crowd1, n1, &mut axes_s, &mut projs_s, &mut eig_s, &mut scratch_s, None, &cfg_single);
-        run_once(&crowd1, n1, &mut axes_g, &mut projs_g, &mut eig_g, &mut scratch_g, None, &cfg_grouped);
-        run_once(&crowd1, n1, &mut axes_g8, &mut projs_g8, &mut eig_g8, &mut scratch_g8, None, &cfg_grouped_8);
+        run_once(
+            &crowd1,
+            n1,
+            &mut axes_s,
+            &mut projs_s,
+            &mut eig_s,
+            &mut scratch_s,
+            None,
+            &cfg_single,
+        );
+        run_once(
+            &crowd1,
+            n1,
+            &mut axes_g,
+            &mut projs_g,
+            &mut eig_g,
+            &mut scratch_g,
+            None,
+            &cfg_grouped,
+        );
+        run_once(
+            &crowd1,
+            n1,
+            &mut axes_g8,
+            &mut projs_g8,
+            &mut eig_g8,
+            &mut scratch_g8,
+            None,
+            &cfg_grouped_8,
+        );
     }
 
     // Time single-PCA.
     let mut durs = Vec::with_capacity(TIMED_RUNS);
     for _ in 0..TIMED_RUNS {
         let t0 = Instant::now();
-        run_once(&crowd1, n1, &mut axes_s, &mut projs_s, &mut eig_s, &mut scratch_s, None, &cfg_single);
+        run_once(
+            &crowd1,
+            n1,
+            &mut axes_s,
+            &mut projs_s,
+            &mut eig_s,
+            &mut scratch_s,
+            None,
+            &cfg_single,
+        );
         durs.push(t0.elapsed());
     }
     let g1_single = median(&durs);
@@ -159,7 +201,16 @@ fn main() {
     let mut durs = Vec::with_capacity(TIMED_RUNS);
     for _ in 0..TIMED_RUNS {
         let t0 = Instant::now();
-        let g = run_once(&crowd1, n1, &mut axes_g, &mut projs_g, &mut eig_g, &mut scratch_g, None, &cfg_grouped);
+        let g = run_once(
+            &crowd1,
+            n1,
+            &mut axes_g,
+            &mut projs_g,
+            &mut eig_g,
+            &mut scratch_g,
+            None,
+            &cfg_grouped,
+        );
         durs.push(t0.elapsed());
         debug_assert_eq!(g, g1_groups, "group count changed");
     }
@@ -169,16 +220,31 @@ fn main() {
     let mut durs = Vec::with_capacity(TIMED_RUNS);
     for _ in 0..TIMED_RUNS {
         let t0 = Instant::now();
-        run_once(&crowd1, n1, &mut axes_g8, &mut projs_g8, &mut eig_g8, &mut scratch_g8, None, &cfg_grouped_8);
+        run_once(
+            &crowd1,
+            n1,
+            &mut axes_g8,
+            &mut projs_g8,
+            &mut eig_g8,
+            &mut scratch_g8,
+            None,
+            &cfg_grouped_8,
+        );
         durs.push(t0.elapsed());
     }
     let g1_grouped8 = median(&durs);
 
     let g1_best = g1_grouped.min(g1_single).min(g1_grouped8);
     let g1_pass = g1_best <= Duration::from_micros(100);
-    println!("G1 (N=10000): single {} | grouped({}g) {} | grouped(8g) {} | best {} — target ≤ 100 µs — {}",
-        fmt_us(g1_single), g1_groups, fmt_us(g1_grouped), fmt_us(g1_grouped8), fmt_us(g1_best),
-        if g1_pass { "PASS" } else { "FAIL" });
+    println!(
+        "G1 (N=10000): single {} | grouped({}g) {} | grouped(8g) {} | best {} — target ≤ 100 µs — {}",
+        fmt_us(g1_single),
+        g1_groups,
+        fmt_us(g1_grouped),
+        fmt_us(g1_grouped8),
+        fmt_us(g1_best),
+        if g1_pass { "PASS" } else { "FAIL" }
+    );
 
     // ── G2: latency at N=50000 ────────────────────────────────────
     let n2 = 50_000;
@@ -194,49 +260,121 @@ fn main() {
     let mut scratch2_g = ZoneManifoldScratch::new(D, K);
 
     for _ in 0..WARMUP {
-        run_once(&crowd2, n2, &mut axes2_s, &mut projs2_s, &mut eig2_s, &mut scratch2_s, None, &cfg_single);
-        run_once(&crowd2, n2, &mut axes2_g, &mut projs2_g, &mut eig2_g, &mut scratch2_g, None, &cfg_grouped);
+        run_once(
+            &crowd2,
+            n2,
+            &mut axes2_s,
+            &mut projs2_s,
+            &mut eig2_s,
+            &mut scratch2_s,
+            None,
+            &cfg_single,
+        );
+        run_once(
+            &crowd2,
+            n2,
+            &mut axes2_g,
+            &mut projs2_g,
+            &mut eig2_g,
+            &mut scratch2_g,
+            None,
+            &cfg_grouped,
+        );
     }
     let mut durs = Vec::with_capacity(TIMED_RUNS);
     for _ in 0..TIMED_RUNS {
         let t0 = Instant::now();
-        run_once(&crowd2, n2, &mut axes2_s, &mut projs2_s, &mut eig2_s, &mut scratch2_s, None, &cfg_single);
+        run_once(
+            &crowd2,
+            n2,
+            &mut axes2_s,
+            &mut projs2_s,
+            &mut eig2_s,
+            &mut scratch2_s,
+            None,
+            &cfg_single,
+        );
         durs.push(t0.elapsed());
     }
     let g2_single = median(&durs);
     let mut durs = Vec::with_capacity(TIMED_RUNS);
     for _ in 0..TIMED_RUNS {
         let t0 = Instant::now();
-        run_once(&crowd2, n2, &mut axes2_g, &mut projs2_g, &mut eig2_g, &mut scratch2_g, None, &cfg_grouped);
+        run_once(
+            &crowd2,
+            n2,
+            &mut axes2_g,
+            &mut projs2_g,
+            &mut eig2_g,
+            &mut scratch2_g,
+            None,
+            &cfg_grouped,
+        );
         durs.push(t0.elapsed());
     }
     let g2_grouped = median(&durs);
     let g2_best = g2_grouped.min(g2_single);
     let g2_pass = g2_best <= Duration::from_micros(500);
-    println!("G2 (N=50000): single-PCA {} | grouped({}g) {} | best {} — target ≤ 500 µs — {}",
-        fmt_us(g2_single), g2_groups, fmt_us(g2_grouped), fmt_us(g2_best),
-        if g2_pass { "PASS" } else { "FAIL" });
+    println!(
+        "G2 (N=50000): single-PCA {} | grouped({}g) {} | best {} — target ≤ 500 µs — {}",
+        fmt_us(g2_single),
+        g2_groups,
+        fmt_us(g2_grouped),
+        fmt_us(g2_best),
+        if g2_pass { "PASS" } else { "FAIL" }
+    );
 
     // ── G3: determinism (bit-identical across repeated calls) ──────
     // Test BOTH paths.
-    let run_det = |cfg: ZoneManifoldConfig, axes: &mut [f32], projs: &mut [f32], eig: &mut [f32], scratch: &mut ZoneManifoldScratch| -> (Vec<f32>, Vec<f32>) {
+    let run_det = |cfg: ZoneManifoldConfig,
+                   axes: &mut [f32],
+                   projs: &mut [f32],
+                   eig: &mut [f32],
+                   scratch: &mut ZoneManifoldScratch|
+     -> (Vec<f32>, Vec<f32>) {
         axes.fill(0.0);
         projs.fill(0.0);
         eig.fill(0.0);
         zone_affective_manifold(&crowd1, n1, D, K, axes, projs, eig, scratch, None, &cfg).unwrap();
         (axes.to_vec(), eig.to_vec())
     };
-    let (a1, e1) = run_det(cfg_single, &mut axes_s, &mut projs_s, &mut eig_s, &mut scratch_s);
-    let (a2, e2) = run_det(cfg_single, &mut axes_s, &mut projs_s, &mut eig_s, &mut scratch_s);
+    let (a1, e1) = run_det(
+        cfg_single,
+        &mut axes_s,
+        &mut projs_s,
+        &mut eig_s,
+        &mut scratch_s,
+    );
+    let (a2, e2) = run_det(
+        cfg_single,
+        &mut axes_s,
+        &mut projs_s,
+        &mut eig_s,
+        &mut scratch_s,
+    );
     let g3_single_pass = a1 == a2 && e1 == e2;
-    let (a1g, e1g) = run_det(cfg_grouped, &mut axes_g, &mut projs_g, &mut eig_g, &mut scratch_g);
-    let (a2g, e2g) = run_det(cfg_grouped, &mut axes_g, &mut projs_g, &mut eig_g, &mut scratch_g);
+    let (a1g, e1g) = run_det(
+        cfg_grouped,
+        &mut axes_g,
+        &mut projs_g,
+        &mut eig_g,
+        &mut scratch_g,
+    );
+    let (a2g, e2g) = run_det(
+        cfg_grouped,
+        &mut axes_g,
+        &mut projs_g,
+        &mut eig_g,
+        &mut scratch_g,
+    );
     let g3_grouped_pass = a1g == a2g && e1g == e2g;
     let g3_pass = g3_single_pass && g3_grouped_pass;
-    println!("G3 (determinism): single {} | grouped {} — {}",
+    println!(
+        "G3 (determinism): single {} | grouped {} — {}",
         if g3_single_pass { "PASS" } else { "FAIL" },
         if g3_grouped_pass { "PASS" } else { "FAIL" },
-        if g3_pass { "PASS" } else { "FAIL" });
+        if g3_pass { "PASS" } else { "FAIL" }
+    );
     // ── G4: mood discrimination ───────────────────────────────────
     // Two crowds with variance along orthogonal directions.
     let evecs_a = {
@@ -260,15 +398,27 @@ fn main() {
         let mut p = vec![0.0; 2000 * K];
         let mut ev = vec![0.0; K];
         let mut sc = ZoneManifoldScratch::new(D, K);
-        run_once(crowd, 2000, &mut a, &mut p, &mut ev, &mut sc, None, &cfg_single);
+        run_once(
+            crowd,
+            2000,
+            &mut a,
+            &mut p,
+            &mut ev,
+            &mut sc,
+            None,
+            &cfg_single,
+        );
         a
     };
     let ma = run_mood(&crowd_a);
     let mb = run_mood(&crowd_b);
     let cos = (0..D).map(|i| ma[i] * mb[i]).sum::<f32>().abs();
     let g4_pass = cos < 0.3; // > 70°
-    println!("G4 (mood discrimination): |cos| = {:.4} — target < 0.3 (> 70°) — {}",
-        cos, if g4_pass { "PASS" } else { "FAIL" });
+    println!(
+        "G4 (mood discrimination): |cos| = {:.4} — target < 0.3 (> 70°) — {}",
+        cos,
+        if g4_pass { "PASS" } else { "FAIL" }
+    );
 
     // ── G6: memory per zone ───────────────────────────────────────
     // Measure the scratch struct's allocated size at D=8, k=4.
@@ -284,8 +434,13 @@ fn main() {
     let stack = size_of_val(&scratch_g6);
     let total = stack + heap;
     let g6_pass = total <= 2048;
-    println!("G6 (memory/zone): stack={}B heap={}B total={}B — target ≤ 2048 B — {}",
-        stack, heap, total, if g6_pass { "PASS" } else { "FAIL" });
+    println!(
+        "G6 (memory/zone): stack={}B heap={}B total={}B — target ≤ 2048 B — {}",
+        stack,
+        heap,
+        total,
+        if g6_pass { "PASS" } else { "FAIL" }
+    );
     // Also note the pre-parallel heap (chunk_cov is empty until first parallel call).
     let heap_min: usize = (scratch_g6.cov.len()
         + scratch_g6.cov_backup.len()
@@ -293,7 +448,10 @@ fn main() {
         + scratch_g6.w.len()
         + scratch_g6.mean.len())
         * 4;
-    println!("    (pre-parallel heap = {}B; chunk_cov grows on first N>threshold call)", heap_min);
+    println!(
+        "    (pre-parallel heap = {}B; chunk_cov grows on first N>threshold call)",
+        heap_min
+    );
 
     // ── Verdict ───────────────────────────────────────────────────
     println!("\n=== Verdict ===");
@@ -310,6 +468,9 @@ fn main() {
     // G5 deferred (needs riir-ai game integration).
     println!("  G5 routing quality — DEFERRED (needs riir-ai game integration)");
     let all_present = gates.iter().all(|(_, p)| *p);
-    println!("\nG1-G4+G6 (present gates): {}", if all_present { "ALL PASS" } else { "FAIL" });
+    println!(
+        "\nG1-G4+G6 (present gates): {}",
+        if all_present { "ALL PASS" } else { "FAIL" }
+    );
     println!("G5 (deferred) will determine final GOAT/Gain/Pass verdict.");
 }

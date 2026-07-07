@@ -187,10 +187,7 @@ impl SheafMaps {
                 }
             }
         }
-        let is_identity = dim_indices
-            .iter()
-            .enumerate()
-            .all(|(r, &idx)| idx == r);
+        let is_identity = dim_indices.iter().enumerate().all(|(r, &idx)| idx == r);
         Self {
             d_e,
             d_v,
@@ -242,7 +239,10 @@ impl SheafMaps {
             dim_indices_per_edge.len(),
             n_edges
         );
-        assert!(!dim_indices_per_edge.is_empty(), "SheafMaps::selector_per_edge: no edges");
+        assert!(
+            !dim_indices_per_edge.is_empty(),
+            "SheafMaps::selector_per_edge: no edges"
+        );
         let d_e = dim_indices_per_edge[0].len();
         assert!(
             d_e > 0 && d_e <= d_v,
@@ -264,18 +264,18 @@ impl SheafMaps {
         }
         // Compact u16 storage: n_edges * 2 * d_e indices (both endpoints).
         let mut selector_indices = vec![0u16; n_edges * 2 * d_e];
-        for e in 0..n_edges {
+        for (e, slice) in dim_indices_per_edge.iter().enumerate().take(n_edges) {
             let base = e * 2 * d_e;
             for r in 0..d_e {
-                let idx = dim_indices_per_edge[e][r] as u16;
+                let idx = slice[r] as u16;
                 selector_indices[base + r] = idx; // endpoint 0 (tail)
                 selector_indices[base + d_e + r] = idx; // endpoint 1 (head)
             }
         }
         // is_identity iff every edge selects dims [0, 1, …, d_e-1] in order.
-        let is_identity = dim_indices_per_edge.iter().all(|slice| {
-            slice.iter().enumerate().all(|(r, &idx)| idx == r)
-        });
+        let is_identity = dim_indices_per_edge
+            .iter()
+            .all(|slice| slice.iter().enumerate().all(|(r, &idx)| idx == r));
         Self {
             d_e,
             d_v,
@@ -330,16 +330,19 @@ impl SheafMaps {
             );
             // Partial sort: pick top-k dims by score (descending), tie-break by
             // index (ascending). Build (score, dim) pairs, sort by (-score, dim).
-            let mut pairs: Vec<(f32, usize)> =
-                scores.iter().copied().enumerate().map(|(d, s)| (s, d)).collect();
+            let mut pairs: Vec<(f32, usize)> = scores
+                .iter()
+                .copied()
+                .enumerate()
+                .map(|(d, s)| (s, d))
+                .collect();
             pairs.sort_unstable_by(|a, b| {
                 // Higher score first; on tie, lower dim first.
                 b.0.partial_cmp(&a.0)
                     .unwrap_or(std::cmp::Ordering::Equal)
                     .then(a.1.cmp(&b.1))
             });
-            let selected: Vec<usize> =
-                pairs.iter().take(k).map(|&(_, d)| d).collect();
+            let selected: Vec<usize> = pairs.iter().take(k).map(|&(_, d)| d).collect();
             owned.push(selected);
         }
         for v in &owned {
@@ -486,7 +489,7 @@ impl AdmmScratch {
 /// User-friendly entry point: asserts cochain shapes then delegates to
 /// [`sheaf_admm_step_into`]. All three cochains must be rank-0, `dim == d_v`,
 /// `n_cells == cx.n_vertices()`.
-#[allow(clippy::too_many_arguments)]  // ADMM solver — all 10 params are genuinely needed
+#[allow(clippy::too_many_arguments)] // ADMM solver — all 10 params are genuinely needed
 #[inline]
 pub fn sheaf_admm_step(
     cx: &CellComplex,
@@ -503,7 +506,10 @@ pub fn sheaf_admm_step(
     let n = cx.n_vertices();
     let d_v = maps.d_v;
     debug_assert_eq!(primal_x.rank, 0, "sheaf_admm_step: primal_x must be rank-0");
-    debug_assert_eq!(consensus_z.rank, 0, "sheaf_admm_step: consensus_z must be rank-0");
+    debug_assert_eq!(
+        consensus_z.rank, 0,
+        "sheaf_admm_step: consensus_z must be rank-0"
+    );
     debug_assert_eq!(dual_u.rank, 0, "sheaf_admm_step: dual_u must be rank-0");
     debug_assert_eq!(
         primal_x.dim, d_v,
@@ -530,7 +536,11 @@ pub fn sheaf_admm_step(
         n,
         "sheaf_admm_step: consensus_z.n_cells mismatch"
     );
-    debug_assert_eq!(dual_u.n_cells(), n, "sheaf_admm_step: dual_u.n_cells mismatch");
+    debug_assert_eq!(
+        dual_u.n_cells(),
+        n,
+        "sheaf_admm_step: dual_u.n_cells mismatch"
+    );
     debug_assert_eq!(
         scratch.sheaf_laplacian_z.len(),
         n * d_v,
@@ -566,7 +576,7 @@ pub fn sheaf_admm_step(
 ///    `z ← z − η (L_F z)`. Writes `z^{k+1}`.
 /// 3. **u-update** — `u^{k+1} = u^k + x^{k+1} − z^{k+1}`. Reads the post-step
 ///    `x^{k+1}` and `z^{k+1}`.
-#[allow(clippy::too_many_arguments)]  // ADMM solver — all 10 params are genuinely needed
+#[allow(clippy::too_many_arguments)] // ADMM solver — all 10 params are genuinely needed
 #[inline]
 pub fn sheaf_admm_step_into(
     cx: &CellComplex,
@@ -588,7 +598,11 @@ pub fn sheaf_admm_step_into(
     // Reads consensus_z (z^k) and dual_u (u^k) from the start of the step.
     match objective {
         LocalObjective::DiagonalQuadratic { diag_q, q } => {
-            debug_assert_eq!(diag_q.len(), total, "DiagonalQuadratic: diag_q.len() != n*d_v");
+            debug_assert_eq!(
+                diag_q.len(),
+                total,
+                "DiagonalQuadratic: diag_q.len() != n*d_v"
+            );
             debug_assert_eq!(q.len(), total, "DiagonalQuadratic: q.len() != n*d_v");
             for k in 0..total {
                 let denom = diag_q[k] + rho;
@@ -598,8 +612,7 @@ pub fn sheaf_admm_step_into(
                     diag_q[k],
                     rho
                 );
-                primal_x.data[k] =
-                    (rho * (consensus_z.data[k] - dual_u.data[k]) - q[k]) / denom;
+                primal_x.data[k] = (rho * (consensus_z.data[k] - dual_u.data[k]) - q[k]) / denom;
             }
         }
         LocalObjective::DiagonalQuadL1 { diag_q, q, lambda } => {
@@ -614,8 +627,7 @@ pub fn sheaf_admm_step_into(
                     diag_q[k],
                     rho
                 );
-                let x_quad =
-                    (rho * (consensus_z.data[k] - dual_u.data[k]) - q[k]) / denom;
+                let x_quad = (rho * (consensus_z.data[k] - dual_u.data[k]) - q[k]) / denom;
                 let thresh = lambda[k] / denom;
                 primal_x.data[k] = soft_threshold(x_quad, thresh);
             }
@@ -666,7 +678,7 @@ pub fn sheaf_admm_step_into(
 ///
 /// The warm-start `b` is snapshotted into `scratch.warm_start_b` before the
 /// diffusion loop and read from there (avoids re-reading `x + u` each step).
-#[allow(clippy::too_many_arguments)]  // ADMM solver + gamma = 11 params
+#[allow(clippy::too_many_arguments)] // ADMM solver + gamma = 11 params
 #[inline]
 pub fn sheaf_admm_step_soft_into(
     cx: &CellComplex,
@@ -744,7 +756,7 @@ pub fn sheaf_admm_step_soft_into(
 ///
 /// CG is a deterministic linear-algebra solver — no training, no gradient
 /// descent on weights. The sheaf Laplacian is fixed by the restriction maps.
-#[allow(clippy::too_many_arguments)]  // ADMM solver + CG params = 12 params
+#[allow(clippy::too_many_arguments)] // ADMM solver + CG params = 12 params
 #[inline]
 pub fn sheaf_admm_step_cg_into(
     cx: &CellComplex,
@@ -792,11 +804,17 @@ pub fn sheaf_admm_step_cg_into(
             );
             // matvec wrote into sheaf_laplacian_z; copy to cg_ap before the
             // next iteration clobbers it.
-            scratch.cg_ap.copy_from_slice(&scratch.sheaf_laplacian_z[0..total]);
+            scratch
+                .cg_ap
+                .copy_from_slice(&scratch.sheaf_laplacian_z[0..total]);
 
             // alpha = (r·r) / (p·Ap)
-            let p_ap: f32 = scratch.cg_p.iter().zip(scratch.cg_ap.iter())
-                .map(|(&p, &ap)| p * ap).sum();
+            let p_ap: f32 = scratch
+                .cg_p
+                .iter()
+                .zip(scratch.cg_ap.iter())
+                .map(|(&p, &ap)| p * ap)
+                .sum();
             if p_ap <= 0.0 || !p_ap.is_finite() {
                 break; // L_F is PSD; p_ap ≤ 0 means we hit the kernel — done.
             }
@@ -841,7 +859,11 @@ fn x_update(
 ) {
     match objective {
         LocalObjective::DiagonalQuadratic { diag_q, q } => {
-            debug_assert_eq!(diag_q.len(), total, "DiagonalQuadratic: diag_q.len() != n*d_v");
+            debug_assert_eq!(
+                diag_q.len(),
+                total,
+                "DiagonalQuadratic: diag_q.len() != n*d_v"
+            );
             debug_assert_eq!(q.len(), total, "DiagonalQuadratic: q.len() != n*d_v");
             for k in 0..total {
                 let denom = diag_q[k] + rho;
@@ -851,8 +873,7 @@ fn x_update(
                     diag_q[k],
                     rho
                 );
-                primal_x.data[k] =
-                    (rho * (consensus_z.data[k] - dual_u.data[k]) - q[k]) / denom;
+                primal_x.data[k] = (rho * (consensus_z.data[k] - dual_u.data[k]) - q[k]) / denom;
             }
         }
         LocalObjective::DiagonalQuadL1 { diag_q, q, lambda } => {
@@ -867,8 +888,7 @@ fn x_update(
                     diag_q[k],
                     rho
                 );
-                let x_quad =
-                    (rho * (consensus_z.data[k] - dual_u.data[k]) - q[k]) / denom;
+                let x_quad = (rho * (consensus_z.data[k] - dual_u.data[k]) - q[k]) / denom;
                 let thresh = lambda[k] / denom;
                 primal_x.data[k] = soft_threshold(x_quad, thresh);
             }
@@ -991,10 +1011,18 @@ fn sheaf_laplacian_identity_grid_into(
                 for c in 0..d_e {
                     let center = *p.add(base + c);
                     let mut acc = deg * center;
-                    if has_left { acc -= *p.add(left + c); }
-                    if has_right { acc -= *p.add(right + c); }
-                    if has_up { acc -= *p.add(up + c); }
-                    if has_down { acc -= *p.add(down + c); }
+                    if has_left {
+                        acc -= *p.add(left + c);
+                    }
+                    if has_right {
+                        acc -= *p.add(right + c);
+                    }
+                    if has_up {
+                        acc -= *p.add(up + c);
+                    }
+                    if has_down {
+                        acc -= *p.add(down + c);
+                    }
                     *o.add(base + c) = acc;
                 }
             }
@@ -1008,9 +1036,7 @@ fn sheaf_laplacian_identity_grid_into(
             let row = y * stride;
             let up_row = row - stride;
             let down_row = row + stride;
-            for &(x, has_left, has_right) in
-                [(0usize, false, true), (w - 1, true, false)].iter()
-            {
+            for &(x, has_left, has_right) in [(0usize, false, true), (w - 1, true, false)].iter() {
                 let base = row + x * d_v;
                 let deg = 3.0f32; // has_up + has_down + one horizontal neighbor
                 let left = base.wrapping_sub(d_v);
@@ -1021,8 +1047,12 @@ fn sheaf_laplacian_identity_grid_into(
                     for c in 0..d_e {
                         let center = *p.add(base + c);
                         let mut acc = deg * center;
-                        if has_left { acc -= *p.add(left + c); }
-                        if has_right { acc -= *p.add(right + c); }
+                        if has_left {
+                            acc -= *p.add(left + c);
+                        }
+                        if has_right {
+                            acc -= *p.add(right + c);
+                        }
                         acc -= *p.add(up + c);
                         acc -= *p.add(down + c);
                         *o.add(base + c) = acc;
@@ -1208,8 +1238,11 @@ mod tests {
         for e in 0..2 {
             for endpoint in 0..2 {
                 let m = maps.edge_map(e, endpoint);
-                assert_eq!(m, expected.as_slice(),
-                    "identity map (e={e}, endpoint={endpoint}) wrong: {m:?}");
+                assert_eq!(
+                    m,
+                    expected.as_slice(),
+                    "identity map (e={e}, endpoint={endpoint}) wrong: {m:?}"
+                );
             }
         }
     }
@@ -1227,8 +1260,11 @@ mod tests {
         for e in 0..2 {
             for endpoint in 0..2 {
                 let m = maps.edge_map(e, endpoint);
-                assert_eq!(m, expected.as_slice(),
-                    "selector map (e={e}, endpoint={endpoint}) wrong: {m:?}");
+                assert_eq!(
+                    m,
+                    expected.as_slice(),
+                    "selector map (e={e}, endpoint={endpoint}) wrong: {m:?}"
+                );
             }
         }
     }
@@ -1248,10 +1284,8 @@ mod tests {
         let cx = CellComplex::from_edges(2, &[(0, 1)]);
         let maps = SheafMaps::identity(&cx, 2, 2);
         let mut primal_x = CochainField::zeros(0, 2, 2);
-        let mut consensus_z = CochainField::from_vec(0, 2,
-            vec![1.0, 2.0, 3.0, 4.0]);
-        let mut dual_u = CochainField::from_vec(0, 2,
-            vec![0.1, 0.2, 0.3, 0.4]);
+        let mut consensus_z = CochainField::from_vec(0, 2, vec![1.0, 2.0, 3.0, 4.0]);
+        let mut dual_u = CochainField::from_vec(0, 2, vec![0.1, 0.2, 0.3, 0.4]);
         let objective = LocalObjective::DiagonalQuadratic {
             diag_q: vec![1.0, 1.0, 2.0, 2.0],
             q: vec![0.5, -0.5, 1.0, -1.0],
@@ -1263,8 +1297,18 @@ mod tests {
         let z_pre = consensus_z.data.clone();
         let u_pre = dual_u.data.clone();
 
-        sheaf_admm_step(&cx, &maps, &mut primal_x, &mut consensus_z, &mut dual_u,
-            &objective, rho, 0.1, 1, &mut scratch);
+        sheaf_admm_step(
+            &cx,
+            &maps,
+            &mut primal_x,
+            &mut consensus_z,
+            &mut dual_u,
+            &objective,
+            rho,
+            0.1,
+            1,
+            &mut scratch,
+        );
 
         // Expected x_i = (ρ(z-u) - q) / (diag_q + ρ).
         let expected = [
@@ -1274,8 +1318,10 @@ mod tests {
             (rho * (z_pre[3] - u_pre[3]) - (-1.0)) / (2.0 + rho), // v1d1
         ];
         for (k, (&got, &exp)) in primal_x.data.iter().zip(&expected).enumerate() {
-            assert!((got - exp).abs() < 1e-5,
-                "x_update v{k}: got {got}, expected {exp}");
+            assert!(
+                (got - exp).abs() < 1e-5,
+                "x_update v{k}: got {got}, expected {exp}"
+            );
         }
     }
 
@@ -1285,10 +1331,8 @@ mod tests {
         let cx = CellComplex::from_edges(2, &[(0, 1)]);
         let maps = SheafMaps::identity(&cx, 2, 2);
         let mut primal_x = CochainField::zeros(0, 2, 2);
-        let mut consensus_z = CochainField::from_vec(0, 2,
-            vec![1.0, 2.0, 3.0, 4.0]);
-        let mut dual_u = CochainField::from_vec(0, 2,
-            vec![0.1, 0.2, 0.3, 0.4]);
+        let mut consensus_z = CochainField::from_vec(0, 2, vec![1.0, 2.0, 3.0, 4.0]);
+        let mut dual_u = CochainField::from_vec(0, 2, vec![0.1, 0.2, 0.3, 0.4]);
         // lambda[0]=2.0 makes v0d0 threshold (2/3 ≈ 0.667) exceed its quad
         // solve (≈0.4333) → result 0. Tests the max(0, ...) zeroing path.
         let objective = LocalObjective::DiagonalQuadL1 {
@@ -1301,14 +1345,24 @@ mod tests {
         let z_pre = consensus_z.data.clone();
         let u_pre = dual_u.data.clone();
 
-        sheaf_admm_step(&cx, &maps, &mut primal_x, &mut consensus_z, &mut dual_u,
-            &objective, rho, 0.1, 1, &mut scratch);
+        sheaf_admm_step(
+            &cx,
+            &maps,
+            &mut primal_x,
+            &mut consensus_z,
+            &mut dual_u,
+            &objective,
+            rho,
+            0.1,
+            1,
+            &mut scratch,
+        );
 
         let xq = |k: usize, dq: f32, lin: f32| (rho * (z_pre[k] - u_pre[k]) - lin) / (dq + rho);
-        let xq0 = xq(0, 1.0, 0.5);    // ≈ 0.4333
-        let xq1 = xq(1, 1.0, -0.5);   // ≈ 1.3667
-        let xq2 = xq(2, 2.0, 1.0);    // = 1.1
-        let xq3 = xq(3, 2.0, -1.0);   // = 2.05
+        let xq0 = xq(0, 1.0, 0.5); // ≈ 0.4333
+        let xq1 = xq(1, 1.0, -0.5); // ≈ 1.3667
+        let xq2 = xq(2, 2.0, 1.0); // = 1.1
+        let xq3 = xq(3, 2.0, -1.0); // = 2.05
         let expected = [
             soft_threshold(xq0, 2.0 / 3.0), // thresh 0.667 > 0.4333 → 0
             soft_threshold(xq1, 0.1 / 3.0), // ≈ 1.3333
@@ -1316,10 +1370,16 @@ mod tests {
             soft_threshold(xq3, 3.0 / 4.0), // = 1.3
         ];
         // Sanity: xq0 should indeed be zeroed.
-        assert!((expected[0]).abs() < 1e-6, "v0d0 should be soft-zeroed, got {}", expected[0]);
+        assert!(
+            (expected[0]).abs() < 1e-6,
+            "v0d0 should be soft-zeroed, got {}",
+            expected[0]
+        );
         for (k, (&got, &exp)) in primal_x.data.iter().zip(&expected).enumerate() {
-            assert!((got - exp).abs() < 1e-5,
-                "x_update_l1 v{k}: got {got}, expected {exp}");
+            assert!(
+                (got - exp).abs() < 1e-5,
+                "x_update_l1 v{k}: got {got}, expected {exp}"
+            );
         }
     }
 
@@ -1345,16 +1405,34 @@ mod tests {
         let mut scratch = AdmmScratch::new(&cx, 2, 2);
 
         let u_before = dual_u.data.clone();
-        sheaf_admm_step(&cx, &maps, &mut primal_x, &mut consensus_z, &mut dual_u,
-            &objective, 1.0, 0.1, 3, &mut scratch);
+        sheaf_admm_step(
+            &cx,
+            &maps,
+            &mut primal_x,
+            &mut consensus_z,
+            &mut dual_u,
+            &objective,
+            1.0,
+            0.1,
+            3,
+            &mut scratch,
+        );
 
         // Post-step x and z are exactly what the u-update read; the invariant
         // is bit-exact because both sides compute the same expression.
-        for (k, ((&u_post, &u_pre), (&x_val, &z_val))) in dual_u.data.iter().zip(&u_before).zip(primal_x.data.iter().zip(&consensus_z.data)).enumerate() {
+        for (k, ((&u_post, &u_pre), (&x_val, &z_val))) in dual_u
+            .data
+            .iter()
+            .zip(&u_before)
+            .zip(primal_x.data.iter().zip(&consensus_z.data))
+            .enumerate()
+        {
             let du = u_post - u_pre;
             let dxz = x_val - z_val;
-            assert!((du - dxz).abs() < 1e-6,
-                "u invariant k={k}: du={du}, x-z={dxz}");
+            assert!(
+                (du - dxz).abs() < 1e-6,
+                "u invariant k={k}: du={du}, x-z={dxz}"
+            );
         }
     }
 
@@ -1380,7 +1458,8 @@ mod tests {
             assert!(
                 (scratch.sheaf_laplacian_z[k] - gl.data[k]).abs() < 1e-4,
                 "sheaf_laplacian vs graph_laplacian k={k}: sheaf={}, graph={}",
-                scratch.sheaf_laplacian_z[k], gl.data[k]
+                scratch.sheaf_laplacian_z[k],
+                gl.data[k]
             );
         }
     }
@@ -1404,8 +1483,18 @@ mod tests {
             q: vec![0.0; total],
         };
         let mut scratch = AdmmScratch::new(&cx, d_v, d_e);
-        sheaf_admm_step(&cx, &maps, &mut primal_x, &mut consensus_z, &mut dual_u,
-            &objective, 1.0, 0.1, 3, &mut scratch);
+        sheaf_admm_step(
+            &cx,
+            &maps,
+            &mut primal_x,
+            &mut consensus_z,
+            &mut dual_u,
+            &objective,
+            1.0,
+            0.1,
+            3,
+            &mut scratch,
+        );
         // If we get here, no panic. Sanity: primal is finite.
         for v in primal_x.data.iter() {
             assert!(v.is_finite(), "non-finite primal after step");
@@ -1454,14 +1543,22 @@ mod tests {
         // eta = 0.2 keeps diffusion stable (grid Laplacian λ_max ≈ 6.8 on 4×4;
         // 0.2·6.8 ≈ 1.36 < 2). T = 50 drives the z-projection near-exact.
         for _ in 0..30 {
-            sheaf_admm_step(&cx, &maps, &mut primal_x, &mut consensus_z, &mut dual_u,
-                &objective, rho, 0.2, 50, &mut scratch);
+            sheaf_admm_step(
+                &cx,
+                &maps,
+                &mut primal_x,
+                &mut consensus_z,
+                &mut dual_u,
+                &objective,
+                rho,
+                0.2,
+                50,
+                &mut scratch,
+            );
         }
         let d_final = max_edge_disagreement(&cx, &primal_x);
 
-        eprintln!(
-            "identity_maps_reach_consensus: d_initial={d_initial:.5}, d_final={d_final:.5}"
-        );
+        eprintln!("identity_maps_reach_consensus: d_initial={d_initial:.5}, d_final={d_final:.5}");
         assert!(
             d_final < d_initial,
             "consensus not reached: d_final {d_final} >= d_initial {d_initial}"
@@ -1503,15 +1600,19 @@ mod tests {
         let cx = CellComplex::from_edges(3, &[(0, 1), (1, 2)]);
         let d_v = 4;
         // Edge 0 selects dims [0, 2], edge 1 selects dims [1, 3].
-        let maps = SheafMaps::selector_per_edge(
-            &cx, d_v, &[&[0, 2], &[1, 3]]
-        );
+        let maps = SheafMaps::selector_per_edge(&cx, d_v, &[&[0, 2], &[1, 3]]);
         assert_eq!(maps.d_e, 2);
         assert_eq!(maps.d_v, 4);
         assert_eq!(maps.n_edges, 2);
         assert!(maps.is_selector);
-        assert!(!maps.is_identity, "heterogeneous selectors should not be identity");
-        assert!(maps.maps.is_empty(), "selector maps should not materialize dense maps");
+        assert!(
+            !maps.is_identity,
+            "heterogeneous selectors should not be identity"
+        );
+        assert!(
+            maps.maps.is_empty(),
+            "selector maps should not materialize dense maps"
+        );
         assert_eq!(maps.selector_indices.len(), 2 * 2 * 2); // n_edges * 2 * d_e
         // Edge 0, endpoint 0 (tail): indices [0, 2].
         assert_eq!(maps.selector_edge_indices(0, 0), &[0, 2]);
@@ -1526,7 +1627,10 @@ mod tests {
     fn selector_per_edge_collapses_to_identity_when_uniform_ordered() {
         let cx = CellComplex::from_edges(3, &[(0, 1), (1, 2)]);
         let maps = SheafMaps::selector_per_edge(&cx, 4, &[&[0, 1], &[0, 1]]);
-        assert!(maps.is_identity, "uniform ordered selectors should detect identity");
+        assert!(
+            maps.is_identity,
+            "uniform ordered selectors should detect identity"
+        );
     }
 
     /// `selector_per_edge_topk` picks the top-k dims by score per edge.
@@ -1539,7 +1643,11 @@ mod tests {
         let maps = SheafMaps::selector_per_edge_topk(&cx, d_v, scores, 2);
         assert_eq!(maps.d_e, 2);
         let indices = maps.selector_edge_indices(0, 0);
-        assert_eq!(indices, &[3, 1], "top-2 should be [3, 1] by descending score");
+        assert_eq!(
+            indices,
+            &[3, 1],
+            "top-2 should be [3, 1] by descending score"
+        );
     }
 
     /// `selector_per_edge_topk` breaks ties deterministically (lower dim wins).
@@ -1565,9 +1673,7 @@ mod tests {
         // Dense selector (uniform dims [1, 3] for all edges).
         let dense_maps = SheafMaps::selector(&cx, d_v, &[1, 3]);
         // Compact selector (same dims [1, 3] per edge).
-        let compact_maps = SheafMaps::selector_per_edge(
-            &cx, d_v, &[&[1, 3], &[1, 3], &[1, 3]]
-        );
+        let compact_maps = SheafMaps::selector_per_edge(&cx, d_v, &[&[1, 3], &[1, 3], &[1, 3]]);
 
         // Random z.
         let mut z = CochainField::zeros(0, cx.n_vertices(), d_v);
@@ -1586,11 +1692,9 @@ mod tests {
         // identical; only the storage/compute path differs).
         for k in 0..z.data.len() {
             assert_eq!(
-                dense_scratch.sheaf_laplacian_z[k],
-                compact_scratch.sheaf_laplacian_z[k],
+                dense_scratch.sheaf_laplacian_z[k], compact_scratch.sheaf_laplacian_z[k],
                 "dense vs compact selector matvec mismatch at k={k}: dense={}, compact={}",
-                dense_scratch.sheaf_laplacian_z[k],
-                compact_scratch.sheaf_laplacian_z[k]
+                dense_scratch.sheaf_laplacian_z[k], compact_scratch.sheaf_laplacian_z[k]
             );
         }
     }
@@ -1632,8 +1736,18 @@ mod tests {
 
         let d_initial = max_edge_disagreement(&cx, &primal_x);
         for _ in 0..30 {
-            sheaf_admm_step(&cx, &maps, &mut primal_x, &mut consensus_z, &mut dual_u,
-                &objective, rho, 0.2, 50, &mut scratch);
+            sheaf_admm_step(
+                &cx,
+                &maps,
+                &mut primal_x,
+                &mut consensus_z,
+                &mut dual_u,
+                &objective,
+                rho,
+                0.2,
+                50,
+                &mut scratch,
+            );
         }
         let d_final = max_edge_disagreement(&cx, &primal_x);
         assert!(
@@ -1664,24 +1778,44 @@ mod tests {
             q: vec![0.0; total],
         };
         // Initial primal: vertex 0 = [1,1,1,1], v1 = [0,0,0,0], v2 = [1,1,1,1].
-        let mut primal_x = CochainField::from_vec(0, d_v, vec![1.0, 1.0, 1.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0]);
+        let mut primal_x = CochainField::from_vec(
+            0,
+            d_v,
+            vec![1.0, 1.0, 1.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0],
+        );
         let mut consensus_z = CochainField::zeros(0, 3, d_v);
         let mut dual_u = CochainField::zeros(0, 3, d_v);
         let mut scratch = AdmmScratch::new(&cx, d_v, d_e);
 
         // Run 50 ADMM steps (enough to converge on a 3-vertex path).
         for _ in 0..50 {
-            sheaf_admm_step(&cx, &maps, &mut primal_x, &mut consensus_z, &mut dual_u,
-                &objective, 1.0, 0.25, 50, &mut scratch);
+            sheaf_admm_step(
+                &cx,
+                &maps,
+                &mut primal_x,
+                &mut consensus_z,
+                &mut dual_u,
+                &objective,
+                1.0,
+                0.25,
+                50,
+                &mut scratch,
+            );
         }
 
         // Edge 0 (v0-v1) coordinates dims 0,1 → |x0[0] - x1[0]| should be small.
         let edge0_dim0_diff = (primal_x.data[0] - primal_x.data[4]).abs();
-        assert!(edge0_dim0_diff < 0.1, "edge 0 dim 0 should agree: diff={edge0_dim0_diff}");
+        assert!(
+            edge0_dim0_diff < 0.1,
+            "edge 0 dim 0 should agree: diff={edge0_dim0_diff}"
+        );
 
         // Edge 1 (v1-v2) coordinates dims 2,3 → |x1[2] - x2[2]| should be small.
         let edge1_dim2_diff = (primal_x.data[4 + 2] - primal_x.data[8 + 2]).abs();
-        assert!(edge1_dim2_diff < 0.1, "edge 1 dim 2 should agree: diff={edge1_dim2_diff}");
+        assert!(
+            edge1_dim2_diff < 0.1,
+            "edge 1 dim 2 should agree: diff={edge1_dim2_diff}"
+        );
     }
 
     // ========================================================================
@@ -1719,8 +1853,16 @@ mod tests {
         // CG with 20 iters + tight tol.
         for _ in 0..30 {
             sheaf_admm_step_cg_into(
-                &cx, &maps, &mut primal_x, &mut consensus_z, &mut dual_u,
-                &objective, rho, 20, 1e-8, &mut scratch,
+                &cx,
+                &maps,
+                &mut primal_x,
+                &mut consensus_z,
+                &mut dual_u,
+                &objective,
+                rho,
+                20,
+                1e-8,
+                &mut scratch,
             );
         }
         let d_final = max_edge_disagreement(&cx, &primal_x);
@@ -1749,8 +1891,8 @@ mod tests {
         // non-trivial (non-constant → has components outside ker(L_F)).
         // q = -target, diag_q = 1.0 → x-update = (rho*(z-u) + target) / (1+rho).
         let mut target = vec![0.0f32; total];
-        for k in 0..total {
-            target[k] = (0.1 * (k as f32)).sin();
+        for (k, t) in target.iter_mut().enumerate() {
+            *t = (0.1 * (k as f32)).sin();
         }
         let objective = LocalObjective::DiagonalQuadratic {
             diag_q: vec![1.0; total],
@@ -1760,7 +1902,7 @@ mod tests {
         // Identical non-zero initial state for both paths.
         let make_state = || {
             let mut x = CochainField::zeros(0, cx.n_vertices(), d_v);
-            for k in 0..total { x.data[k] = target[k]; }
+            x.data[..total].copy_from_slice(&target[..total]);
             let z = CochainField::zeros(0, cx.n_vertices(), d_v);
             let u = CochainField::zeros(0, cx.n_vertices(), d_v);
             (x, z, u)
@@ -1772,12 +1914,28 @@ mod tests {
 
         // One step with GD (T=20 diffusion) vs CG (20 iters, same matvec count).
         sheaf_admm_step_into(
-            &cx, &maps, &mut primal_gd, &mut z_gd, &mut u_gd,
-            &objective, 1.0, 0.2, 20, &mut scratch_gd,
+            &cx,
+            &maps,
+            &mut primal_gd,
+            &mut z_gd,
+            &mut u_gd,
+            &objective,
+            1.0,
+            0.2,
+            20,
+            &mut scratch_gd,
         );
         sheaf_admm_step_cg_into(
-            &cx, &maps, &mut primal_cg, &mut z_cg, &mut u_cg,
-            &objective, 1.0, 20, 1e-12, &mut scratch_cg,
+            &cx,
+            &maps,
+            &mut primal_cg,
+            &mut z_cg,
+            &mut u_cg,
+            &objective,
+            1.0,
+            20,
+            1e-12,
+            &mut scratch_cg,
         );
 
         // Measure residual ‖L_F z‖ (should be near zero if z is in ker(L_F)).
@@ -1819,23 +1977,46 @@ mod tests {
                 x.data[k] = (0.1 * (k as f32)).sin();
             }
         };
-        let mut x_hard = CochainField::zeros(0, cx.n_vertices(), d_v); init(&mut x_hard);
-        let mut z_hard = CochainField::zeros(0, cx.n_vertices(), d_v); init(&mut z_hard);
-        let mut u_hard = CochainField::zeros(0, cx.n_vertices(), d_v); init(&mut u_hard);
-        let mut x_soft = CochainField::zeros(0, cx.n_vertices(), d_v); init(&mut x_soft);
-        let mut z_soft = CochainField::zeros(0, cx.n_vertices(), d_v); init(&mut z_soft);
-        let mut u_soft = CochainField::zeros(0, cx.n_vertices(), d_v); init(&mut u_soft);
+        let mut x_hard = CochainField::zeros(0, cx.n_vertices(), d_v);
+        init(&mut x_hard);
+        let mut z_hard = CochainField::zeros(0, cx.n_vertices(), d_v);
+        init(&mut z_hard);
+        let mut u_hard = CochainField::zeros(0, cx.n_vertices(), d_v);
+        init(&mut u_hard);
+        let mut x_soft = CochainField::zeros(0, cx.n_vertices(), d_v);
+        init(&mut x_soft);
+        let mut z_soft = CochainField::zeros(0, cx.n_vertices(), d_v);
+        init(&mut z_soft);
+        let mut u_soft = CochainField::zeros(0, cx.n_vertices(), d_v);
+        init(&mut u_soft);
 
         let mut scratch_hard = AdmmScratch::new(&cx, d_v, d_e);
         let mut scratch_soft = AdmmScratch::new(&cx, d_v, d_e);
 
         sheaf_admm_step_into(
-            &cx, &maps, &mut x_hard, &mut z_hard, &mut u_hard,
-            &objective, 1.0, 0.2, 10, &mut scratch_hard,
+            &cx,
+            &maps,
+            &mut x_hard,
+            &mut z_hard,
+            &mut u_hard,
+            &objective,
+            1.0,
+            0.2,
+            10,
+            &mut scratch_hard,
         );
         sheaf_admm_step_soft_into(
-            &cx, &maps, &mut x_soft, &mut z_soft, &mut u_soft,
-            &objective, 1.0, 0.2, 0.0, 10, &mut scratch_soft,
+            &cx,
+            &maps,
+            &mut x_soft,
+            &mut z_soft,
+            &mut u_soft,
+            &objective,
+            1.0,
+            0.2,
+            0.0,
+            10,
+            &mut scratch_soft,
         );
 
         // Bit-identical: gamma=0 takes the hard path.
@@ -1871,13 +2052,17 @@ mod tests {
             q,
         };
 
-        let init_primal = |x: &mut CochainField| { x.data.copy_from_slice(&target); };
+        let init_primal = |x: &mut CochainField| {
+            x.data.copy_from_slice(&target);
+        };
 
-        let mut x_hard = CochainField::zeros(0, cx.n_vertices(), d_v); init_primal(&mut x_hard);
+        let mut x_hard = CochainField::zeros(0, cx.n_vertices(), d_v);
+        init_primal(&mut x_hard);
         let mut z_hard = CochainField::zeros(0, cx.n_vertices(), d_v);
         let mut u_hard = CochainField::zeros(0, cx.n_vertices(), d_v);
 
-        let mut x_soft = CochainField::zeros(0, cx.n_vertices(), d_v); init_primal(&mut x_soft);
+        let mut x_soft = CochainField::zeros(0, cx.n_vertices(), d_v);
+        init_primal(&mut x_soft);
         let mut z_soft = CochainField::zeros(0, cx.n_vertices(), d_v);
         let mut u_soft = CochainField::zeros(0, cx.n_vertices(), d_v);
 
@@ -1886,12 +2071,29 @@ mod tests {
 
         for _ in 0..30 {
             sheaf_admm_step_into(
-                &cx, &maps, &mut x_hard, &mut z_hard, &mut u_hard,
-                &objective, 1.0, 0.2, 50, &mut scratch_hard,
+                &cx,
+                &maps,
+                &mut x_hard,
+                &mut z_hard,
+                &mut u_hard,
+                &objective,
+                1.0,
+                0.2,
+                50,
+                &mut scratch_hard,
             );
             sheaf_admm_step_soft_into(
-                &cx, &maps, &mut x_soft, &mut z_soft, &mut u_soft,
-                &objective, 1.0, 0.2, 0.5, 50, &mut scratch_soft,
+                &cx,
+                &maps,
+                &mut x_soft,
+                &mut z_soft,
+                &mut u_soft,
+                &objective,
+                1.0,
+                0.2,
+                0.5,
+                50,
+                &mut scratch_soft,
             );
         }
 

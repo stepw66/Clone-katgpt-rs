@@ -33,8 +33,8 @@
 
 // Substrate re-export — single source of truth is katgpt-core.
 pub use katgpt_core::delta_mem::{
-    AggregationStrategy, ContextFeatures, DeltaMemoryConfig, DeltaMemorySnapshot,
-    DeltaMemoryState, FeatureHasher, MultiDomainMemory, OutcomeFeatures,
+    AggregationStrategy, ContextFeatures, DeltaMemoryConfig, DeltaMemorySnapshot, DeltaMemoryState,
+    FeatureHasher, MultiDomainMemory, OutcomeFeatures,
 };
 
 // Re-expose the substrate module layout so absolute paths
@@ -47,18 +47,18 @@ pub mod multi {
     pub use katgpt_core::delta_mem::multi::{AggregationStrategy, MultiDomainMemory};
 }
 pub mod state {
+    #[cfg(feature = "temporal_deriv")]
+    pub use katgpt_core::delta_mem::state::DEFAULT_THETA_SURPRISE;
     pub use katgpt_core::delta_mem::state::{
         DeltaMemoryConfig, DeltaMemorySnapshot, DeltaMemoryState,
     };
-    #[cfg(feature = "temporal_deriv")]
-    pub use katgpt_core::delta_mem::state::DEFAULT_THETA_SURPRISE;
 }
 
 // Composition layer: pruners that wrap an inner ScreeningPruner. Local
 // because the P: ScreeningPruner generic is instantiated at root call sites
 // (root owns the speculative-decoding composition types).
-mod pruner;
 mod multi_pruner;
+mod pruner;
 
 pub use multi_pruner::MultiDomainMemoryPruner;
 pub use pruner::{CorrectionMode, MemorySteeredPruner, WriteGranularity};

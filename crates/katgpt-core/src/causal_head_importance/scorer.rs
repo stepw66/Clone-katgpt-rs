@@ -129,9 +129,7 @@ pub fn partition_by_causal_score(
     let mut convertible: Vec<usize> = order;
 
     // Constrained Global Screening: ensure at least one critical head per layer.
-    if min_one_per_layer
-        && let Some(layers) = layer_ids
-    {
+    if min_one_per_layer && let Some(layers) = layer_ids {
         debug_assert_eq!(layers.len(), n, "layer_ids must have one entry per head");
         // Dense layer-coverage bitset indexed by layer id (O(1) lookup,
         // no hashing) instead of HashSet<usize>.
@@ -196,10 +194,7 @@ mod tests {
         // cap0 scores: [0.0, 1.0] → normalized [0.0, 1.0]
         // cap1 scores: [1.0, 0.0] → normalized [1.0, 0.0]
         // equal weights → mean: head0 = (0+1)/2 = 0.5, head1 = (1+0)/2 = 0.5
-        let per_head = vec![
-            vec![(1.0, 0.0), (1.0, 1.0)],
-            vec![(1.0, 1.0), (1.0, 0.0)],
-        ];
+        let per_head = vec![vec![(1.0, 0.0), (1.0, 1.0)], vec![(1.0, 1.0), (1.0, 0.0)]];
         let fused = fuse_across_capabilities(&per_head);
         assert_eq!(fused.len(), 2);
         assert!((fused[0] - 0.5).abs() < 1e-6, "head0: {}", fused[0]);
@@ -221,10 +216,7 @@ mod tests {
         // Two capabilities with unequal weights; head0 should weight cap0 more.
         // cap0 normalized [0, 1], cap1 normalized [1, 0]; weights (3.0, 1.0).
         // head0 = (3*0 + 1*1)/(3+1) = 0.25
-        let per_head = vec![
-            vec![(3.0, 0.0), (1.0, 1.0)],
-            vec![(3.0, 1.0), (1.0, 0.0)],
-        ];
+        let per_head = vec![vec![(3.0, 0.0), (1.0, 1.0)], vec![(3.0, 1.0), (1.0, 0.0)]];
         let fused = fuse_across_capabilities(&per_head);
         assert!((fused[0] - 0.25).abs() < 1e-6, "head0: {}", fused[0]);
     }
@@ -274,8 +266,7 @@ mod tests {
         // from convertible into critical.
         let scores = [0.9, 0.8, 0.4, 0.3];
         let layers = [0usize, 0, 1, 1];
-        let (crit, conv) =
-            partition_by_causal_score(&scores, 0.25, Some(&layers), true);
+        let (crit, conv) = partition_by_causal_score(&scores, 0.25, Some(&layers), true);
         // head0 (layer 0) is critical by score; head2 (layer 1) promoted.
         assert!(crit.contains(&0), "head0 missing from critical: {crit:?}");
         assert!(crit.contains(&2), "head2 (promoted) missing: {crit:?}");
@@ -292,8 +283,7 @@ mod tests {
         // All layers already represented after top-k → no promotion.
         let scores = [0.9, 0.8, 0.7, 0.6];
         let layers = [0, 1, 2, 3];
-        let (crit, conv) =
-            partition_by_causal_score(&scores, 0.5, Some(&layers), true);
+        let (crit, conv) = partition_by_causal_score(&scores, 0.5, Some(&layers), true);
         // Top-2: head0, head1 (layers 0, 1). Layers 2, 3 unrepresented →
         // promote head2 (layer 2), head3 (layer 3). All 4 critical.
         assert_eq!(crit.len(), 4, "expected all critical after promotion");
@@ -305,7 +295,13 @@ mod tests {
         let scores = [0.4, 0.1, 0.9, 0.2, 0.7];
         let (crit, conv) = partition_by_causal_score(&scores, 0.4, None, false);
         // Verify ascending order.
-        assert!(crit.windows(2).all(|w| w[0] < w[1]), "crit not sorted: {crit:?}");
-        assert!(conv.windows(2).all(|w| w[0] < w[1]), "conv not sorted: {conv:?}");
+        assert!(
+            crit.windows(2).all(|w| w[0] < w[1]),
+            "crit not sorted: {crit:?}"
+        );
+        assert!(
+            conv.windows(2).all(|w| w[0] < w[1]),
+            "conv not sorted: {conv:?}"
+        );
     }
 }

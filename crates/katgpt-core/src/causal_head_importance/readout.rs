@@ -45,11 +45,7 @@ impl SpanLogitDiffReadout {
             denom += w;
             w *= self.lambda;
         }
-        if denom > 0.0 {
-            numer / denom
-        } else {
-            0.0
-        }
+        if denom > 0.0 { numer / denom } else { 0.0 }
     }
 }
 

@@ -83,13 +83,13 @@
 //! | Need per-arm differentiation within a cycle | CGSP (`CgspLoop` + `Solver`) |
 
 use crate::cgsp::conjecturer::PoolConjecturer;
-use crate::cgsp::loop_::{renormalize_priorities, CgspConfig};
+use crate::cgsp::loop_::{CgspConfig, renormalize_priorities};
 use crate::cgsp::traits::{CollapseSignal, CuriosityConjecturer, HintDeltaBandit};
 use crate::cgsp::types::{
-    entropy_nats, Candidate, CycleResult, CycleStats, Direction, Priority, ScratchBuffers, Target,
-    DEFAULT_POOL_SIZE,
+    Candidate, CycleResult, CycleStats, DEFAULT_POOL_SIZE, Direction, Priority, ScratchBuffers,
+    Target, entropy_nats,
 };
-use crate::temporal_deriv::{sigmoid_surprise_gate, TemporalDerivativeKernel};
+use crate::temporal_deriv::{TemporalDerivativeKernel, sigmoid_surprise_gate};
 
 /// Default β (inverse temperature) for the curiosity sigmoid gate.
 ///
@@ -391,7 +391,8 @@ impl<const D: usize> CuriosityConjecturer for DerivativeCuriosity<D> {
         let _score = self.observe_interestingness(priorities);
         // Delegate actual candidate sampling to the inner PoolConjecturer.
         // This keeps the sampling distribution identical to CGSP's reference.
-        self.pool_conjecturer.sample_candidates(target, priorities, out, cdf_scratch);
+        self.pool_conjecturer
+            .sample_candidates(target, priorities, out, cdf_scratch);
     }
 
     #[inline]
@@ -481,7 +482,10 @@ mod tests {
         let prios = vec![0.25f32; 4];
         // First observation: kernel moves off zero → high surprise.
         let first = dc.observe_interestingness(&prios);
-        assert!(first > 0.5, "first observation should be surprising: {first}");
+        assert!(
+            first > 0.5,
+            "first observation should be surprising: {first}"
+        );
         // Continue observing the same preferences → surprise decays.
         let mut last = first;
         for _ in 0..500 {
@@ -530,7 +534,10 @@ mod tests {
 
         for cycle in 0..50 {
             let r = dc.cycle_curiosity(&target, &mut bandit, &mut scratch, &mut collapse, &config);
-            assert!(r.stats.priority_entropy.is_finite(), "cycle {cycle}: entropy NaN");
+            assert!(
+                r.stats.priority_entropy.is_finite(),
+                "cycle {cycle}: entropy NaN"
+            );
             assert!(
                 r.stats.mean_r_synth.is_finite(),
                 "cycle {cycle}: curiosity NaN"
@@ -563,7 +570,10 @@ mod tests {
             *p = if i == 3 { 1.0 } else { 0.0 };
         }
         let h_collapsed = entropy_nats(bandit.priorities());
-        assert!(h_collapsed < 0.30, "collapsed entropy should be low: {h_collapsed}");
+        assert!(
+            h_collapsed < 0.30,
+            "collapsed entropy should be low: {h_collapsed}"
+        );
 
         // Run cycles — EntropyCollapse should fire and raise entropy.
         let mut max_h = h_collapsed;
@@ -793,15 +803,29 @@ mod tests {
         println!("\n═══ G5 GOAT Gate (Plan 277 Phase 5 / Fusion F4) ═══");
         println!("  τ_low                          = {tau_low:.3} nats");
         println!("  ── (a) Collapse recovery ──");
-        println!("  CGSP cycles-to-recover         = {cgsp_cycles}  (collapse_triggered={cgsp_triggered})");
-        println!("  Derivative cycles-to-recover   = {deriv_cycles}  (collapse_triggered={deriv_triggered})");
+        println!(
+            "  CGSP cycles-to-recover         = {cgsp_cycles}  (collapse_triggered={cgsp_triggered})"
+        );
+        println!(
+            "  Derivative cycles-to-recover   = {deriv_cycles}  (collapse_triggered={deriv_triggered})"
+        );
         println!("  Derivative / CGSP ratio        = {recovery_ratio:.2}×  (target ≤ 2.0×)");
-        println!("  (a) recovery verdict           = {}", if recovery_pass { "PASS" } else { "FAIL" });
+        println!(
+            "  (a) recovery verdict           = {}",
+            if recovery_pass { "PASS" } else { "FAIL" }
+        );
         println!("  ── (b) Per-cycle cost (std::time::Instant, {ITERS} iters) ──");
         println!("  Derivative ns/cycle            = {ns_per_cycle:.1}");
         println!("  CGSP baseline (G4 doc)         = {CGSP_BASELINE_NS:.1} ns/cycle");
         println!("  Cost ratio (deriv / CGSP)      = {cost_ratio:.3}×  (target ≤ 0.10×)");
-        println!("  Stretch target (≤{STRETCH_TARGET_NS:.0}ns)      = {}", if stretch_pass { "PASS" } else { "INFO — not met" });
+        println!(
+            "  Stretch target (≤{STRETCH_TARGET_NS:.0}ns)      = {}",
+            if stretch_pass {
+                "PASS"
+            } else {
+                "INFO — not met"
+            }
+        );
         println!("═══════════════════════════════════════════════════\n");
 
         // ── Asserts ─────────────────────────────────────────────────────

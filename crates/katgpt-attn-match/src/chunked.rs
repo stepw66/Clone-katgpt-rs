@@ -489,7 +489,9 @@ struct PositionFreeBridge {
 impl PositionFreeBridge {
     fn new(rope_theta: f32, head_dim: usize) -> Self {
         Self {
-            inner: katgpt_kv::still_kv::position_free::PositionFreeCompactor::new(rope_theta, head_dim),
+            inner: katgpt_kv::still_kv::position_free::PositionFreeCompactor::new(
+                rope_theta, head_dim,
+            ),
         }
     }
 

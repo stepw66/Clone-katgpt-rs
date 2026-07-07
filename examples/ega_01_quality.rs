@@ -146,9 +146,7 @@ fn main() {
         "  {:>4}  {:>10}  {:>10}  {:>8}  Type",
         "Pos", "Energy", "Z-Norm", "Gate"
     );
-    println!(
-        "  ────  ──────────  ──────────  ────────  ──────"
-    );
+    println!("  ────  ──────────  ──────────  ────────  ──────");
     for pos in 0..SEQ_LEN {
         let kind = if is_signal(pos) { "SIGNAL" } else { "noise" };
         let g = sigmoid(gate.alpha * (z_energy[pos] - gate.tau));

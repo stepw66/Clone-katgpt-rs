@@ -106,7 +106,10 @@ fn g4_light_client_verify_no_self() {
 
     // Verify: pure function, no store access.
     let valid = InMemoryChunkedStore::verify_proof(&proof, &leaf_hash);
-    assert!(valid, "G4: light-client verify must succeed without store ref");
+    assert!(
+        valid,
+        "G4: light-client verify must succeed without store ref"
+    );
 
     // Also verify the standalone merkle function works without any store —
     // it takes individual fields (leaf_hash, leaf_index, siblings, root),
@@ -117,7 +120,10 @@ fn g4_light_client_verify_no_self() {
         &proof.siblings,
         &proof.expected_root,
     );
-    assert!(valid2, "G4: standalone verify_binary_merkle_proof must work");
+    assert!(
+        valid2,
+        "G4: standalone verify_binary_merkle_proof must work"
+    );
 }
 
 /// G4 structural: `build_binary_merkle_proof` returns a self-contained proof
@@ -151,8 +157,7 @@ fn g7_tamper_detection() {
 
     for blob_n in 0..N_BLOBS {
         // Each blob: deterministic but distinct fill.
-        let original: Vec<u8> = std::iter::repeat_n(blob_n as u8, BLOB_SIZE)
-            .collect();
+        let original: Vec<u8> = std::iter::repeat_n(blob_n as u8, BLOB_SIZE).collect();
         let original_id = {
             let store = InMemoryChunkedStore::new();
             store.put(&original)
@@ -318,8 +323,5 @@ fn g5_hot_path_read_p99_under_200ns() {
     let p99_idx = (READS as f64 * 0.99) as usize;
     let p99_ns = latencies_ns[p99_idx];
 
-    assert!(
-        p99_ns < 200,
-        "G5 FAIL: get_chunk p99 {p99_ns}ns >= 200ns"
-    );
+    assert!(p99_ns < 200, "G5 FAIL: get_chunk p99 {p99_ns}ns >= 200ns");
 }

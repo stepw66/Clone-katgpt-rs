@@ -142,7 +142,11 @@ impl AcceptanceForecastH2 {
         let beta = collision_purity(prob_scratch);
         // Guard against log(0) when β underflows (impossible for finite
         // softmax but f32 arithmetic can drift).
-        let h2 = if beta > 0.0 { -beta.ln() } else { f32::INFINITY };
+        let h2 = if beta > 0.0 {
+            -beta.ln()
+        } else {
+            f32::INFINITY
+        };
         let alpha = self.a - self.b * h2;
 
         // ── EMA update. ──
@@ -161,7 +165,12 @@ impl AcceptanceForecastH2 {
     /// Matches Bebop's adaptive-γ policy; the only difference is `ema_alpha`
     /// here comes from the H₂ forecast rather than the H₁ forecast.
     #[inline]
-    pub fn adaptive_gamma(&self, _target_accept_length: f32, gamma_min: usize, gamma_max: usize) -> usize {
+    pub fn adaptive_gamma(
+        &self,
+        _target_accept_length: f32,
+        gamma_min: usize,
+        gamma_max: usize,
+    ) -> usize {
         let gamma_f = self.ema_alpha;
         let gamma = if gamma_f < gamma_min as f32 {
             gamma_min as f32
@@ -186,7 +195,10 @@ mod tests {
     fn empty_logits_returns_intercept() {
         let mut f = AcceptanceForecastH2::new(8.0, 1.0);
         let alpha = f.observe_and_forecast(&[]);
-        assert!((alpha - 8.0).abs() < 1e-6, "empty logits → α=a=8.0, got {alpha}");
+        assert!(
+            (alpha - 8.0).abs() < 1e-6,
+            "empty logits → α=a=8.0, got {alpha}"
+        );
     }
 
     #[test]
@@ -196,7 +208,10 @@ mod tests {
         let mut f = AcceptanceForecastH2::new(8.0, 2.0);
         let logits = [0.0_f32, -1e10];
         let alpha = f.observe_and_forecast(&logits);
-        assert!((alpha - 8.0).abs() < 1e-3, "degenerate α should be a=8.0, got {alpha}");
+        assert!(
+            (alpha - 8.0).abs() < 1e-3,
+            "degenerate α should be a=8.0, got {alpha}"
+        );
     }
 
     #[test]

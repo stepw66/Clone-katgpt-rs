@@ -91,7 +91,12 @@ pub struct MemorySoupArtifact {
 
 /// Compute the number of f32 parameters per checkpoint.
 #[inline]
-fn params_per_checkpoint(n_layers: usize, n_targets: usize, lora_rank: usize, n_embd: usize) -> usize {
+fn params_per_checkpoint(
+    n_layers: usize,
+    n_targets: usize,
+    lora_rank: usize,
+    n_embd: usize,
+) -> usize {
     n_layers * n_targets * 2 * lora_rank * n_embd
 }
 
@@ -201,10 +206,7 @@ pub fn sigmoid_gate(score: f32) -> f32 {
 /// checkpoint deltas. Matches riir-gpu's `interpolate` (GRM mode).
 ///
 /// Returns `(interpolated_delta, gate_weights)`.
-pub fn interpolate_query(
-    query: &[f32],
-    artifact: &MemorySoupArtifact,
-) -> (Vec<f32>, Vec<f32>) {
+pub fn interpolate_query(query: &[f32], artifact: &MemorySoupArtifact) -> (Vec<f32>, Vec<f32>) {
     let k = artifact.checkpoints.len();
     if k == 0 || artifact.n_embd != query.len() {
         return (Vec::new(), Vec::new());
@@ -269,12 +271,8 @@ mod tests {
         let params_per_cp = params_per_checkpoint(n_layers, n_targets, lora_rank, n_embd);
 
         // Build payload.
-        let mut payload: Vec<f32> = vec![
-            k as f32,
-            gate_dim as f32,
-            n_embd as f32,
-            lora_rank as f32,
-        ];
+        let mut payload: Vec<f32> =
+            vec![k as f32, gate_dim as f32, n_embd as f32, lora_rank as f32];
         payload.push(n_targets as f32);
         payload.push(n_layers as f32);
 
@@ -313,8 +311,7 @@ mod tests {
     #[test]
     fn g5_import_valid_bundle() {
         let bundle = build_sample_bundle(4, 8, 8, 4, 2, 1);
-        let artifact = import_memory_soup_artifact(&bundle)
-            .expect("valid bundle must parse");
+        let artifact = import_memory_soup_artifact(&bundle).expect("valid bundle must parse");
 
         assert_eq!(artifact.n_checkpoints, 4);
         assert_eq!(artifact.gate_dim, 8);
@@ -374,13 +371,10 @@ mod tests {
     #[test]
     fn g5_interpolate_query_works() {
         let bundle = build_sample_bundle(4, 8, 8, 4, 2, 1);
-        let artifact = import_memory_soup_artifact(&bundle)
-            .expect("valid bundle");
+        let artifact = import_memory_soup_artifact(&bundle).expect("valid bundle");
 
         // Query with dim 0 hot → should activate checkpoint 0 most.
-        let query: Vec<f32> = (0..8)
-            .map(|j| if j == 0 { 1.0 } else { 0.0 })
-            .collect();
+        let query: Vec<f32> = (0..8).map(|j| if j == 0 { 1.0 } else { 0.0 }).collect();
 
         let (delta, gammas) = interpolate_query(&query, &artifact);
 
@@ -402,8 +396,8 @@ mod tests {
     fn g5_cross_format_consistency() {
         // Use Plan 253 defaults: gate_dim=64, n_embd=64, rank=32, targets=6, layers=1.
         let bundle = build_sample_bundle(4, 64, 64, 32, 6, 1);
-        let artifact = import_memory_soup_artifact(&bundle)
-            .expect("Plan 253 default config must parse");
+        let artifact =
+            import_memory_soup_artifact(&bundle).expect("Plan 253 default config must parse");
 
         // The params_per_cp for this config:
         // 1 * 6 * 2 * 32 * 64 = 24,576

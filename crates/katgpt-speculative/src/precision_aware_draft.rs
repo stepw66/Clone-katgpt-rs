@@ -104,8 +104,10 @@ impl BoundaryPenalty {
             return 0.0;
         }
         let inv = self.invariants();
-        let total_proximity: f32 =
-            token_logits.iter().map(|&l| Self::proximity_with(l, &inv)).sum();
+        let total_proximity: f32 = token_logits
+            .iter()
+            .map(|&l| Self::proximity_with(l, &inv))
+            .sum();
         total_proximity / token_logits.len() as f32
     }
 

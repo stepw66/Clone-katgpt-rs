@@ -43,12 +43,13 @@
 //!   --features conformal_predictive_intervals,heat_kernel_trajectory -- --nocapture
 //! ```
 
-#![cfg(all(feature = "conformal_predictive_intervals", feature = "heat_kernel_trajectory"))]
+#![cfg(all(
+    feature = "conformal_predictive_intervals",
+    feature = "heat_kernel_trajectory"
+))]
 #![allow(clippy::needless_range_loop)]
 
-use katgpt_core::dec::{
-    CellComplex, CochainField, DecEigendecomposition, near_harmonic_indices,
-};
+use katgpt_core::dec::{CellComplex, CochainField, DecEigendecomposition, near_harmonic_indices};
 use katgpt_core::{
     FloorComparisonReport, PredictiveOutput, TrajectoryCorpus, UqPrimitiveUnderTest,
     run_floor_comparison,
@@ -253,11 +254,7 @@ fn small_sigma_white_noise(n: usize, seed: u64) -> TrajectoryCorpus {
     for _ in 0..n {
         values.push(rng.gaussian() * 0.3);
     }
-    TrajectoryCorpus::from_slice(
-        format!("white_noise_sigma0p3_n{}", n),
-        &values,
-        64,
-    )
+    TrajectoryCorpus::from_slice(format!("white_noise_sigma0p3_n{}", n), &values, 64)
 }
 
 // ===== Tests =====

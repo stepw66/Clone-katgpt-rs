@@ -438,10 +438,14 @@ mod tests {
         // The core property the contextual bandit depends on: compute_phi
         // must produce DIFFERENT vectors for safe vs dangerous board states,
         // so the linear model can learn context-dependent Q.
-        use super::super::{ArenaGrid, Cell, GridPos, ARENA_H, ARENA_W};
+        use super::super::{ARENA_H, ARENA_W, ArenaGrid, Cell, GridPos};
 
         let cells = vec![vec![Cell::Floor; ARENA_W]; ARENA_H];
-        let grid = ArenaGrid { cells, width: ARENA_W, height: ARENA_H };
+        let grid = ArenaGrid {
+            cells,
+            width: ARENA_W,
+            height: ARENA_H,
+        };
 
         let pos = GridPos { x: 5, y: 5 };
         let powerups: [(i32, i32); 0] = [];
@@ -478,7 +482,9 @@ mod tests {
         );
 
         // The vectors should not be identical.
-        let diff: f32 = (0..CONTEXT_DIM).map(|i| (phi_safe[i] - phi_danger[i]).powi(2)).sum();
+        let diff: f32 = (0..CONTEXT_DIM)
+            .map(|i| (phi_safe[i] - phi_danger[i]).powi(2))
+            .sum();
         assert!(
             diff > 0.01,
             "safe and danger phi should differ significantly: squared diff = {diff:.6}"
@@ -487,9 +493,13 @@ mod tests {
 
     #[test]
     fn compute_phi_bias_is_always_one() {
-        use super::super::{ArenaGrid, Cell, GridPos, ARENA_H, ARENA_W};
+        use super::super::{ARENA_H, ARENA_W, ArenaGrid, Cell, GridPos};
         let cells = vec![vec![Cell::Floor; ARENA_W]; ARENA_H];
-        let grid = ArenaGrid { cells, width: ARENA_W, height: ARENA_H };
+        let grid = ArenaGrid {
+            cells,
+            width: ARENA_W,
+            height: ARENA_H,
+        };
         let pos = GridPos { x: 1, y: 1 };
         let phi = compute_phi(pos, &grid, &[], &[], None);
         assert!((phi[BIAS_IDX] - 1.0).abs() < 1e-6, "bias term must be 1.0");

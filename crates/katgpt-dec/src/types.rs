@@ -201,10 +201,14 @@ impl CellComplex {
         let mut cx = Self::new(n_vertices, n_edges, 0, 0);
         cx.boundaries[0].reserve_exact(2 * n_edges);
         for (i, &(tail, head)) in edges.iter().enumerate() {
-            assert!(tail < n_vertices,
-                    "from_edges: tail {tail} >= n_vertices {n_vertices} (edge {i})");
-            assert!(head < n_vertices,
-                    "from_edges: head {head} >= n_vertices {n_vertices} (edge {i})");
+            assert!(
+                tail < n_vertices,
+                "from_edges: tail {tail} >= n_vertices {n_vertices} (edge {i})"
+            );
+            assert!(
+                head < n_vertices,
+                "from_edges: head {head} >= n_vertices {n_vertices} (edge {i})"
+            );
             cx.boundaries[0].push((tail, i, -1));
             cx.boundaries[0].push((head, i, 1));
         }
@@ -689,8 +693,16 @@ mod tests {
         let df = exterior_derivative(&cx, &f);
         assert_eq!(df.rank, 1);
         assert_eq!(df.n_cells(), 2);
-        assert!((df.scalar(0) - 10.0).abs() < 1e-5, "edge 0: {}", df.scalar(0));
-        assert!((df.scalar(1) - 20.0).abs() < 1e-5, "edge 1: {}", df.scalar(1));
+        assert!(
+            (df.scalar(0) - 10.0).abs() < 1e-5,
+            "edge 0: {}",
+            df.scalar(0)
+        );
+        assert!(
+            (df.scalar(1) - 20.0).abs() < 1e-5,
+            "edge 1: {}",
+            df.scalar(1)
+        );
     }
 
     #[test]

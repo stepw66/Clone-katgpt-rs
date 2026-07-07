@@ -231,8 +231,16 @@ pub fn find_blend_beta(p_dist: &[f32], q_dist: &[f32], target_kl: f32, max_iters
     let mut log_p = vec![0.0f32; n];
     let mut log_q = vec![0.0f32; n];
     for i in 0..n {
-        log_p[i] = if p_dist[i] > 0.0 { p_dist[i].ln() } else { -30.0 };
-        log_q[i] = if q_dist[i] > 0.0 { q_dist[i].ln() } else { -30.0 };
+        log_p[i] = if p_dist[i] > 0.0 {
+            p_dist[i].ln()
+        } else {
+            -30.0
+        };
+        log_q[i] = if q_dist[i] > 0.0 {
+            q_dist[i].ln()
+        } else {
+            -30.0
+        };
     }
 
     let mut lo = 0.0f32;

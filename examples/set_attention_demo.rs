@@ -16,9 +16,7 @@
 //! Source: arXiv:2106.02584 (Kossen et al., NeurIPS 2021) — Non-Parametric
 //! Transformers, Attention Between Datapoints (ABD), inference-time half.
 
-use katgpt_core::set_attention::{
-    SetAttentionConfig, identity, set_sigmoid_attention_into,
-};
+use katgpt_core::set_attention::{SetAttentionConfig, identity, set_sigmoid_attention_into};
 
 const D: usize = 4; // reading dimensionality
 const N: usize = 16; // sensor count (8 per cluster)
@@ -119,17 +117,25 @@ fn main() {
             .sum::<f32>()
             .sqrt()
     };
-    let err_before: f32 =
-        (0..N).map(|i| l2(&states[i * D..i * D + D], &true_centers[i])).sum::<f32>() / N as f32;
-    let err_after: f32 =
-        (0..N).map(|i| l2(&final_readings[i * D..i * D + D], &true_centers[i])).sum::<f32>()
-            / N as f32;
+    let err_before: f32 = (0..N)
+        .map(|i| l2(&states[i * D..i * D + D], &true_centers[i]))
+        .sum::<f32>()
+        / N as f32;
+    let err_after: f32 = (0..N)
+        .map(|i| l2(&final_readings[i * D..i * D + D], &true_centers[i]))
+        .sum::<f32>()
+        / N as f32;
 
     println!("=== Set Attention: Sensor Consensus Averaging (Plan 354 Phase 4) ===");
     println!();
-    println!("Setup: {N} sensors (8 per cluster), {D}-dim readings, 2 clusters (factory / outdoor)");
+    println!(
+        "Setup: {N} sensors (8 per cluster), {D}-dim readings, 2 clusters (factory / outdoor)"
+    );
     println!("Modelless floor: W_Q = W_K = W_V = I (no trained projections)");
-    println!("Config: beta={} (sharp), gamma={} (single pass)", cfg.beta, cfg.gamma);
+    println!(
+        "Config: beta={} (sharp), gamma={} (single pass)",
+        cfg.beta, cfg.gamma
+    );
     println!();
 
     let label_str = |l: u8| if l == 0 { "factory" } else { "outdoor" };
@@ -164,7 +170,10 @@ fn main() {
     //    projections (W_Q/W_K from riir-train) would sharpen this further.
     if overall > 10.0 {
         println!();
-        println!("  PASS: set attention denoises sensor readings modellessly ({:.1}% reduction).", overall);
+        println!(
+            "  PASS: set attention denoises sensor readings modellessly ({:.1}% reduction).",
+            overall
+        );
         println!("  The open primitive is useful beyond NPC AI — no training required.");
     } else {
         println!();

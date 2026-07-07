@@ -929,7 +929,10 @@ mod tests {
             }
             kernel.sample_k_states(&s_prev, &input, &queries, &mut out, &cfg);
             for &v in &out {
-                assert!((-1.0..=1.0).contains(&v), "leaky diverged after 1000 ticks: {v}");
+                assert!(
+                    (-1.0..=1.0).contains(&v),
+                    "leaky diverged after 1000 ticks: {v}"
+                );
             }
             s_prev.copy_from_slice(&out[..dim]);
         }

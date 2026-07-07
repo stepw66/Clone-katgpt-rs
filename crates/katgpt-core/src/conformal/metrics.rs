@@ -228,14 +228,22 @@ mod tests {
         let interval = iv(10.0, 20.0, 0.05);
         // Actual = 5 (below 10), α=0.05 → penalty = 2/0.05 = 40.
         // W = 10 + 40·(10−5) = 10 + 200 = 210.
-        assert!((winkler_score(&interval, 5.0) - 210.0).abs() < 1e-4, "got {}", winkler_score(&interval, 5.0));
+        assert!(
+            (winkler_score(&interval, 5.0) - 210.0).abs() < 1e-4,
+            "got {}",
+            winkler_score(&interval, 5.0)
+        );
         // Actual = 25 (above 20) → W = 10 + 40·(25−20) = 210.
         assert!((winkler_score(&interval, 25.0) - 210.0).abs() < 1e-4);
     }
 
     #[test]
     fn coverage_fraction_is_correct() {
-        let intervals = vec![iv(0.0, 10.0, 0.05), iv(0.0, 10.0, 0.05), iv(0.0, 10.0, 0.05)];
+        let intervals = vec![
+            iv(0.0, 10.0, 0.05),
+            iv(0.0, 10.0, 0.05),
+            iv(0.0, 10.0, 0.05),
+        ];
         // 5 inside [0,10], 15 outside, 5 inside.
         let actuals = vec![5.0_f32, 15.0, 5.0];
         // 2/3 inside.

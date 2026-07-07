@@ -120,10 +120,7 @@ fn g1_partial_overlap_boundary_conditions() {
         "large-delta head vetoed at boundary IoU"
     );
     // Just below threshold → rejected.
-    assert!(
-        !gate.should_substitute(0, 0.399),
-        "below tau_iou rejected"
-    );
+    assert!(!gate.should_substitute(0, 0.399), "below tau_iou rejected");
 }
 
 /// G1 case 4: high IoU but high behavior delta → rejected (faithfulness veto).

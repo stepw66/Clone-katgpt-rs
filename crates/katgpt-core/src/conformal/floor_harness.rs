@@ -42,11 +42,11 @@
 //! responsible for its own modelless-vs-trained classification per the
 //! research skill §3.5; the harness just reports the numbers.
 
+use crate::conformal::metrics::{empirical_coverage, mean_crps_interval, mean_winkler};
 use crate::conformal::{
     ConformalIntervalCalibrator, DecayUnit, PointForecaster, PredictiveInterval, ResidualMode,
     SeasonalNaiveForecaster, seasonal_naive_floor,
 };
-use crate::conformal::metrics::{empirical_coverage, mean_crps_interval, mean_winkler};
 use core::cmp::Ordering;
 
 /// Capacity for the floor's residual ring buffer per (channel, horizon-bucket).
@@ -89,26 +89,38 @@ impl PredictiveOutput {
     /// Samples-only output.
     #[inline]
     pub fn from_samples(samples: Vec<f32>) -> Self {
-        Self { samples: Some(samples), interval: None }
+        Self {
+            samples: Some(samples),
+            interval: None,
+        }
     }
 
     /// Interval-only output.
     #[inline]
     pub fn from_interval(interval: PredictiveInterval) -> Self {
-        Self { samples: None, interval: Some(interval) }
+        Self {
+            samples: None,
+            interval: Some(interval),
+        }
     }
 
     /// Both samples and an interval.
     #[inline]
     pub fn from_both(samples: Vec<f32>, interval: PredictiveInterval) -> Self {
-        Self { samples: Some(samples), interval: Some(interval) }
+        Self {
+            samples: Some(samples),
+            interval: Some(interval),
+        }
     }
 
     /// An empty output — the primitive produced no prediction for this step.
     /// The harness will count this as unscorable.
     #[inline]
     pub fn empty() -> Self {
-        Self { samples: None, interval: None }
+        Self {
+            samples: None,
+            interval: None,
+        }
     }
 
     /// Convert to an interval. If the primitive provided an interval, use it
@@ -196,21 +208,18 @@ impl FloorAdapter {
     /// (e.g. `0.05` for a 95% interval).
     #[inline]
     pub fn new(alpha: f32) -> Self {
-        debug_assert!(
-            (0.0..=0.5).contains(&alpha),
-            "alpha must be in [0, 0.5]"
-        );
+        debug_assert!((0.0..=0.5).contains(&alpha), "alpha must be in [0, 0.5]");
         let forecaster = seasonal_naive_floor(FLOOR_CAPACITY);
         let calibrator = ConformalIntervalCalibrator::new(
             forecaster,
-            1,              // n_channels
-            1,              // max_h
-            FLOOR_M,        // m=1 (canonical floor)
+            1,       // n_channels
+            1,       // max_h
+            FLOOR_M, // m=1 (canonical floor)
             FLOOR_CAPACITY,
-            0.0,            // exp_lambda (no recency decay)
+            0.0, // exp_lambda (no recency decay)
             DecayUnit::Step,
             ResidualMode::HStep,
-            false,          // orientation
+            false, // orientation
         );
         Self { calibrator, alpha }
     }
@@ -337,34 +346,68 @@ impl FloorComparisonReport {
     pub fn pretty_print(&self) {
         let nominal = 1.0 - self.alpha;
         println!("=== Floor Comparison: {} ===", self.primitive_name);
-        println!("Corpus: {} (n_scored={}, n_unscorable={}, α={:.2})",
-                 self.corpus_name, self.n_scored, self.n_unscorable, self.alpha);
+        println!(
+            "Corpus: {} (n_scored={}, n_unscorable={}, α={:.2})",
+            self.corpus_name, self.n_scored, self.n_unscorable, self.alpha
+        );
         println!();
         println!("Metric             | Primitive  | Floor      | Ratio (prim/floor) | Verdict");
         println!("-------------------|------------|------------|--------------------|---------");
-        let crps_v = if self.crps_ratio < 1.0 - BEAT_THRESHOLD { "WIN" }
-                     else if self.crps_ratio > 1.0 + BEAT_THRESHOLD { "LOSE" } else { "tie" };
-        let winkler_v = if self.winkler_ratio < 1.0 - BEAT_THRESHOLD { "WIN" }
-                        else if self.winkler_ratio > 1.0 + BEAT_THRESHOLD { "LOSE" } else { "tie" };
-        let cov_v = if self.primitive_cov_err < self.floor_cov_err - COVERAGE_TOL { "WIN" }
-                    else if self.primitive_cov_err > self.floor_cov_err + COVERAGE_TOL { "LOSE" }
-                    else { "tie" };
-        println!("Mean CRPS          | {:>10.4} | {:>10.4} | {:>18.4} | {}",
-                 self.primitive.mean_crps_interval, self.floor.mean_crps_interval,
-                 self.crps_ratio, crps_v);
-        println!("Mean Winkler       | {:>10.4} | {:>10.4} | {:>18.4} | {}",
-                 self.primitive.mean_winkler, self.floor.mean_winkler,
-                 self.winkler_ratio, winkler_v);
-        println!("Coverage (nom={:.2}) | {:>10.4} | {:>10.4} | {:>18} | {}",
-                 nominal, self.primitive.coverage, self.floor.coverage,
-                 format!("err {:.4} vs {:.4}", self.primitive_cov_err, self.floor_cov_err),
-                 cov_v);
+        let crps_v = if self.crps_ratio < 1.0 - BEAT_THRESHOLD {
+            "WIN"
+        } else if self.crps_ratio > 1.0 + BEAT_THRESHOLD {
+            "LOSE"
+        } else {
+            "tie"
+        };
+        let winkler_v = if self.winkler_ratio < 1.0 - BEAT_THRESHOLD {
+            "WIN"
+        } else if self.winkler_ratio > 1.0 + BEAT_THRESHOLD {
+            "LOSE"
+        } else {
+            "tie"
+        };
+        let cov_v = if self.primitive_cov_err < self.floor_cov_err - COVERAGE_TOL {
+            "WIN"
+        } else if self.primitive_cov_err > self.floor_cov_err + COVERAGE_TOL {
+            "LOSE"
+        } else {
+            "tie"
+        };
+        println!(
+            "Mean CRPS          | {:>10.4} | {:>10.4} | {:>18.4} | {}",
+            self.primitive.mean_crps_interval,
+            self.floor.mean_crps_interval,
+            self.crps_ratio,
+            crps_v
+        );
+        println!(
+            "Mean Winkler       | {:>10.4} | {:>10.4} | {:>18.4} | {}",
+            self.primitive.mean_winkler, self.floor.mean_winkler, self.winkler_ratio, winkler_v
+        );
+        println!(
+            "Coverage (nom={:.2}) | {:>10.4} | {:>10.4} | {:>18} | {}",
+            nominal,
+            self.primitive.coverage,
+            self.floor.coverage,
+            format!(
+                "err {:.4} vs {:.4}",
+                self.primitive_cov_err, self.floor_cov_err
+            ),
+            cov_v
+        );
         println!();
         let verdict_str = match &self.overall {
             OverallVerdict::BeatsFloor => "✅ BEATS FLOOR — primitive adds UQ value".to_string(),
-            OverallVerdict::TiesFloor => "🟡 TIES FLOOR — no UQ gain, but may be valuable for other reasons".to_string(),
-            OverallVerdict::LosesToFloor => "❌ LOSES TO FLOOR — primitive does not add UQ value".to_string(),
-            OverallVerdict::Mixed => "🟠 MIXED — better on some metrics, worse on others (judgment call)".to_string(),
+            OverallVerdict::TiesFloor => {
+                "🟡 TIES FLOOR — no UQ gain, but may be valuable for other reasons".to_string()
+            }
+            OverallVerdict::LosesToFloor => {
+                "❌ LOSES TO FLOOR — primitive does not add UQ value".to_string()
+            }
+            OverallVerdict::Mixed => {
+                "🟠 MIXED — better on some metrics, worse on others (judgment call)".to_string()
+            }
             OverallVerdict::NotApplicable { reason } => format!("⚪ N/A — {}", reason),
         };
         println!("Overall: {}", verdict_str);
@@ -499,10 +542,7 @@ pub fn run_floor_comparison<P: UqPrimitiveUnderTest>(
     warmup: usize,
     corpus_name: &str,
 ) -> FloorComparisonReport {
-    debug_assert!(
-        (0.0..=0.5).contains(&alpha),
-        "alpha must be in [0, 0.5]"
-    );
+    debug_assert!((0.0..=0.5).contains(&alpha), "alpha must be in [0, 0.5]");
     debug_assert!(warmup <= corpus.len(), "warmup must be <= corpus.len()");
 
     let mut floor = FloorAdapter::new(alpha);
@@ -658,7 +698,10 @@ fn compute_verdict(
     if (crps_beats || winkler_beats) && coverage_ok && !(crps_loses || winkler_loses) {
         return OverallVerdict::BeatsFloor;
     }
-    if (crps_ties || crps_beats) && (winkler_ties || winkler_beats) && !(crps_loses || winkler_loses) {
+    if (crps_ties || crps_beats)
+        && (winkler_ties || winkler_beats)
+        && !(crps_loses || winkler_loses)
+    {
         return OverallVerdict::TiesFloor;
     }
     if (crps_loses || winkler_loses) && !(crps_beats || winkler_beats) {
@@ -682,7 +725,9 @@ mod tests {
         step: usize,
     }
     impl<'a> UqPrimitiveUnderTest for TrueOraclePrimitive<'a> {
-        fn name(&self) -> &str { "true-oracle (peeks at next value)" }
+        fn name(&self) -> &str {
+            "true-oracle (peeks at next value)"
+        }
         fn predict_next(&mut self) -> PredictiveOutput {
             // Peek at the upcoming ground-truth value.
             let next_y = self.corpus.get(self.step).copied().unwrap_or(0.0);
@@ -703,7 +748,9 @@ mod tests {
     /// lose to the floor on CRPS/Winkler (wider = higher score).
     struct OverWidePrimitive;
     impl UqPrimitiveUnderTest for OverWidePrimitive {
-        fn name(&self) -> &str { "over-wide (±10)" }
+        fn name(&self) -> &str {
+            "over-wide (±10)"
+        }
         fn predict_next(&mut self) -> PredictiveOutput {
             PredictiveOutput::from_interval(PredictiveInterval::new(-10.0, 0.0, 10.0, 0.05))
         }
@@ -716,7 +763,9 @@ mod tests {
         last_y: f32,
     }
     impl UqPrimitiveUnderTest for SamplesOnlyPrimitive {
-        fn name(&self) -> &str { "samples-only" }
+        fn name(&self) -> &str {
+            "samples-only"
+        }
         fn predict_next(&mut self) -> PredictiveOutput {
             // 41 samples around the last observed value with small Gaussian-ish spread.
             let mut samples = Vec::with_capacity(41);
@@ -734,8 +783,12 @@ mod tests {
     /// A primitive that produces nothing — exercises the NotApplicable path.
     struct EmptyPrimitive;
     impl UqPrimitiveUnderTest for EmptyPrimitive {
-        fn name(&self) -> &str { "empty" }
-        fn predict_next(&mut self) -> PredictiveOutput { PredictiveOutput::empty() }
+        fn name(&self) -> &str {
+            "empty"
+        }
+        fn predict_next(&mut self) -> PredictiveOutput {
+            PredictiveOutput::empty()
+        }
         fn observe(&mut self, _y: f32) {}
     }
 
@@ -805,7 +858,11 @@ mod tests {
         // σ=0.1 noise → 95% interval width ≈ 4σ = 0.4. Allow generous bound.
         let width = iv.upper - iv.lower;
         assert!(width > 0.0, "interval width {} should be > 0", width);
-        assert!(width < 2.0, "interval width {} should be < 2.0 for σ=0.1", width);
+        assert!(
+            width < 2.0,
+            "interval width {} should be < 2.0 for σ=0.1",
+            width
+        );
     }
 
     #[test]
@@ -827,7 +884,10 @@ mod tests {
             report.crps_ratio
         );
         assert!(
-            matches!(report.overall, OverallVerdict::TiesFloor | OverallVerdict::BeatsFloor),
+            matches!(
+                report.overall,
+                OverallVerdict::TiesFloor | OverallVerdict::BeatsFloor
+            ),
             "floor-vs-floor should tie or beat (got {:?})",
             report.overall
         );
@@ -838,7 +898,10 @@ mod tests {
         // True oracle peeks at the next corpus value → should beat the floor
         // decisively on every metric (vanishingly narrow interval, always covers).
         let corpus = TrajectoryCorpus::stationary_seasonal(12, 0.5, 300, 0x0ACE_BEE5);
-        let mut oracle = TrueOraclePrimitive { corpus: &corpus.values, step: 0 };
+        let mut oracle = TrueOraclePrimitive {
+            corpus: &corpus.values,
+            step: 0,
+        };
         let report = run_floor_comparison(
             &mut oracle,
             &corpus.values,
@@ -907,13 +970,7 @@ mod tests {
     fn empty_primitive_is_not_applicable() {
         let corpus = TrajectoryCorpus::white_noise(1.0, 100, 0xE7A_DE55);
         let mut empty = EmptyPrimitive;
-        let report = run_floor_comparison(
-            &mut empty,
-            &corpus.values,
-            0.05,
-            10,
-            &corpus.name,
-        );
+        let report = run_floor_comparison(&mut empty, &corpus.values, 0.05, 10, &corpus.name);
         assert_eq!(report.n_scored, 0);
         assert!(report.is_not_applicable());
     }

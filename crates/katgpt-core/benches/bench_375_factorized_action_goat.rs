@@ -49,9 +49,9 @@
 #![cfg(feature = "factorized_action")]
 
 use katgpt_core::factorized_action::{
+    AggregatorType, EffectCodebook, FactorizedActionLatent, FilmProjectionBank, TransitionFactors,
     aggregate_action_latent_into, finalize_factors, fit_codebook_kmeans_into,
-    motion_input_velocity_into, AggregatorType, EffectCodebook, FactorizedActionLatent,
-    FilmProjectionBank, TransitionFactors,
+    motion_input_velocity_into,
 };
 use katgpt_core::sigmoid;
 use std::hint::black_box;
@@ -71,10 +71,18 @@ struct GateResult {
 
 impl GateResult {
     fn pass(name: &'static str, detail: impl Into<String>) -> Self {
-        Self { name, passed: true, detail: detail.into() }
+        Self {
+            name,
+            passed: true,
+            detail: detail.into(),
+        }
     }
     fn fail(name: &'static str, detail: impl Into<String>) -> Self {
-        Self { name, passed: false, detail: detail.into() }
+        Self {
+            name,
+            passed: false,
+            detail: detail.into(),
+        }
     }
 }
 
@@ -118,11 +126,15 @@ const G4_ITERS: usize = 100_000;
 /// reference; we want zero ambiguity about determinism for the GOAT gate).
 
 #[derive(Clone, Copy)]
-struct SplitMix64 { state: u64 }
+struct SplitMix64 {
+    state: u64,
+}
 
 impl SplitMix64 {
     fn new(seed: u64) -> Self {
-        Self { state: seed.wrapping_add(0x9E37_79B9_7F4A_7C15) }
+        Self {
+            state: seed.wrapping_add(0x9E37_79B9_7F4A_7C15),
+        }
     }
     fn next_u64(&mut self) -> u64 {
         self.state = self.state.wrapping_add(0x9E37_79B9_7F4A_7C15);
@@ -161,25 +173,45 @@ const FRAME_SIZE: usize = 16; // 4×4 frame
 /// chosen to be visually distinct (different "shapes").
 const DIGIT_SPRITES: [[f32; FRAME_SIZE]; 10] = [
     // 0: vertical bar in column 0
-    [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0],
+    [
+        1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0,
+    ],
     // 1: vertical bar in column 1
-    [0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0],
+    [
+        0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0,
+    ],
     // 2: vertical bar in column 2
-    [0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0],
+    [
+        0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0,
+    ],
     // 3: vertical bar in column 3
-    [0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0],
+    [
+        0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0,
+    ],
     // 4: horizontal bar in row 0
-    [1.0, 1.0, 1.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+    [
+        1.0, 1.0, 1.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+    ],
     // 5: horizontal bar in row 1
-    [0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+    [
+        0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+    ],
     // 6: horizontal bar in row 2
-    [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0, 0.0, 0.0, 0.0, 0.0],
+    [
+        0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0, 0.0, 0.0, 0.0, 0.0,
+    ],
     // 7: horizontal bar in row 3
-    [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0],
+    [
+        0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0,
+    ],
     // 8: diagonal
-    [1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0],
+    [
+        1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0,
+    ],
     // 9: anti-diagonal
-    [0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 1.0, 0.0, 0.0, 1.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0],
+    [
+        0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 1.0, 0.0, 0.0, 1.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0,
+    ],
 ];
 
 /// A transition: (x_t, x_{t+1}) as flattened frames. The `digit` field
@@ -229,8 +261,7 @@ fn generate_transitions(
 
         if with_distractor {
             // Distractor: a different digit, moving independently.
-            let distractor_digit = digits
-                [(rng.next_u64() as usize) % digits.len()];
+            let distractor_digit = digits[(rng.next_u64() as usize) % digits.len()];
             let distractor_sprite = &DIGIT_SPRITES[distractor_digit];
             let d_off_t = (rng.next_u64() as usize) % (ext_size - FRAME_SIZE + 1).max(1);
             let d_shift = (rng.next_u64() as usize) % 5;
@@ -563,7 +594,10 @@ fn gate_g2_distractor_suppression() -> GateResult {
                  (sigmoid gate adds no value over uniform → riir-train)"
             ));
         }
-        GateResult::fail("G2 distractor suppression + gate ablation", reasons.join("; "))
+        GateResult::fail(
+            "G2 distractor suppression + gate ablation",
+            reasons.join("; "),
+        )
     }
 }
 
@@ -615,8 +649,12 @@ fn gate_g3_cross_carrier_transfer() -> GateResult {
         0.0
     };
 
-    println!("  monolithic source MSE: {mono_source:.6}, target MSE: {mono_target:.6}, drop: {mono_drop:.4}x");
-    println!("  factorized source MSE: {fact_source:.6}, target MSE: {fact_target:.6}, drop: {fact_drop:.4}x");
+    println!(
+        "  monolithic source MSE: {mono_source:.6}, target MSE: {mono_target:.6}, drop: {mono_drop:.4}x"
+    );
+    println!(
+        "  factorized source MSE: {fact_source:.6}, target MSE: {fact_target:.6}, drop: {fact_drop:.4}x"
+    );
 
     if fact_drop < mono_drop {
         GateResult::pass(
@@ -634,7 +672,9 @@ fn gate_g3_cross_carrier_transfer() -> GateResult {
 fn gate_g4_latency() -> GateResult {
     println!("\n--- G4: Latency + Alloc-Free Hot Path ---");
     println!("  K = {K}, D = {D}, N_PATCHES = {N_PATCHES}");
-    println!("  Target: < {G4_LATENCY_TARGET_NS} ns/transition, {G4_ALLOC_TARGET} allocs/100 calls");
+    println!(
+        "  Target: < {G4_LATENCY_TARGET_NS} ns/transition, {G4_ALLOC_TARGET} allocs/100 calls"
+    );
 
     // Build a codebook with non-trivial centroids (k-means on synthetic data).
     let train = generate_transitions(100, &[0, 1, 2], false, 42);

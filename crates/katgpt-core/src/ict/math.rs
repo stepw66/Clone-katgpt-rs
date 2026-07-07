@@ -282,7 +282,10 @@ mod tests {
         // Point mass → β = 1.
         let probs = [1.0_f32, 0.0, 0.0, 0.0, 0.0];
         let beta = collision_purity(&probs);
-        assert!((beta - 1.0).abs() < TOL, "degenerate: β={beta}, expected 1.0");
+        assert!(
+            (beta - 1.0).abs() < TOL,
+            "degenerate: β={beta}, expected 1.0"
+        );
     }
 
     #[test]
@@ -311,7 +314,10 @@ mod tests {
             let probs = vec![1.0_f32 / n as f32; n];
             let h2 = renyi_h2(&probs);
             let expected = (n as f32).ln();
-            assert!((h2 - expected).abs() < TOL, "uniform n={n}: H₂={h2}, expected {expected}");
+            assert!(
+                (h2 - expected).abs() < TOL,
+                "uniform n={n}: H₂={h2}, expected {expected}"
+            );
         }
     }
 
@@ -330,7 +336,10 @@ mod tests {
             let probs = vec![1.0_f32 / n as f32; n];
             let h1 = shannon_h1(&probs);
             let expected = (n as f32).ln();
-            assert!((h1 - expected).abs() < TOL, "uniform n={n}: H₁={h1}, expected {expected}");
+            assert!(
+                (h1 - expected).abs() < TOL,
+                "uniform n={n}: H₁={h1}, expected {expected}"
+            );
         }
     }
 

@@ -211,6 +211,9 @@ mod tests {
         let mut rng = fastrand::Rng::new();
         let projection = project_one_step(&mut generator, &(), &mut rng).unwrap();
         assert_eq!(projection, 42);
-        assert_eq!(generator.calls, 1, "project_one_step must call generate() exactly once");
+        assert_eq!(
+            generator.calls, 1,
+            "project_one_step must call generate() exactly once"
+        );
     }
 }

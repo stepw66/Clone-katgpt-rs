@@ -61,7 +61,7 @@
 //! and a `consolidate_growing_gated(gate)` FaithfulnessProbe integration point.
 
 use crate::cgsp::traits::HintDeltaBandit;
-use crate::cgsp::types::{sigmoid, Priority};
+use crate::cgsp::types::{Priority, sigmoid};
 
 // ── PoolId ────────────────────────────────────────────────────────────────
 
@@ -191,9 +191,9 @@ impl Default for DualPoolConfig {
             consolidate_blend: 0.5,
             min_exploration_prob: 1e-4,
             seed: 0x9E37_79B9_7F4A_7C15,
-            growth_enabled: false,       // Phase 4: off by default (Phase 1 compat).
-            promotion_threshold: 0.1,    // Minimum reward to promote X→E.
-            max_epool_size: 64,          // Cap per Risk table.
+            growth_enabled: false, // Phase 4: off by default (Phase 1 compat).
+            promotion_threshold: 0.1, // Minimum reward to promote X→E.
+            max_epool_size: 64,    // Cap per Risk table.
         }
     }
 }
@@ -493,7 +493,6 @@ impl<B: HintDeltaBandit> DualPoolBandit<B> {
         let u = self.next_u64() >> 40; // top 24 bits
         (u as f32) / ((1u64 << 24) as f32)
     }
-
 }
 
 // ── HintDeltaBandit impl (delegate to active pool) ────────────────────────
@@ -850,7 +849,10 @@ mod tests {
             dp.route_update(PoolId::Exploitation, true);
         }
         let w_before = dp.w_e();
-        assert!(w_before > 1.0, "w_e should be > 1.0 after boosts: {w_before}");
+        assert!(
+            w_before > 1.0,
+            "w_e should be > 1.0 after boosts: {w_before}"
+        );
 
         // E-pool fail → w_e = max(1.0, decay * w_e).
         dp.route_update(PoolId::Exploitation, false);
@@ -1102,10 +1104,7 @@ mod tests {
             } else {
                 // E-pool active → one-hot → arm 0 only.
                 let arm = sample_arm_from(dp.next_f32(), dp.e_pool().priorities());
-                assert_eq!(
-                    arm, 0,
-                    "one-hot E-pool must always select arm 0 (the trap)"
-                );
+                assert_eq!(arm, 0, "one-hot E-pool must always select arm 0 (the trap)");
             }
         }
 
@@ -1426,7 +1425,11 @@ mod tests {
             } else {
                 p_x
             };
-            let reward = if rng.next_f32() < effective_p { 1.0_f32 } else { 0.0_f32 };
+            let reward = if rng.next_f32() < effective_p {
+                1.0_f32
+            } else {
+                0.0_f32
+            };
             total_reward += reward as f64;
             // Expected regret vs optimal (deterministic given pool + staleness).
             regret += r_opt - effective_p;
@@ -1575,16 +1578,7 @@ mod tests {
             r_opt,
             seed,
         );
-        let fixed_05 = simulate_concave(
-            t_cycles,
-            &|_| 0.5,
-            false,
-            p_e,
-            p_x,
-            delta,
-            r_opt,
-            seed,
-        );
+        let fixed_05 = simulate_concave(t_cycles, &|_| 0.5, false, p_e, p_x, delta, r_opt, seed);
         let fixed_10 = simulate_concave(
             t_cycles,
             &|_| 0.99, // α=1.0 clamp floor prevents div-by-zero; 0.99 ≈ pure exploit
@@ -1693,10 +1687,7 @@ mod tests {
             .iter()
             .sum::<f32>()
             / 2000.0;
-        let ratio_eq: f32 = ratio_sim.alpha_curve[t_cycles - 2000..]
-            .iter()
-            .sum::<f32>()
-            / 2000.0;
+        let ratio_eq: f32 = ratio_sim.alpha_curve[t_cycles - 2000..].iter().sum::<f32>() / 2000.0;
         assert!(
             (sigmoid_eq - alpha_star).abs() < 0.20,
             "G2/T3.3 FAIL: sigmoid equilibrium α = {} too far from α* = {}",
@@ -1935,7 +1926,14 @@ mod tests {
 
         // All 8 arms use distinct direction vectors with meaningful content.
         let directions: Vec<Vec<f32>> = (0..8)
-            .map(|i| vec![(i + 1) as f32, (i + 2) as f32, (i + 3) as f32, (i + 4) as f32])
+            .map(|i| {
+                vec![
+                    (i + 1) as f32,
+                    (i + 2) as f32,
+                    (i + 3) as f32,
+                    (i + 4) as f32,
+                ]
+            })
             .collect();
 
         // Pre-probe each direction against the live consumer.
@@ -1943,8 +1941,7 @@ mod tests {
         let mut rng = Rng::with_seed(42);
         let irrelevant_pool = vec![1.0_f32, 2.0, 3.0, 4.0];
         let filler = 1.0_f32;
-        let mut probe =
-            DefaultFaithfulnessProbe::new(live_consumer, irrelevant_pool, filler);
+        let mut probe = DefaultFaithfulnessProbe::new(live_consumer, irrelevant_pool, filler);
 
         let n_x_arms = 8_usize;
         let mut faithful_arms = Vec::new();
@@ -1966,9 +1963,8 @@ mod tests {
         // directions the production Solver ignores due to domain-specific
         // constraints). The gate filters them out.
         let dead_arms = [1_usize, 3, 5, 7];
-        let live_arms_filtered: Vec<usize> = (0..n_x_arms)
-            .filter(|a| !dead_arms.contains(a))
-            .collect();
+        let live_arms_filtered: Vec<usize> =
+            (0..n_x_arms).filter(|a| !dead_arms.contains(a)).collect();
 
         // ── Gate ON: only live arms promoted (dead arms filtered) ───────────
         let e_gated = VecBandit::constant(1, 0.1);

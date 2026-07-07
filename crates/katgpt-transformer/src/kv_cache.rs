@@ -139,10 +139,11 @@ impl MultiLayerKVCache {
         let end = pos * kd;
         out.pos = pos;
         if out.layers.len() != self.layers.len() {
-            out.layers.resize_with(self.layers.len(), || KVLayerSnapshot {
-                key: Vec::new(),
-                value: Vec::new(),
-            });
+            out.layers
+                .resize_with(self.layers.len(), || KVLayerSnapshot {
+                    key: Vec::new(),
+                    value: Vec::new(),
+                });
         }
         for (src, dst) in self.layers.iter().zip(out.layers.iter_mut()) {
             dst.key.resize(end, 0.0);

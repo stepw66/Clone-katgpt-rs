@@ -41,7 +41,10 @@ pub(crate) fn zero_field(cx: &CellComplex, dim: usize) -> CochainField {
 ///
 /// Non-negative everywhere (so ReLU is identity — used for linear-vs-Euler
 /// comparison tests in `heat_kernel.rs` and `nonlinear_heat_kernel.rs`).
-#[allow(clippy::too_many_arguments, reason = "test helper: 8 named positional params (field, w, h, cx, cy, ch, amp, sigma) are the natural signature; grouping into a BumpSpec struct would add boilerplate at every call site without reducing the operand-swap risk that motivated Issue 037")]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "test helper: 8 named positional params (field, w, h, cx, cy, ch, amp, sigma) are the natural signature; grouping into a BumpSpec struct would add boilerplate at every call site without reducing the operand-swap risk that motivated Issue 037"
+)]
 pub(crate) fn place_bump(
     field: &mut CochainField,
     w: usize,

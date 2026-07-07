@@ -53,11 +53,16 @@ fn main() {
 
     for tick in 1..=5 {
         evolve_motor_gated_field(
-            &cx, &mut with_motor, &motor, MOTOR_DIM, dt, 0.0, &mut lap1, &mut relu1,
+            &cx,
+            &mut with_motor,
+            &motor,
+            MOTOR_DIM,
+            dt,
+            0.0,
+            &mut lap1,
+            &mut relu1,
         );
-        evolve_motor_gated_field(
-            &cx, &mut no_motor, &[], 0, dt, 0.0, &mut lap2, &mut relu2,
-        );
+        evolve_motor_gated_field(&cx, &mut no_motor, &[], 0, dt, 0.0, &mut lap2, &mut relu2);
         print_mass_row(tick, &with_motor, &no_motor);
     }
 

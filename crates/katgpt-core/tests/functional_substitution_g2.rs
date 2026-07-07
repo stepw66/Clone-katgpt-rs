@@ -176,11 +176,7 @@ fn synthesize_real_attention(n: usize) -> Vec<f32> {
             // Lower-diagonal: attend to the previous token strongly, with
             // decaying weight further back.
             let dist = (i - j) as f32;
-            let weight_diag = if j > 0 {
-                (-dist).exp() * 0.4
-            } else {
-                0.0
-            };
+            let weight_diag = if j > 0 { (-dist).exp() * 0.4 } else { 0.0 };
             a[i * n + j] = weight_first_token + weight_diag;
         }
         // Row-normalize.
@@ -254,17 +250,13 @@ fn measure_correlation_pairs(n: usize, seed: u64) -> (Vec<f32>, Vec<f32>) {
     // Fixed downstream projection — deterministic so the only variable is the
     // surrogate. Emphasizes early positions to interact with the first-token
     // structure of the real head.
-    let projection: Vec<f32> = (0..n)
-        .map(|j| (-((j as f32) / (n as f32))).exp())
-        .collect();
+    let projection: Vec<f32> = (0..n).map(|j| (-((j as f32) / (n as f32))).exp()).collect();
 
     let real_probs = downstream_task_projection(&real, n, &projection);
 
     // Sweep alpha across a fine grid to get a well-populated scatter.
     // alpha = 1.0 → IoU = 1.0 (identity); alpha = 0.0 → IoU ≈ 0 (pure noise).
-    let alphas: Vec<f32> = (0..=20)
-        .map(|k| k as f32 / 20.0)
-        .collect();
+    let alphas: Vec<f32> = (0..=20).map(|k| k as f32 / 20.0).collect();
 
     let mut ious = Vec::with_capacity(alphas.len());
     let mut deltas = Vec::with_capacity(alphas.len());
@@ -304,8 +296,16 @@ fn g2_iou_delta_spearman_below_minus_09() {
     let rho = spearman(&ious, &deltas);
 
     println!("G2 synthetic harness (n={n}):");
-    println!("  IoU range: [{:.4}, {:.4}]", ious_min_max(&ious).0, ious_min_max(&ious).1);
-    println!("  Δ range:   [{:.4}, {:.4}]", ious_min_max(&deltas).0, ious_min_max(&deltas).1);
+    println!(
+        "  IoU range: [{:.4}, {:.4}]",
+        ious_min_max(&ious).0,
+        ious_min_max(&ious).1
+    );
+    println!(
+        "  Δ range:   [{:.4}, {:.4}]",
+        ious_min_max(&deltas).0,
+        ious_min_max(&deltas).1
+    );
     println!("  Spearman ρ(IoU, Δ) = {rho:.4}");
     println!("  Target: ρ ≤ -0.9");
 
@@ -349,9 +349,7 @@ fn g2_iou_delta_spearman_robust_across_seeds() {
 fn g2_identity_anchor_iou_one_delta_zero() {
     let n = 32;
     let real = synthesize_real_attention(n);
-    let projection: Vec<f32> = (0..n)
-        .map(|j| (-((j as f32) / (n as f32))).exp())
-        .collect();
+    let projection: Vec<f32> = (0..n).map(|j| (-((j as f32) / (n as f32))).exp()).collect();
     let real_probs = downstream_task_projection(&real, n, &projection);
 
     // alpha = 1.0 → surrogate == real (modulo noise blend of 0).
@@ -364,7 +362,10 @@ fn g2_identity_anchor_iou_one_delta_zero() {
         iou_sum += iou(&real[i * n..(i + 1) * n], &identity[i * n..(i + 1) * n]);
     }
     let mean_iou = iou_sum / n as f32;
-    assert!((mean_iou - 1.0).abs() < 1e-4, "identity IoU = {mean_iou}, expected 1.0");
+    assert!(
+        (mean_iou - 1.0).abs() < 1e-4,
+        "identity IoU = {mean_iou}, expected 1.0"
+    );
 
     let identity_probs = downstream_task_projection(&identity, n, &projection);
     let delta = symmetric_kl(&real_probs, &identity_probs);

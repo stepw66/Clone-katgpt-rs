@@ -177,7 +177,10 @@ mod tests {
         assert_eq!(LatencyBucket::from_nanos(10_000), LatencyBucket::Fast);
         assert_eq!(LatencyBucket::from_nanos(1_000_000), LatencyBucket::Medium);
         assert_eq!(LatencyBucket::from_nanos(100_000_000), LatencyBucket::Slow);
-        assert_eq!(LatencyBucket::from_nanos(2_000_000_000), LatencyBucket::VerySlow);
+        assert_eq!(
+            LatencyBucket::from_nanos(2_000_000_000),
+            LatencyBucket::VerySlow
+        );
     }
 
     #[test]

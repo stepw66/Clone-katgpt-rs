@@ -56,10 +56,14 @@ struct Needle {
     value: [f32; D],
 }
 
+/// One `(key, value, beta, residual)` token in the synthetic stream fed into
+/// a cache under test.
+type StreamToken = ([f32; D], [f32; D], f32, f32);
+
 /// Generate the 4k-token stream: 8 needles + (N_TOKENS - 8) distractors.
 /// Returns (needles, distractor_kvs) where distractor_kvs is the full stream
 /// of (k, v, beta, residual) for feeding into a cache.
-fn generate_stream(seed: u64) -> (Vec<Needle>, Vec<([f32; D], [f32; D], f32, f32)>) {
+fn generate_stream(seed: u64) -> (Vec<Needle>, Vec<StreamToken>) {
     let mut rng = fastrand::Rng::with_seed(seed);
 
     // 8 needles: unit-norm key/value, high score.
@@ -87,7 +91,12 @@ fn generate_stream(seed: u64) -> (Vec<Needle>, Vec<([f32; D], [f32; D], f32, f32
             let needle_idx = i / needle_interval;
             let beta = 0.9f32;
             let residual = 0.5 + rng.f32() * 0.5; // [0.5, 1.0]
-            stream.push((needles[needle_idx].key, needles[needle_idx].value, beta, residual));
+            stream.push((
+                needles[needle_idx].key,
+                needles[needle_idx].value,
+                beta,
+                residual,
+            ));
         } else {
             let mut k = [0.0f32; D];
             let mut v = [0.0f32; D];
@@ -155,15 +164,15 @@ impl<const D: usize, const W: usize> RecencyCache<D, W> {
             if logit > max_logit {
                 let rescale = (max_logit - logit).exp();
                 sum_exp = sum_exp * rescale + 1.0;
-                for d in 0..D {
-                    out[d] = out[d] * rescale + self.vals[i][d];
+                for (o, v) in out.iter_mut().zip(self.vals[i].iter()) {
+                    *o = *o * rescale + v;
                 }
                 max_logit = logit;
             } else {
                 let weight = (logit - max_logit).exp();
                 sum_exp += weight;
-                for d in 0..D {
-                    out[d] += weight * self.vals[i][d];
+                for (o, v) in out.iter_mut().zip(self.vals[i].iter()) {
+                    *o += weight * v;
                 }
             }
         }
@@ -181,8 +190,8 @@ impl<const D: usize, const W: usize> RecencyCache<D, W> {
         let _ = max_logit;
         if sum_exp > 0.0 {
             let inv = 1.0 / sum_exp;
-            for d in 0..D {
-                out[d] *= inv;
+            for o in out.iter_mut() {
+                *o *= inv;
             }
         }
     }

@@ -69,8 +69,8 @@
 //! Run with: `cargo run --example sleep_time_02_curiosity_inversion --features sleep_time_anticipation --release`
 
 use katgpt_core::sleep_time::{
-    consume, consume_gate, AmortizationCostModel, AnticipatedQueryDir, IdentityFunctorOp,
-    PredictabilityScorer, SleepTimeAnticipator, SleepTimeScratch,
+    AmortizationCostModel, AnticipatedQueryDir, IdentityFunctorOp, PredictabilityScorer,
+    SleepTimeAnticipator, SleepTimeScratch, consume, consume_gate,
 };
 
 // ── Constants ───────────────────────────────────────────────────────────────
@@ -213,11 +213,7 @@ fn main() {
     println!("── Synthetic KARC-like ridge forecaster ──");
     println!(
         "  manifold_dim = {} of {} axes. decay = {}. Off-manifold axes = [{}, {}).",
-        forecaster.manifold_dim,
-        D,
-        forecaster.decay,
-        forecaster.manifold_dim,
-        D
+        forecaster.manifold_dim, D, forecaster.decay, forecaster.manifold_dim, D
     );
     println!("  curiosity(x) = ‖x_off_manifold‖²  (on-manifold contributes 0 since decay=1)");
     println!();
@@ -233,8 +229,14 @@ fn main() {
     let cur_hi = forecaster.curiosity_sq(&c_hi);
 
     println!("── Two contexts ──");
-    println!("  c_lo = {:?}  (on-manifold)   curiosity = {:.4}", c_lo, cur_lo);
-    println!("  c_hi = {:?}  (off-manifold)  curiosity = {:.4}", c_hi, cur_hi);
+    println!(
+        "  c_lo = {:?}  (on-manifold)   curiosity = {:.4}",
+        c_lo, cur_lo
+    );
+    println!(
+        "  c_hi = {:?}  (off-manifold)  curiosity = {:.4}",
+        c_hi, cur_hi
+    );
     println!();
 
     // ── Build the catalog (same toy 4-direction catalog as T3.1) ───────────
@@ -249,13 +251,14 @@ fn main() {
     //
     // Same anticipator orchestration as T3.1, but with our custom scorer.
     // The anticipator is generic over Scorer — no orchestration code changed.
-    let mk_anticipator = || SleepTimeAnticipator::<D, K, IdentityFunctorOp, CuriosityInversionScorer> {
-        op: IdentityFunctorOp,
-        scorer,
-        budgets: [100, 100, 100, 100],
-        tau: TAU,
-        beta: BETA,
-    };
+    let mk_anticipator =
+        || SleepTimeAnticipator::<D, K, IdentityFunctorOp, CuriosityInversionScorer> {
+            op: IdentityFunctorOp,
+            scorer,
+            budgets: [100, 100, 100, 100],
+            tau: TAU,
+            beta: BETA,
+        };
 
     let mut scratch = SleepTimeScratch::new();
     let anticipator = mk_anticipator();
@@ -270,8 +273,14 @@ fn main() {
     println!("  {:<10} {:>14} {:>14}", "context", "curiosity", "slot p_i");
     let p_lo = c_prime_lo.slots[0].predictability;
     let p_hi = c_prime_hi.slots[0].predictability;
-    println!("  c_lo       {:>14.4} {:>14.6}   (HIGH p → predictable)", cur_lo, p_lo);
-    println!("  c_hi       {:>14.4} {:>14.6}   (LOW  p → unpredictable)", cur_hi, p_hi);
+    println!(
+        "  c_lo       {:>14.4} {:>14.6}   (HIGH p → predictable)",
+        cur_lo, p_lo
+    );
+    println!(
+        "  c_hi       {:>14.4} {:>14.6}   (LOW  p → unpredictable)",
+        cur_hi, p_hi
+    );
     println!();
     println!("  Verdict: high-curiosity context c_hi gets LOW predictability across");
     println!("  the whole catalog — no direction anticipates it. c_lo gets HIGH p.");
@@ -299,13 +308,19 @@ fn main() {
     let (best_lo, gate_lo) = consume_gate(&q, &c_prime_lo, TAU, BETA);
     let out_lo = consume(&q, &c_prime_lo, TAU, BETA, fresh_think);
     println!("  in c_lo (low curiosity):");
-    println!("    best slot i* = {best_lo}  gate = {:.6}  (HIGH → precomputed)", gate_lo);
+    println!(
+        "    best slot i* = {best_lo}  gate = {:.6}  (HIGH → precomputed)",
+        gate_lo
+    );
     println!("    out = {}  ≈ precomputed slot", fmt_array(&out_lo));
 
     let (best_hi, gate_hi) = consume_gate(&q, &c_prime_hi, TAU, BETA);
     let out_hi = consume(&q, &c_prime_hi, TAU, BETA, fresh_think);
     println!("  in c_hi (high curiosity):");
-    println!("    best slot i* = {best_hi}  gate = {:.6}  (LOW → fresh think)", gate_hi);
+    println!(
+        "    best slot i* = {best_hi}  gate = {:.6}  (LOW → fresh think)",
+        gate_hi
+    );
     println!("    out = {}  ≈ fresh_think output", fmt_array(&out_hi));
     println!();
     println!("  Same query, same catalog, same τ/β — different verdict. That's the");
@@ -335,7 +350,10 @@ fn main() {
         model.t, model.b_max, sleep_cost, n_consumers
     );
     println!();
-    println!("  {:<10} {:>12} {:>12} {:>16}", "context", "E[gate]", "amort. factor", "should_pre_compute?");
+    println!(
+        "  {:<10} {:>12} {:>12} {:>16}",
+        "context", "E[gate]", "amort. factor", "should_pre_compute?"
+    );
 
     for (label, cur, e_gate, c_prime) in [
         ("c_lo", cur_lo, gate_lo, &c_prime_lo),

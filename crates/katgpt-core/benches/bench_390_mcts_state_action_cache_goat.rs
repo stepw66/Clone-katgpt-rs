@@ -77,18 +77,14 @@ struct DllmState {
 fn action_quality(action: u8, depth: u8) -> f32 {
     // Returns a quality multiplier in [0.5, 1.0]. Higher = more tokens correct.
     let best = match action {
-        0 => depth <= 2,          // early
+        0 => depth <= 2,               // early
         1 => (3..=4).contains(&depth), // early-mid
         2 => (5..=6).contains(&depth), // mid
         3 => (7..=8).contains(&depth), // mid-late
-        4 => depth >= 9,          // late
+        4 => depth >= 9,               // late
         _ => return 0.5,
     };
-    if best {
-        1.0
-    } else {
-        0.6
-    }
+    if best { 1.0 } else { 0.6 }
 }
 
 struct DllmSpace;
@@ -227,7 +223,13 @@ fn run_search(
     } else {
         0.0
     };
-    (reward, r.cache_hits, r.cache_misses, cache.len(), r.total_rollout_steps)
+    (
+        reward,
+        r.cache_hits,
+        r.cache_misses,
+        cache.len(),
+        r.total_rollout_steps,
+    )
 }
 
 // ── Main: run all gates and print verdict ─────────────────────────────────
@@ -253,7 +255,8 @@ fn main() {
     for &nfe in &nfe_sweep {
         let cache: StateActionCache<f32> = StateActionCache::with_capacity(nfe * 5);
         let mut scratch = SearchScratch::with_capacity(2048);
-        let (_reward, hits, misses, _len, _steps) = run_search(&space, &root, nfe, &cache, &mut scratch);
+        let (_reward, hits, misses, _len, _steps) =
+            run_search(&space, &root, nfe, &cache, &mut scratch);
         let total = hits + misses;
         let hit_rate = if total > 0 {
             hits as f64 / total as f64 * 100.0
@@ -265,10 +268,7 @@ fn main() {
             g1_pass = true;
         }
     }
-    println!(
-        "  G1 verdict: {}\n",
-        if g1_pass { "PASS" } else { "FAIL" }
-    );
+    println!("  G1 verdict: {}\n", if g1_pass { "PASS" } else { "FAIL" });
 
     // ── G2: Effective-budget expansion (true no-cache baseline + NFE-savings) ──
     // Issue 044 fix: two complementary G2 metrics.
@@ -295,20 +295,18 @@ fn main() {
         let (reward_no_cache, _, _, _) = search_no_cache(&space, &root, nfe, &mut s2);
 
         g2a_table.push((nfe, reward_cached, reward_no_cache));
-        println!(
-            "    NFE={nfe:>5}: cached={reward_cached:.3}, no-cache={reward_no_cache:.3}"
-        );
+        println!("    NFE={nfe:>5}: cached={reward_cached:.3}, no-cache={reward_no_cache:.3}");
     }
 
     // G2a verdict: the cache helps if at SOME NFE the cached reward strictly
     // exceeds the no-cache reward (the cache's intra-search reuse translates to
     // better exploration per NFE). If they're identical at every NFE, the
     // domain is still too small or the cache doesn't help.
-    let g2a_strict_wins = g2a_table
-        .iter()
-        .filter(|(_, c, n)| *c > *n + 1e-4)
-        .count();
-    println!("  G2a strict wins (cached > no-cache): {g2a_strict_wins}/{}", nfe_sweep.len());
+    let g2a_strict_wins = g2a_table.iter().filter(|(_, c, n)| *c > *n + 1e-4).count();
+    println!(
+        "  G2a strict wins (cached > no-cache): {g2a_strict_wins}/{}",
+        nfe_sweep.len()
+    );
 
     // G2b: direct NFE-savings at the highest NFE (the regime where the cache
     // matters most — enough budget for revisits to accumulate).
@@ -317,7 +315,8 @@ fn main() {
     for &nfe in &[2048, 4096, 8192] {
         let cache: StateActionCache<f32> = StateActionCache::with_capacity(nfe * 5);
         let mut scratch = SearchScratch::with_capacity(2048);
-        let (_reward, hits, misses, _len, steps) = run_search(&space, &root, nfe, &cache, &mut scratch);
+        let (_reward, hits, misses, _len, steps) =
+            run_search(&space, &root, nfe, &cache, &mut scratch);
         let total_lookups = hits + misses;
         let avg_depth = if total_lookups > 0 {
             steps as f64 / total_lookups as f64
@@ -365,7 +364,8 @@ fn main() {
     for &nfe in &[1024, 4096, 8192] {
         let cache: StateActionCache<f32> = StateActionCache::with_capacity(nfe * 5);
         let mut scratch = SearchScratch::with_capacity(2048);
-        let (_reward, _hits, _misses, len, _steps) = run_search(&space, &root, nfe, &cache, &mut scratch);
+        let (_reward, _hits, _misses, len, _steps) =
+            run_search(&space, &root, nfe, &cache, &mut scratch);
         // The domain has at most 12 depth levels × 48 token configs × 5 actions
         // = a bounded state space. Cache should be well under NFE.
         let ratio = len as f64 / nfe as f64;
@@ -375,15 +375,28 @@ fn main() {
 
     // ── Overall verdict ──
     println!("=== GOAT Gate Verdict (Issue 044 re-gate) ===");
-    println!("  G1 (hit rate):      {}", if g1_pass { "PASS" } else { "FAIL" });
-    println!("  G2 (budget expand): {}", if g2_pass { "PASS" } else { "FAIL" });
-    println!("  G3 (no-regression): {}", if g3_pass { "PASS" } else { "FAIL" });
+    println!(
+        "  G1 (hit rate):      {}",
+        if g1_pass { "PASS" } else { "FAIL" }
+    );
+    println!(
+        "  G2 (budget expand): {}",
+        if g2_pass { "PASS" } else { "FAIL" }
+    );
+    println!(
+        "  G3 (no-regression): {}",
+        if g3_pass { "PASS" } else { "FAIL" }
+    );
     println!("  G4 (zero-alloc):    DEFERRED (informational)");
     println!("  G5 (size bounded):  PASS");
     let all_pass = g1_pass && g2_pass && g3_pass;
     println!(
         "\n  Overall: {} — {}",
-        if all_pass { "GOAT CONFIRMED" } else { "GOAT PENDING/FAILED" },
+        if all_pass {
+            "GOAT CONFIRMED"
+        } else {
+            "GOAT PENDING/FAILED"
+        },
         if all_pass {
             "proceed to Phase 4 (promote-to-default decision)"
         } else {

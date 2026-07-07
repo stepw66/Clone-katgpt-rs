@@ -146,7 +146,11 @@ fn speculate_one_round(first_digit: u8) -> usize {
     // Commit the deepest path.
     let best = tree
         .iter()
-        .max_by(|a, b| a.depth.cmp(&b.depth).then(a.score.partial_cmp(&b.score).unwrap()))
+        .max_by(|a, b| {
+            a.depth
+                .cmp(&b.depth)
+                .then(a.score.partial_cmp(&b.score).unwrap())
+        })
         .unwrap();
 
     let path = katgpt_rs::speculative::extract_parent_tokens(best.parent_path, best.depth + 1);
@@ -357,19 +361,28 @@ fn main() {
     let skip = run_ab("Skip", HintPolicy::Skip);
 
     // ── Report ──
-    println!("┌{:─<14}┬{:─>14}┬{:─>14}┬{:─>14}┬{:─>14}┐", "", "", "", "", "");
+    println!(
+        "┌{:─<14}┬{:─>14}┬{:─>14}┬{:─>14}┬{:─>14}┐",
+        "", "", "", "", ""
+    );
     println!(
         "│{: <14}│{: >14}│{: >14}│{: >14}│{: >14}│",
         "Policy", "Mean r_synth", "Prio Spread", "Prio Min", "Prio Max"
     );
-    println!("├{:─<14}┼{:─>14}┼{:─>14}┼{:─>14}┼{:─>14}┤", "", "", "", "", "");
+    println!(
+        "├{:─<14}┼{:─>14}┼{:─>14}┼{:─>14}┼{:─>14}┤",
+        "", "", "", "", ""
+    );
     for o in [&order_only, &skip] {
         println!(
             "│{: <14}│{: >14.6}│{: >14.6}│{: >14.6}│{: >14.6}│",
             o.label, o.mean_solve_rate, o.priority_spread, o.priority_min, o.priority_max
         );
     }
-    println!("└{:─<14}┴{:─>14}┴{:─>14}┴{:─>14}┴{:─>14}┘", "", "", "", "", "");
+    println!(
+        "└{:─<14}┴{:─>14}┴{:─>14}┴{:─>14}┴{:─>14}┘",
+        "", "", "", "", ""
+    );
     println!();
 
     // ── Verdict ──

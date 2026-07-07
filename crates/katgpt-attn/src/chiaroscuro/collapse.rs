@@ -166,8 +166,10 @@ mod tests {
     use crate::chiaroscuro::op_trait::{ChiaroscuroOp, DctMixOp, FullAttnOp};
 
     fn make_router() -> ChiaroscuroRouter {
-        let ops: Vec<Box<dyn ChiaroscuroOp>> =
-            vec![Box::new(DctMixOp::default()), Box::new(FullAttnOp::default())];
+        let ops: Vec<Box<dyn ChiaroscuroOp>> = vec![
+            Box::new(DctMixOp::default()),
+            Box::new(FullAttnOp::default()),
+        ];
         ChiaroscuroRouter::new(ops)
     }
 
@@ -220,7 +222,10 @@ mod tests {
         }
         // Total = 200, but balanced → U ≈ 1.0 → no collapse.
         let promotion = harness.check_collapse();
-        assert!(promotion.is_none(), "no collapse when utilization is uniform");
+        assert!(
+            promotion.is_none(),
+            "no collapse when utilization is uniform"
+        );
     }
 
     #[test]
@@ -248,7 +253,9 @@ mod tests {
         for _ in 0..100 {
             harness.observe_h(0.95);
         }
-        let promotion = harness.check_collapse().expect("should re-detect after reset");
+        let promotion = harness
+            .check_collapse()
+            .expect("should re-detect after reset");
         assert_eq!(promotion.keep, vec![1]); // now FullAttn survives
     }
 
@@ -260,7 +267,11 @@ mod tests {
         harness.observe_h(0.95);
         let snap = harness.current_snapshot();
         assert_eq!(snap.total_observations, 2);
-        assert_eq!(snap.keep.len(), 2, "both ops should have non-zero utilization");
+        assert_eq!(
+            snap.keep.len(),
+            2,
+            "both ops should have non-zero utilization"
+        );
         assert_eq!(snap.demote.len(), 0);
     }
 

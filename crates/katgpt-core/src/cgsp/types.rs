@@ -310,7 +310,8 @@ impl ScratchBuffers {
             self.candidates.truncate(k);
         }
         while self.candidates.len() < k {
-            self.candidates.push(Candidate::new(Direction::zeros(dim), usize::MAX));
+            self.candidates
+                .push(Candidate::new(Direction::zeros(dim), usize::MAX));
         }
         // Resize any existing slot whose dim doesn't match (e.g. caller
         // changed target dimensionality). `Vec::resize` on `f32` is
@@ -644,7 +645,10 @@ mod tests {
 
     #[test]
     fn snapshot_blake3_deterministic() {
-        let dirs = vec![Direction::from_slice(&[1.0, 0.0]), Direction::from_slice(&[0.0, 1.0])];
+        let dirs = vec![
+            Direction::from_slice(&[1.0, 0.0]),
+            Direction::from_slice(&[0.0, 1.0]),
+        ];
         let prios = vec![0.5, 0.5];
         let s1 = CuriosityPrioritySnapshot::new(dirs.clone(), prios.clone());
         // Force identical snapshot_id to compare deterministically.

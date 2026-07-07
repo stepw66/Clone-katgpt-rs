@@ -237,7 +237,10 @@ enum GoActionTypeBin {
 impl From<&GoActionType> for GoActionTypeBin {
     fn from(a: &GoActionType) -> Self {
         match a {
-            GoActionType::Place { row, col } => Self::Place { row: *row, col: *col },
+            GoActionType::Place { row, col } => Self::Place {
+                row: *row,
+                col: *col,
+            },
             GoActionType::Pass => Self::Pass,
         }
     }
@@ -463,9 +466,13 @@ impl GameSampleCollector {
         writer: &mut GoReplayWriter,
         quality_threshold: f32,
     ) -> std::io::Result<usize> {
-        Self::finalize_inner(&mut self.samples, winner, quality_threshold, |w, s| {
-            w.write_sample(s)
-        }, writer)
+        Self::finalize_inner(
+            &mut self.samples,
+            winner,
+            quality_threshold,
+            |w, s| w.write_sample(s),
+            writer,
+        )
     }
 
     /// Finalize all samples with winner quality and write as length-prefixed
@@ -479,9 +486,13 @@ impl GameSampleCollector {
         writer: &mut GoReplayWriter,
         quality_threshold: f32,
     ) -> std::io::Result<usize> {
-        Self::finalize_inner(&mut self.samples, winner, quality_threshold, |w, s| {
-            w.write_sample_binary(s)
-        }, writer)
+        Self::finalize_inner(
+            &mut self.samples,
+            winner,
+            quality_threshold,
+            |w, s| w.write_sample_binary(s),
+            writer,
+        )
     }
 
     /// Shared finalize loop — applies quality assignment + threshold filter,
@@ -840,8 +851,8 @@ mod tests {
         let bytes = original.to_bytes();
         assert!(!bytes.is_empty(), "to_bytes must produce output");
 
-        let restored = JsonlGoSample::from_bytes(&bytes)
-            .expect("postcard round-trip should succeed");
+        let restored =
+            JsonlGoSample::from_bytes(&bytes).expect("postcard round-trip should succeed");
 
         // Every field must round-trip exactly.
         assert_eq!(restored.board, original.board);
@@ -855,7 +866,10 @@ mod tests {
             restored.checksum, original.checksum,
             "BLAKE3 checksum must round-trip through postcard hex-string codec"
         );
-        assert_eq!(restored, original, "full struct equality after binary round-trip");
+        assert_eq!(
+            restored, original,
+            "full struct equality after binary round-trip"
+        );
     }
 
     #[test]
@@ -880,13 +894,14 @@ mod tests {
         let mut offset = 0usize;
         let mut count = 0usize;
         while offset + 4 <= contents.len() {
-            let len = u32::from_le_bytes(
-                contents[offset..offset + 4].try_into().unwrap(),
-            ) as usize;
+            let len = u32::from_le_bytes(contents[offset..offset + 4].try_into().unwrap()) as usize;
             offset += 4;
             let restored = JsonlGoSample::from_bytes(&contents[offset..offset + len])
                 .expect("each record must deserialize");
-            assert_eq!(restored, sample, "binary record must round-trip identically");
+            assert_eq!(
+                restored, sample,
+                "binary record must round-trip identically"
+            );
             offset += len;
             count += 1;
         }
@@ -918,7 +933,10 @@ mod tests {
 
         // Read back the single binary record and verify quality=1.0, player=Black.
         let contents = std::fs::read(&path).unwrap();
-        assert!(contents.len() >= 4, "file must contain at least one length prefix");
+        assert!(
+            contents.len() >= 4,
+            "file must contain at least one length prefix"
+        );
         let len = u32::from_le_bytes(contents[0..4].try_into().unwrap()) as usize;
         let restored = JsonlGoSample::from_bytes(&contents[4..4 + len]).unwrap();
         assert!((restored.quality - 1.0).abs() < f32::EPSILON);
@@ -980,9 +998,7 @@ mod tests {
         let mut offset = 0usize;
         let mut read = 0usize;
         while offset + 4 <= contents.len() {
-            let len = u32::from_le_bytes(
-                contents[offset..offset + 4].try_into().unwrap(),
-            ) as usize;
+            let len = u32::from_le_bytes(contents[offset..offset + 4].try_into().unwrap()) as usize;
             offset += 4;
             let s = JsonlGoSample::from_bytes(&contents[offset..offset + len])
                 .expect("each binary record must deserialize");
@@ -996,6 +1012,9 @@ mod tests {
                 s.quality
             );
         }
-        assert_eq!(read, total_samples, "record count must match samples written");
+        assert_eq!(
+            read, total_samples,
+            "record count must match samples written"
+        );
     }
 }

@@ -403,7 +403,12 @@ impl AneOpShape {
         largest_operand_bytes: u64,
         min_family: AneFamily,
     ) -> Self {
-        Self { flops, bytes_moved, largest_operand_bytes, min_family }
+        Self {
+            flops,
+            bytes_moved,
+            largest_operand_bytes,
+            min_family,
+        }
     }
 
     /// GEMV: `(m × k) × (k,) → (m,)`. F0 floor (all chips).
@@ -656,13 +661,7 @@ pub fn ane_gemv_cost(m: u64, k: u64, dtype: Dtype, peaks: &AnePeaks) -> AneCost 
 /// FLOPs = `2·m·n·k`, bytes = `(m·k + k·n + m·n)·sizeof(dtype)`,
 /// largest operand = `max(m·k, k·n)·sizeof(dtype)`, min family = F0.
 #[inline(always)]
-pub fn ane_gemm_cost(
-    m: u64,
-    n: u64,
-    k: u64,
-    dtype: Dtype,
-    peaks: &AnePeaks,
-) -> AneCost {
+pub fn ane_gemm_cost(m: u64, n: u64, k: u64, dtype: Dtype, peaks: &AnePeaks) -> AneCost {
     ane_estimate(AneOpShape::gemm(m, n, k, dtype), dtype, peaks)
 }
 
@@ -817,7 +816,10 @@ mod tests {
         // assert monotonicity on it here — only on the raw peaks.
         assert!(m5.compute_tflops_fp16 > m1.compute_tflops_fp16);
         assert!(m5.bandwidth_gbs > m1.bandwidth_gbs);
-        assert!(m5.dispatch_floor_ms < m1.dispatch_floor_ms, "M5 floor must be lower");
+        assert!(
+            m5.dispatch_floor_ms < m1.dispatch_floor_ms,
+            "M5 floor must be lower"
+        );
         assert!(m5.working_set_bytes > m1.working_set_bytes);
     }
 
@@ -847,7 +849,10 @@ mod tests {
         if !(cfg!(target_arch = "aarch64") && cfg!(target_os = "macos")) {
             assert!(detected.is_none(), "detect() must return None on non-Apple");
         } else {
-            assert!(detected.is_some(), "detect() must return Some on Apple Silicon");
+            assert!(
+                detected.is_some(),
+                "detect() must return Some on Apple Silicon"
+            );
         }
     }
 

@@ -185,12 +185,10 @@ impl TreeNode {
     /// Phase 2 GOAT gate.
     pub fn internal(children: Vec<TreeNode>) -> Self {
         let n = children.len() as f32;
-        let (a, b) = children
-            .iter()
-            .fold((0.0_f32, 0.0_f32), |(sa, sb), c| {
-                let (ca, cb) = c.beta_params();
-                (sa + ca, sb + cb)
-            });
+        let (a, b) = children.iter().fold((0.0_f32, 0.0_f32), |(sa, sb), c| {
+            let (ca, cb) = c.beta_params();
+            (sa + ca, sb + cb)
+        });
         // Evidence pooling: subtract per-child pseudocount, add back one.
         TreeNode::Internal {
             children,
@@ -477,11 +475,7 @@ impl LatentTaskTree {
     // ── Private helpers ──────────────────────────────────────────────────
 
     /// Recursively collect root→leaf paths for every arm_id.
-    fn collect_arm_paths(
-        node: &TreeNode,
-        current_path: &mut Vec<usize>,
-        paths: &mut Vec<ArmPath>,
-    ) {
+    fn collect_arm_paths(node: &TreeNode, current_path: &mut Vec<usize>, paths: &mut Vec<ArmPath>) {
         match node {
             TreeNode::Leaf { arm_id, .. } => {
                 while paths.len() <= *arm_id {
@@ -801,7 +795,13 @@ fn normalize(v: &mut [f32]) {
 /// or `n_components > min(d, n−1)`.
 fn pca_into(data: &[f32], n: usize, n_components: usize, out: &mut [f32], seed: u64) {
     assert!(!data.is_empty() && n > 0, "pca_into: empty input");
-    assert_eq!(data.len() % n, 0, "pca_into: data.len() {} not divisible by n {}", data.len(), n);
+    assert_eq!(
+        data.len() % n,
+        0,
+        "pca_into: data.len() {} not divisible by n {}",
+        data.len(),
+        n
+    );
     let d = data.len() / n;
     let max_components = d.min(n.saturating_sub(1)).max(1);
     assert!(
@@ -977,11 +977,7 @@ fn chart_test(points: &[[f32; 2]], k: usize, threshold: f32) -> Vec<bool> {
         eig[1] = l2;
 
         // Ratio λ₂/λ₁ (l1 ≥ l2). High ratio → round → on-manifold.
-        let ratio = if eig[0] > 1e-30 {
-            eig[1] / eig[0]
-        } else {
-            0.0
-        };
+        let ratio = if eig[0] > 1e-30 { eig[1] / eig[0] } else { 0.0 };
         // Noise if ratio < threshold (elongated neighborhood).
         noise[i] = ratio < threshold;
     }
@@ -1144,7 +1140,13 @@ fn build_recursive(
     let pca_target = effective_pca_dim(config.pca_dim, dim, n);
     let pca_data: Vec<f32> = if dim > pca_target {
         let mut reduced = vec![0.0f32; n * pca_target];
-        pca_into(&subset, n, pca_target, &mut reduced, config.umap_seed.wrapping_add(depth as u64));
+        pca_into(
+            &subset,
+            n,
+            pca_target,
+            &mut reduced,
+            config.umap_seed.wrapping_add(depth as u64),
+        );
         reduced
     } else {
         subset
@@ -1152,7 +1154,12 @@ fn build_recursive(
     let pca_dim_actual = if dim > pca_target { pca_target } else { dim };
 
     // 2D embedding (PCA-to-2D).
-    let embedded = embed_2d(&pca_data, n, pca_dim_actual, config.umap_seed.wrapping_add(depth as u64).wrapping_add(1));
+    let embedded = embed_2d(
+        &pca_data,
+        n,
+        pca_dim_actual,
+        config.umap_seed.wrapping_add(depth as u64).wrapping_add(1),
+    );
 
     // Chart test (diagnostic — computed but not used for filtering in this phase).
     let _noise_mask = chart_test(&embedded, DEFAULT_KNN_K, config.chart_test_threshold);
@@ -1161,7 +1168,12 @@ fn build_recursive(
     let clusters = dbscan_adaptive(&embedded, config.hdbscan_min_cluster);
 
     // Count clusters.
-    let n_clusters = clusters.iter().filter_map(|&c| c).map(|c| c + 1).max().unwrap_or(0);
+    let n_clusters = clusters
+        .iter()
+        .filter_map(|&c| c)
+        .map(|c| c + 1)
+        .max()
+        .unwrap_or(0);
 
     if n_clusters <= 1 {
         // No meaningful subdivision → flat leaf group.
@@ -1171,9 +1183,8 @@ fn build_recursive(
     // Assign points to clusters (noise → nearest cluster by distance).
     let mut cluster_members: Vec<Vec<usize>> = vec![Vec::new(); n_clusters];
     for (local_idx, &global_idx) in arm_indices.iter().enumerate() {
-        let cluster = clusters[local_idx].unwrap_or_else(|| {
-            nearest_cluster_idx(local_idx, &embedded, &clusters)
-        });
+        let cluster = clusters[local_idx]
+            .unwrap_or_else(|| nearest_cluster_idx(local_idx, &embedded, &clusters));
         cluster_members[cluster].push(global_idx);
     }
 
@@ -1212,7 +1223,7 @@ fn make_leaf_or_single(arm_indices: &[usize], drift_rate: f32) -> TreeNode {
 fn nearest_cluster_idx(local_idx: usize, points: &[[f32; 2]], clusters: &[Option<usize>]) -> usize {
     let mut best_dist = f32::INFINITY;
     let mut best_cluster = 0usize;
- for (j, &c) in clusters.iter().enumerate() {
+    for (j, &c) in clusters.iter().enumerate() {
         if let Some(cid) = c {
             let d = sq_dist(&points[local_idx], &points[j]);
             if d < best_dist {
@@ -1236,9 +1247,15 @@ impl LatentTaskTree {
     /// Panics if `embeddings` is empty, or if embeddings have inconsistent
     /// dimensionality.
     pub fn build(embeddings: &[Vec<f32>], config: LatentTaskTreeConfig) -> Self {
-        assert!(!embeddings.is_empty(), "manifold_bandit::build: embeddings must not be empty");
+        assert!(
+            !embeddings.is_empty(),
+            "manifold_bandit::build: embeddings must not be empty"
+        );
         let dim = embeddings[0].len();
-        assert!(dim > 0, "manifold_bandit::build: embeddings must have non-zero dimension");
+        assert!(
+            dim > 0,
+            "manifold_bandit::build: embeddings must have non-zero dimension"
+        );
         for (i, e) in embeddings.iter().enumerate() {
             assert_eq!(
                 e.len(),
@@ -1365,8 +1382,14 @@ mod tests {
         // Before any observation: root has Beta(1, 1) — evidence pooling of 4
         // children × Beta(1,1): 1 + Σ(1-1) = 1 for both α and β.
         let (ra, rb) = tree.root.beta_params();
-        assert!((ra - 1.0).abs() < 1e-5, "root alpha should start at 1, got {ra}");
-        assert!((rb - 1.0).abs() < 1e-5, "root beta should start at 1, got {rb}");
+        assert!(
+            (ra - 1.0).abs() < 1e-5,
+            "root alpha should start at 1, got {ra}"
+        );
+        assert!(
+            (rb - 1.0).abs() < 1e-5,
+            "root beta should start at 1, got {rb}"
+        );
 
         // Observe 1 success on arm 0.
         tree.observe(0, 1.0, 0);
@@ -1452,13 +1475,25 @@ mod tests {
         // After 1 step with λ=0.5:
         // decay = 0.5, alpha' = 21*0.5 + 0.5 = 11.0, beta' = 1*0.5 + 0.5 = 1.0.
         arm.predict(1);
-        assert!((arm.alpha - 11.0).abs() < 1e-4, "alpha after 1 drift step: {}", arm.alpha);
-        assert!((arm.beta - 1.0).abs() < 1e-4, "beta after 1 drift step: {}", arm.beta);
+        assert!(
+            (arm.alpha - 11.0).abs() < 1e-4,
+            "alpha after 1 drift step: {}",
+            arm.alpha
+        );
+        assert!(
+            (arm.beta - 1.0).abs() < 1e-4,
+            "beta after 1 drift step: {}",
+            arm.beta
+        );
 
         // After another step (total elapsed = 1 from last_obs_step=1):
         // decay = 0.5, alpha' = 11*0.5 + 0.5 = 6.0.
         arm.predict(2);
-        assert!((arm.alpha - 6.0).abs() < 1e-4, "alpha after 2 drift steps: {}", arm.alpha);
+        assert!(
+            (arm.alpha - 6.0).abs() < 1e-4,
+            "alpha after 2 drift steps: {}",
+            arm.alpha
+        );
     }
 
     // ── T1.5(d): blake3 stability ───────────────────────────────────────
@@ -1470,14 +1505,8 @@ mod tests {
         // Build two identical trees.
         let tree1 = build_test_tree(0.01);
         let tree2 = {
-            let left = TreeNode::internal(vec![
-                TreeNode::leaf(0, 0.01),
-                TreeNode::leaf(1, 0.01),
-            ]);
-            let right = TreeNode::internal(vec![
-                TreeNode::leaf(2, 0.01),
-                TreeNode::leaf(3, 0.01),
-            ]);
+            let left = TreeNode::internal(vec![TreeNode::leaf(0, 0.01), TreeNode::leaf(1, 0.01)]);
+            let right = TreeNode::internal(vec![TreeNode::leaf(2, 0.01), TreeNode::leaf(3, 0.01)]);
             let root = TreeNode::internal(vec![left, right]);
             LatentTaskTree::from_root(root, config)
         };
@@ -1577,8 +1606,10 @@ mod tests {
         let mean2 = sum2 / n as f64;
         // With gate disabled, both trees have identical posteriors → identical
         // sample means (within sampling noise, ~0.01).
-        assert!((mean1 - mean2).abs() < 0.05,
-                "gate disabled should match: mean1={mean1:.3} mean2={mean2:.3}");
+        assert!(
+            (mean1 - mean2).abs() < 0.05,
+            "gate disabled should match: mean1={mean1:.3} mean2={mean2:.3}"
+        );
     }
 
     /// When `phase_gate_min_obs` exceeds every child's n_obs, ALL children are
@@ -1603,13 +1634,19 @@ mod tests {
 
         // Root should still be at Beta(1, 1) — uniform.
         if let TreeNode::Internal {
-            beta_alpha, beta_beta, ..
+            beta_alpha,
+            beta_beta,
+            ..
         } = &tree.root
         {
-            assert!((beta_alpha - 1.0).abs() < 1e-5,
-                    "gated root alpha should be 1.0 (uniform), got {beta_alpha}");
-            assert!((beta_beta - 1.0).abs() < 1e-5,
-                    "gated root beta should be 1.0 (uniform), got {beta_beta}");
+            assert!(
+                (beta_alpha - 1.0).abs() < 1e-5,
+                "gated root alpha should be 1.0 (uniform), got {beta_alpha}"
+            );
+            assert!(
+                (beta_beta - 1.0).abs() < 1e-5,
+                "gated root beta should be 1.0 (uniform), got {beta_beta}"
+            );
         } else {
             panic!("root should be Internal");
         }
@@ -1651,7 +1688,10 @@ mod tests {
         //   parent_alpha = (11 - 1 + 1) = 11
         //   parent_beta  = (1  - 1 + 1) = 1
         if let TreeNode::Internal {
-            children, beta_alpha, beta_beta, ..
+            children,
+            beta_alpha,
+            beta_beta,
+            ..
         } = &tree.root
         {
             // Verify the child n_obs counts.
@@ -1661,10 +1701,14 @@ mod tests {
             assert_eq!(b_n_obs, 1, "subtree_B n_obs should be 1");
 
             // Root aggregate should reflect ONLY subtree_A.
-            assert!((beta_alpha - 11.0).abs() < 1e-4,
-                    "root alpha should be 11 (only A contributes), got {beta_alpha}");
-            assert!((beta_beta - 1.0).abs() < 1e-4,
-                    "root beta should be 1 (only A contributes), got {beta_beta}");
+            assert!(
+                (beta_alpha - 11.0).abs() < 1e-4,
+                "root alpha should be 11 (only A contributes), got {beta_alpha}"
+            );
+            assert!(
+                (beta_beta - 1.0).abs() < 1e-4,
+                "root beta should be 1 (only A contributes), got {beta_beta}"
+            );
         } else {
             panic!("root should be Internal");
         }
@@ -1693,15 +1737,22 @@ mod tests {
         //   root alpha = 2 - 1 + 1 = 2
         //   root beta  = 1 - 1 + 1 = 1
         if let TreeNode::Internal {
-            children, beta_alpha, beta_beta, ..
+            children,
+            beta_alpha,
+            beta_beta,
+            ..
         } = &tree.root
         {
             assert_eq!(children[0].n_obs(), 1);
             assert_eq!(children[1].n_obs(), 0);
-            assert!((beta_alpha - 2.0).abs() < 1e-4,
-                    "root alpha should be 2, got {beta_alpha}");
-            assert!((beta_beta - 1.0).abs() < 1e-4,
-                    "root beta should be 1, got {beta_beta}");
+            assert!(
+                (beta_alpha - 2.0).abs() < 1e-4,
+                "root alpha should be 2, got {beta_alpha}"
+            );
+            assert!(
+                (beta_beta - 1.0).abs() < 1e-4,
+                "root beta should be 1, got {beta_beta}"
+            );
         } else {
             panic!("root should be Internal");
         }
@@ -1735,14 +1786,8 @@ mod tests {
     /// Kept separate from `build_test_tree` so the gate tests can supply their
     /// own config without changing the existing test fixture.
     fn make_tree_topology() -> TreeNode {
-        let left = TreeNode::internal(vec![
-            TreeNode::leaf(0, 0.0),
-            TreeNode::leaf(1, 0.0),
-        ]);
-        let right = TreeNode::internal(vec![
-            TreeNode::leaf(2, 0.0),
-            TreeNode::leaf(3, 0.0),
-        ]);
+        let left = TreeNode::internal(vec![TreeNode::leaf(0, 0.0), TreeNode::leaf(1, 0.0)]);
+        let right = TreeNode::internal(vec![TreeNode::leaf(2, 0.0), TreeNode::leaf(3, 0.0)]);
         TreeNode::internal(vec![left, right])
     }
 
@@ -1784,7 +1829,10 @@ mod tests {
             }
         }
         fn next_u64(&mut self) -> u64 {
-            self.state = self.state.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            self.state = self
+                .state
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
             self.state ^ (self.state >> 29)
         }
         fn next_f32(&mut self) -> f32 {
@@ -1807,7 +1855,11 @@ mod tests {
         dim: usize,
         seed: u64,
     ) -> Vec<Vec<f32>> {
-        assert_eq!(n_total % n_clusters, 0, "n_total must be divisible by n_clusters");
+        assert_eq!(
+            n_total % n_clusters,
+            0,
+            "n_total must be divisible by n_clusters"
+        );
         let per_cluster = n_total / n_clusters;
         let mut rng = TestRng::new(seed);
 
@@ -1870,8 +1922,7 @@ mod tests {
 
         // The projected data should have much higher variance than either input dim.
         let mean_proj: f32 = out.iter().sum::<f32>() / n as f32;
-        let var_proj: f32 =
-            out.iter().map(|x| (x - mean_proj).powi(2)).sum::<f32>() / n as f32;
+        let var_proj: f32 = out.iter().map(|x| (x - mean_proj).powi(2)).sum::<f32>() / n as f32;
         // Original variance along x ≈ (10/√12)² ≈ 8.33, projected should be ~5× larger.
         assert!(
             var_proj > 10.0,
@@ -1955,16 +2006,27 @@ mod tests {
             })
             .collect();
         let labels = dbscan_adaptive(&points, 3);
-        let n_clusters = labels.iter().filter_map(|&c| c).map(|c| c + 1).max().unwrap_or(0);
+        let n_clusters = labels
+            .iter()
+            .filter_map(|&c| c)
+            .map(|c| c + 1)
+            .max()
+            .unwrap_or(0);
         assert_eq!(n_clusters, 2, "expected 2 clusters, got {n_clusters}");
         // No noise — all points should be assigned.
-        assert!(labels.iter().all(|c| c.is_some()), "all points should be clustered");
+        assert!(
+            labels.iter().all(|c| c.is_some()),
+            "all points should be clustered"
+        );
     }
 
     #[test]
     fn test_dbscan_isolated_point_is_noise() {
         let points: Vec<[f32; 2]> = vec![
-            [0.0, 0.0], [0.1, 0.0], [0.2, 0.0], [0.3, 0.0], // cluster
+            [0.0, 0.0],
+            [0.1, 0.0],
+            [0.2, 0.0],
+            [0.3, 0.0],     // cluster
             [100.0, 100.0], // isolated
         ];
         let labels = dbscan_adaptive(&points, 3);
@@ -1973,7 +2035,10 @@ mod tests {
         // The cluster points should form one cluster.
         let cluster_labels: Vec<_> = labels[..4].iter().filter_map(|&c| c).collect();
         assert_eq!(cluster_labels.len(), 4, "cluster should have 4 points");
-        assert!(cluster_labels.iter().all(|&c| c == 0), "all cluster points should be cluster 0");
+        assert!(
+            cluster_labels.iter().all(|&c| c == 0),
+            "all cluster points should be cluster 0"
+        );
     }
 
     // ── T3.5: build() integration tests ─────────────────────────────────
@@ -1991,17 +2056,18 @@ mod tests {
             "root should be Internal for multi-cluster data"
         );
         let n_top = root_children_count(&tree.root);
-        assert!(
-            n_top >= 4,
-            "expected ≥4 top-level clusters, got {n_top}"
-        );
+        assert!(n_top >= 4, "expected ≥4 top-level clusters, got {n_top}");
 
         // All 128 arms should be reachable.
         assert_eq!(tree.num_arms(), 128, "all 128 arms should be in the tree");
         let mut ids = Vec::new();
         collect_arm_ids(&tree.root, &mut ids);
         ids.sort();
-        assert_eq!(ids, (0..128).collect::<Vec<_>>(), "arm_ids should be 0..128");
+        assert_eq!(
+            ids,
+            (0..128).collect::<Vec<_>>(),
+            "arm_ids should be 0..128"
+        );
     }
 
     #[test]
@@ -2024,7 +2090,11 @@ mod tests {
         let config = LatentTaskTreeConfig::default();
         let t1 = LatentTaskTree::build(&e1, config.clone());
         let t2 = LatentTaskTree::build(&e2, config);
-        assert_ne!(t1.blake3_root(), t2.blake3_root(), "different embeddings → different BLAKE3");
+        assert_ne!(
+            t1.blake3_root(),
+            t2.blake3_root(),
+            "different embeddings → different BLAKE3"
+        );
     }
 
     #[test]
@@ -2064,7 +2134,11 @@ mod tests {
             seen.insert(arm);
         }
         // With uniform priors, should eventually visit all arms.
-        assert_eq!(seen.len(), 64, "should visit all 64 arms with uniform prior");
+        assert_eq!(
+            seen.len(),
+            64,
+            "should visit all 64 arms with uniform prior"
+        );
     }
 
     #[test]
@@ -2085,8 +2159,16 @@ mod tests {
         let leaf = find_leaf(&tree.root, 10).expect("arm 10 should exist");
         if let TreeNode::Leaf { filter, .. } = leaf {
             // alpha = 1 + 5 = 6.
-            assert!((filter.alpha - 6.0).abs() < 1e-5, "alpha should be 6, got {}", filter.alpha);
-            assert!((filter.beta - 1.0).abs() < 1e-5, "beta should be 1, got {}", filter.beta);
+            assert!(
+                (filter.alpha - 6.0).abs() < 1e-5,
+                "alpha should be 6, got {}",
+                filter.alpha
+            );
+            assert!(
+                (filter.beta - 1.0).abs() < 1e-5,
+                "beta should be 1, got {}",
+                filter.beta
+            );
         }
     }
 
@@ -2094,9 +2176,7 @@ mod tests {
 
     fn find_leaf(node: &TreeNode, arm_id: usize) -> Option<&TreeNode> {
         match node {
-            TreeNode::Leaf {
-                arm_id: id, ..
-            } if *id == arm_id => Some(node),
+            TreeNode::Leaf { arm_id: id, .. } if *id == arm_id => Some(node),
             TreeNode::Leaf { .. } => None,
             TreeNode::Internal { children, .. } => {
                 for child in children {

@@ -48,10 +48,10 @@ pub use katgpt_core::cgsp;
 pub use katgpt_claim::clr;
 #[cfg(feature = "clr")]
 pub use katgpt_claim::clr::{
-    allocate_budget, brevity_tiebreak, Claim, ClaimExtractor, ClaimVerifier, ClrConfig, ClrScratch,
-    Cluster, DirectionVectorSource, FnClaimExtractor, learning_potential, mgpo_sampling_weight,
-    ReliabilityScore, should_write_memory, SigmoidProjectionVerifier, Trajectory, Verdict,
-    VoteResult, clr_vote, clr_vote_minimal,
+    Claim, ClaimExtractor, ClaimVerifier, ClrConfig, ClrScratch, Cluster, DirectionVectorSource,
+    FnClaimExtractor, ReliabilityScore, SigmoidProjectionVerifier, Trajectory, Verdict, VoteResult,
+    allocate_budget, brevity_tiebreak, clr_vote, clr_vote_minimal, learning_potential,
+    mgpo_sampling_weight, should_write_memory,
 };
 
 // Claim Rubric Runtime — L1/L2/L3 evidence ladder validator (Plan 307,
@@ -84,8 +84,8 @@ pub use katgpt_core::compaction;
 #[cfg(feature = "closed_unit_compaction")]
 pub use katgpt_core::compaction::{
     Backstop, ClosedUnitCompactionGate, ClosedUnitCompactionGateBuilder, CombineOp,
-    CompactionAuditRecord, CompactionDecision, DecisionKind, FireRule, FireRuleEval, PredicateAudit,
-    PredicateReason, PredicateResult, Rubric, RubricScratch, RubricVerdict,
+    CompactionAuditRecord, CompactionDecision, DecisionKind, FireRule, FireRuleEval,
+    PredicateAudit, PredicateReason, PredicateResult, Rubric, RubricScratch, RubricVerdict,
 };
 // Phase 10 absorption (Proposal 003, 2026-07-04): module moved to katgpt-core.
 // Re-export preserves `katgpt_rs::ssd_block::*` paths.
@@ -111,10 +111,10 @@ pub use katgpt_band::collider_pruner;
 // CompressionDrafter — corpus-as-model quest grammar drafter (Plan 285, Research 256).
 // Re-exports katgpt-core's compression_drafter module for downstream consumers (riir-games).
 // Opt-in behind the `compression_drafter` feature until GOAT gate passes.
-#[cfg(feature = "compression_drafter")]
-pub use katgpt_core::compression_drafter;
 #[cfg(any(feature = "gdn2_attention", feature = "wall_attention"))]
 pub use katgpt_attn::diagonal_gate;
+#[cfg(feature = "compression_drafter")]
+pub use katgpt_core::compression_drafter;
 // Phase 6 absorption (Proposal 003, 2026-07-04): `ilc` moved to katgpt-speculative;
 // `trd` stays root (depends on `crate::fold` — transformer-bound glue). peira
 // already re-exports katgpt-spectral (Phase 4). The distill/mod.rs shim re-exports
@@ -130,12 +130,12 @@ pub mod distill;
 #[allow(clippy::too_many_lines)]
 #[allow(clippy::needless_range_loop)]
 pub mod dllm;
+#[cfg(feature = "ega_attn")]
+pub use katgpt_attn::ega_attn;
 #[cfg(feature = "critical_interval_gate")]
 // Phase 12 absorption (Proposal 003, 2026-07-04): module moved to katgpt-core.
 // Re-export preserves `katgpt_rs::dllm_solver::*` paths.
 pub use katgpt_core::dllm_solver;
-#[cfg(feature = "ega_attn")]
-pub use katgpt_attn::ega_attn;
 // `feedback` module exiled to `katgpt-deprecated` (Phase 3a, Proposal 003).
 // Re-export preserved for back-compat: `katgpt_rs::feedback::*` still resolves.
 #[cfg(feature = "feedback")]
@@ -177,39 +177,39 @@ pub mod inference_router;
 // Phase 12 absorption (Proposal 003, 2026-07-04): module moved to katgpt-pruners.
 // Re-export preserves `katgpt_rs::interval_pruner::*` paths.
 pub use katgpt_pruners::interval_pruner;
-#[cfg(feature = "iso_quant")]
-pub use katgpt_quant::iso_quant;
 #[cfg(feature = "lattice_operad")]
 // Phase 12 absorption (Proposal 003, 2026-07-04): module moved to katgpt-pruners.
 // Re-export preserves `katgpt_rs::lattice_operad::*` paths.
 pub use katgpt_pruners::lattice_operad;
+#[cfg(feature = "iso_quant")]
+pub use katgpt_quant::iso_quant;
 #[cfg(feature = "gauge_invariant")]
 pub use katgpt_spectral::gauge_invariant;
-pub use katgpt_spectral::spectral_retract;
 #[cfg(feature = "manifold_power_iter_router")]
 pub use katgpt_spectral::manifold_power_iter_router;
+pub use katgpt_spectral::spectral_retract;
 // Kog CPU Fusion — RMSNorm gamma folding + QKV interleaving (Plan 160 GOAT 3/3 Gemma 2 scale).
 // Phase 9: mbu moved to katgpt-transformer; re-export preserves `katgpt_rs::mbu::*`.
-#[cfg(feature = "kog_cpu_fusion")]
-pub use katgpt_transformer::mbu;
 #[cfg(feature = "newton_schulz")]
-pub use katgpt_core::newton_schulz;  // Extracted to katgpt-core per Issue 355 Phase 1a; re-export preserves historical `katgpt_rs::newton_schulz::*` paths.
-#[cfg(feature = "off_principal_retrieval")]
-pub use katgpt_spectral::off_principal;
-#[cfg(feature = "hla_eigenbasis_recovery")]
-// Phase 12 absorption (Proposal 003, 2026-07-04): module moved to katgpt-spectral.
-// Re-export preserves `katgpt_rs::hla_eigenbasis::*` paths.
-pub use katgpt_spectral::hla_eigenbasis;
-#[cfg(feature = "octopus")]
-pub use katgpt_quant::octopus;
+pub use katgpt_core::newton_schulz; // Extracted to katgpt-core per Issue 355 Phase 1a; re-export preserves historical `katgpt_rs::newton_schulz::*` paths.
 #[cfg(feature = "modality_pruned_load")]
 // Phase 12 absorption (Proposal 003, 2026-07-04): module moved to katgpt-core.
 // Re-export preserves `katgpt_rs::pipeline_pruner::*` paths.
 pub use katgpt_core::pipeline_pruner;
+#[cfg(feature = "octopus")]
+pub use katgpt_quant::octopus;
 #[cfg(feature = "planar_quant")]
 pub use katgpt_quant::planar_quant;
+#[cfg(feature = "hla_eigenbasis_recovery")]
+// Phase 12 absorption (Proposal 003, 2026-07-04): module moved to katgpt-spectral.
+// Re-export preserves `katgpt_rs::hla_eigenbasis::*` paths.
+pub use katgpt_spectral::hla_eigenbasis;
+#[cfg(feature = "off_principal_retrieval")]
+pub use katgpt_spectral::off_principal;
+#[cfg(feature = "kog_cpu_fusion")]
+pub use katgpt_transformer::mbu;
 #[cfg(feature = "plot")]
-pub mod plot;  // Issue 355 Phase 2a: gated behind `plot` feature (plotters is now optional). DEFAULT-ON.
+pub mod plot; // Issue 355 Phase 2a: gated behind `plot` feature (plotters is now optional). DEFAULT-ON.
 // Orthogonal Procrustes — cross-frame embedding alignment via polar
 // decomposition (Newton-Schulz on B^T A). Issue 001 (katgpt-rs). GOAT
 // candidate — gated behind `orthogonal_procrustes` until benchmark gates
@@ -261,10 +261,10 @@ pub use katgpt_speculative::rt_turbo;
 pub use katgpt_ruliology as ruliology;
 // Phase 5 absorption (Proposal 003, 2026-07-04): module moved to katgpt-kv.
 // Re-export preserves `katgpt_rs::segment_checkpoint::*` paths.
-#[cfg(feature = "segment_checkpoint")]
-pub use katgpt_kv::segment_checkpoint;
 #[cfg(feature = "chiaroscuro")]
 pub use katgpt_attn::chiaroscuro;
+#[cfg(feature = "segment_checkpoint")]
+pub use katgpt_kv::segment_checkpoint;
 // Functional Attention composition layer — Plan 286 Phase 5 (T5.1–T5.3). Each
 // submodule is independently feature-gated; the module root compiles when any
 // of the three composition features is on.
@@ -277,32 +277,32 @@ pub use katgpt_attn::funcattn_compose;
 // Phase 11 absorption (Proposal 003, 2026-07-04): modules moved to katgpt-sparse.
 // Re-exports preserve `katgpt_rs::specialist_projection::*` and
 // `katgpt_rs::sparse_task_vector::*` paths.
-#[cfg(feature = "specialist_projection")]
-pub use katgpt_sparse::specialist_projection;
-#[cfg(feature = "sparse_task_vector")]
-pub use katgpt_sparse::sparse_task_vector;
 #[cfg(feature = "sparse_task_vector")]
 // Phase 12 absorption (Proposal 003, 2026-07-04): module moved to katgpt-sparse.
 // Re-export preserves `katgpt_rs::sparse_compose::*` paths.
 pub use katgpt_sparse::sparse_compose;
+#[cfg(feature = "sparse_task_vector")]
+pub use katgpt_sparse::sparse_task_vector;
+#[cfg(feature = "specialist_projection")]
+pub use katgpt_sparse::specialist_projection;
 // Phase 10 absorption (Proposal 003, 2026-07-04): module moved to katgpt-core.
 // Re-export preserves `katgpt_rs::skill_opt::*` paths.
 #[cfg(feature = "skill_opt")]
 pub use katgpt_core::skill_opt;
 #[cfg(feature = "sleep_consolidation")]
 pub mod sleep;
-#[cfg(feature = "kv_share")]
-pub use katgpt_kv::kv_share;
-#[cfg(feature = "osc_kv")]
-pub use katgpt_kv::osc_kv;
 #[cfg(feature = "cs_kv_probe")]
 pub use katgpt_kv::cs_kv_probe;
+#[cfg(feature = "kv_share")]
+pub use katgpt_kv::kv_share;
+#[cfg(feature = "kvarn")]
+pub use katgpt_kv::kvarn;
+#[cfg(feature = "osc_kv")]
+pub use katgpt_kv::osc_kv;
 #[cfg(feature = "shard_kv")]
 pub use katgpt_kv::shard_kv;
 #[cfg(feature = "still_kv")]
 pub use katgpt_kv::still_kv;
-#[cfg(feature = "kvarn")]
-pub use katgpt_kv::kvarn;
 #[cfg(feature = "targeted_precision")]
 pub use katgpt_kv::targeted_precision;
 #[cfg(feature = "sp_kv")]
@@ -333,12 +333,12 @@ mod sp_kv_forward_mod;
 pub use katgpt_speculative::spec_reconciliation;
 // Phase 6 absorption (Proposal 003, 2026-07-04): module moved to katgpt-speculative.
 // Re-export preserves `katgpt_rs::spechop::*` paths.
-#[cfg(feature = "spechop")]
-pub use katgpt_speculative::spechop;
 #[cfg(feature = "spectral_budget")]
 pub use katgpt_spectral::spectral_budget;
 #[cfg(feature = "spectral_rank")]
 pub use katgpt_spectral::spectral_concentration;
+#[cfg(feature = "spechop")]
+pub use katgpt_speculative::spechop;
 #[cfg(feature = "spectral_quant")]
 pub mod spectralquant {
     //! Spectralquant re-export shim (Issue 015 Phase 5).
@@ -353,21 +353,21 @@ pub mod speculative;
 // SwiR Switch-Thinking — Explicit↔Latent mode controller (Plan 275, Research 241).
 // Phase 12 T4.6 (2026-07-04): strategy_adapter moved to katgpt-transformer
 // (the thinking_cot cycle is resolved). This shim re-exports everything.
-#[cfg(feature = "swir_switch_thinking")]
-pub use katgpt_transformer::swir;
 #[cfg(feature = "static_cal_tables")]
 pub use katgpt_attn::static_cal;
 #[cfg(feature = "stiff_anomaly")]
 pub use katgpt_spectral::stiff_anomaly;
+#[cfg(feature = "swir_switch_thinking")]
+pub use katgpt_transformer::swir;
 // thinking_cot — adaptive CoT framework (Plan 194). The feature is a
 // meta-feature that pulls in the bandit/prune/probe machinery required by
 // speculative::thinking_controller; the module itself owns the shared
 // ThinkingStrategy trait (Plan 275 Phase 2).
+pub use katgpt_tokenizer as tokenizer;
 #[cfg(feature = "thinking_cot")]
 // Phase 12 absorption (Proposal 003, 2026-07-04): module moved to katgpt-transformer.
 // Re-export preserves `katgpt_rs::thinking_cot::*` paths.
-pub use katgpt_transformer::thinking_cot;
-pub use katgpt_tokenizer as tokenizer;  // re-export (Issue 014): preserves `katgpt_rs::tokenizer::*` paths for tests/examples/validator
+pub use katgpt_transformer::thinking_cot; // re-export (Issue 014): preserves `katgpt_rs::tokenizer::*` paths for tests/examples/validator
 pub mod transformer;
 // Phase 10 absorption (Proposal 003, 2026-07-04): module moved to katgpt-core.
 // Re-export preserves `katgpt_rs::trigger_gate::*` paths.
@@ -433,7 +433,9 @@ pub use katgpt_core::llmexec_guard;
 pub use katgpt_validator as validator;
 
 #[cfg(feature = "breakeven_routing")]
-pub use katgpt_core::breakeven::{BreakevenBandit, BreakevenStats, BreakevenTierPair, BreakevenTracker};
+pub use katgpt_core::breakeven::{
+    BreakevenBandit, BreakevenStats, BreakevenTierPair, BreakevenTracker,
+};
 
 #[cfg(feature = "tf_loop")]
 pub mod tf_loop;
@@ -498,7 +500,7 @@ pub use salience::{
 pub use katgpt_pruners::screening;
 #[cfg(feature = "complexity_prior_sampler")]
 pub use katgpt_pruners::screening::{
-    CoincidenceGate, CompressionPriorSampler, ComplexityProxy, EntropyComplexity, L1Complexity,
+    CoincidenceGate, ComplexityProxy, CompressionPriorSampler, EntropyComplexity, L1Complexity,
     LatentCompressionPriorSampler, RleComplexity, quantize_latent,
 };
 

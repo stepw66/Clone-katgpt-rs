@@ -782,8 +782,8 @@ pub(crate) fn deflate(v: &mut [f32], basis: &[Vec<f32>]) {
 
 #[cfg(test)]
 mod tests {
-    use crate::operators::graph_laplacian;
     use super::*;
+    use crate::operators::graph_laplacian;
 
     /// Tolerance for floating-point comparisons.
     const TOL: f32 = 1e-3;

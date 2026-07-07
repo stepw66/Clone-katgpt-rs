@@ -359,7 +359,12 @@ mod tests {
         // the non-uniform scaling mixes modes. This is CORRECT behavior: the
         // audit flags it as having spurious coupling, because a spectral
         // transport operator should act per-mode, not per-coordinate.
-        let op = make_kxk(4, &[2.0, 0.0, 0.0, 0.0, 0.0, 1.5, 0.0, 0.0, 0.0, 0.0, 0.7, 0.0, 0.0, 0.0, 0.0, 0.3]);
+        let op = make_kxk(
+            4,
+            &[
+                2.0, 0.0, 0.0, 0.0, 0.0, 1.5, 0.0, 0.0, 0.0, 0.0, 0.7, 0.0, 0.0, 0.0, 0.0, 0.3,
+            ],
+        );
         let report = spectral_audit(&op);
         // This SHOULD fail G6 — non-uniform diagonal mixes DCT-II modes.
         assert!(
@@ -372,12 +377,13 @@ mod tests {
     #[test]
     fn random_operator_fails_g6() {
         // A dense random-ish operator: lots of cross-mode coupling.
-        let op = make_kxk(4, &[
-            0.7, -0.4, 0.2, 0.9,
-            -0.3, 0.6, -0.8, 0.1,
-            0.5, -0.2, 0.4, -0.7,
-            -0.6, 0.8, 0.3, -0.5,
-        ]);
+        let op = make_kxk(
+            4,
+            &[
+                0.7, -0.4, 0.2, 0.9, -0.3, 0.6, -0.8, 0.1, 0.5, -0.2, 0.4, -0.7, -0.6, 0.8, 0.3,
+                -0.5,
+            ],
+        );
         let report = spectral_audit(&op);
         assert!(
             !report.passes_g6(),
@@ -433,7 +439,10 @@ mod tests {
         let id = TransportOperator::identity(8);
         let report = spectral_audit(&id);
         assert_eq!(report.modes, DEFAULT_FOURIER_MODES);
-        assert_eq!(report.mode_matrix.len(), DEFAULT_FOURIER_MODES * DEFAULT_FOURIER_MODES);
+        assert_eq!(
+            report.mode_matrix.len(),
+            DEFAULT_FOURIER_MODES * DEFAULT_FOURIER_MODES
+        );
         assert_eq!(report.mode_gains.len(), DEFAULT_FOURIER_MODES);
         assert_eq!(report.k, 8);
     }

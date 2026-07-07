@@ -21,7 +21,10 @@ use katgpt_rs::pruners::bomber::replay::ReplaySample;
 fn parse_args() -> (PathBuf, PathBuf) {
     let args: Vec<String> = std::env::args().collect();
     if args.len() < 3 {
-        eprintln!("Usage: {} <input_postcard.jsonl> <output_jsonl.jsonl>", args[0]);
+        eprintln!(
+            "Usage: {} <input_postcard.jsonl> <output_jsonl.jsonl>",
+            args[0]
+        );
         eprintln!();
         eprintln!("Converts binary postcard replay records to JSONL text format.");
         eprintln!("The LoRA trainer (parse_jsonl_dir) expects JSONL text, not binary.");

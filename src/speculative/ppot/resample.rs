@@ -13,17 +13,17 @@
 //! Plan 027 extension: multi-strategy cycling and adaptive rescue with
 //! rejection memory from TRT (arXiv:2602.03094).
 
-use katgpt_core::speculative::sampling::sample_from_distribution;
 use crate::speculative::types::ScreeningPruner;
 use crate::types::Rng;
+use katgpt_core::speculative::sampling::sample_from_distribution;
 
 // Plan 367 Phase 3 — QMC-aware PPoT variant generation.
+#[cfg(feature = "qmc_sampling")]
+use super::types::QmcMethod;
 #[cfg(feature = "qmc_sampling")]
 use katgpt_core::speculative::qmc::{LatticeQmc, QmcSource, SobolQmc, StratifiedQmc};
 #[cfg(feature = "qmc_sampling")]
 use katgpt_core::speculative::sampling::sample_from_distribution_qmc;
-#[cfg(feature = "qmc_sampling")]
-use super::types::QmcMethod;
 
 use super::entropy::identify_high_entropy_positions;
 use super::entropy::identify_high_entropy_positions_with_entropy_into;
@@ -231,11 +231,7 @@ fn sample_different_value_qmc(
         let scaled = *u * n;
         let idx = (scaled as usize).min(len - 2);
         *u = scaled - idx as f32;
-        if idx >= original_token {
-            idx + 1
-        } else {
-            idx
-        }
+        if idx >= original_token { idx + 1 } else { idx }
     }
 }
 
@@ -1227,7 +1223,14 @@ mod tests {
         };
 
         let variants = ppot_resample_multi_strategy(
-            &base_path, marginals, &[0, 1, 2], 8, &[], &config, &mut scratch, &mut rng,
+            &base_path,
+            marginals,
+            &[0, 1, 2],
+            8,
+            &[],
+            &config,
+            &mut scratch,
+            &mut rng,
         );
 
         assert_eq!(variants.len(), 8);
@@ -1268,14 +1271,28 @@ mod tests {
             seed: 42,
         };
         let variants_qmc = ppot_resample_multi_strategy(
-            &base_path, marginals, &positions, k, &[], &config_qmc, &mut scratch, &mut rng_qmc,
+            &base_path,
+            marginals,
+            &positions,
+            k,
+            &[],
+            &config_qmc,
+            &mut scratch,
+            &mut rng_qmc,
         );
 
         // i.i.d. variants (QMC disabled).
         let mut rng_iid = Rng::new(42);
         let config_iid = PpotConfig::default().with_cached_support(4);
         let variants_iid = ppot_resample_multi_strategy(
-            &base_path, marginals, &positions, k, &[], &config_iid, &mut scratch, &mut rng_iid,
+            &base_path,
+            marginals,
+            &positions,
+            k,
+            &[],
+            &config_iid,
+            &mut scratch,
+            &mut rng_iid,
         );
 
         let div_qmc = mean_pairwise_edit_distance(&variants_qmc);

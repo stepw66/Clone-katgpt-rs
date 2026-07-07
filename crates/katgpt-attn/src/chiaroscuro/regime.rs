@@ -147,8 +147,10 @@ impl ChiarRegimeGate {
         let alpha = 0.01; // gentle — 100-token window for transition
         let beta = 1000.0; // sharp — variance is small in absolute terms
 
-        let length_signal = sigmoid(alpha * (self.prompt_tokens as f32 - self.min_prompt_tokens as f32));
-        let variance_signal = sigmoid(beta * (self.h_variance.variance() - self.naturalistic_variance));
+        let length_signal =
+            sigmoid(alpha * (self.prompt_tokens as f32 - self.min_prompt_tokens as f32));
+        let variance_signal =
+            sigmoid(beta * (self.h_variance.variance() - self.naturalistic_variance));
 
         // AND gate: both signals must individually cross 0.5 (their respective thresholds).
         // This avoids the case where variance = 0 still passes because length signal ≈ 1.
@@ -164,8 +166,10 @@ impl ChiarRegimeGate {
         }
         let alpha = 0.01;
         let beta = 1000.0;
-        let length_signal = sigmoid(alpha * (self.prompt_tokens as f32 - self.min_prompt_tokens as f32));
-        let variance_signal = sigmoid(beta * (self.h_variance.variance() - self.naturalistic_variance));
+        let length_signal =
+            sigmoid(alpha * (self.prompt_tokens as f32 - self.min_prompt_tokens as f32));
+        let variance_signal =
+            sigmoid(beta * (self.h_variance.variance() - self.naturalistic_variance));
         length_signal * variance_signal
     }
 
@@ -211,7 +215,10 @@ mod tests {
         w.observe(2.0);
         w.observe(3.0);
         assert!((w.mean() - 2.0).abs() < 1e-6);
-        assert!(w.variance() > 0.0, "variance of {{1,2,3}} should be positive");
+        assert!(
+            w.variance() > 0.0,
+            "variance of {{1,2,3}} should be positive"
+        );
         // Sample variance of {1,2,3} = ((1-2)² + (2-2)² + (3-2)²) / (3-1) = 2/2 = 1.0
         assert!((w.variance() - 1.0).abs() < 1e-6, "variance should be 1.0");
     }
@@ -247,7 +254,10 @@ mod tests {
             g.observe_h(0.85 + ((i % 10) as f32) * 0.001);
         }
         // Short prompt → no.
-        assert!(!g.should_apply_chiar(), "short prompt should not trigger CHIAR");
+        assert!(
+            !g.should_apply_chiar(),
+            "short prompt should not trigger CHIAR"
+        );
     }
 
     #[test]
@@ -286,7 +296,10 @@ mod tests {
             g.observe_h(0.9);
         }
         let p = g.apply_probability();
-        assert!((0.0..=1.0).contains(&p), "probability must be in [0, 1], got {p}");
+        assert!(
+            (0.0..=1.0).contains(&p),
+            "probability must be in [0, 1], got {p}"
+        );
     }
 
     #[test]

@@ -326,7 +326,10 @@ impl FeedbackBandit {
 
         // Score feedback arms (4-5) using standard UCB1
         let key = (context.domain, context.entropy_bin, context.desperation_bin);
-        let fb_stats = self.feedback_stats.entry(key).or_insert_with(FeedbackContextStats::new);
+        let fb_stats = self
+            .feedback_stats
+            .entry(key)
+            .or_insert_with(FeedbackContextStats::new);
 
         for fb_arm in 0..2 {
             let arm = ARM_HARNESS + fb_arm;
@@ -637,7 +640,10 @@ mod tests {
         //
         // The key assertion: PlanNew (arm 0) Q-value in FeedbackBandit's inner
         // should be within 10% of the standalone base bandit's PlanNew Q-value.
-        let fb_plan_new_q = fb.inner().q_value(ctx, PlanningDecision::PlanNew).unwrap_or(0.0);
+        let fb_plan_new_q = fb
+            .inner()
+            .q_value(ctx, PlanningDecision::PlanNew)
+            .unwrap_or(0.0);
         let base_plan_new_q = base.q_value(ctx, PlanningDecision::PlanNew).unwrap_or(0.0);
 
         // Both should be positive (reward is 0.5)

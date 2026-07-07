@@ -38,9 +38,7 @@ fn main() {
     let k = 4;
 
     // Pre-allocate all scratch (caller owns it).
-    let states: Vec<f32> = (0..n * d)
-        .map(|i| (i as f32) * 0.001)
-        .collect();
+    let states: Vec<f32> = (0..n * d).map(|i| (i as f32) * 0.001).collect();
     let w = identity_projection(d, k);
     let mut output = vec![0.0f32; n * d];
     let mut sq = vec![0.0f32; n * k];
@@ -51,10 +49,18 @@ fn main() {
     // ── Warm-up (populate caches, JIT-style first-call effects). ──
     for _ in 0..1000 {
         set_sigmoid_attention_into(
-            black_box(&states), black_box(&w), black_box(&w), None,
-            black_box(&mut output), black_box(&cfg),
-            n, d, k,
-            &mut sq, &mut sk, &mut sa,
+            black_box(&states),
+            black_box(&w),
+            black_box(&w),
+            None,
+            black_box(&mut output),
+            black_box(&cfg),
+            n,
+            d,
+            k,
+            &mut sq,
+            &mut sk,
+            &mut sa,
         )
         .unwrap();
     }
@@ -70,10 +76,18 @@ fn main() {
     let measure_start = Instant::now();
     for _ in 0..iters {
         set_sigmoid_attention_into(
-            black_box(&states), black_box(&w), black_box(&w), None,
-            black_box(&mut output), black_box(&cfg),
-            n, d, k,
-            &mut sq, &mut sk, &mut sa,
+            black_box(&states),
+            black_box(&w),
+            black_box(&w),
+            None,
+            black_box(&mut output),
+            black_box(&cfg),
+            n,
+            d,
+            k,
+            &mut sq,
+            &mut sk,
+            &mut sa,
         )
         .unwrap();
     }
@@ -88,9 +102,18 @@ fn main() {
     println!("   mean per call:  {mean_us:.3} µs ({mean_ns:.0} ns)");
     println!("   target (prod):  < 25.0 µs at N=64 (within 50ms tick budget, 2000× headroom)");
     println!("   target (NPC):   < 5.0 µs  at N≤32 (speculative, needs SIMD)");
-    println!("   result (prod):  {}", if g3_pass { "PASS ✓" } else { "FAIL ✗" });
-    println!("   result (NPC):   {} (N=64 is above NPC-zone size; see scale sweep for N≤32)",
-             if g3_npc_zone_pass { "PASS ✓" } else { "deferred — see scale sweep" });
+    println!(
+        "   result (prod):  {}",
+        if g3_pass { "PASS ✓" } else { "FAIL ✗" }
+    );
+    println!(
+        "   result (NPC):   {} (N=64 is above NPC-zone size; see scale sweep for N≤32)",
+        if g3_npc_zone_pass {
+            "PASS ✓"
+        } else {
+            "deferred — see scale sweep"
+        }
+    );
     println!();
 
     // ─── G4: zero-alloc (dense path) ────────────────────────────────────
@@ -98,10 +121,18 @@ fn main() {
     ALLOC_COUNT.store(0, Ordering::Relaxed);
     let (_, allocs) = alloc_delta(|| {
         set_sigmoid_attention_into(
-            black_box(&states), black_box(&w), black_box(&w), None,
-            black_box(&mut output), black_box(&cfg),
-            n, d, k,
-            &mut sq, &mut sk, &mut sa,
+            black_box(&states),
+            black_box(&w),
+            black_box(&w),
+            None,
+            black_box(&mut output),
+            black_box(&cfg),
+            n,
+            d,
+            k,
+            &mut sq,
+            &mut sk,
+            &mut sa,
         )
         .unwrap();
     });
@@ -109,17 +140,28 @@ fn main() {
     println!("G4 zero-alloc (dense path, N={n}, d={d}, k={k}):");
     println!("   allocations on measured call: {allocs}");
     println!("   target:                       0");
-    println!("   result:                       {}", if g4_pass { "PASS ✓" } else { "FAIL ✗" });
+    println!(
+        "   result:                       {}",
+        if g4_pass { "PASS ✓" } else { "FAIL ✗" }
+    );
     println!();
 
     // ─── G4 supplementary: sparse top-k path (documented not-zero-alloc) ──
     let cfg_topk = SetAttentionConfig::default().with_top_k(16);
     let (_, topk_allocs) = alloc_delta(|| {
         set_sigmoid_attention_into(
-            black_box(&states), black_box(&w), black_box(&w), None,
-            black_box(&mut output), black_box(&cfg_topk),
-            n, d, k,
-            &mut sq, &mut sk, &mut sa,
+            black_box(&states),
+            black_box(&w),
+            black_box(&w),
+            None,
+            black_box(&mut output),
+            black_box(&cfg_topk),
+            n,
+            d,
+            k,
+            &mut sq,
+            &mut sk,
+            &mut sa,
         )
         .unwrap();
     });
@@ -140,10 +182,18 @@ fn main() {
         let t0 = Instant::now();
         for _ in 0..scale_iters {
             set_sigmoid_attention_into(
-                black_box(&scale_states), black_box(&w), black_box(&w), None,
-                black_box(&mut scale_output), black_box(&cfg),
-                scale_n, d, k,
-                &mut scale_sq, &mut scale_sk, &mut scale_sa,
+                black_box(&scale_states),
+                black_box(&w),
+                black_box(&w),
+                None,
+                black_box(&mut scale_output),
+                black_box(&cfg),
+                scale_n,
+                d,
+                k,
+                &mut scale_sq,
+                &mut scale_sk,
+                &mut scale_sa,
             )
             .unwrap();
         }
@@ -174,38 +224,72 @@ fn main() {
         // Warm-up
         for _ in 0..5 {
             set_sigmoid_attention_into(
-                black_box(&scale_states), black_box(&w), black_box(&w), None,
-                black_box(&mut scale_output), black_box(&cfg_topk16),
-                scale_n, d, k,
-                &mut scale_sq, &mut scale_sk, &mut scale_sa,
-            ).unwrap();
+                black_box(&scale_states),
+                black_box(&w),
+                black_box(&w),
+                None,
+                black_box(&mut scale_output),
+                black_box(&cfg_topk16),
+                scale_n,
+                d,
+                k,
+                &mut scale_sq,
+                &mut scale_sk,
+                &mut scale_sa,
+            )
+            .unwrap();
         }
         let t0 = Instant::now();
         for _ in 0..scale_iters {
             set_sigmoid_attention_into(
-                black_box(&scale_states), black_box(&w), black_box(&w), None,
-                black_box(&mut scale_output), black_box(&cfg_topk16),
-                scale_n, d, k,
-                &mut scale_sq, &mut scale_sk, &mut scale_sa,
-            ).unwrap();
+                black_box(&scale_states),
+                black_box(&w),
+                black_box(&w),
+                None,
+                black_box(&mut scale_output),
+                black_box(&cfg_topk16),
+                scale_n,
+                d,
+                k,
+                &mut scale_sq,
+                &mut scale_sk,
+                &mut scale_sa,
+            )
+            .unwrap();
         }
         let dt = t0.elapsed();
         let per_call_us = dt.as_nanos() as f64 / (scale_iters as f64) / 1000.0;
         let target_pass = scale_n != 1000 || per_call_us < 100.0;
-        println!("   N={scale_n:>4} top_k=16: {per_call_us:>10.3} µs/call {}",
-                 if scale_n == 1000 {
-                     if target_pass { "< 100µs PASS ✓" } else { ">= 100µs FAIL ✗ (expected — O(N²) scoring dominates; LSH needed for sub-100µs)" }
-                 } else { "" });
+        println!(
+            "   N={scale_n:>4} top_k=16: {per_call_us:>10.3} µs/call {}",
+            if scale_n == 1000 {
+                if target_pass {
+                    "< 100µs PASS ✓"
+                } else {
+                    ">= 100µs FAIL ✗ (expected — O(N²) scoring dominates; LSH needed for sub-100µs)"
+                }
+            } else {
+                ""
+            }
+        );
     }
     println!();
 
     // ─── Verdict ────────────────────────────────────────────────────────
     println!("═══ Verdict ═══");
-    println!("   G3 latency:    {}", if g3_pass { "PASS ✓" } else { "FAIL ✗" });
-    println!("   G4 zero-alloc: {}", if g4_pass { "PASS ✓" } else { "FAIL ✗" });
+    println!(
+        "   G3 latency:    {}",
+        if g3_pass { "PASS ✓" } else { "FAIL ✗" }
+    );
+    println!(
+        "   G4 zero-alloc: {}",
+        if g4_pass { "PASS ✓" } else { "FAIL ✗" }
+    );
     if g3_pass && g4_pass {
         println!("   → Plan 354 Phase 2 perf gates PASS.");
-        println!("   → Promotion to default-on also requires Plan 355 G6 (riir-ai runtime fusion gate).");
+        println!(
+            "   → Promotion to default-on also requires Plan 355 G6 (riir-ai runtime fusion gate)."
+        );
     } else {
         println!("   → One or more perf gates FAILED — keep set_attention opt-in.");
     }

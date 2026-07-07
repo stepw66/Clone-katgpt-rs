@@ -135,7 +135,10 @@ mod tests {
         assert_eq!(c.m, 5, "m default");
         assert!((c.tau_v - 0.5).abs() < 1e-6, "tau_v default");
         assert!((c.tau_reliable - 0.5).abs() < 1e-6, "tau_reliable default");
-        assert!((c.tau_curiosity - 0.7).abs() < 1e-6, "tau_curiosity default");
+        assert!(
+            (c.tau_curiosity - 0.7).abs() < 1e-6,
+            "tau_curiosity default"
+        );
         assert!((c.alpha_freeze_thaw - 0.01).abs() < 1e-6, "alpha default");
         assert!((c.gamma_mgpo - 2.0).abs() < 1e-6, "gamma_mgpo default");
         assert!((c.lambda_long2short - 0.2).abs() < 1e-6, "lambda default");
@@ -144,7 +147,10 @@ mod tests {
 
     #[test]
     fn claim_carries_embedding_and_payload() {
-        let c = Claim { embedding: vec![1.0, 2.0], payload: 42usize };
+        let c = Claim {
+            embedding: vec![1.0, 2.0],
+            payload: 42usize,
+        };
         assert_eq!(c.embedding.len(), 2);
         assert_eq!(c.payload, 42);
     }

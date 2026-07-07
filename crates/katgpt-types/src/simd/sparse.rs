@@ -53,13 +53,7 @@ pub fn simd_sparse_dot_f32(
     #[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
     {
         unsafe {
-            wasm32_simd128_sparse_dot_f32(
-                weight,
-                row_off,
-                active_indices,
-                active_values,
-                alive,
-            )
+            wasm32_simd128_sparse_dot_f32(weight, row_off, active_indices, active_values, alive)
         }
     }
     #[cfg(not(any(

@@ -135,11 +135,8 @@ fn bench_boundary_flux_vs_naive(c: &mut Criterion) {
     // ── A: boundary_flux_mass_only ──────────────────────────────────────────
     group.bench_function("G-B_256x256_boundary_flux", |b| {
         b.iter(|| {
-            let mass = boundary_flux_mass_only(
-                black_box(&cx),
-                black_box(&region),
-                black_box(&field),
-            );
+            let mass =
+                boundary_flux_mass_only(black_box(&cx), black_box(&region), black_box(&field));
             black_box(mass);
         });
     });
@@ -199,11 +196,8 @@ fn bench_boundary_flux_indexed(c: &mut Criterion) {
     // Baseline (full-scan) for direct A/B in the same group.
     group.bench_function("G-B_256x256_full_scan_baseline", |b| {
         b.iter(|| {
-            let mass = boundary_flux_mass_only(
-                black_box(&cx),
-                black_box(&region),
-                black_box(&field),
-            );
+            let mass =
+                boundary_flux_mass_only(black_box(&cx), black_box(&region), black_box(&field));
             black_box(mass);
         });
     });
@@ -360,22 +354,14 @@ fn bench_line_integral(c: &mut Criterion) {
 
     group.bench_function("G-C_smooth_path_30_edges", |b| {
         b.iter(|| {
-            let li = line_integral(
-                black_box(&cx),
-                black_box(&field),
-                black_box(&smooth_path),
-            );
+            let li = line_integral(black_box(&cx), black_box(&field), black_box(&smooth_path));
             black_box(li);
         });
     });
 
     group.bench_function("G-C_zigzag_path_30_edges", |b| {
         b.iter(|| {
-            let li = line_integral(
-                black_box(&cx),
-                black_box(&field),
-                black_box(&zigzag_path),
-            );
+            let li = line_integral(black_box(&cx), black_box(&field), black_box(&zigzag_path));
             black_box(li);
         });
     });
@@ -503,22 +489,16 @@ fn bench_circulation_integral(c: &mut Criterion) {
 
     group.bench_function("G-C2_smooth_closed_loop_8x8", |b| {
         b.iter(|| {
-            let circ = circulation_integral(
-                black_box(&cx),
-                black_box(&field),
-                black_box(&smooth_loop),
-            );
+            let circ =
+                circulation_integral(black_box(&cx), black_box(&field), black_box(&smooth_loop));
             black_box(circ);
         });
     });
 
     group.bench_function("G-C2_zigzag_closed_loop", |b| {
         b.iter(|| {
-            let circ = circulation_integral(
-                black_box(&cx),
-                black_box(&field),
-                black_box(&zigzag_loop),
-            );
+            let circ =
+                circulation_integral(black_box(&cx), black_box(&field), black_box(&zigzag_loop));
             black_box(circ);
         });
     });
@@ -539,11 +519,7 @@ fn bench_codifferential_baseline(c: &mut Criterion) {
     group.throughput(Throughput::Elements(n_edges as u64));
     group.bench_function("32x32_codifferential_into", |b| {
         b.iter(|| {
-            codifferential_into(
-                black_box(&cx),
-                black_box(&field),
-                black_box(&mut scratch),
-            );
+            codifferential_into(black_box(&cx), black_box(&field), black_box(&mut scratch));
             // L1 sum of the divergence.
             let l1: f32 = scratch.data.iter().copied().map(f32::abs).sum();
             black_box(l1);

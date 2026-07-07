@@ -43,8 +43,8 @@
 use criterion::{BatchSize, Criterion, black_box, criterion_group, criterion_main};
 use katgpt_core::engram::{
     CanonicalId, EngramConfig, EngramHash, EngramTable, EngramTableBuilder, HashHead,
-    InMemoryEngramTable, K_MAX, SigmoidFusionConfig, StagingEngramTable,
-    fuse_into_hidden_state, multi_head_hash, sigmoid_fuse_into,
+    InMemoryEngramTable, K_MAX, SigmoidFusionConfig, StagingEngramTable, fuse_into_hidden_state,
+    multi_head_hash, sigmoid_fuse_into,
 };
 
 /// Large-table regime per Plan 299 T2.6 — 1M slots.
@@ -76,7 +76,9 @@ fn bench_lookup_into_1m(c: &mut Criterion) {
     let n_populated = LOOKUP_N_SLOTS / 100;
     for _ in 0..n_populated {
         let slot = (lcg() as usize) % LOOKUP_N_SLOTS;
-        let pat: Vec<f32> = (0..LOOKUP_D).map(|_| (lcg() >> 40) as f32 / (1u64 << 24) as f32).collect();
+        let pat: Vec<f32> = (0..LOOKUP_D)
+            .map(|_| (lcg() >> 40) as f32 / (1u64 << 24) as f32)
+            .collect();
         builder.add_pattern(EngramHash(slot as u64), &pat);
     }
     let table = builder.build();
@@ -182,7 +184,9 @@ fn bench_fuse_into_hidden_state(c: &mut Criterion) {
     };
     for _ in 0..64 {
         let slot = (lcg() as usize) % 4096;
-        let pat: Vec<f32> = (0..d).map(|_| (lcg() >> 40) as f32 / (1u64 << 24) as f32).collect();
+        let pat: Vec<f32> = (0..d)
+            .map(|_| (lcg() >> 40) as f32 / (1u64 << 24) as f32)
+            .collect();
         builder.add_pattern(EngramHash(slot as u64), &pat);
     }
     let table = builder.build();
@@ -332,9 +336,7 @@ fn bench_staging_commit(c: &mut Criterion) {
                 || {
                     let mut staging = StagingEngramTable::with_capacity(&table, n_pending);
                     for (i, p) in patterns.iter().enumerate() {
-                        staging
-                            .update_slot(i, p)
-                            .expect("in bounds, correct len");
+                        staging.update_slot(i, p).expect("in bounds, correct len");
                     }
                     staging
                 },

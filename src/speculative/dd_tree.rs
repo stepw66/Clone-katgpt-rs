@@ -17,7 +17,7 @@ pub use katgpt_forward::dd_tree::*;
 // `crate::speculative::dd_tree::build_dd_tree_screened_with_schedule` /
 // `build_dd_tree_gdsd` paths resolve without callers needing to know they now
 // live in katgpt-forward.
-#[cfg(feature = "thinking_prune")]
-pub use katgpt_forward::build_dd_tree_screened_with_schedule;
 #[cfg(feature = "gdsd_distill")]
 pub use katgpt_forward::build_dd_tree_gdsd;
+#[cfg(feature = "thinking_prune")]
+pub use katgpt_forward::build_dd_tree_screened_with_schedule;

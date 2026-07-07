@@ -17,7 +17,7 @@
 //! - `hoare_pruner` — gates the optional `ConstraintPruner::propagate` impl
 //!   that does Hoare-style predicate checking during DDTree expansion.
 
-#![allow(unexpected_cfgs)]  // root may pass-through aggregate features like `full`
+#![allow(unexpected_cfgs)] // root may pass-through aggregate features like `full`
 
 mod partial_parser;
 mod syn_pruner;

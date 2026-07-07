@@ -39,7 +39,7 @@
 ))]
 
 use katgpt_core::conformal::{
-    run_floor_comparison, PredictiveOutput, TrajectoryCorpus, UqPrimitiveUnderTest,
+    PredictiveOutput, TrajectoryCorpus, UqPrimitiveUnderTest, run_floor_comparison,
 };
 use katgpt_core::velocity_field_ensemble::{
     ClosureField, EnsembleFitScratch, VelocityFieldEnsemble,
@@ -126,7 +126,9 @@ impl VfeForecastAdapter {
         // Build training pairs: (x_t, drift=x_{t+1}-x_t).
         // The "state" seen by the field is the scalar x_t (length-1 slice).
         let x_refs: Vec<Vec<f32>> = (0..N_TRAIN - 1).map(|t| vec![train[t]]).collect();
-        let drift_refs: Vec<Vec<f32>> = (0..N_TRAIN - 1).map(|t| vec![train[t + 1] - train[t]]).collect();
+        let drift_refs: Vec<Vec<f32>> = (0..N_TRAIN - 1)
+            .map(|t| vec![train[t + 1] - train[t]])
+            .collect();
         let x_slices: Vec<&[f32]> = x_refs.iter().map(|v| v.as_slice()).collect();
         let drift_slices: Vec<&[f32]> = drift_refs.iter().map(|v| v.as_slice()).collect();
 
@@ -157,7 +159,11 @@ impl VfeForecastAdapter {
             residuals.push(actual_drift - predicted[0]);
         }
         let mean_resid = residuals.iter().sum::<f32>() / residuals.len() as f32;
-        let var = residuals.iter().map(|r| (r - mean_resid).powi(2)).sum::<f32>() / residuals.len() as f32;
+        let var = residuals
+            .iter()
+            .map(|r| (r - mean_resid).powi(2))
+            .sum::<f32>()
+            / residuals.len() as f32;
         let noise_sigma = var.sqrt().max(1e-3);
 
         Self {
@@ -178,7 +184,8 @@ impl UqPrimitiveUnderTest for VfeForecastAdapter {
     fn predict_next(&mut self) -> PredictiveOutput {
         // Evaluate drift at current_x.
         let mut drift = [0.0f32; 1];
-        self.ensemble.eval_into(&[self.current_x], &mut drift, &mut self.eval_scratch);
+        self.ensemble
+            .eval_into(&[self.current_x], &mut drift, &mut self.eval_scratch);
 
         // Generate M samples: x_pred = current_x + drift + noise_sigma · ξ.
         let mut samples = Vec::with_capacity(M_SAMPLES);

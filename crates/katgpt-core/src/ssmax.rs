@@ -457,9 +457,7 @@ mod tests {
         };
         assert!((m.resolve_s_l() - 4.0).abs() < TOL);
 
-        let m = SsmaxMode::Adaptive {
-            rolling_delta: 5.0,
-        };
+        let m = SsmaxMode::Adaptive { rolling_delta: 5.0 };
         assert!((m.resolve_s_l() - 0.2).abs() < TOL);
     }
 
@@ -467,9 +465,7 @@ mod tests {
     fn adaptive_mode_floors_zero_delta() {
         // rolling_delta = 0 would divide by zero; floor at 1e-3 → s_L = 1/1e-3
         // = 1000, then clamp to 10.0.
-        let m = SsmaxMode::Adaptive {
-            rolling_delta: 0.0,
-        };
+        let m = SsmaxMode::Adaptive { rolling_delta: 0.0 };
         assert!((m.resolve_s_l() - 10.0).abs() < TOL);
 
         // Negative delta should also floor (max(1e-3) sees the negative as
@@ -493,7 +489,7 @@ mod tests {
         let mode = SsmaxMode::Fixed { s_l: 1.0 };
         let mult = mode.multiplier(log_n);
 
-        let original = [-1.0_f32, 0.5, 2.0, -0.3, 1.7, 0.0, -3.14, 0.001, 42.0];
+        let original = [-1.0_f32, 0.5, 2.0, -0.3, 1.7, 0.0, -3.12, 0.001, 42.0];
         let mut logits = original;
         apply_ssmax_inplace(&mut logits, &mode, log_n);
 
@@ -598,19 +594,30 @@ mod estimator_tests {
         // which resolves to s_L = 1/1.0 = 1.0 — identical to Fixed { s_l: 1.0 }.
         let est = RollingDeltaEstimator::default();
         let mode = est.to_mode();
-        assert!(matches!(mode, SsmaxMode::Adaptive { rolling_delta } if (rolling_delta - 1.0).abs() < TOL));
-        assert!((est.resolve_delta() - 1.0).abs() < TOL, "warm-start Δ should be 1.0");
+        assert!(
+            matches!(mode, SsmaxMode::Adaptive { rolling_delta } if (rolling_delta - 1.0).abs() < TOL)
+        );
+        assert!(
+            (est.resolve_delta() - 1.0).abs() < TOL,
+            "warm-start Δ should be 1.0"
+        );
         // s_L from warm-start should be 1.0 (same as Fixed default).
-        assert!((mode.resolve_s_l() - 1.0).abs() < TOL, "warm-start s_L should be 1.0");
+        assert!(
+            (mode.resolve_s_l() - 1.0).abs() < TOL,
+            "warm-start s_L should be 1.0"
+        );
     }
 
     #[test]
     fn observe_empty_and_single_are_noop() {
         let est = RollingDeltaEstimator::default();
         est.observe_row(&[]);
-        est.observe_row(&[3.14]);
+        est.observe_row(&[3.12]);
         // EMA unchanged from warm-start.
-        assert!((est.resolve_delta() - 1.0).abs() < TOL, "empty/single observations should not change EMA");
+        assert!(
+            (est.resolve_delta() - 1.0).abs() < TOL,
+            "empty/single observations should not change EMA"
+        );
     }
 
     #[test]
@@ -624,7 +631,12 @@ mod estimator_tests {
         est.observe_row(&logits);
         // max=1.5, mean=1.1 → delta=0.4. Not exactly 0.5 because mean of [1.5,1,1,1,1] = 1.1.
         let expected_delta = 1.5 - 1.1;
-        assert!((est.resolve_delta() - expected_delta).abs() < TOL, "got {}, expected {}", est.resolve_delta(), expected_delta);
+        assert!(
+            (est.resolve_delta() - expected_delta).abs() < TOL,
+            "got {}, expected {}",
+            est.resolve_delta(),
+            expected_delta
+        );
     }
 
     #[test]
@@ -648,8 +660,12 @@ mod estimator_tests {
             est.observe_row(&logits);
         }
         let expected = 2.0 - 4.0 / 3.0;
-        assert!((est.resolve_delta() - expected as f32).abs() < 1e-3,
-            "got {}, expected ~{}", est.resolve_delta(), expected);
+        assert!(
+            (est.resolve_delta() - expected as f32).abs() < 1e-3,
+            "got {}, expected ~{}",
+            est.resolve_delta(),
+            expected
+        );
     }
 
     #[test]
@@ -664,8 +680,10 @@ mod estimator_tests {
         // Now observe NaN logits (NaN comparison always fails → max stays -inf,
         // sum becomes NaN → delta becomes NaN → update_ema skips).
         est.observe_row(&[f32::NAN, f32::NAN]);
-        assert!((est.resolve_delta() - known_delta).abs() < TOL,
-            "NaN observation should not change EMA");
+        assert!(
+            (est.resolve_delta() - known_delta).abs() < TOL,
+            "NaN observation should not change EMA"
+        );
     }
 
     #[test]
@@ -675,7 +693,11 @@ mod estimator_tests {
         let mode = est.to_mode();
         match mode {
             SsmaxMode::Adaptive { rolling_delta } => {
-                assert!((rolling_delta - 2.4).abs() < TOL, "got {}, expected 2.4", rolling_delta);
+                assert!(
+                    (rolling_delta - 2.4).abs() < TOL,
+                    "got {}, expected 2.4",
+                    rolling_delta
+                );
             }
             _ => panic!("expected Adaptive mode"),
         }
@@ -698,7 +720,11 @@ mod estimator_tests {
         est.observe_row(&[1000.0_f32, 0.0, 0.0]); // max-mean = 1000 - 333.3 = 666.7
         let mode = est.to_mode();
         let s_l = mode.resolve_s_l();
-        assert!(s_l < 0.2, "huge gap should give low s_L (mild sharpening), got {}", s_l);
+        assert!(
+            s_l < 0.2,
+            "huge gap should give low s_L (mild sharpening), got {}",
+            s_l
+        );
     }
 
     #[test]
@@ -723,8 +749,11 @@ mod estimator_tests {
         // After 400 observations of the same distribution, EMA should be
         // close to the observed max-mean gap (2.0 - 1.25 = 0.75).
         let delta = est.resolve_delta();
-        assert!(delta > 0.5 && delta < 1.0,
-            "converged delta {} should be near 0.75", delta);
+        assert!(
+            delta > 0.5 && delta < 1.0,
+            "converged delta {} should be near 0.75",
+            delta
+        );
     }
 
     #[test]
@@ -736,12 +765,18 @@ mod estimator_tests {
         // so new = 1e-6 * old + (1-1e-6) * obs ≈ obs).
         est_zero.observe_row(&[5.0_f32, 1.0, 1.0]);
         let delta = est_zero.resolve_delta();
-        assert!((delta - (5.0 - 7.0/3.0) as f32).abs() < 0.01,
-            "alpha≈0 should fully adopt new value, got {}", delta);
+        assert!(
+            (delta - (5.0 - 7.0 / 3.0) as f32).abs() < 0.01,
+            "alpha≈0 should fully adopt new value, got {}",
+            delta
+        );
         // est_one should barely adapt (alpha clamped to 1-1e-6).
         est_one.observe_row(&[5.0_f32, 1.0, 1.0]);
         let delta_one = est_one.resolve_delta();
-        assert!((delta_one - 1.0).abs() < 0.01,
-            "alpha≈1 should barely move from warm-start, got {}", delta_one);
+        assert!(
+            (delta_one - 1.0).abs() < 0.01,
+            "alpha≈1 should barely move from warm-start, got {}",
+            delta_one
+        );
     }
 }

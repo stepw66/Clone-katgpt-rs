@@ -198,13 +198,7 @@ pub fn gdn2_state_update(
 ///
 /// Reads the current state without modifying it. Safe to call multiple times
 /// for different Q heads sharing the same KV group.
-pub fn gdn2_state_readout(
-    s: &[f32],
-    q: &[f32],
-    out: &mut [f32],
-    dk: usize,
-    dv: usize,
-) {
+pub fn gdn2_state_readout(s: &[f32], q: &[f32], out: &mut [f32], dk: usize, dv: usize) {
     debug_assert_eq!(q.len(), dk);
     debug_assert_eq!(s.len(), dk * dv);
     debug_assert_eq!(out.len(), dv);
@@ -689,9 +683,20 @@ mod tests {
         let mut delta_a = vec![0.0f32; dv];
         for (k, v, q) in &tokens {
             gdn2_recurrent_step(
-                k, v, q, &mut s_a, &alpha, &b, 0.5, &w_channel,
-                &mut out_a, &mut temp_a, &mut delta_a,
-                dk, dv, Gdn2GateConfig::EraseOnly,
+                k,
+                v,
+                q,
+                &mut s_a,
+                &alpha,
+                &b,
+                0.5,
+                &w_channel,
+                &mut out_a,
+                &mut temp_a,
+                &mut delta_a,
+                dk,
+                dv,
+                Gdn2GateConfig::EraseOnly,
             );
         }
 
@@ -705,9 +710,20 @@ mod tests {
         let mut cache: HippocampalCache<16, 8> = HippocampalCache::new_with_ones_gamma();
         for (k, v, q) in &tokens {
             gdn2_recurrent_step(
-                k, v, q, &mut s_b, &alpha, &b, 0.5, &w_channel,
-                &mut out_b, &mut temp_b, &mut delta_b,
-                dk, dv, Gdn2GateConfig::EraseOnly,
+                k,
+                v,
+                q,
+                &mut s_b,
+                &alpha,
+                &b,
+                0.5,
+                &w_channel,
+                &mut out_b,
+                &mut temp_b,
+                &mut delta_b,
+                dk,
+                dv,
+                Gdn2GateConfig::EraseOnly,
             );
             // Compute surprise score: β·‖e‖ where β = write gate, ‖e‖ = ‖delta‖.
             let delta_norm: f32 = delta_b.iter().map(|x| x * x).sum::<f32>().sqrt();
@@ -721,17 +737,16 @@ mod tests {
         // Assert byte-identical GDN2 state.
         for i in 0..s_a.len() {
             assert_eq!(
-                s_a[i].to_bits(), s_b[i].to_bits(),
+                s_a[i].to_bits(),
+                s_b[i].to_bits(),
                 "S[{i}] differs: bare={a}, with_cache={b}",
-                a = s_a[i], b = s_b[i],
+                a = s_a[i],
+                b = s_b[i],
             );
         }
         // Assert byte-identical output.
         for i in 0..out_a.len() {
-            assert_eq!(
-                out_a[i].to_bits(), out_b[i].to_bits(),
-                "out[{i}] differs"
-            );
+            assert_eq!(out_a[i].to_bits(), out_b[i].to_bits(), "out[{i}] differs");
         }
 
         // Sanity: cache should have observed some tokens.
@@ -766,16 +781,44 @@ mod tests {
         let q: Vec<f32> = (0..dk).map(|i| i as f32 * 0.15).collect();
 
         gdn2_recurrent_step(
-            &k, &v, &q, &mut s1, &alpha, &b, 0.5, &w,
-            &mut out1, &mut temp, &mut delta, dk, dv, Gdn2GateConfig::EraseOnly,
+            &k,
+            &v,
+            &q,
+            &mut s1,
+            &alpha,
+            &b,
+            0.5,
+            &w,
+            &mut out1,
+            &mut temp,
+            &mut delta,
+            dk,
+            dv,
+            Gdn2GateConfig::EraseOnly,
         );
         gdn2_recurrent_step(
-            &k, &v, &q, &mut s2, &alpha, &b, 0.5, &w,
-            &mut out2, &mut temp, &mut delta, dk, dv, Gdn2GateConfig::EraseOnly,
+            &k,
+            &v,
+            &q,
+            &mut s2,
+            &alpha,
+            &b,
+            0.5,
+            &w,
+            &mut out2,
+            &mut temp,
+            &mut delta,
+            dk,
+            dv,
+            Gdn2GateConfig::EraseOnly,
         );
 
         for i in 0..s1.len() {
-            assert_eq!(s1[i].to_bits(), s2[i].to_bits(), "bare GDN2 must be deterministic");
+            assert_eq!(
+                s1[i].to_bits(),
+                s2[i].to_bits(),
+                "bare GDN2 must be deterministic"
+            );
         }
     }
 }

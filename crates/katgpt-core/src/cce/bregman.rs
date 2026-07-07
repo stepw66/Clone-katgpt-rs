@@ -31,11 +31,7 @@ pub trait BregmanPotential<const N: usize, const A: usize> {
 pub struct Euclidean;
 
 impl<const N: usize, const A: usize> BregmanPotential<N, A> for Euclidean {
-    fn divergence(
-        &self,
-        rho: &OccupationMeasure<N, A>,
-        sigma: &OccupationMeasure<N, A>,
-    ) -> f32 {
+    fn divergence(&self, rho: &OccupationMeasure<N, A>, sigma: &OccupationMeasure<N, A>) -> f32 {
         rho.entries
             .iter()
             .zip(sigma.entries.iter())
@@ -59,11 +55,7 @@ impl<const N: usize, const A: usize> BregmanPotential<N, A> for Euclidean {
 pub struct Kl;
 
 impl<const N: usize, const A: usize> BregmanPotential<N, A> for Kl {
-    fn divergence(
-        &self,
-        rho: &OccupationMeasure<N, A>,
-        sigma: &OccupationMeasure<N, A>,
-    ) -> f32 {
+    fn divergence(&self, rho: &OccupationMeasure<N, A>, sigma: &OccupationMeasure<N, A>) -> f32 {
         let mut d = 0.0;
         for (&r, &s) in rho.entries.iter().zip(sigma.entries.iter()) {
             if r > 1e-12 {

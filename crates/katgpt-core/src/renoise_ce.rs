@@ -255,10 +255,7 @@ where
             let score = renoise_ce_score(operator, &candidate, config, rng);
             (score.drift, candidate)
         })
-        .min_by(|a, b| {
-            a.0.partial_cmp(&b.0)
-                .unwrap_or(std::cmp::Ordering::Equal)
-        })
+        .min_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal))
         .map(|(_, c)| P::into_output(c))
 }
 
@@ -470,10 +467,7 @@ mod tests {
             let far = rng.u32(0..100) < 20; // 20% far
             let center = if far { 5.0 } else { 0.0 };
             let state: Vec<f32> = (0..self.dim)
-                .map(|_| {
-                    center
-                        + (rng.f32() + rng.f32() + rng.f32() - 1.5) * self.spread
-                })
+                .map(|_| center + (rng.f32() + rng.f32() + rng.f32() - 1.5) * self.spread)
                 .collect();
             (VecState(state), 1)
         }
@@ -501,7 +495,10 @@ mod tests {
         };
         let mut rng = Rng::with_seed(99);
         let result = verify_and_restart(&proposer, &op, &config, 200, &mut rng);
-        assert!(result.is_some(), "should find a stable candidate within budget");
+        assert!(
+            result.is_some(),
+            "should find a stable candidate within budget"
+        );
         let out = result.unwrap();
         // Accepted candidate should be near the origin (low norm).
         let norm: f32 = out.0.iter().map(|v| v * v).sum::<f32>().sqrt();

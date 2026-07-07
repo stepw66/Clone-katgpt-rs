@@ -456,9 +456,9 @@ mod tests {
             // Half are bare words, half have leading-space or capitalized variants.
             let variant = match i % 4 {
                 0 => word.to_string(),
-                1 => format!(" {word}"),              // leading space
+                1 => format!(" {word}"),           // leading space
                 2 => capitalize(word).to_string(), // capitalized
-                _ => word.to_uppercase(),             // uppercase
+                _ => word.to_uppercase(),          // uppercase
             };
             tokens.push(variant);
         }

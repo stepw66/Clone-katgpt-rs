@@ -186,7 +186,12 @@ impl PostCandidateRouter for DotProductRouter {
         if candidates_hidden.len() <= 1 {
             return 0;
         }
-        perturbed_argmax(candidates_hidden.len(), |i| self.score(candidates_hidden[i]), temperature, rng)
+        perturbed_argmax(
+            candidates_hidden.len(),
+            |i| self.score(candidates_hidden[i]),
+            temperature,
+            rng,
+        )
     }
 }
 
@@ -265,7 +270,9 @@ impl<PS: PreservationScorer> PostCandidateRouter for ColliderRouterAdapter<PS> {
             self.scorer
                 .preservation_score(self.depth, parent_hidden, candidates_hidden[0]);
         for (i, cand) in candidates_hidden.iter().enumerate().skip(1) {
-            let s = self.scorer.preservation_score(self.depth, parent_hidden, cand);
+            let s = self
+                .scorer
+                .preservation_score(self.depth, parent_hidden, cand);
             if s > best_score {
                 best_score = s;
                 best_idx = i;
@@ -287,9 +294,12 @@ impl<PS: PreservationScorer> PostCandidateRouter for ColliderRouterAdapter<PS> {
         }
         let depth = self.depth;
         let scorer = &self.scorer;
-        perturbed_argmax(candidates_hidden.len(), |i| {
-            scorer.preservation_score(depth, parent_hidden, candidates_hidden[i])
-        }, temperature, rng)
+        perturbed_argmax(
+            candidates_hidden.len(),
+            |i| scorer.preservation_score(depth, parent_hidden, candidates_hidden[i]),
+            temperature,
+            rng,
+        )
     }
 }
 

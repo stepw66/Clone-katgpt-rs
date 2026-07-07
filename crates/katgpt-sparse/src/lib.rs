@@ -26,7 +26,7 @@
 //!   `SparseTaskVector`. The impl is self-contained; the parity test uses
 //!   `katgpt-spectral` (dev-dep only).
 
-#![allow(unexpected_cfgs)]  // root may pass-through aggregate features like `full`
+#![allow(unexpected_cfgs)] // root may pass-through aggregate features like `full`
 
 #[cfg(feature = "sparse_task_vector")]
 pub mod sparse_task_vector;

@@ -126,7 +126,10 @@ fn gate_g1_latency_fast() -> (f64, bool) {
 /// Measure the FULL (cold) path — includes BLAKE3 + Uuid::now_v7. Reported for
 /// transparency; no budget (this is the freeze/thaw cache-validation path).
 fn gate_g1_latency_full() -> f64 {
-    gate_header("G1 Latency (FULL / cold path)", "no budget (transparency only)");
+    gate_header(
+        "G1 Latency (FULL / cold path)",
+        "no budget (transparency only)",
+    );
     latency_of(true).0
 }
 
@@ -147,7 +150,12 @@ fn gate_g1_latency_tracker() -> (f64, bool) {
     for r in 0..64 {
         let tick_row = (r % T_LATENCY) * D;
         tracker.push_tick(&window[tick_row..tick_row + D]);
-        let _ = tracker.recover(black_box(&mut eigvecs), black_box(&mut eigvals), K_LATENCY, ITERS);
+        let _ = tracker.recover(
+            black_box(&mut eigvecs),
+            black_box(&mut eigvals),
+            K_LATENCY,
+            ITERS,
+        );
     }
 
     let mut samples = Vec::with_capacity(LATENCY_OUTER);
@@ -244,7 +252,13 @@ fn latency_of(with_provenance: bool) -> (f64, bool) {
     let _ = path;
     println!(
         "  median = {:.1} ns/call  ({:.2} M calls/s)  [T={}, D={}, k={}, iters={}, path={}]",
-        med, mops, T_LATENCY, D, K_LATENCY, ITERS, if with_provenance { "full" } else { "fast" }
+        med,
+        mops,
+        T_LATENCY,
+        D,
+        K_LATENCY,
+        ITERS,
+        if with_provenance { "full" } else { "fast" }
     );
     if with_provenance {
         println!("  (cold path — no budget; reported for transparency)");
@@ -291,7 +305,9 @@ fn gate_g2_determinism() -> bool {
     println!("  eigvec bit diffs: {vec_diffs} / {}", a.len());
     println!("  eigval bit diffs: {val_diffs} / {}", la.len());
     // Cross-platform note.
-    println!("  (cross-platform x86_64/aarch64/wasm32 bit-identical: see tests/hla_eigenbasis_determinism.rs)");
+    println!(
+        "  (cross-platform x86_64/aarch64/wasm32 bit-identical: see tests/hla_eigenbasis_determinism.rs)"
+    );
     if pass {
         println!("  ✅ G2 PASS (same-machine)");
     } else {
@@ -314,7 +330,14 @@ fn gate_g3_quality() -> (f64, bool) {
     let mut eigvals = vec![0.0; k];
     let mut scratch = EigenbasisScratch::with_capacity_d(D);
     recover_eigenbasis_from_window(
-        &window, T_QUALITY, D, &mut eigvecs, &mut eigvals, &mut scratch, k, ITERS,
+        &window,
+        T_QUALITY,
+        D,
+        &mut eigvecs,
+        &mut eigvals,
+        &mut scratch,
+        k,
+        ITERS,
     );
 
     let total = window_total_energy(&window, T_QUALITY, D);
@@ -322,7 +345,12 @@ fn gate_g3_quality() -> (f64, bool) {
     let recon_err = (1.0_f32 - ratio) as f64;
     let pass = recon_err < 0.10;
     println!("  total energy (trace)  = {:.4}", total);
-    println!("  top-{} energy captured = {:.4} ({:.2}%)", k, ratio, ratio * 100.0);
+    println!(
+        "  top-{} energy captured = {:.4} ({:.2}%)",
+        k,
+        ratio,
+        ratio * 100.0
+    );
     println!("  reconstruction error  = {:.4}", recon_err);
     if pass {
         println!("  ✅ G3 PASS (error {:.4} < 0.10)", recon_err);
@@ -353,7 +381,14 @@ fn gate_g4_divergence() -> (f64, bool) {
         energies[0] = 5.0; // dominant
         // Rotate which canonical axis is "direction 0" by permuting the window
         // columns: swap axis 0 and axis (npc % D).
-        let window = make_window(T_NPC, D, 3, &energies, 0.02, (npc as u64).wrapping_mul(2654435761));
+        let window = make_window(
+            T_NPC,
+            D,
+            3,
+            &energies,
+            0.02,
+            (npc as u64).wrapping_mul(2654435761),
+        );
         let mut permuted = window.clone();
         for r in 0..T_NPC {
             let a = permuted[r * D];
@@ -362,7 +397,14 @@ fn gate_g4_divergence() -> (f64, bool) {
             permuted[r * D + (npc % D)] = a;
         }
         recover_eigenbasis_from_window(
-            &permuted, T_NPC, D, &mut eigvecs, &mut eigvals, &mut scratch, k, ITERS,
+            &permuted,
+            T_NPC,
+            D,
+            &mut eigvecs,
+            &mut eigvals,
+            &mut scratch,
+            k,
+            ITERS,
         );
         let mut dir = [0.0_f32; D];
         dir.copy_from_slice(&eigvecs[..D]);
@@ -401,7 +443,11 @@ fn gate_g4_divergence() -> (f64, bool) {
     let pass = frac_separated > 0.5;
     println!("  NPCs sampled         = {N_NPCS}");
     println!("  pairs tested         = {N_PAIRS}");
-    println!("  fraction cos < 0.7   = {:.4} ({:.1}%)", frac_separated, frac_separated * 100.0);
+    println!(
+        "  fraction cos < 0.7   = {:.4} ({:.1}%)",
+        frac_separated,
+        frac_separated * 100.0
+    );
     println!("  mean |cos|           = {:.4}", mean_cos);
     if pass {
         println!("  ✅ G4 PASS ({:.1}% > 50%)", frac_separated * 100.0);
@@ -424,8 +470,10 @@ fn gate_g5_memory() -> (usize, bool) {
     println!("  eigvecs: {} × {} × 4 = {} bytes", D, k, D * k * 4);
     println!("  eigvals: {} × 4 = {} bytes", k, k * 4);
     println!("  per-NPC total       = {} bytes", per_npc_bytes);
-    println!("  (shared scratch: {} bytes, amortized across all NPCs)",
-        (D * D + 2 * D) * std::mem::size_of::<f32>());
+    println!(
+        "  (shared scratch: {} bytes, amortized across all NPCs)",
+        (D * D + 2 * D) * std::mem::size_of::<f32>()
+    );
     if pass {
         println!("  ✅ G5 PASS ({per_npc_bytes} bytes ≤ 256)");
     } else {
@@ -439,7 +487,10 @@ fn gate_g5_memory() -> (usize, bool) {
 fn main() {
     println!("╔══════════════════════════════════════════════════════════════╗");
     println!("║  Issue 001 — HLA Windowed Eigenbasis Recovery GOAT gate     ║");
-    println!("║  D={}, plasma-tier operating point                          ║", D);
+    println!(
+        "║  D={}, plasma-tier operating point                          ║",
+        D
+    );
     println!("╚══════════════════════════════════════════════════════════════╝");
 
     let (ns_fast, g1_fast) = gate_g1_latency_fast();
@@ -451,19 +502,52 @@ fn main() {
     let (bytes, g5) = gate_g5_memory();
 
     println!("\n════════ Verdict ════════");
-    println!("  G1 Latency (tracker)  : {} ({:.1} ns/tick, budget 2000 ns) ← live-NPC hot path", verdict(g1_tracker), ns_tracker);
-    println!("  G1 Latency (stateless): {} ({:.1} ns, budget 2000 ns)", verdict(g1_fast), ns_fast);
-    println!("  G1 Latency (full cold):    {:.1} ns (freeze/thaw, no budget)", ns_full);
-    println!("  G2 Determinism         : {} (same-machine; cross-platform via tests/)", verdict(g2));
-    println!("  G3 Quality     : {} (error {:.4}, budget < 0.10)", verdict(g3), err);
-    println!("  G4 Divergence  : {} ({:.1}% pairs cos<0.7, budget > 50%)", verdict(g4), frac * 100.0);
-    println!("  G5 Memory      : {} ({} bytes, budget ≤ 256)", verdict(g5), bytes);
+    println!(
+        "  G1 Latency (tracker)  : {} ({:.1} ns/tick, budget 2000 ns) ← live-NPC hot path",
+        verdict(g1_tracker),
+        ns_tracker
+    );
+    println!(
+        "  G1 Latency (stateless): {} ({:.1} ns, budget 2000 ns)",
+        verdict(g1_fast),
+        ns_fast
+    );
+    println!(
+        "  G1 Latency (full cold):    {:.1} ns (freeze/thaw, no budget)",
+        ns_full
+    );
+    println!(
+        "  G2 Determinism         : {} (same-machine; cross-platform via tests/)",
+        verdict(g2)
+    );
+    println!(
+        "  G3 Quality     : {} (error {:.4}, budget < 0.10)",
+        verdict(g3),
+        err
+    );
+    println!(
+        "  G4 Divergence  : {} ({:.1}% pairs cos<0.7, budget > 50%)",
+        verdict(g4),
+        frac * 100.0
+    );
+    println!(
+        "  G5 Memory      : {} ({} bytes, budget ≤ 256)",
+        verdict(g5),
+        bytes
+    );
 
     // GOAT is gated on the TRACKER hot path (the realistic plasma-tier entry
     // point for a live NPC). The stateless path is reported for transparency
     // and as the cold-start / batch-recovery option.
     let all_pass = g1_tracker && g2 && g3 && g4 && g5;
-    println!("\n  OVERALL: {}", if all_pass { "✅ ALL GATES PASS — GOAT" } else { "❌ ONE OR MORE GATES FAILED" });
+    println!(
+        "\n  OVERALL: {}",
+        if all_pass {
+            "✅ ALL GATES PASS — GOAT"
+        } else {
+            "❌ ONE OR MORE GATES FAILED"
+        }
+    );
     if all_pass {
         println!("  Per Issue 001 acceptance: eligible for promotion to default-on");
         println!("  + riir-ai private architectural guide (Super-GOAT fusion candidate).");

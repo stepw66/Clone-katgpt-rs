@@ -72,7 +72,10 @@ fn main() {
 
     // 3. Print the resulting per-head shares.
     println!("Solved per-head shares:");
-    println!("  {:>10} {:>10} {:>12} {:>12}", "layer", "head", "share", "multiplier");
+    println!(
+        "  {:>10} {:>10} {:>12} {:>12}",
+        "layer", "head", "share", "multiplier"
+    );
     for (i, &s) in shares.iter().enumerate() {
         let layer = i / num_heads;
         let head = i % num_heads;
@@ -103,10 +106,7 @@ fn main() {
     let schedule = HeadBudgetSchedule::new("synthetic-6h-2L".into(), shares.clone());
     println!("  model_id  : {}", schedule.model_id);
     println!("  version   : {}", schedule.version);
-    println!(
-        "  blake3    : {}",
-        hex_short(&schedule.blake3_hash)
-    );
+    println!("  blake3    : {}", hex_short(&schedule.blake3_hash));
     println!("  verify    : {}", schedule.verify());
 
     let bytes = schedule.to_postcard().expect("serialize");

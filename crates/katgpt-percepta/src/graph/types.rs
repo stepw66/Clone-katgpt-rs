@@ -568,12 +568,13 @@ impl ProgramGraph {
     fn check_lookup_consistency(&self) -> Result<(), ValidationError> {
         for (&dim_id, dim) in &self.all_dims {
             if let DimensionKind::LookUp { lookup_id, .. } = &dim.kind
-                && !self.all_lookups.contains_key(lookup_id) {
-                    return Err(ValidationError::MissingLookup {
-                        source: dim_id,
-                        missing: *lookup_id,
-                    });
-                }
+                && !self.all_lookups.contains_key(lookup_id)
+            {
+                return Err(ValidationError::MissingLookup {
+                    source: dim_id,
+                    missing: *lookup_id,
+                });
+            }
         }
         Ok(())
     }

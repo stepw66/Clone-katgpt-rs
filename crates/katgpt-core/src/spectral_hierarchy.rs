@@ -54,7 +54,10 @@ pub fn eigenspace_alignment(gram: &[f32], reference: &[f32], n: usize, k: usize)
             || top_k_eigenvectors(reference, n, k),
         )
     } else {
-        (top_k_eigenvectors(gram, n, k), top_k_eigenvectors(reference, n, k))
+        (
+            top_k_eigenvectors(gram, n, k),
+            top_k_eigenvectors(reference, n, k),
+        )
     };
 
     let mut alignment_sum = 0.0f64;

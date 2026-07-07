@@ -28,11 +28,11 @@
 
 #![allow(clippy::too_many_arguments)]
 
-use crate::d2f_context::D2fContext;
 use crate::d2f::{D2fBlockResult, D2fDecodeConfig};
+use crate::d2f_context::D2fContext;
+use crate::{ForwardContext, forward};
 use katgpt_core::traits::{NoPruner, NoScreeningPruner};
 use katgpt_transformer::{MultiLayerKVCache, TransformerWeights};
-use crate::{ForwardContext, forward};
 use katgpt_types::{Config, Rng, softmax_scaled};
 
 use katgpt_core::speculative::sampling::sample_from_distribution;
@@ -401,8 +401,8 @@ fn sample_from_distribution_weighted(probs: &[f32], rng: &mut Rng) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::d2f_context::D2fContext;
     use crate::d2f::D2fDecodeConfig;
+    use crate::d2f_context::D2fContext;
     use katgpt_transformer::TransformerWeights;
     use katgpt_types::{Config, Rng};
 

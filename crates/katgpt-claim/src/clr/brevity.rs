@@ -101,8 +101,18 @@ mod tests {
         // Two clusters tied on reliability within eps.
         // Cluster A rep (idx 0) has 100 tokens; cluster B rep (idx 1) has 50.
         let trajectories: Vec<Trajectory<()>> = vec![
-            Trajectory { outcome: (), tokens_or_steps: 100, claims: vec![], log_probs: None },
-            Trajectory { outcome: (), tokens_or_steps: 50, claims: vec![], log_probs: None },
+            Trajectory {
+                outcome: (),
+                tokens_or_steps: 100,
+                claims: vec![],
+                log_probs: None,
+            },
+            Trajectory {
+                outcome: (),
+                tokens_or_steps: 50,
+                claims: vec![],
+                log_probs: None,
+            },
         ];
         let c0 = cluster((), 0.8, 0, &[0]);
         let c1 = cluster((), 0.8, 1, &[1]);
@@ -117,8 +127,18 @@ mod tests {
     fn respects_reliability_when_not_tied() {
         // Cluster A has higher reliability → wins outright, even though longer.
         let trajectories: Vec<Trajectory<()>> = vec![
-            Trajectory { outcome: (), tokens_or_steps: 200, claims: vec![], log_probs: None },
-            Trajectory { outcome: (), tokens_or_steps: 50, claims: vec![], log_probs: None },
+            Trajectory {
+                outcome: (),
+                tokens_or_steps: 200,
+                claims: vec![],
+                log_probs: None,
+            },
+            Trajectory {
+                outcome: (),
+                tokens_or_steps: 50,
+                claims: vec![],
+                log_probs: None,
+            },
         ];
         let c0 = cluster((), 0.9, 0, &[0]);
         let c1 = cluster((), 0.5, 1, &[1]);
@@ -132,8 +152,18 @@ mod tests {
     fn first_encountered_wins_token_tie() {
         // Both reps have the same token count → first-encountered (index 0) wins.
         let trajectories: Vec<Trajectory<()>> = vec![
-            Trajectory { outcome: (), tokens_or_steps: 50, claims: vec![], log_probs: None },
-            Trajectory { outcome: (), tokens_or_steps: 50, claims: vec![], log_probs: None },
+            Trajectory {
+                outcome: (),
+                tokens_or_steps: 50,
+                claims: vec![],
+                log_probs: None,
+            },
+            Trajectory {
+                outcome: (),
+                tokens_or_steps: 50,
+                claims: vec![],
+                log_probs: None,
+            },
         ];
         let c0 = cluster((), 0.7, 0, &[0]);
         let c1 = cluster((), 0.7, 1, &[1]);

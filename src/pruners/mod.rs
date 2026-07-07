@@ -24,7 +24,7 @@ pub use bomber::{
 // `cfg(all(feature = "game_state", feature = "bomber"))` in this module.
 // bomber_state.rs moved back into the bomber module (src/pruners/bomber/)
 // because it is tightly coupled to the bomber types (ArenaGrid, Cell, ...).
-#[cfg(all(feature = "game_state", feature = "bomber"))]
-pub use bomber::bomber_state::{BombSnapshot, BomberHeuristic, BomberState, PlayerSnapshot};
 #[cfg(all(feature = "game_state", feature = "bomber", feature = "bandit"))]
 pub use bomber::bomber_state::BanditBomberHeuristic;
+#[cfg(all(feature = "game_state", feature = "bomber"))]
+pub use bomber::bomber_state::{BombSnapshot, BomberHeuristic, BomberState, PlayerSnapshot};

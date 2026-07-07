@@ -41,8 +41,8 @@
 //! [`ThinkingStrategy`].
 
 use crate::swir::{
-    entropy_from_logits, mix_thinking_signal, soft_embedding, ControlToken, StepAction,
-    SwiRConfig, SwiRController,
+    ControlToken, StepAction, SwiRConfig, SwiRController, entropy_from_logits, mix_thinking_signal,
+    soft_embedding,
 };
 use crate::thinking_cot::{ControlTokenIds, StepContext, StepDirective, ThinkingStrategy};
 
@@ -190,7 +190,12 @@ impl ThinkingStrategy for SwiRStrategyAdapter {
                     // checker sees disjoint fields, then re-borrow soft_scratch
                     // for the accumulate call.
                     let probs = Self::softmax_into_scratch(&mut self.probs_scratch, ctx.logits);
-                    soft_embedding(probs, ctx.embedding_matrix, embedding_dim, &mut self.soft_scratch);
+                    soft_embedding(
+                        probs,
+                        ctx.embedding_matrix,
+                        embedding_dim,
+                        &mut self.soft_scratch,
+                    );
                 }
                 // Apply signal mixing if the controller signalled a switch
                 // instant this step. The anchor embedding is the row of the
@@ -209,7 +214,10 @@ impl ThinkingStrategy for SwiRStrategyAdapter {
                         crate::swir::SignalMixKind::ExplicitExit => {
                             // Exiting Latent — anchor is the forced-answer
                             // prefix (or `</think>` if no dedicated id).
-                            (ids.force_answer_prefix.max(ids.think_close), "explicit-exit")
+                            (
+                                ids.force_answer_prefix.max(ids.think_close),
+                                "explicit-exit",
+                            )
                         }
                     };
                     let _ = _label; // for debug logs / future telemetry
@@ -393,7 +401,11 @@ mod tests {
         let d2 = adapter.on_step(&mut ctx);
         match d2 {
             StepDirective::InjectTokens(tokens) => {
-                assert_eq!(tokens, vec![42], "CloseThink should resolve to ids.think_close");
+                assert_eq!(
+                    tokens,
+                    vec![42],
+                    "CloseThink should resolve to ids.think_close"
+                );
             }
             other => panic!("step 2 should inject CloseThink, got {other:?}"),
         }

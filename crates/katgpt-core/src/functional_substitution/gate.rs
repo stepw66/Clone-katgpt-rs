@@ -107,7 +107,11 @@ where
     /// Heads beyond the cache length always return `false` (defensive —
     /// un-profiled heads are not substituted).
     #[inline]
-    pub fn new(tau_iou: f32, tau_behavior: D, cached_faithfulness: Vec<FaithfulnessProfile<D>>) -> Self {
+    pub fn new(
+        tau_iou: f32,
+        tau_behavior: D,
+        cached_faithfulness: Vec<FaithfulnessProfile<D>>,
+    ) -> Self {
         Self {
             tau_iou,
             tau_behavior,
@@ -141,7 +145,8 @@ where
     /// needed (audit-cadence path only).
     pub fn update_head(&mut self, h: usize, profile: FaithfulnessProfile<D>) {
         if h >= self.cached_faithfulness.len() {
-            self.cached_faithfulness.resize(h + 1, FaithfulnessProfile::default_at());
+            self.cached_faithfulness
+                .resize(h + 1, FaithfulnessProfile::default_at());
         }
         self.cached_faithfulness[h] = profile;
     }
@@ -301,7 +306,10 @@ mod tests {
         // tau_iou = 0.4, tau_behavior = 0.16
         // IoU = 0.4 → exactly at the boundary; strict `<` means 0.4 is accepted.
         let gate = HeadSubstitutionGate::new(0.4, 0.16, vec![small_delta, large_delta]);
-        assert!(gate.should_substitute(0, 0.4), "boundary IoU accepted for head 0");
+        assert!(
+            gate.should_substitute(0, 0.4),
+            "boundary IoU accepted for head 0"
+        );
         // Same IoU, but head 1 has a large delta → vetoed.
         assert!(!gate.should_substitute(1, 0.4), "large-delta head vetoed");
         // Just below threshold → rejected.

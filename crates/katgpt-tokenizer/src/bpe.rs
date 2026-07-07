@@ -55,7 +55,9 @@ impl BpeTokenizerImpl {
                 }
             }
 
-            let Some((best_rank, left_idx)) = best else { break };
+            let Some((best_rank, left_idx)) = best else {
+                break;
+            };
 
             // Resolve the merged token ID via the rank-indexed table — no
             // hashmap lookup, just a slice index.

@@ -602,17 +602,16 @@ impl VocabChannelMap {
     pub fn serialize(&self) -> Vec<u8> {
         // Pre-compute exact byte size to avoid repeated Vec growth reallocs.
         // Layout: header (4) + per layer (4) + per neuron (4 + 4 * token_count).
-        let total_bytes: usize = 4
-            + self
-                .layers
-                .iter()
-                .map(|neurons| {
-                    4 + neurons
-                        .iter()
-                        .map(|tokens| 4 + tokens.len() * 4)
-                        .sum::<usize>()
-                })
-                .sum::<usize>();
+        let total_bytes: usize = 4 + self
+            .layers
+            .iter()
+            .map(|neurons| {
+                4 + neurons
+                    .iter()
+                    .map(|tokens| 4 + tokens.len() * 4)
+                    .sum::<usize>()
+            })
+            .sum::<usize>();
 
         let mut buf = Vec::with_capacity(total_bytes);
 
@@ -798,9 +797,10 @@ impl ConstraintPruner for VocabChannelPruner {
 
         // Try neuron-specific check first
         if let Ok(neurons) = self.active_neurons.read()
-            && !neurons.is_empty() {
-                return self.is_valid_with_neurons(layer, &neurons, token_idx);
-            }
+            && !neurons.is_empty()
+        {
+            return self.is_valid_with_neurons(layer, &neurons, token_idx);
+        }
 
         // Fallback: per-layer union
         self.is_valid_layer_union(layer, token_idx)
@@ -817,13 +817,14 @@ impl ConstraintPruner for VocabChannelPruner {
 
         // Try neuron-specific check first
         if let Ok(neurons) = self.active_neurons.read()
-            && !neurons.is_empty() {
-                let len = candidates.len().min(results.len());
-                for i in 0..len {
-                    results[i] = self.is_valid_with_neurons(layer, &neurons, candidates[i]);
-                }
-                return;
+            && !neurons.is_empty()
+        {
+            let len = candidates.len().min(results.len());
+            for i in 0..len {
+                results[i] = self.is_valid_with_neurons(layer, &neurons, candidates[i]);
             }
+            return;
+        }
 
         // Fallback: per-layer union batch check
         let len = candidates.len().min(results.len());

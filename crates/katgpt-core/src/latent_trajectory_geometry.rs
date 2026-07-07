@@ -145,11 +145,7 @@ pub fn fast_acos(x: f32) -> f32 {
     r = r * x - 0.2121144;
     r = r * x + 1.5707288;
     r *= (1.0_f32 - x).sqrt();
-    if negate {
-        std::f32::consts::PI - r
-    } else {
-        r
-    }
+    if negate { std::f32::consts::PI - r } else { r }
 }
 
 /// Compute the probe-free geometric diagnostic over a sequence of latent
@@ -248,7 +244,9 @@ pub fn from_states(states: &[&[f32]]) -> LatentTrajectoryGeometry {
             // the compiler cannot prove disp_curr and disp_prev don't alias
             // disp_curr from the swap, so checked indexing blocks SIMD fusion.
             // (Bench G2: checked indexing = 12.5µs; unchecked = 1.4µs at 100×32.)
-            unsafe { *disp_curr.get_unchecked_mut(j) = d; }
+            unsafe {
+                *disp_curr.get_unchecked_mut(j) = d;
+            }
             disp_norm_sq += d * d;
             dot_hc += p * c;
             prev_norm_sq += p * p;
@@ -419,7 +417,10 @@ mod tests {
             }
             i += 10;
         }
-        assert!(worst_err < 2e-4, "worst fast_acos error = {worst_err:.2e} (need < 2e-4)");
+        assert!(
+            worst_err < 2e-4,
+            "worst fast_acos error = {worst_err:.2e} (need < 2e-4)"
+        );
     }
 
     // ── T2.1 length ────────────────────────────────────────────────────────
@@ -767,7 +768,9 @@ mod tests {
         println!("=== Latent Trajectory Geometry — Game-Related Gate (Plan 342 Phase 3) ===");
         println!();
         println!("Scenario: agent takes K={K_TICKS} decisions of fixed magnitude step={STEP_MAG},");
-        println!("          direction pattern differs by class. N={N_SAMPLES} trajectories per class.");
+        println!(
+            "          direction pattern differs by class. N={N_SAMPLES} trajectories per class."
+        );
         println!("          (noise sigma={NOISE_SIGMA}, drift angle={DRIFT_ANGLE} rad/step)");
         println!();
         println!("Trajectory class     | mean length | mean curvature (rad)");
@@ -821,9 +824,18 @@ mod tests {
         );
         println!();
 
-        assert!(g3_1_pass, "G3.1 FAILED: curvature gap = {curv_gap:.3} (need >= 0.5)");
-        assert!(g3_2_pass, "G3.2 FAILED: length diff ratio = {len_diff_ratio:.3} (need <= 0.15)");
-        assert!(g3_3_pass, "G3.3 FAILED: drift must sit between committed and osc");
+        assert!(
+            g3_1_pass,
+            "G3.1 FAILED: curvature gap = {curv_gap:.3} (need >= 0.5)"
+        );
+        assert!(
+            g3_2_pass,
+            "G3.2 FAILED: length diff ratio = {len_diff_ratio:.3} (need <= 0.15)"
+        );
+        assert!(
+            g3_3_pass,
+            "G3.3 FAILED: drift must sit between committed and osc"
+        );
     }
 
     #[test]
@@ -852,7 +864,11 @@ mod tests {
         // Realistic damped oscillation should produce high curvature (> 1.0 rad)
         // and non-trivial length (> 5.0). Not a strict threshold — just a sanity
         // floor that confirms the signal is present.
-        assert!(g.mean_curvature > 1.0, "realistic osc curvature = {}", g.mean_curvature);
+        assert!(
+            g.mean_curvature > 1.0,
+            "realistic osc curvature = {}",
+            g.mean_curvature
+        );
         assert!(g.length > 5.0, "realistic osc length = {}", g.length);
     }
 

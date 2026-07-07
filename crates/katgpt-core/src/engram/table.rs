@@ -83,7 +83,10 @@ impl InMemoryEngramTable {
         n_slots: usize,
         d: usize,
     ) -> Self {
-        debug_assert_eq!(slots.len(), n_slots.checked_mul(d).expect("n_slots*d overflow"));
+        debug_assert_eq!(
+            slots.len(),
+            n_slots.checked_mul(d).expect("n_slots*d overflow")
+        );
         Self {
             slots,
             heads,

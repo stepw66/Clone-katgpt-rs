@@ -489,7 +489,11 @@ mod tests {
             })
             .collect();
 
-        let expected: Vec<f32> = base.iter().zip(delta.iter()).map(|(&b, &d)| b + d).collect();
+        let expected: Vec<f32> = base
+            .iter()
+            .zip(delta.iter())
+            .map(|(&b, &d)| b + d)
+            .collect();
 
         let stv = SparseTaskVector::from_dense(&delta, (rows, cols), 1e-5);
         stv.apply_to(&mut base);
@@ -514,14 +518,23 @@ mod tests {
             );
         }
         // Confirm we exercised the path (not all-zero deltas).
-        assert!(!stv.is_empty(), "test should produce non-empty sparse vector");
-        eprintln!("g2_apply_roundtrip: {}/{} active, max_rel_err = {max_rel_err:.2e}", stv.len(), n);
+        assert!(
+            !stv.is_empty(),
+            "test should produce non-empty sparse vector"
+        );
+        eprintln!(
+            "g2_apply_roundtrip: {}/{} active, max_rel_err = {max_rel_err:.2e}",
+            stv.len(),
+            n
+        );
     }
 
     /// Paper §4.1 metric: density reports the correct active fraction.
     #[test]
     fn density_matches_paper_definition() {
-        let dense = vec![0.0, 0.0, 0.0, 0.001, 0.0, 0.002, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
+        let dense = vec![
+            0.0, 0.0, 0.0, 0.001, 0.0, 0.002, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+        ];
         let stv = SparseTaskVector::from_dense(&dense, (4, 3), 1e-5);
         assert_eq!(stv.len(), 2);
         let d = stv.density();
@@ -546,46 +559,25 @@ mod tests {
     /// `from_parts` validates mask/delta length parity and index range.
     #[test]
     fn from_parts_rejects_mismatched_lengths() {
-        let result = SparseTaskVector::from_parts(
-            (3, 3),
-            vec![0, 1],
-            vec![0.1],
-            1.0,
-        );
+        let result = SparseTaskVector::from_parts((3, 3), vec![0, 1], vec![0.1], 1.0);
         assert_eq!(
             result.unwrap_err(),
-            SparseTaskVectorError::LengthMismatch {
-                mask: 2,
-                deltas: 1
-            }
+            SparseTaskVectorError::LengthMismatch { mask: 2, deltas: 1 }
         );
     }
 
     #[test]
     fn from_parts_rejects_out_of_range() {
-        let result = SparseTaskVector::from_parts(
-            (3, 3),
-            vec![0, 99],
-            vec![0.1, 0.2],
-            1.0,
-        );
+        let result = SparseTaskVector::from_parts((3, 3), vec![0, 99], vec![0.1, 0.2], 1.0);
         assert_eq!(
             result.unwrap_err(),
-            SparseTaskVectorError::IndexOutOfRange {
-                idx: 99,
-                total: 9
-            }
+            SparseTaskVectorError::IndexOutOfRange { idx: 99, total: 9 }
         );
     }
 
     #[test]
     fn from_parts_rejects_unsorted() {
-        let result = SparseTaskVector::from_parts(
-            (3, 3),
-            vec![2, 1],
-            vec![0.1, 0.2],
-            1.0,
-        );
+        let result = SparseTaskVector::from_parts((3, 3), vec![2, 1], vec![0.1, 0.2], 1.0);
         assert_eq!(result.unwrap_err(), SparseTaskVectorError::UnsortedMask);
     }
 
@@ -664,30 +656,36 @@ mod gauge_tests {
     /// of two rank-`nnz` factor pairs under the natural sparse factorization.
     #[test]
     fn compose_gauge_invariant_merges_masks_and_sums_overlapping() {
-        let a = SparseTaskVector::from_parts(
-            (4, 4),
-            vec![0, 5, 10],
-            vec![0.10, 0.20, 0.30],
-            1.0,
-        )
-        .unwrap();
-        let b = SparseTaskVector::from_parts(
-            (4, 4),
-            vec![5, 10, 15],
-            vec![0.05, 0.10, 0.15],
-            1.0,
-        )
-        .unwrap();
+        let a = SparseTaskVector::from_parts((4, 4), vec![0, 5, 10], vec![0.10, 0.20, 0.30], 1.0)
+            .unwrap();
+        let b = SparseTaskVector::from_parts((4, 4), vec![5, 10, 15], vec![0.05, 0.10, 0.15], 1.0)
+            .unwrap();
 
         let merged = a.compose_gauge_invariant(&b, 1.0);
 
         // Merged mask = sorted union = [0, 5, 10, 15]
         assert_eq!(merged.mask, vec![0, 5, 10, 15], "merged mask must be union");
         // Weighted sums: idx 0 only from a, idx 5+10 shared, idx 15 only from b.
-        assert!((merged.deltas[0] - 0.10).abs() < 1e-6, "idx 0 = {:?}", merged.deltas[0]);
-        assert!((merged.deltas[1] - 0.25).abs() < 1e-6, "idx 5 = {:?}", merged.deltas[1]);
-        assert!((merged.deltas[2] - 0.40).abs() < 1e-6, "idx 10 = {:?}", merged.deltas[2]);
-        assert!((merged.deltas[3] - 0.15).abs() < 1e-6, "idx 15 = {:?}", merged.deltas[3]);
+        assert!(
+            (merged.deltas[0] - 0.10).abs() < 1e-6,
+            "idx 0 = {:?}",
+            merged.deltas[0]
+        );
+        assert!(
+            (merged.deltas[1] - 0.25).abs() < 1e-6,
+            "idx 5 = {:?}",
+            merged.deltas[1]
+        );
+        assert!(
+            (merged.deltas[2] - 0.40).abs() < 1e-6,
+            "idx 10 = {:?}",
+            merged.deltas[2]
+        );
+        assert!(
+            (merged.deltas[3] - 0.15).abs() < 1e-6,
+            "idx 15 = {:?}",
+            merged.deltas[3]
+        );
         assert_eq!(merged.shape, (4, 4));
         assert!((merged.eta - 1.0).abs() < 1e-6, "output eta must be 1.0");
     }
@@ -776,7 +774,10 @@ mod gauge_tests {
         merged.apply_to(&mut base_merged);
 
         for (i, (&s, &m)) in base_seq.iter().zip(base_merged.iter()).enumerate() {
-            assert!((s - m).abs() < 1e-6, "apply mismatch at {i}: seq={s}, merged={m}");
+            assert!(
+                (s - m).abs() < 1e-6,
+                "apply mismatch at {i}: seq={s}, merged={m}"
+            );
         }
     }
 
@@ -791,7 +792,7 @@ mod gauge_tests {
     /// weighted delta sum.
     #[test]
     fn test_compose_gauge_invariant_matches_full_compose() {
-        use katgpt_spectral::gauge_invariant::{gauge_invariant_compose, GaugePair};
+        use katgpt_spectral::gauge_invariant::{GaugePair, gauge_invariant_compose};
 
         let (rows, cols) = (3_usize, 3_usize);
         // Two STVs with overlapping masks.
@@ -847,31 +848,44 @@ mod gauge_tests {
         // Build A_i (rows × r), B_i (cols × r) for each STV.
         // For STV `a`, delta_k sits at (row_of(mask[k]), col_of(mask[k])) —
         // we need to pad to the union rank with zeros where the mask is absent.
-        let build_factors =
-            |stv: &SparseTaskVector| -> (Vec<f32>, Vec<f32>) {
-                let mut a_mat = vec![0.0_f32; rows * r];
-                let mut b_mat = vec![0.0_f32; cols * r];
-                // For each union column k, find whether `stv` has a delta at union_mask[k].
-                let mut si = 0usize;
-                for (k, &um) in union_mask.iter().enumerate() {
-                    while si < stv.mask.len() && stv.mask[si] < um {
-                        si += 1;
-                    }
-                    if si < stv.mask.len() && stv.mask[si] == um {
-                        let flat = um as usize;
-                        let (ro, co) = (flat / cols, flat % cols);
-                        a_mat[ro * r + k] = stv.deltas[si];
-                        b_mat[co * r + k] = 1.0;
-                    }
+        let build_factors = |stv: &SparseTaskVector| -> (Vec<f32>, Vec<f32>) {
+            let mut a_mat = vec![0.0_f32; rows * r];
+            let mut b_mat = vec![0.0_f32; cols * r];
+            // For each union column k, find whether `stv` has a delta at union_mask[k].
+            let mut si = 0usize;
+            for (k, &um) in union_mask.iter().enumerate() {
+                while si < stv.mask.len() && stv.mask[si] < um {
+                    si += 1;
                 }
-                (a_mat, b_mat)
-            };
+                if si < stv.mask.len() && stv.mask[si] == um {
+                    let flat = um as usize;
+                    let (ro, co) = (flat / cols, flat % cols);
+                    a_mat[ro * r + k] = stv.deltas[si];
+                    b_mat[co * r + k] = 1.0;
+                }
+            }
+            (a_mat, b_mat)
+        };
 
         let (a1, b1) = build_factors(&a);
         let (a2, b2) = build_factors(&b);
         let pairs = [
-            GaugePair { eta: 1.0, a: &a1, b: &b1, a_rows: rows, b_rows: cols, rank: r },
-            GaugePair { eta, a: &a2, b: &b2, a_rows: rows, b_rows: cols, rank: r },
+            GaugePair {
+                eta: 1.0,
+                a: &a1,
+                b: &b1,
+                a_rows: rows,
+                b_rows: cols,
+                rank: r,
+            },
+            GaugePair {
+                eta,
+                a: &a2,
+                b: &b2,
+                a_rows: rows,
+                b_rows: cols,
+                rank: r,
+            },
         ];
         let merged_r = 2 * r;
         let mut out_a = vec![0.0_f32; rows * merged_r];

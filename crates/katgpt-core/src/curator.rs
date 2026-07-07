@@ -674,7 +674,10 @@ mod tests {
         // High accuracy: amplified
         let w_high = verification_weight(0.9);
         let expected_high = 1.0 + (0.9 - 0.8) * 5.0;
-        assert!((w_high - expected_high).abs() < EPS, "high amplification: {w_high} vs {expected_high}");
+        assert!(
+            (w_high - expected_high).abs() < EPS,
+            "high amplification: {w_high} vs {expected_high}"
+        );
         assert!(w_high > 1.0, "high accuracy should amplify");
         assert!(w_high <= 2.0, "max amplification is 2.0");
 

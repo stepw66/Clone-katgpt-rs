@@ -15,9 +15,7 @@
 //! column); `effective_rank` is the *aggregate symptom*. `LayerSinkSummary`
 //! aggregates the per-sink verdicts across all heads in a layer.
 
-use super::sink_classify::{
-    SinkClassifierConfig, SinkKind, StableRankScratch, classify_all_sinks,
-};
+use super::sink_classify::{SinkClassifierConfig, SinkKind, StableRankScratch, classify_all_sinks};
 
 // ── Core types ──────────────────────────────────────────────────
 

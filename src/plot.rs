@@ -82,7 +82,11 @@ pub fn plot_results(
         // intermediate `tp_str` allocation before composing the label).
         let tp = result.throughput;
         let label = if tp >= 1_000_000.0 {
-            format!("{:.2}M  ({:.2} μs)", tp / 1_000_000.0, result.time_per_step_us)
+            format!(
+                "{:.2}M  ({:.2} μs)",
+                tp / 1_000_000.0,
+                result.time_per_step_us
+            )
         } else if tp >= 1_000.0 {
             format!("{:.0}K  ({:.2} μs)", tp / 1_000.0, result.time_per_step_us)
         } else {
@@ -654,10 +658,7 @@ mod tests {
     /// Zero or negative throughput must be skipped (defensive — avoids divide-by-zero).
     #[test]
     fn zero_baseline_skipped() {
-        let rows = [
-            row("d1", "m", 0.0),
-            row("d2", "m", 0.0),
-        ];
+        let rows = [row("d1", "m", 0.0), row("d2", "m", 0.0)];
         let refs: Vec<&TsRow> = rows.iter().collect();
         let regs = check_regression_filtered(&refs, "cat");
         assert!(regs.is_empty());

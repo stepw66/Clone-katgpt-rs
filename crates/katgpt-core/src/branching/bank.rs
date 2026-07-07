@@ -19,9 +19,7 @@
 //!
 //! The hot read-path (`active_branches`) allocates nothing.
 
-use crate::branching::types::{
-    BranchId, BranchLifecycle, CognitiveBranch,
-};
+use crate::branching::types::{BranchId, BranchLifecycle, CognitiveBranch};
 use std::collections::HashSet;
 
 /// Default maximum active branches. Matches the G2 perf target (router < 1µs
@@ -146,7 +144,8 @@ impl<E: Clone> BranchBank<E> {
             (slot as usize) < self.max_branches,
             "spawn invariants: n_active < max_branches but no free slot and branches.len() >= max_branches"
         );
-        self.branches.push(CognitiveBranch::new(BranchId(slot), spawn_anchor));
+        self.branches
+            .push(CognitiveBranch::new(BranchId(slot), spawn_anchor));
         Some(BranchId(slot))
     }
 
@@ -202,8 +201,7 @@ impl<E: Clone> BranchBank<E> {
         }
 
         // Validate both are active (check before split to avoid aliasing issues).
-        if !self.branches[ti].lifecycle.is_routable()
-            || !self.branches[si].lifecycle.is_routable()
+        if !self.branches[ti].lifecycle.is_routable() || !self.branches[si].lifecycle.is_routable()
         {
             return None;
         }
@@ -216,8 +214,16 @@ impl<E: Clone> BranchBank<E> {
         let mut merged_anchor = Vec::with_capacity(dim);
         let mut norm_sq = 0.0f32;
         for i in 0..dim {
-            let a = self.branches[ti].spawn_anchor.get(i).copied().unwrap_or(0.0);
-            let b = self.branches[si].spawn_anchor.get(i).copied().unwrap_or(0.0);
+            let a = self.branches[ti]
+                .spawn_anchor
+                .get(i)
+                .copied()
+                .unwrap_or(0.0);
+            let b = self.branches[si]
+                .spawn_anchor
+                .get(i)
+                .copied()
+                .unwrap_or(0.0);
             let v = a + b;
             norm_sq += v * v;
             merged_anchor.push(v);
@@ -397,13 +403,15 @@ impl<E: Clone + Default> BranchBank<E> {
         if !branch.lifecycle.is_routable() {
             return false;
         }
-        branch.episodic.push(crate::branching::types::EpisodicEntry {
-            embedding,
-            payload,
-            reward,
-            scope,
-            tick,
-        });
+        branch
+            .episodic
+            .push(crate::branching::types::EpisodicEntry {
+                embedding,
+                payload,
+                reward,
+                scope,
+                tick,
+            });
         branch.stats.record_write(reward, tick);
         true
     }

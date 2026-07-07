@@ -89,9 +89,7 @@
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, RwLock};
 
-use crate::product_key_memory::{
-    PkmScratch, ProductKeyMemory, ScoreFn,
-};
+use crate::product_key_memory::{PkmScratch, ProductKeyMemory, ScoreFn};
 
 /// BLAKE3 domain-separation tag. Prepended to every commitment hash input so
 /// PKM commitments cannot collide with digests from other subsystems that
@@ -259,7 +257,7 @@ impl<const SQRT_N: usize, const D_K: usize, const D_V: usize>
             .inner
             .read()
             .expect("FrozenProductKeyMemory lock poisoned");
-        guard.as_ref().map(|arc| Arc::clone(arc))
+        guard.as_ref().map(Arc::clone)
     }
 
     /// Convenience: run [`ProductKeyMemory::query_into`] against the current
@@ -408,17 +406,17 @@ mod tests {
         ProductKeyMemory::new(keys_1, keys_2, values)
     }
 
+    /// The three flat slices (`keys_1`, `keys_2`, `values`) that make up a
+    /// [`ProductKeyMemory`]'s storage.
+    type TableSlices = (Box<[f32]>, Box<[f32]>, Box<[f32]>);
+
     /// Clone a table's three flat slices into fresh `Box<[f32]>`s. Used by
     /// the bit-identity test to construct a 1-bit-flipped copy without
     /// needing `ProductKeyMemory: Clone`.
     fn clone_table_slices<const SQRT_N: usize, const D_K: usize, const D_V: usize>(
         src: &ProductKeyMemory<SQRT_N, D_K, D_V>,
-    ) -> (Box<[f32]>, Box<[f32]>, Box<[f32]>) {
-        (
-            src.keys_1.clone(),
-            src.keys_2.clone(),
-            src.values.clone(),
-        )
+    ) -> TableSlices {
+        (src.keys_1.clone(), src.keys_2.clone(), src.values.clone())
     }
 
     // ── T4.1 — basic freeze/thaw contract ───────────────────────────────
@@ -492,7 +490,10 @@ mod tests {
         assert!(n > 0, "query_into on a frozen slot should return > 0");
         // Weights are softmax-normalized → sum to ~1.
         let sum: f32 = out[..n].iter().map(|(_, w)| w).sum();
-        assert!((sum - 1.0).abs() < 1e-4, "weights should sum to 1, got {sum}");
+        assert!(
+            (sum - 1.0).abs() < 1e-4,
+            "weights should sum to 1, got {sum}"
+        );
     }
 
     #[test]
@@ -512,10 +513,7 @@ mod tests {
         assert_eq!(frozen.arc_strong_count(), 2);
         assert_eq!(cloned.arc_strong_count(), 2);
         // Both observe the same table.
-        assert_eq!(
-            frozen.current_commitment(),
-            cloned.current_commitment()
-        );
+        assert_eq!(frozen.current_commitment(), cloned.current_commitment());
         // A commit on one is visible to the other.
         cloned.commit(table_with_fill::<8, 4, 2>(2.0));
         assert_eq!(frozen.current_version(), 1);

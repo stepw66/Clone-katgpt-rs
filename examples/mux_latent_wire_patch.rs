@@ -54,16 +54,17 @@ fn main() {
             .segments
             .iter()
             .find(|s| s.segment_id() == Some(sid))
-            && let LatentSegment::Compressed { weights, .. } = seg {
-                let first_3 = &weights[..3.min(weights.len())];
-                println!(
-                    "  Segment {sid}: [{:.3}, {:.3}, {:.3}, ...] ({} weights)",
-                    first_3[0],
-                    first_3.get(1).unwrap_or(&0.0),
-                    first_3.get(2).unwrap_or(&0.0),
-                    weights.len()
-                );
-            }
+            && let LatentSegment::Compressed { weights, .. } = seg
+        {
+            let first_3 = &weights[..3.min(weights.len())];
+            println!(
+                "  Segment {sid}: [{:.3}, {:.3}, {:.3}, ...] ({} weights)",
+                first_3[0],
+                first_3.get(1).unwrap_or(&0.0),
+                first_3.get(2).unwrap_or(&0.0),
+                weights.len()
+            );
+        }
     }
     println!();
 
@@ -118,16 +119,17 @@ fn main() {
             .segments
             .iter()
             .find(|s| s.segment_id() == Some(sid))
-            && let LatentSegment::Compressed { weights, .. } = seg {
-                let first_3 = &weights[..3.min(weights.len())];
-                println!(
-                    "  Segment {sid}: [{:.3}, {:.3}, {:.3}, ...] ({} weights)",
-                    first_3[0],
-                    first_3.get(1).unwrap_or(&0.0),
-                    first_3.get(2).unwrap_or(&0.0),
-                    weights.len()
-                );
-            }
+            && let LatentSegment::Compressed { weights, .. } = seg
+        {
+            let first_3 = &weights[..3.min(weights.len())];
+            println!(
+                "  Segment {sid}: [{:.3}, {:.3}, {:.3}, ...] ({} weights)",
+                first_3[0],
+                first_3.get(1).unwrap_or(&0.0),
+                first_3.get(2).unwrap_or(&0.0),
+                weights.len()
+            );
+        }
     }
     println!();
 

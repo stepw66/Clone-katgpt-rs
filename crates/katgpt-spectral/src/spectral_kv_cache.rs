@@ -233,7 +233,8 @@ impl SpectralQuantKVCache {
             let head_dim = layer.calibration.head_dim;
             let b_high = layer.b_high;
             let b_low = layer.b_low;
-            let mut rng = katgpt_core::types::Rng::new(config.seed.wrapping_add(layer_idx as u64 * 31));
+            let mut rng =
+                katgpt_core::types::Rng::new(config.seed.wrapping_add(layer_idx as u64 * 31));
             let eigenvectors = &layer.calibration.eigenvectors;
 
             // Generate synthetic data matching the actual pipeline:
@@ -251,7 +252,9 @@ impl SpectralQuantKVCache {
                     *v = rng.normal();
                 }
                 // Step 2: normalize to unit norm
-                let norm = katgpt_core::simd::simd_sum_sq(&scratch_x, head_dim).sqrt().max(1e-8);
+                let norm = katgpt_core::simd::simd_sum_sq(&scratch_x, head_dim)
+                    .sqrt()
+                    .max(1e-8);
                 katgpt_core::simd::simd_scale_inplace(&mut scratch_x, 1.0 / norm);
                 // Step 3: rotate by V^T — output[j] = Σ_i x[i] * V[i*head_dim+j]
                 // Same transpose-and-accumulate pattern as SpectralRotation::rotate().
@@ -474,7 +477,11 @@ impl SpectralQuantKVCache {
         all_indices[d_eff..self.kv_dim].copy_from_slice(&self.scratch_tail_indices[..tail_len]);
 
         // Pack variable bits into storage using precomputed packed_bits
-        pack_variable_bits(&all_indices[..self.kv_dim], &layer_state.packed_bits, packed_slot);
+        pack_variable_bits(
+            &all_indices[..self.kv_dim],
+            &layer_state.packed_bits,
+            packed_slot,
+        );
     }
 
     /// Dequantize a key at position into a new vector.
@@ -1799,9 +1806,16 @@ mod tests {
                 &mut scratch,
             );
 
-            assert_eq!(alloc_flat.len(), into_buf.len(), "len mismatch threshold={threshold}");
+            assert_eq!(
+                alloc_flat.len(),
+                into_buf.len(),
+                "len mismatch threshold={threshold}"
+            );
             for (i, (a, b)) in alloc_flat.iter().zip(into_buf.iter()).enumerate() {
-                assert_eq!(a, b, "bit mismatch at [{i}] threshold={threshold}: {a} vs {b}");
+                assert_eq!(
+                    a, b,
+                    "bit mismatch at [{i}] threshold={threshold}: {a} vs {b}"
+                );
             }
         }
     }
@@ -1824,12 +1838,13 @@ mod tests {
 
         let mut buf = vec![0.0f32; kv_dim];
         let mut scratch = DequantizeScratch::new(kv_dim);
-        par_dequantize_spectral_keys_flat_into(
-            &cache, 0, 0, kv_dim, 1, &mut buf, &mut scratch,
-        );
+        par_dequantize_spectral_keys_flat_into(&cache, 0, 0, kv_dim, 1, &mut buf, &mut scratch);
         // Should have written kv_dim floats for position 0
         assert_eq!(buf.len(), kv_dim);
         // Values should be non-zero (we stored a non-zero key)
-        assert!(buf.iter().any(|&v| v != 0.0), "expected non-zero dequant output");
+        assert!(
+            buf.iter().any(|&v| v != 0.0),
+            "expected non-zero dequant output"
+        );
     }
 }

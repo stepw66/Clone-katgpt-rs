@@ -5,7 +5,6 @@
 
 use katgpt_core::types::DilationConfig;
 
-
 /// Dilated decode step — replace full KV scan with D-strided access + bridge readout.
 /// Returns attention-weighted output from dilated KV positions.
 ///

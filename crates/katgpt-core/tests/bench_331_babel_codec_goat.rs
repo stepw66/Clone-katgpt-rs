@@ -43,9 +43,7 @@
 
 #![cfg(feature = "babel_codec")]
 
-use katgpt_core::{
-    BabelCodec, BabelCommitment, FixedRuleTextCodec, SigmoidLatentCodec,
-};
+use katgpt_core::{BabelCodec, BabelCommitment, FixedRuleTextCodec, SigmoidLatentCodec};
 use std::hint::black_box;
 use std::time::Instant;
 
@@ -63,10 +61,18 @@ struct GateResult {
 
 impl GateResult {
     fn pass(name: &'static str, detail: impl Into<String>) -> Self {
-        Self { name, passed: true, detail: detail.into() }
+        Self {
+            name,
+            passed: true,
+            detail: detail.into(),
+        }
     }
     fn fail(name: &'static str, detail: impl Into<String>) -> Self {
-        Self { name, passed: false, detail: detail.into() }
+        Self {
+            name,
+            passed: false,
+            detail: detail.into(),
+        }
     }
 }
 
@@ -109,16 +115,40 @@ const N_PER_CATEGORY: usize = 500;
 /// `{entity} has {key} = {value}`.
 fn synth_kg_triples(rng: &mut Lcg) -> Vec<String> {
     const ENTITIES: &[&str] = &[
-        "Wang_Nianfang", "player_42", "guard_captain", "merchant_eli", "boss_drake",
-        "npc_mira", "king_aldric", "thief_raven", "healer_sera", "blacksmith_borin",
+        "Wang_Nianfang",
+        "player_42",
+        "guard_captain",
+        "merchant_eli",
+        "boss_drake",
+        "npc_mira",
+        "king_aldric",
+        "thief_raven",
+        "healer_sera",
+        "blacksmith_borin",
     ];
     const KEYS: &[&str] = &[
-        "appellant_of", "hp", "level", "faction", "alignment", "origin_zone",
-        "current_quest", "relationship_to", "known_for", "carries",
+        "appellant_of",
+        "hp",
+        "level",
+        "faction",
+        "alignment",
+        "origin_zone",
+        "current_quest",
+        "relationship_to",
+        "known_for",
+        "carries",
     ];
     const VALUES: &[&str] = &[
-        "Hubei_Longan_Real_Estate", "100", "7", "crimson_court", "neutral_good",
-        "lakeside_town", "rescue_hostage", "ally", "blade_of_dawn", "BIBREF0",
+        "Hubei_Longan_Real_Estate",
+        "100",
+        "7",
+        "crimson_court",
+        "neutral_good",
+        "lakeside_town",
+        "rescue_hostage",
+        "ally",
+        "blade_of_dawn",
+        "BIBREF0",
     ];
     let mut out = Vec::with_capacity(N_PER_CATEGORY);
     for _ in 0..N_PER_CATEGORY {
@@ -134,14 +164,32 @@ fn synth_kg_triples(rng: &mut Lcg) -> Vec<String> {
 /// `Config[{target}]: {key} = {value}({unit})`.
 fn synth_configs(rng: &mut Lcg) -> Vec<String> {
     const TARGETS: &[&str] = &[
-        "engine", "combat", "negotiation", "inventory", "economy", "pathing",
-        "render", "audio", "ai_brain", "save_system",
+        "engine",
+        "combat",
+        "negotiation",
+        "inventory",
+        "economy",
+        "pathing",
+        "render",
+        "audio",
+        "ai_brain",
+        "save_system",
     ];
     const KEYS: &[&str] = &[
-        "max_fps", "base_damage", "patience_required", "slot_count", "gold_cap",
-        "tick_rate", "draw_distance", "volume", "think_budget", "autosave_interval",
+        "max_fps",
+        "base_damage",
+        "patience_required",
+        "slot_count",
+        "gold_cap",
+        "tick_rate",
+        "draw_distance",
+        "volume",
+        "think_budget",
+        "autosave_interval",
     ];
-    const UNITS: &[&str] = &["hz", "hp", "turns", "slots", "gold", "ticks", "meters", "db", "ms", "sec"];
+    const UNITS: &[&str] = &[
+        "hz", "hp", "turns", "slots", "gold", "ticks", "meters", "db", "ms", "sec",
+    ];
     let mut out = Vec::with_capacity(N_PER_CATEGORY);
     for _ in 0..N_PER_CATEGORY {
         let t = TARGETS[rng.next_u32(TARGETS.len() as u32) as usize];
@@ -156,20 +204,36 @@ fn synth_configs(rng: &mut Lcg) -> Vec<String> {
 /// 500 multi-line quest/dialog records (each entry is 3-5 lines of mixed schema).
 fn synth_mixed(rng: &mut Lcg) -> Vec<String> {
     const SECTIONS: &[&str] = &[
-        "quest/kill_10_rats", "quest/rescue_hostage", "quest/escort_caravan",
-        "quest/main_story", "quest/side_deal", "dialog/greeting",
-        "dialog/farewell", "dialog/bargain", "dialog/threat", "dialog/thanks",
+        "quest/kill_10_rats",
+        "quest/rescue_hostage",
+        "quest/escort_caravan",
+        "quest/main_story",
+        "quest/side_deal",
+        "dialog/greeting",
+        "dialog/farewell",
+        "dialog/bargain",
+        "dialog/threat",
+        "dialog/thanks",
     ];
     const ACTIONS: &[&str] = &["flee", "fight", "negotiate", "bribe", "hide"];
     const CONDS: &[&str] = &[
-        "hp < 10", "enemy_level > player_level", "gold > 100", "night_time",
-        "reputation_low", "has_weapon", "alone", "witnessed",
+        "hp < 10",
+        "enemy_level > player_level",
+        "gold > 100",
+        "night_time",
+        "reputation_low",
+        "has_weapon",
+        "alone",
+        "witnessed",
     ];
     const COMPARISONS: &[&str] = &["fire_wins", "ice_wins", "trade_favored", "fight_favored"];
     let mut out = Vec::with_capacity(N_PER_CATEGORY);
     for i in 0..N_PER_CATEGORY {
         let mut lines = Vec::with_capacity(4);
-        lines.push(format!("Section[{}]", SECTIONS[rng.next_u32(SECTIONS.len() as u32) as usize]));
+        lines.push(format!(
+            "Section[{}]",
+            SECTIONS[rng.next_u32(SECTIONS.len() as u32) as usize]
+        ));
         lines.push(format!("npc_{} has disposition = {}", i, rng.next_u32(10)));
         lines.push(format!(
             "Config[ai_brain]: budget = {}(ticks)",
@@ -269,7 +333,11 @@ fn gate_g2_compression_ratio(corpus: &[String]) -> (GateResult, f32, usize, usiz
     } else {
         1.0
     };
-    let compression_x = if ratio > 0.0 { 1.0 / ratio } else { f32::INFINITY };
+    let compression_x = if ratio > 0.0 {
+        1.0 / ratio
+    } else {
+        f32::INFINITY
+    };
 
     let passed = ratio <= 0.5; // ≥ 2×
     let gr = if passed {
@@ -346,11 +414,13 @@ fn gate_g3_latency(corpus: &[String]) -> GateResult {
     let ns_per_256_bytes_big = (median_big_ns as f64) * (256.0 / big_len as f64);
 
     // Latent codec latency: D=8, K=4, 8 canonical basis directions.
-    let dirs: Vec<[f32; 8]> = (0..8).map(|i| {
-        let mut d = [0.0f32; 8];
-        d[i] = 1.0;
-        d
-    }).collect();
+    let dirs: Vec<[f32; 8]> = (0..8)
+        .map(|i| {
+            let mut d = [0.0f32; 8];
+            d[i] = 1.0;
+            d
+        })
+        .collect();
     let bias = vec![0.0f32; 8];
     let mut latent_codec = SigmoidLatentCodec::<8, 4>::new(dirs, bias, 1.0).expect("latent codec");
     let latent_input = [0.5f32; 8];
@@ -414,11 +484,13 @@ fn gate_g4_alloc_free_hot_path() -> GateResult {
     // GATE is the latent codec.
     const D: usize = 8;
     const K: usize = 4;
-    let dirs: Vec<[f32; D]> = (0..D).map(|i| {
-        let mut d = [0.0f32; D];
-        d[i] = 1.0;
-        d
-    }).collect();
+    let dirs: Vec<[f32; D]> = (0..D)
+        .map(|i| {
+            let mut d = [0.0f32; D];
+            d[i] = 1.0;
+            d
+        })
+        .collect();
     let bias = vec![0.0f32; D];
     let mut latent_codec = SigmoidLatentCodec::<D, K>::new(dirs, bias, 1.0).expect("latent codec");
     let input = [0.5f32; D];
@@ -512,7 +584,10 @@ fn gate_g5_determinism(corpus: &[String]) -> GateResult {
     // Dedup check: distinct inputs should (with overwhelming probability for
     // 1500 entries under BLAKE3) produce distinct commitments. If many collide,
     // something is wrong with the codec or the corpus is degenerate.
-    let n_distinct = commitments.iter().collect::<std::collections::HashSet<_>>().len();
+    let n_distinct = commitments
+        .iter()
+        .collect::<std::collections::HashSet<_>>()
+        .len();
 
     if byte_mismatches == 0 && commitment_mismatches == 0 {
         GateResult::pass(
@@ -568,14 +643,20 @@ fn main() {
     }
 
     println!();
-    println!("G4 (no-regression build matrix): verified via `cargo test -p katgpt-core --all-features`");
-    println!("    (run separately by the workflow — this bench covers the alloc-free hot path only).");
+    println!(
+        "G4 (no-regression build matrix): verified via `cargo test -p katgpt-core --all-features`"
+    );
+    println!(
+        "    (run separately by the workflow — this bench covers the alloc-free hot path only)."
+    );
     println!();
 
     // Decision per the plan exit criteria.
     if all_pass {
         println!("=== ALL G1–G5 PASS — eligible for default promotion ===");
-        println!("    (per the plan, promotion to default is recorded in the Cargo.toml comment + README.)");
+        println!(
+            "    (per the plan, promotion to default is recorded in the Cargo.toml comment + README.)"
+        );
         // Exit 0 so `cargo test` reports success.
         std::process::exit(0);
     } else {

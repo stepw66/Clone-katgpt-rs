@@ -45,7 +45,9 @@ impl IntervalMask {
     ///
     /// `gap_threshold = 0` means no merging — returns a clone.
     pub fn close_intervals(&self, gap_threshold: usize) -> Self {
-        if gap_threshold == 0 { return self.clone() }
+        if gap_threshold == 0 {
+            return self.clone();
+        }
 
         let intervals = self.valid_intervals();
         match intervals.len() {
@@ -111,7 +113,10 @@ impl IntervalMask {
     /// Selects between scalar and SIMD backends based on `config.interval_simd_threshold`.
     /// For masks smaller than the threshold, scalar is faster (no SIMD setup overhead).
     #[inline]
-    pub fn is_interval_closed_adaptive(&self, config: &crate::interval_pruner::AdaptiveConfig) -> bool {
+    pub fn is_interval_closed_adaptive(
+        &self,
+        config: &crate::interval_pruner::AdaptiveConfig,
+    ) -> bool {
         config.is_interval_closed(&self.mask)
     }
 
@@ -119,7 +124,11 @@ impl IntervalMask {
     ///
     /// Selects between scalar and SIMD backends based on `config.interval_simd_threshold`.
     /// Returns a new mask with gaps filled.
-    pub fn close_intervals_adaptive(&self, gap_threshold: usize, config: &crate::interval_pruner::AdaptiveConfig) -> Self {
+    pub fn close_intervals_adaptive(
+        &self,
+        gap_threshold: usize,
+        config: &crate::interval_pruner::AdaptiveConfig,
+    ) -> Self {
         let result = config.close_intervals(&self.mask, gap_threshold);
         Self { mask: result }
     }
@@ -258,7 +267,9 @@ impl<P: ConstraintPruner> ConstraintPruner for IntervalPruner<P> {
                 let intervals = valid_intervals_from_slice(&results[..len]);
                 match intervals.len() {
                     0 | 1 => {}
-                    _ => close_intervals_inplace(&mut results[..len], &intervals, self.gap_threshold),
+                    _ => {
+                        close_intervals_inplace(&mut results[..len], &intervals, self.gap_threshold)
+                    }
                 }
             }
         }

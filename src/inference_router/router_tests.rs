@@ -698,7 +698,7 @@ fn tvp_tier_decision_branches() {
     // directly (the leaf crate mirrors the root enum bit-for-bit; values cross
     // the boundary as u8 via `tier_to_kp` in prod). Asserting on the pruners
     // enum here is the honest framing for an isolated-fn test.
-    use crate::pruners::thicket_variance_probe::{tvp_tier_decision, ComputeTier as KpComputeTier};
+    use crate::pruners::thicket_variance_probe::{ComputeTier as KpComputeTier, tvp_tier_decision};
 
     // No signal → Defer.
     assert_eq!(
@@ -708,45 +708,101 @@ fn tvp_tier_decision_branches() {
 
     // Promote branch.
     assert_eq!(
-        tvp_tier_decision(Some(tvp_reasoning(0.9)), 0.6, 0.2, KpComputeTier::CpuOnly, true, true),
+        tvp_tier_decision(
+            Some(tvp_reasoning(0.9)),
+            0.6,
+            0.2,
+            KpComputeTier::CpuOnly,
+            true,
+            true
+        ),
         TvpTierDecision::PromoteGpu
     );
     // No GPU → cannot promote.
     assert_eq!(
-        tvp_tier_decision(Some(tvp_reasoning(0.9)), 0.6, 0.2, KpComputeTier::CpuOnly, false, true),
+        tvp_tier_decision(
+            Some(tvp_reasoning(0.9)),
+            0.6,
+            0.2,
+            KpComputeTier::CpuOnly,
+            false,
+            true
+        ),
         TvpTierDecision::Hold
     );
     // Already CpuGpu → cannot promote further.
     assert_eq!(
-        tvp_tier_decision(Some(tvp_reasoning(0.9)), 0.6, 0.2, KpComputeTier::CpuGpu, true, true),
+        tvp_tier_decision(
+            Some(tvp_reasoning(0.9)),
+            0.6,
+            0.2,
+            KpComputeTier::CpuGpu,
+            true,
+            true
+        ),
         TvpTierDecision::Hold
     );
 
     // Demote branch.
     assert_eq!(
-        tvp_tier_decision(Some(tvp_reasoning(0.1)), 0.6, 0.2, KpComputeTier::CpuGpu, true, true),
+        tvp_tier_decision(
+            Some(tvp_reasoning(0.1)),
+            0.6,
+            0.2,
+            KpComputeTier::CpuGpu,
+            true,
+            true
+        ),
         TvpTierDecision::DemoteCpu
     );
     // High load → cannot demote.
     assert_eq!(
-        tvp_tier_decision(Some(tvp_reasoning(0.1)), 0.6, 0.2, KpComputeTier::CpuGpu, true, false),
+        tvp_tier_decision(
+            Some(tvp_reasoning(0.1)),
+            0.6,
+            0.2,
+            KpComputeTier::CpuGpu,
+            true,
+            false
+        ),
         TvpTierDecision::Hold
     );
     // Already CpuOnly → cannot demote.
     assert_eq!(
-        tvp_tier_decision(Some(tvp_reasoning(0.1)), 0.6, 0.2, KpComputeTier::CpuOnly, true, true),
+        tvp_tier_decision(
+            Some(tvp_reasoning(0.1)),
+            0.6,
+            0.2,
+            KpComputeTier::CpuOnly,
+            true,
+            true
+        ),
         TvpTierDecision::Hold
     );
 
     // Mid-range disagreement → Hold.
     assert_eq!(
-        tvp_tier_decision(Some(tvp_reasoning(0.4)), 0.6, 0.2, KpComputeTier::CpuOnly, true, true),
+        tvp_tier_decision(
+            Some(tvp_reasoning(0.4)),
+            0.6,
+            0.2,
+            KpComputeTier::CpuOnly,
+            true,
+            true
+        ),
         TvpTierDecision::Hold
     );
 
     // Format-only signal → never promotes.
     assert_eq!(
-        tvp_tier_decision(Some(tvp_format_only(0.99)), 0.6, 0.2, KpComputeTier::CpuOnly, true, true),
+        tvp_tier_decision(
+            Some(tvp_format_only(0.99)),
+            0.6,
+            0.2,
+            KpComputeTier::CpuOnly,
+            true,
+            true
+        ),
         TvpTierDecision::Hold
     );
 }
@@ -844,16 +900,16 @@ fn g4_tvp_plus_rv_strictly_dominates_either_alone() {
     // Class D — both low: obvious easy query. Neither promotes (correct).
     let queries: &[(f64, f32, bool)] = &[
         // (rv, tvp_reasoning, should_promote)
-        (0.20, 0.40, true),  // A: RV-high, TVP-mid — hard (RV catches, TVP holds)
-        (0.20, 0.50, true),  // A: variant
-        (0.01, 0.90, true),  // B: RV-low, TVP-high — hard (TVP catches)
-        (0.005, 0.85, true), // B: variant
-        (0.20, 0.90, true),  // C: both high — hard
-        (0.15, 0.95, true),  // C: variant
-        (0.01, 0.05, false), // D: both low — easy
+        (0.20, 0.40, true),   // A: RV-high, TVP-mid — hard (RV catches, TVP holds)
+        (0.20, 0.50, true),   // A: variant
+        (0.01, 0.90, true),   // B: RV-low, TVP-high — hard (TVP catches)
+        (0.005, 0.85, true),  // B: variant
+        (0.20, 0.90, true),   // C: both high — hard
+        (0.15, 0.95, true),   // C: variant
+        (0.01, 0.05, false),  // D: both low — easy
         (0.005, 0.10, false), // D: variant
-        (0.05, 0.40, false), // ambiguous mid-range — easy (no strong signal)
-        (0.05, 0.50, false), // ambiguous mid-range — easy
+        (0.05, 0.40, false),  // ambiguous mid-range — easy (no strong signal)
+        (0.05, 0.50, false),  // ambiguous mid-range — easy
     ];
 
     let mut correct_rv_only = 0usize;
@@ -973,9 +1029,16 @@ fn chiar_hook_reports_stats_after_observing_keys() {
         router.observe_chiar_key(&entropy_key);
     }
     let stats = router.chiar_stats().expect("stats after 100 keys");
-    assert!(stats.tokens_observed >= 100, "tokens_observed = {}", stats.tokens_observed);
+    assert!(
+        stats.tokens_observed >= 100,
+        "tokens_observed = {}",
+        stats.tokens_observed
+    );
     let entropy = stats.utilization_entropy.expect("utilization_entropy");
-    assert!((0.0..=1.0).contains(&entropy), "entropy out of range: {entropy}");
+    assert!(
+        (0.0..=1.0).contains(&entropy),
+        "entropy out of range: {entropy}"
+    );
 }
 
 #[cfg(feature = "chiaroscuro")]
@@ -984,7 +1047,10 @@ fn chiar_hook_stats_visible_in_router_stats() {
     let mut router = fast_router(false, false);
     router.observe_chiar_key(&[0.5f32; 256]);
     let stats = router.stats();
-    assert!(stats.chiar_stats.is_some(), "chiar_stats should be Some in RouterStats");
+    assert!(
+        stats.chiar_stats.is_some(),
+        "chiar_stats should be Some in RouterStats"
+    );
     let cs = stats.chiar_stats.unwrap();
     assert!(cs.tokens_observed >= 1);
 }

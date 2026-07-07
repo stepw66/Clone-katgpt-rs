@@ -121,10 +121,19 @@ fn q_outer_baseline(
             // Scores: query · keys^T * scale
             let mut scores = [0.0f32; 256];
             let actual_bs = bs.min(256);
-            compute_scores(query, block_keys, actual_bs, hd, scale, &mut scores[..actual_bs]);
+            compute_scores(
+                query,
+                block_keys,
+                actual_bs,
+                hd,
+                scale,
+                &mut scores[..actual_bs],
+            );
 
             // Local softmax
-            let max_score = scores[..actual_bs].iter().fold(f32::NEG_INFINITY, |a, &b| a.max(b));
+            let max_score = scores[..actual_bs]
+                .iter()
+                .fold(f32::NEG_INFINITY, |a, &b| a.max(b));
             let mut sum_exp = 0.0f32;
             for s in scores[..actual_bs].iter_mut() {
                 *s = (*s - max_score).exp();
@@ -224,8 +233,13 @@ fn bench_kv_outer_vs_q_outer() {
     println!();
     println!("╔══════════════════════════════════════════════════════════════════════════╗");
     println!("║  Plan 256 Phase 2 — KV-Outer vs Q-Outer Sparse Prefill (GOAT gate)     ║");
-    println!("║  HEAD_DIM={HD}, BLOCK_SIZE={BS}, N_QUERIES={NQ}, TOP_K={TK}                       ║",
-        HD = HEAD_DIM, BS = BLOCK_SIZE, NQ = N_QUERIES, TK = TOP_K);
+    println!(
+        "║  HEAD_DIM={HD}, BLOCK_SIZE={BS}, N_QUERIES={NQ}, TOP_K={TK}                       ║",
+        HD = HEAD_DIM,
+        BS = BLOCK_SIZE,
+        NQ = N_QUERIES,
+        TK = TOP_K
+    );
     println!("╠═══════════════╦════════════════╦════════════════╦═════════╦═════════╣");
     println!("║ Context       ║ Q-Outer (ms)   ║ KV-Outer (ms)  ║ Speedup ║ Match   ║");
     println!("╠═══════════════╬════════════════╬════════════════╬═════════╬═════════╣");
@@ -241,7 +255,9 @@ fn bench_kv_outer_vs_q_outer() {
         // --- Q-outer baseline (1 iteration) ---
         let router_q = VortexRouter::BlockTopK(BlockTopKRouter::new(true));
         let t0 = Instant::now();
-        let q_out = q_outer_baseline(&router_q, &keys, &values, &queries, N_QUERIES, n_blocks, TOP_K);
+        let q_out = q_outer_baseline(
+            &router_q, &keys, &values, &queries, N_QUERIES, n_blocks, TOP_K,
+        );
         let q_ms = t0.elapsed().as_secs_f64() * 1000.0;
 
         // --- KV-outer prefill_sparse (1 iteration) ---
@@ -268,7 +284,9 @@ fn bench_kv_outer_vs_q_outer() {
                 assert!(
                     diff < 1e-3,
                     "KV/Q-outer mismatch at ctx={ctx_tokens} idx={i}: kv={:.6} q={:.6} diff={:.2e}",
-                    kv_out[i], q_out[i], diff
+                    kv_out[i],
+                    q_out[i],
+                    diff
                 );
             }
             matched = if max_diff < 1e-3 { "OK" } else { "FAIL" };
@@ -309,12 +327,29 @@ fn bench_kv_outer_vs_q_outer() {
     // — it sharpens the regime boundary that the recommendation already names.
     println!();
     println!("── O2 (Issue 015): N_QUERIES sweep — KV-outer vs Q-outer speedup ──");
-    println!("    HEAD_DIM={HD}, BLOCK_SIZE={BS}, TOP_K={TK}", HD = HEAD_DIM, BS = BLOCK_SIZE, TK = TOP_K);
-    println!("    avg_queries/block = (N_QUERIES × TOP_K) / n_blocks (theoretical max amortization)");
+    println!(
+        "    HEAD_DIM={HD}, BLOCK_SIZE={BS}, TOP_K={TK}",
+        HD = HEAD_DIM,
+        BS = BLOCK_SIZE,
+        TK = TOP_K
+    );
+    println!(
+        "    avg_queries/block = (N_QUERIES × TOP_K) / n_blocks (theoretical max amortization)"
+    );
     println!();
-    println!("    {ctx:<8} {nq:<8} {aqb:<18} {qm:<14} {kvm:<14} {sp:<12}",
-        ctx = "ctx", nq = "NQ", aqb = "avg_q/block", qm = "Q-outer(ms)", kvm = "KV-outer(ms)", sp = "speedup");
-    println!("    {d:<8} {d:<8} {d:<18} {d:<14} {d:<14} {d:<12}", d = "--------");
+    println!(
+        "    {ctx:<8} {nq:<8} {aqb:<18} {qm:<14} {kvm:<14} {sp:<12}",
+        ctx = "ctx",
+        nq = "NQ",
+        aqb = "avg_q/block",
+        qm = "Q-outer(ms)",
+        kvm = "KV-outer(ms)",
+        sp = "speedup"
+    );
+    println!(
+        "    {d:<8} {d:<8} {d:<18} {d:<14} {d:<14} {d:<12}",
+        d = "--------"
+    );
 
     for &nq in N_QUERIES_SET {
         let queries_sweep = make_queries(nq);
@@ -325,7 +360,15 @@ fn bench_kv_outer_vs_q_outer() {
             // Q-outer baseline.
             let router_q = VortexRouter::BlockTopK(BlockTopKRouter::new(true));
             let t0 = Instant::now();
-            let _ = q_outer_baseline(&router_q, &keys, &values, &queries_sweep, nq, n_blocks, TOP_K);
+            let _ = q_outer_baseline(
+                &router_q,
+                &keys,
+                &values,
+                &queries_sweep,
+                nq,
+                n_blocks,
+                TOP_K,
+            );
             let q_ms = t0.elapsed().as_secs_f64() * 1000.0;
 
             // KV-outer.
@@ -338,7 +381,8 @@ fn bench_kv_outer_vs_q_outer() {
             let speedup = if kv_ms > 0.0 { q_ms / kv_ms } else { 0.0 };
             let avg_q_per_block = (nq * TOP_K) as f64 / n_blocks as f64;
 
-            println!("    {ctx:<8} {nq:<8} {aqb:<18.3} {qm:<14.2} {kvm:<14.2} {sp:<12.3}x",
+            println!(
+                "    {ctx:<8} {nq:<8} {aqb:<18.3} {qm:<14.2} {kvm:<14.2} {sp:<12.3}x",
                 ctx = format_ctx(ctx_tokens),
                 nq = nq,
                 aqb = avg_q_per_block,

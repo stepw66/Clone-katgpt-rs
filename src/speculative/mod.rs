@@ -1,5 +1,5 @@
-pub use katgpt_speculative::budget_compat;
 pub use katgpt_speculative::acceptance_forecast;
+pub use katgpt_speculative::budget_compat;
 
 #[cfg(feature = "belief_drafter")]
 pub use katgpt_speculative::belief_cache;
@@ -129,15 +129,15 @@ pub use dflash::{
     dflash_predict, dflash_predict_ar, dflash_predict_ar_with, dflash_predict_conditioned,
     dflash_predict_conditioned_with, dflash_predict_parallel, dflash_predict_with,
 };
+#[allow(deprecated)]
+pub use katgpt_core::speculative::sampling::{
+    sample_from_distribution, sample_residual_distribution, sample_residual_distribution_into,
+};
 pub use katgpt_core::traits::DominoPruner;
 pub use prefill::{
     AttentionScorer, BlockAttentionScorer, PrefillScorer, RandomScorer, UniformScorer,
     block_select, block_select_grid, compress_prompt, compress_prompt_blocks, should_compress,
     speculative_prefill, speculative_prefill_adaptive, speculative_prefill_block,
-};
-#[allow(deprecated)]
-pub use katgpt_core::speculative::sampling::{
-    sample_from_distribution, sample_residual_distribution, sample_residual_distribution_into,
 };
 pub use step::{speculative_step, speculative_step_verifier};
 pub use types::{
@@ -427,7 +427,11 @@ pub use caddtree_budget::{
     build_dd_tree_adaptive_screened,
 };
 
-#[cfg(all(feature = "caddtree_budget", feature = "mux_demux", feature = "rcd_residual"))]
+#[cfg(all(
+    feature = "caddtree_budget",
+    feature = "mux_demux",
+    feature = "rcd_residual"
+))]
 pub use caddtree_budget::build_dd_tree_adaptive_mux_residual;
 
 // ── Hardware-Aware Prefix Scheduler — Multi-Request Budget Allocator (Plan 339) ──

@@ -155,7 +155,9 @@ impl ReconstructionState {
 mod tests {
     use super::*;
     use crate::reconstruction::{ReconstructionConfig, ReconstructionState};
-    use katgpt_types::{DepthInvarianceConfig, DepthInvarianceKind, MagnitudeRegularization, Scratch};
+    use katgpt_types::{
+        DepthInvarianceConfig, DepthInvarianceKind, MagnitudeRegularization, Scratch,
+    };
 
     /// Default config for the audit (k=1000 chain → scratch sized for 1001 samples).
     const AUDIT_K: usize = 1000;
@@ -405,7 +407,10 @@ mod tests {
         let h = state.hla();
         // Finite (no NaN / Inf).
         for &x in h {
-            assert!(x.is_finite(), "T1.7: regularized HLA must be finite, got {x}");
+            assert!(
+                x.is_finite(),
+                "T1.7: regularized HLA must be finite, got {x}"
+            );
         }
         // RMS-bounded: RmsNorm targets unit RMS, allow +1e-4 slack for f32
         // rounding + the 1e-8 epsilon.

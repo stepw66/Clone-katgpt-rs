@@ -10,11 +10,11 @@
 //! They run against synthetic data with known structure.
 
 use crate::{
-    beta_fitter::{fit_beta_nnls, BetaFitConfig},
+    beta_fitter::{BetaFitConfig, fit_beta_nnls},
     compact::compact,
     key_selection::{omp::mass_coverage, select_highest_attn_keys, select_omp_keys},
     types::{AmConfig, ScoreMethod},
-    value_fitter::{compute_compact_attention, fit_cv_least_squares, ValueFitConfig},
+    value_fitter::{ValueFitConfig, compute_compact_attention, fit_cv_least_squares},
 };
 
 /// Generate synthetic KV with a known block-diagonal structure:
@@ -41,7 +41,9 @@ fn synth_queries(n: usize, d: usize, seed: u64) -> Vec<f32> {
     let mut state = seed;
     for v in q.iter_mut() {
         // Simple LCG for deterministic noise.
-        state = state.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+        state = state
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
         let r = ((state >> 33) as f32) / (1u64 << 31) as f32 - 0.5;
         *v = r * 0.4;
     }
@@ -348,7 +350,15 @@ fn test_compact_attention_with_beta() {
     let t = 4;
     let d = 4;
     let mut x = vec![0.0f32; n * t];
-    compute_compact_attention(&queries, &result.compact_keys, &result.beta, n, t, d, &mut x);
+    compute_compact_attention(
+        &queries,
+        &result.compact_keys,
+        &result.beta,
+        n,
+        t,
+        d,
+        &mut x,
+    );
     for i in 0..n {
         let row_sum: f32 = x[i * t..(i + 1) * t].iter().sum();
         assert!(

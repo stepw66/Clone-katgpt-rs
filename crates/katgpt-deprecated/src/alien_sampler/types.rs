@@ -31,14 +31,20 @@ impl AlienConfig {
     /// Paper-default config: `beta = 0.7`, `top_m = 10`.
     #[must_use]
     pub const fn paper_default() -> Self {
-        Self { beta: 0.7, top_m: 10 }
+        Self {
+            beta: 0.7,
+            top_m: 10,
+        }
     }
 
     /// Coherence-only config: `beta = 0.0`. Useful as the GOAT-gate baseline
     /// arm (Plan 311 T3.2 Arm A).
     #[must_use]
     pub const fn coherence_only() -> Self {
-        Self { beta: 0.0, top_m: 10 }
+        Self {
+            beta: 0.0,
+            top_m: 10,
+        }
     }
 
     /// Availability-only config: `beta = 1.0`. Diagnostic only — rarely what a
@@ -46,7 +52,10 @@ impl AlienConfig {
     /// the fusion math in tests.
     #[must_use]
     pub const fn availability_only() -> Self {
-        Self { beta: 1.0, top_m: 10 }
+        Self {
+            beta: 1.0,
+            top_m: 10,
+        }
     }
 }
 
@@ -129,7 +138,11 @@ pub enum AlienSamplerError {
 impl core::fmt::Display for AlienSamplerError {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
-            Self::ScratchLengthMismatch { expected, got, which } => {
+            Self::ScratchLengthMismatch {
+                expected,
+                got,
+                which,
+            } => {
                 write!(
                     f,
                     "alien_sampler: {which} scratch length mismatch (expected {expected}, got {got})"
@@ -154,9 +167,11 @@ mod tests {
 
     #[test]
     fn scored_candidate_descending_order() {
-        let mut v = [ScoredCandidate::new(0.1, 0),
+        let mut v = [
+            ScoredCandidate::new(0.1, 0),
             ScoredCandidate::new(0.9, 1),
-            ScoredCandidate::new(0.5, 2)];
+            ScoredCandidate::new(0.5, 2),
+        ];
         v.sort();
         assert_eq!(v[0].idx, 1); // 0.9
         assert_eq!(v[1].idx, 2); // 0.5

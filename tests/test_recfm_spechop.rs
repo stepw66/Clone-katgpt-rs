@@ -15,10 +15,12 @@ use katgpt_rs::spechop::{CacheSpeculator, CrossHopConfig, HopSpeculator, observa
 
 #[test]
 fn proof_p1_converging_observations_decreasing_velocity() {
-    let obs = ["The quick brown fox",
+    let obs = [
+        "The quick brown fox",
         "The quick brown fox jumps",
         "The quick brown fox jumps over",
-        "The quick brown fox jumps over the"];
+        "The quick brown fox jumps over the",
+    ];
 
     let mut velocities = Vec::new();
     for i in 1..obs.len() {

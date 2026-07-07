@@ -79,7 +79,6 @@ fn mean_std(values: &[f64]) -> (f64, f64) {
 // ── T9: Synthetic Quality Sweep ──────────────────────────────
 
 #[test]
-
 #[ignore = "pure measurement benchmark (no assertions), slow in debug; run with --release --ignored"]
 fn goat_octopus_synthetic_mse_sweep() {
     let dims = [64usize, 128, 256];
@@ -178,7 +177,6 @@ fn goat_octopus_synthetic_mse_sweep() {
 // ── T9b: Joint vs Simple Rounding Ablation ───────────────────
 
 #[test]
-
 #[ignore = "pure measurement benchmark (no assertions), slow in debug; run with --release --ignored"]
 fn goat_octopus_joint_vs_simple_rounding() {
     let dim = 128;
@@ -255,7 +253,6 @@ fn goat_octopus_joint_vs_simple_rounding() {
 // ── T10: Compression Ratio Comparison ────────────────────────
 
 #[test]
-
 #[ignore = "pure measurement benchmark (no assertions), slow in debug; run with --release --ignored"]
 fn goat_octopus_compression_ratio() {
     let dims = [64usize, 128, 256];
@@ -517,7 +514,6 @@ fn goat_octopus_vs_turboquant_legacy() {
 // ── T11: Quality by Dimension ────────────────────────────────
 
 #[test]
-
 #[ignore = "pure measurement benchmark (no assertions), slow in debug; run with --release --ignored"]
 fn goat_octopus_quality_by_dimension() {
     let bits = 2; // Most aggressive — where OCTOPUS should shine
@@ -576,7 +572,6 @@ fn goat_octopus_quality_by_dimension() {
 // ── T9d: Bit Split Sensitivity ───────────────────────────────
 
 #[test]
-
 #[ignore = "pure measurement benchmark (no assertions), slow in debug; run with --release --ignored"]
 fn goat_octopus_bit_split_sweep() {
     let dim = 128;
@@ -647,7 +642,6 @@ fn goat_octopus_bit_split_sweep() {
 // ── T10c: Effective Storage Efficiency ────────────────────────
 
 #[test]
-
 #[ignore = "pure measurement benchmark (no assertions), slow in debug; run with --release --ignored"]
 fn goat_octopus_storage_efficiency() {
     println!("\n🧪 GOAT 022: OCTOPUS Storage Efficiency");

@@ -23,7 +23,7 @@
 #![cfg(feature = "cross_resolution_transport")]
 
 use katgpt_core::cross_resolution::{
-    CrossResolutionBases, CrossResScratch, transport_cross_resolution_into,
+    CrossResScratch, CrossResolutionBases, transport_cross_resolution_into,
 };
 
 const D_SRC: usize = 64;

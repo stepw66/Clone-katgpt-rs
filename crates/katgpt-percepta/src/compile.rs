@@ -690,10 +690,7 @@ fn compile_function(
                 entries.push(("i32.eq", 0));
 
                 if label_stack[target_frame_idx].kind == LabelKind::Loop {
-                    entries.push((
-                        "br_if",
-                        label_stack[target_frame_idx].start_pc as i32,
-                    ));
+                    entries.push(("br_if", label_stack[target_frame_idx].start_pc as i32));
                 } else {
                     let idx = entries.len();
                     entries.push(("br_if", PLACEHOLDER));
@@ -712,10 +709,7 @@ fn compile_function(
                 })?;
 
             if label_stack[default_frame_idx].kind == LabelKind::Loop {
-                entries.push((
-                    "br",
-                    label_stack[default_frame_idx].start_pc as i32,
-                ));
+                entries.push(("br", label_stack[default_frame_idx].start_pc as i32));
             } else {
                 let idx = entries.len();
                 entries.push(("br", PLACEHOLDER));
@@ -787,10 +781,7 @@ fn compile_function(
         // ── Constants ───────────────────────────────────────
 
         if op == OP_I32_CONST {
-            entries.push((
-                "i32.const",
-                (instr.immediates[0] & MASK32) as i32,
-            ));
+            entries.push(("i32.const", (instr.immediates[0] & MASK32) as i32));
             continue;
         }
 
@@ -1040,7 +1031,11 @@ pub fn format_prefix(program: &[DispatchEntry]) -> String {
         let bytes = int_to_bytes(*imm as i64);
         // Inline write avoids allocating an intermediate Vec<String>.
         use std::fmt::Write as _;
-        let _ = writeln!(out, "{op} {:02x} {:02x} {:02x} {:02x}", bytes[0], bytes[1], bytes[2], bytes[3]);
+        let _ = writeln!(
+            out,
+            "{op} {:02x} {:02x} {:02x} {:02x}",
+            bytes[0], bytes[1], bytes[2], bytes[3]
+        );
     }
     out.push('}');
     out.push('\n');
@@ -1339,11 +1334,7 @@ mod tests {
 
     #[test]
     fn test_format_prefix() {
-        let program: Vec<DispatchEntry> = vec![
-            ("i32.const", 72),
-            ("output", 0),
-            ("halt", 0),
-        ];
+        let program: Vec<DispatchEntry> = vec![("i32.const", 72), ("output", 0), ("halt", 0)];
 
         let prefix = format_prefix(&program);
 
@@ -1591,12 +1582,7 @@ mod tests {
 
     #[test]
     fn test_adjust_branches() {
-        let body: Vec<DispatchEntry> = vec![
-            ("i32.const", 1),
-            ("br", 5),
-            ("br_if", 3),
-            ("halt", 0),
-        ];
+        let body: Vec<DispatchEntry> = vec![("i32.const", 1), ("br", 5), ("br_if", 3), ("halt", 0)];
 
         let adjusted = adjust_branches(&body, 10);
 
@@ -1761,16 +1747,11 @@ void compute(const char *input) {
         );
 
         // Must contain output instruction (print_str → putchar → output_byte)
-        assert!(
-            compiled.program.iter().any(|(op, _)| *op == "output")
-        );
+        assert!(compiled.program.iter().any(|(op, _)| *op == "output"));
 
         // Must end with halt
         assert!(
-            compiled
-                .program
-                .last()
-                .is_some_and(|(op, _)| *op == "halt"),
+            compiled.program.last().is_some_and(|(op, _)| *op == "halt"),
             "program should end with halt"
         );
 

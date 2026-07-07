@@ -88,7 +88,10 @@ pub fn hadamard_cols_into(tile: &mut [f32], rows: usize, cols: usize, col_buf: &
     if rows == 0 || cols == 0 || !rows.is_power_of_two() {
         return;
     }
-    debug_assert!(col_buf.len() >= rows, "col_buf must hold at least `rows` elements");
+    debug_assert!(
+        col_buf.len() >= rows,
+        "col_buf must hold at least `rows` elements"
+    );
     let buf = &mut col_buf[..rows];
     // Process one column at a time: gather strided, transform, scatter strided.
     for j in 0..cols {

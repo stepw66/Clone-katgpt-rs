@@ -92,9 +92,7 @@ const IMPORTANT_COST_FLOOR: f32 = 0.01;
 /// [1.0, 0.5, -0.3, 0.2] has norm sqrt(1.38) ≈ 1.1747; dividing through
 /// gives the unit vector below (verified: Σ components² = 1.0 ± 1e-6).
 const CROWD_DIM: usize = 4;
-const CROWD_DIRECTION: [f32; CROWD_DIM] = [
-    0.851330, 0.425665, -0.255399, 0.170266,
-];
+const CROWD_DIRECTION: [f32; CROWD_DIM] = [0.851330, 0.425665, -0.255399, 0.170266];
 
 // ──────────────────────────────────────────────────────────────────────────
 // Signal helpers
@@ -217,9 +215,18 @@ struct G2Row {
 
 fn run_g2() -> (Vec<G2Row>, bool) {
     println!("┌─ G2 — Crowd-NPC compute savings (T2.4) ─────────────────────────┐");
-    println!("│ Regime: geometric step_size decay, crowd-tier cost_floor={:.2}    │", CROWD_COST_FLOOR);
-    println!("│ Halter: tau={}, patience={}, l_min={}                              │", TAU, OSCILLATION_PATIENCE, L_MIN);
-    println!("│ Target: ≥75% loops saved vs L_max={}                              │", L_MAX);
+    println!(
+        "│ Regime: geometric step_size decay, crowd-tier cost_floor={:.2}    │",
+        CROWD_COST_FLOOR
+    );
+    println!(
+        "│ Halter: tau={}, patience={}, l_min={}                              │",
+        TAU, OSCILLATION_PATIENCE, L_MIN
+    );
+    println!(
+        "│ Target: ≥75% loops saved vs L_max={}                              │",
+        L_MAX
+    );
     println!();
 
     // Sweep decay rates. Lower decay = faster collapse = more savings.
@@ -230,10 +237,7 @@ fn run_g2() -> (Vec<G2Row>, bool) {
         "{:>8} {:>11} {:>12} {:>11} {:>14} {:>6}",
         "decay", "loops_used", "loops_saved", "savings", "halt_reason", "pass"
     );
-    println!(
-        "{}",
-        "-".repeat(8 + 11 + 12 + 11 + 14 + 6 + 5)
-    );
+    println!("{}", "-".repeat(8 + 11 + 12 + 11 + 14 + 6 + 5));
 
     for &decay in &decays {
         let outcome = simulate_trace(decay, CROWD_COST_FLOOR);
@@ -249,7 +253,12 @@ fn run_g2() -> (Vec<G2Row>, bool) {
 
         println!(
             "{:>8.2} {:>11} {:>12} {:>10.1}% {:>14} {:>6}",
-            decay, loops_used, loops_saved, savings_pct, reason_str, if pass { "✓" } else { "✗" }
+            decay,
+            loops_used,
+            loops_saved,
+            savings_pct,
+            reason_str,
+            if pass { "✓" } else { "✗" }
         );
 
         rows.push(G2Row {
@@ -324,9 +333,18 @@ struct G3Result {
 fn run_g3() -> G3Result {
     println!("┌─ G3 — No-regression on important-NPC regime (T2.5) ──────────────┐");
     println!("│ Regime: slow decay (×0.95/loop), cos_theta=+1.0 (non-oscillatory) │");
-    println!("│ Cost floor: {} (cheap drift — important tier refines long)        │", IMPORTANT_COST_FLOOR);
-    println!("│ Halter: tau={}, patience={}, l_min={}                              │", TAU, OSCILLATION_PATIENCE, L_MIN);
-    println!("│ Pass: waste ≤ 1 loop vs L_max={} AND no spurious halt              │", L_MAX);
+    println!(
+        "│ Cost floor: {} (cheap drift — important tier refines long)        │",
+        IMPORTANT_COST_FLOOR
+    );
+    println!(
+        "│ Halter: tau={}, patience={}, l_min={}                              │",
+        TAU, OSCILLATION_PATIENCE, L_MIN
+    );
+    println!(
+        "│ Pass: waste ≤ 1 loop vs L_max={} AND no spurious halt              │",
+        L_MAX
+    );
     println!();
 
     // Main trace: slow decay (0.95/loop), aligned cos_theta.
@@ -350,10 +368,8 @@ fn run_g3() -> G3Result {
     };
     println!("  Halt reason: {}", reason_str);
 
-    let spurious_gain_below_cost =
-        matches!(outcome.halt_reason, Some(HaltReason::GainBelowCost));
-    let spurious_oscillation =
-        matches!(outcome.halt_reason, Some(HaltReason::Oscillation));
+    let spurious_gain_below_cost = matches!(outcome.halt_reason, Some(HaltReason::GainBelowCost));
+    let spurious_oscillation = matches!(outcome.halt_reason, Some(HaltReason::Oscillation));
 
     // Non-oscillation contract sub-test: cos_theta stays ≥ 0 throughout, so
     // oscillation_count must never accumulate. We re-run the trace and inspect
@@ -494,7 +510,11 @@ fn run_g4() -> G4Result {
 
     for tau in 1..=L_MAX {
         // Hop: odd loops → A, even loops → B.
-        let curr_hidden = if tau % 2 == 1 { pos_a.clone() } else { pos_b.clone() };
+        let curr_hidden = if tau % 2 == 1 {
+            pos_a.clone()
+        } else {
+            pos_b.clone()
+        };
 
         let gain = step_size(&curr_hidden, &prev_hidden);
 
@@ -530,7 +550,10 @@ fn run_g4() -> G4Result {
         }
     }
     if halter_halt_loop.is_none() {
-        println!("  GainCostLoopHalter: ran all {} loops without halting", L_MAX);
+        println!(
+            "  GainCostLoopHalter: ran all {} loops without halting",
+            L_MAX
+        );
     }
 
     // ── PathwayTracker side ──────────────────────────────────────────────
@@ -544,8 +567,7 @@ fn run_g4() -> G4Result {
     let loops_for_pathway = halter_halt_loop.unwrap_or(L_MAX);
     let (pathway_stability_2loop, pathway_converged_2loop) =
         run_g4_pathway(&branches, loops_for_pathway);
-    let (pathway_stability_full, pathway_converged_full) =
-        run_g4_pathway(&branches, L_MAX);
+    let (pathway_stability_full, pathway_converged_full) = run_g4_pathway(&branches, L_MAX);
     println!(
         "  PathwayTracker ({} loops, parallel to halter): stability = {:.3}, is_converged(0.8) = {}",
         loops_for_pathway, pathway_stability_2loop, pathway_converged_2loop
@@ -554,12 +576,8 @@ fn run_g4() -> G4Result {
         "  PathwayTracker (full {} loops, if halter hadn't fired): stability = {:.3}, is_converged(0.8) = {}",
         L_MAX, pathway_stability_full, pathway_converged_full
     );
-    println!(
-        "    (constant branch input → PathwayTracker's stability signal stays high (≥0.8)"
-    );
-    println!(
-        "     even after many oscillatory loops — it cannot detect the activation reversal)"
-    );
+    println!("    (constant branch input → PathwayTracker's stability signal stays high (≥0.8)");
+    println!("     even after many oscillatory loops — it cannot detect the activation reversal)");
 
     println!();
     let halter_caught = halter_halt_loop == Some(2);
@@ -576,15 +594,27 @@ fn run_g4() -> G4Result {
 
     if pass {
         println!("│ G4 PASS: gain/cost halter caught oscillation at L=2 (cos θ = −1.0);");
-        println!("│          PathwayTracker (stability-only) reported stability={:.3}", pathway_stability_full);
-        println!("│          after {} oscillatory loops — structurally blind to activation reversal ✓", L_MAX);
+        println!(
+            "│          PathwayTracker (stability-only) reported stability={:.3}",
+            pathway_stability_full
+        );
+        println!(
+            "│          after {} oscillatory loops — structurally blind to activation reversal ✓",
+            L_MAX
+        );
     } else {
         println!("│ G4 FAIL:");
         if !halter_caught {
-            println!("│   → GainCostLoopHalter did not halt at L=2 (got {:?})", halter_halt_loop);
+            println!(
+                "│   → GainCostLoopHalter did not halt at L=2 (got {:?})",
+                halter_halt_loop
+            );
         }
         if !pathway_missed {
-            println!("│   → PathwayTracker full-run stability={:.3} (< 0.8) — controls mismatch", pathway_stability_full);
+            println!(
+                "│   → PathwayTracker full-run stability={:.3} (< 0.8) — controls mismatch",
+                pathway_stability_full
+            );
         }
     }
     println!("└──────────────────────────────────────────────────────────────────┘");
@@ -654,8 +684,10 @@ fn main() {
     println!("═══════════════════════════════════════════════════════════════════");
     println!();
     println!("Synthetic kernel-only harness. No `forward_looped`, no weights.");
-    println!("L_max reference = {}. Halter defaults: tau={}, patience={}, l_min={}.",
-             L_MAX, TAU, OSCILLATION_PATIENCE, L_MIN);
+    println!(
+        "L_max reference = {}. Halter defaults: tau={}, patience={}, l_min={}.",
+        L_MAX, TAU, OSCILLATION_PATIENCE, L_MIN
+    );
     println!();
 
     let (g2_rows, g2_pass) = run_g2();

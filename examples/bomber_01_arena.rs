@@ -281,15 +281,15 @@ fn main() {
             .as_any()
             .downcast_ref::<katgpt_rs::pruners::bomber::GatePlayer>()
     {
-            let stats = gate_player.router_stats();
-            println!();
-            println!("═══ InferenceRouter Stats ═══");
-            println!("  Tier: {}", stats.current_tier);
-            println!("  Total inferences: {}", stats.total_inferences);
-            println!("  Estimated QPS: {:.1}", stats.estimated_qps);
-            println!("  Tier transitions: {}", stats.tier_transitions);
-            println!("  Last backend: {}", stats.last_backend);
-            println!("  Total routed calls: {}", gate_player.total_routed());
+        let stats = gate_player.router_stats();
+        println!();
+        println!("═══ InferenceRouter Stats ═══");
+        println!("  Tier: {}", stats.current_tier);
+        println!("  Total inferences: {}", stats.total_inferences);
+        println!("  Estimated QPS: {:.1}", stats.estimated_qps);
+        println!("  Tier transitions: {}", stats.tier_transitions);
+        println!("  Last backend: {}", stats.last_backend);
+        println!("  Total routed calls: {}", gate_player.total_routed());
     }
 }
 

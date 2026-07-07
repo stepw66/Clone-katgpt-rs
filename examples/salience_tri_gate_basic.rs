@@ -60,14 +60,12 @@ fn main() {
     // gate; `ceil_delegate` is low enough that high-`delegate_dot` samples
     // actually delegate rather than speaking inline.
     let gate: SalienceTriGate<u32, D> = SalienceTriGate::new(
-        D_SPEAK,
-        D_DELEGATE,
-        0.3, // w_z — zone-attention weight
-        0.2, // w_c — curiosity weight
-        2.0, // beta_speak
-        2.0, // beta_delegate
-        0.5, // tau_speak
-        0.5, // tau_delegate
+        D_SPEAK, D_DELEGATE, 0.3,  // w_z — zone-attention weight
+        0.2,  // w_c — curiosity weight
+        2.0,  // beta_speak
+        2.0,  // beta_delegate
+        0.5,  // tau_speak
+        0.5,  // tau_delegate
         0.15, // floor_speak — below this speak score → Silent
         0.4,  // ceil_delegate — above this delegate score → Delegate
     );

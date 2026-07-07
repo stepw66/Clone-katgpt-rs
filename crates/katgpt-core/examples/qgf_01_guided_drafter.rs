@@ -121,7 +121,10 @@ fn main() {
     let p_after = softmax(&logits);
 
     println!("── Step 4: distribution shift (softmax visualization) ──");
-    println!("  {:<6} {:>14} {:>14} {:>14}", "action", "p (BC)", "p (QGF)", "Q");
+    println!(
+        "  {:<6} {:>14} {:>14} {:>14}",
+        "action", "p (BC)", "p (QGF)", "Q"
+    );
     for i in 0..N {
         let marker = if i == 2 {
             "  ← BC mode"
@@ -145,7 +148,10 @@ fn main() {
     println!("── Step 5: expected Q gain (the QGF headline) ──");
     println!("  E[Q] (BC reference) = {:.6}", e_before);
     println!("  E[Q] (QGF guided)   = {:.6}", e_after);
-    println!("  relative gain       = {:.2}%  (clear shift toward Q optimum)", rel_gain * 100.0);
+    println!(
+        "  relative gain       = {:.2}%  (clear shift toward Q optimum)",
+        rel_gain * 100.0
+    );
     println!();
     println!("  This is the katgpt-core mechanism gate G1: the tilt provably");
     println!("  shifts E[Q] toward the optimum. The downstream selling-point");
@@ -200,12 +206,7 @@ impl QGradientOracle for KnownLandscapeOracle {
         self.q_values.clone()
     }
 
-    fn q_gradient_into(
-        &self,
-        _state: &Self::State,
-        _action: &Self::Action,
-        out: &mut [f32],
-    ) {
+    fn q_gradient_into(&self, _state: &Self::State, _action: &Self::Action, out: &mut [f32]) {
         let n = out.len().min(self.q_values.len());
         out[..n].copy_from_slice(&self.q_values[..n]);
         for slot in &mut out[n..] {

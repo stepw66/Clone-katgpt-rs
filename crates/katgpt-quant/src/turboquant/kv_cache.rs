@@ -604,8 +604,7 @@ fn pack_indices_into(indices: &[u8], bits: u8, out: &mut [u8]) {
             }
             if !n.is_multiple_of(2) {
                 unsafe {
-                    *out.get_unchecked_mut(full_pairs) =
-                        *indices.get_unchecked(n - 1) & 0xF;
+                    *out.get_unchecked_mut(full_pairs) = *indices.get_unchecked(n - 1) & 0xF;
                 }
             }
         }
@@ -743,8 +742,7 @@ fn unpack_indices_into(packed: &[u8], bits: u8, n: usize, out: &mut [u8]) {
                 let byte_pos = bit_pos / 8;
                 let shift = bit_pos % 8;
                 unsafe {
-                    *out.get_unchecked_mut(i) =
-                        (*packed.get_unchecked(byte_pos) >> shift) & mask;
+                    *out.get_unchecked_mut(i) = (*packed.get_unchecked(byte_pos) >> shift) & mask;
                     if shift + bits as usize > 8 {
                         *out.get_unchecked_mut(i) |=
                             (*packed.get_unchecked(byte_pos + 1) << (8 - shift)) & mask;

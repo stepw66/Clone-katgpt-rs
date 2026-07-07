@@ -28,9 +28,7 @@
 
 #![cfg(all(feature = "parallax_attn", feature = "sink_aware_attn"))]
 
-use katgpt_core::data_probe::{
-    SinkAwarePolicy, SinkClassifierConfig,
-};
+use katgpt_core::data_probe::{SinkAwarePolicy, SinkClassifierConfig};
 use katgpt_core::parallax_attn::{
     ParallaxActivation, ParallaxConfig, ParallaxScratch, SinkAwareParallaxScratch,
     tiled_attention_parallax_forward, tiled_attention_parallax_forward_sink_aware,
@@ -88,6 +86,7 @@ fn run_case(n: usize, d: usize) {
         gate_scale: 0.0,
         zero_init: true,
         activation: ParallaxActivation::Sigmoid,
+        ..Default::default()
     };
     let r = vec![0.0f32; d * d];
     let x = vec![0.0f32; d];
@@ -100,7 +99,16 @@ fn run_case(n: usize, d: usize) {
     let mut pscratch = ParallaxScratch::new(n, d);
     let us_vanilla = bench_us(5, 50, || {
         tiled_attention_parallax_forward(
-            &q, &k, &v, &mut out_vanilla, n, d, scale, &r, &x, &cfg,
+            &q,
+            &k,
+            &v,
+            &mut out_vanilla,
+            n,
+            d,
+            scale,
+            &r,
+            &x,
+            &cfg,
             Some(&mut pscratch),
         );
         std::hint::black_box(out_vanilla[0]);
@@ -112,8 +120,20 @@ fn run_case(n: usize, d: usize) {
     let mut pscratch_u = ParallaxScratch::new(n, d);
     let us_sa_uniform = bench_us(5, 50, || {
         let kind = tiled_attention_parallax_forward_sink_aware(
-            &q, &k, &v, &mut out_uniform, n, d, scale, &r, &x, &cfg,
-            &policy_uniform, 0.0, &mut sscratch_uniform, Some(&mut pscratch_u),
+            &q,
+            &k,
+            &v,
+            &mut out_uniform,
+            n,
+            d,
+            scale,
+            &r,
+            &x,
+            &cfg,
+            &policy_uniform,
+            0.0,
+            &mut sscratch_uniform,
+            Some(&mut pscratch_u),
         );
         std::hint::black_box((out_uniform[0], kind));
     });
@@ -124,8 +144,20 @@ fn run_case(n: usize, d: usize) {
     let mut pscratch_d = ParallaxScratch::new(n, d);
     let us_sa_dual = bench_us(5, 50, || {
         let kind = tiled_attention_parallax_forward_sink_aware(
-            &q, &k, &v, &mut out_dual, n, d, scale, &r, &x, &cfg,
-            &policy_dual, -2.0, &mut sscratch_dual, Some(&mut pscratch_d),
+            &q,
+            &k,
+            &v,
+            &mut out_dual,
+            n,
+            d,
+            scale,
+            &r,
+            &x,
+            &cfg,
+            &policy_dual,
+            -2.0,
+            &mut sscratch_dual,
+            Some(&mut pscratch_d),
         );
         std::hint::black_box((out_dual[0], kind));
     });
@@ -140,24 +172,52 @@ fn run_case(n: usize, d: usize) {
     // Prime the cache so steady-state runs reflect the cached path.
     {
         let _ = tiled_attention_parallax_forward_sink_aware(
-            &q, &k, &v, &mut out_cached, n, d, scale, &r, &x, &cfg,
-            &policy_dual, -2.0, &mut sscratch_cached, Some(&mut pscratch_c),
+            &q,
+            &k,
+            &v,
+            &mut out_cached,
+            n,
+            d,
+            scale,
+            &r,
+            &x,
+            &cfg,
+            &policy_dual,
+            -2.0,
+            &mut sscratch_cached,
+            Some(&mut pscratch_c),
         );
     }
     let us_sa_cached = bench_us(5, 50, || {
         let kind = tiled_attention_parallax_forward_sink_aware(
-            &q, &k, &v, &mut out_cached, n, d, scale, &r, &x, &cfg,
-            &policy_dual, -2.0, &mut sscratch_cached, Some(&mut pscratch_c),
+            &q,
+            &k,
+            &v,
+            &mut out_cached,
+            n,
+            d,
+            scale,
+            &r,
+            &x,
+            &cfg,
+            &policy_dual,
+            -2.0,
+            &mut sscratch_cached,
+            Some(&mut pscratch_c),
         );
         std::hint::black_box((out_cached[0], kind));
     });
 
     println!(
         "{:>5} {:>10.3} {:>10.3} {:>7.1}% {:>10.3} {:>7.1}% {:>10.3} {:>7.1}%",
-        n, us_vanilla,
-        us_sa_uniform, pct(us_sa_uniform, us_vanilla),
-        us_sa_dual, pct(us_sa_dual, us_vanilla),
-        us_sa_cached, pct(us_sa_cached, us_vanilla),
+        n,
+        us_vanilla,
+        us_sa_uniform,
+        pct(us_sa_uniform, us_vanilla),
+        us_sa_dual,
+        pct(us_sa_dual, us_vanilla),
+        us_sa_cached,
+        pct(us_sa_cached, us_vanilla),
     );
 }
 
@@ -170,8 +230,7 @@ fn main() {
     println!();
     println!(
         "{:>5} {:>10} {:>10} {:>8} {:>10} {:>8} {:>10} {:>8}",
-        "n", "vanilla", "sa(Uniform)", "oh%",
-        "sa(Dual)", "oh%", "sa(cached)", "oh%"
+        "n", "vanilla", "sa(Uniform)", "oh%", "sa(Dual)", "oh%", "sa(cached)", "oh%"
     );
     println!("{}", "-".repeat(80));
 

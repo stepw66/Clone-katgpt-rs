@@ -161,10 +161,12 @@ pub fn factor_token_into<const K: usize, const D: usize, const S: usize>(
             let mut db = 0.0f32;
             let mut i = 0usize;
             while i + 4 <= S {
-                dg += state[i] * g[i] + state[i + 1] * g[i + 1]
+                dg += state[i] * g[i]
+                    + state[i + 1] * g[i + 1]
                     + state[i + 2] * g[i + 2]
                     + state[i + 3] * g[i + 3];
-                db += state[i] * bb[i] + state[i + 1] * bb[i + 1]
+                db += state[i] * bb[i]
+                    + state[i + 1] * bb[i + 1]
                     + state[i + 2] * bb[i + 2]
                     + state[i + 3] * bb[i + 3];
                 i += 4;
@@ -318,8 +320,8 @@ pub fn aggregate_action_latent_into<const K: usize, const D: usize, const S: usi
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::types::MAX_PATCHES;
+    use super::*;
 
     /// T1.8 smoke test — assign + aggregate on K=4, D=8, 16 patches.
     #[test]
@@ -403,7 +405,11 @@ mod tests {
         let mut factors = TransitionFactors::zeroed();
         // 4 patches → code 0, 4 patches → code 1.
         for i in 0..8 {
-            let p: &[f32] = if i < 4 { &[0.9, 0.9, 0.9, 0.9] } else { &[-0.9, -0.9, -0.9, -0.9] };
+            let p: &[f32] = if i < 4 {
+                &[0.9, 0.9, 0.9, 0.9]
+            } else {
+                &[-0.9, -0.9, -0.9, -0.9]
+            };
             cb.assign_patch_into(p, &mut factors, i);
         }
         finalize_factors(&mut factors, 8);
@@ -424,7 +430,10 @@ mod tests {
 
         // Symmetric codes → output ≈ 0.
         for x in out.0.iter() {
-            assert!(x.abs() < 1e-5, "uniform mean of ±1 centroids should be 0, got {x}");
+            assert!(
+                x.abs() < 1e-5,
+                "uniform mean of ±1 centroids should be 0, got {x}"
+            );
         }
     }
 

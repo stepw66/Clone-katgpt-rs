@@ -167,7 +167,10 @@ impl OctopusKVCache {
 
         // Encode triplets into scratch_indices (zero-alloc)
         let cb = &self.layers[layer].key_codebook;
-        super::triplet::decompose_into(&self.scratch_workspace[..self.kv_dim], &mut self.scratch_triplets);
+        super::triplet::decompose_into(
+            &self.scratch_workspace[..self.kv_dim],
+            &mut self.scratch_triplets,
+        );
         encode_vector_into(
             &self.scratch_triplets,
             cb,
@@ -208,7 +211,10 @@ impl OctopusKVCache {
 
         // Encode triplets into scratch_indices (zero-alloc)
         let cb = &self.layers[layer].val_codebook;
-        super::triplet::decompose_into(&self.scratch_workspace[..self.kv_dim], &mut self.scratch_triplets);
+        super::triplet::decompose_into(
+            &self.scratch_workspace[..self.kv_dim],
+            &mut self.scratch_triplets,
+        );
         encode_vector_into(
             &self.scratch_triplets,
             cb,
@@ -485,8 +491,7 @@ fn mat_vec_into(mat: &[f32], input: &[f32], out: &mut [f32]) {
             let col2 = (base + 2) * dim;
             let col3 = (base + 3) * dim;
             for r in 0..dim {
-                *out.get_unchecked_mut(r) +=
-                    *mat.get_unchecked(col0 + r) * x0
+                *out.get_unchecked_mut(r) += *mat.get_unchecked(col0 + r) * x0
                     + *mat.get_unchecked(col1 + r) * x1
                     + *mat.get_unchecked(col2 + r) * x2
                     + *mat.get_unchecked(col3 + r) * x3;

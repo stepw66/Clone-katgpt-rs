@@ -186,7 +186,11 @@ impl OfflineCandidateScorer {
     ///
     /// Zero-alloc: returns a `Copy` `ScoredCandidate`. The evidence slice is
     /// borrowed; no allocation regardless of evidence count.
-    pub fn score(&self, _candidate: &TypedOfflineCandidate<'_>, evidence: &[Evidence]) -> ScoredCandidate {
+    pub fn score(
+        &self,
+        _candidate: &TypedOfflineCandidate<'_>,
+        evidence: &[Evidence],
+    ) -> ScoredCandidate {
         let mut gains = GainComponents::default();
         for e in evidence {
             // Clamp negative weights to zero — weights are non-negative by contract.
@@ -232,9 +236,9 @@ pub const DEFAULT_AUTO_COMMIT_THRESHOLD: f32 = 0.5;
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::candidate::{CandidateKind, TypedOfflineCandidate};
     use super::super::taxonomy::LabelId;
+    use super::*;
 
     fn lbl(n: u32) -> LabelId {
         LabelId::new(n)
@@ -355,7 +359,10 @@ mod tests {
         let scorer = OfflineCandidateScorer::default();
         let scored = scorer.score(&unscored_edge(), &[]);
         assert!(scored.has_no_evidence());
-        assert!(!OfflineCandidateScorer::can_auto_commit(&scored, DEFAULT_AUTO_COMMIT_THRESHOLD));
+        assert!(!OfflineCandidateScorer::can_auto_commit(
+            &scored,
+            DEFAULT_AUTO_COMMIT_THRESHOLD
+        ));
     }
 
     #[test]
@@ -368,7 +375,10 @@ mod tests {
         ];
         let scored = scorer.score(&unscored_edge(), &evidence);
         assert!((scored.gains.unverified_fraction() - 0.8).abs() < 1e-6);
-        assert!(!OfflineCandidateScorer::can_auto_commit(&scored, DEFAULT_AUTO_COMMIT_THRESHOLD));
+        assert!(!OfflineCandidateScorer::can_auto_commit(
+            &scored,
+            DEFAULT_AUTO_COMMIT_THRESHOLD
+        ));
     }
 
     #[test]
@@ -381,7 +391,10 @@ mod tests {
         ];
         let scored = scorer.score(&unscored_edge(), &evidence);
         assert!((scored.gains.unverified_fraction() - 0.3).abs() < 1e-6);
-        assert!(OfflineCandidateScorer::can_auto_commit(&scored, DEFAULT_AUTO_COMMIT_THRESHOLD));
+        assert!(OfflineCandidateScorer::can_auto_commit(
+            &scored,
+            DEFAULT_AUTO_COMMIT_THRESHOLD
+        ));
     }
 
     #[test]
@@ -393,7 +406,10 @@ mod tests {
         ];
         let scored = scorer.score(&unscored_edge(), &evidence);
         assert!((scored.gains.confirmed_fraction() - 1.0).abs() < 1e-6);
-        assert!(OfflineCandidateScorer::can_auto_commit(&scored, DEFAULT_AUTO_COMMIT_THRESHOLD));
+        assert!(OfflineCandidateScorer::can_auto_commit(
+            &scored,
+            DEFAULT_AUTO_COMMIT_THRESHOLD
+        ));
         // Even a strict threshold (0.1) allows all-confirmed.
         assert!(OfflineCandidateScorer::can_auto_commit(&scored, 0.1));
     }
@@ -462,7 +478,13 @@ mod tests {
         // At lambda=0, both equal nominal_gain — G5's strict inequality fails.
         assert!((s_confirmed - s_lowconf).abs() < 1e-6);
         // The penalty is zero.
-        assert!(scorer.score(&unscored_edge(), &lowconf).penalty_silent.abs() < 1e-6);
+        assert!(
+            scorer
+                .score(&unscored_edge(), &lowconf)
+                .penalty_silent
+                .abs()
+                < 1e-6
+        );
     }
 
     #[test]

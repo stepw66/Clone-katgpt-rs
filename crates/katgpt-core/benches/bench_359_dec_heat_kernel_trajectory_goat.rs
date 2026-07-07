@@ -292,9 +292,23 @@ fn gate_g1_linear_correctness() -> (f32, f32, bool) {
     let fine_dt = 0.001f32;
     let coarse_dt = 0.1f32;
 
-    let fine = linear_euler_trajectory(&cx, &h0_bump, &[motor_b], 1, fine_dt, (t_long / fine_dt) as usize);
+    let fine = linear_euler_trajectory(
+        &cx,
+        &h0_bump,
+        &[motor_b],
+        1,
+        fine_dt,
+        (t_long / fine_dt) as usize,
+    );
     let hk = heat_kernel_trajectory_linear(&eig, &h0_bump, &[motor_b], 1, t_long);
-    let coarse = linear_euler_trajectory(&cx, &h0_bump, &[motor_b], 1, coarse_dt, (t_long / coarse_dt) as usize);
+    let coarse = linear_euler_trajectory(
+        &cx,
+        &h0_bump,
+        &[motor_b],
+        1,
+        coarse_dt,
+        (t_long / coarse_dt) as usize,
+    );
 
     let fine_norm = l2_norm(&fine).max(1e-12);
     let hk_err = l2_dist(&hk, &fine) / fine_norm;
@@ -362,16 +376,42 @@ fn gate_g1_nonlinear_correctness() -> (f32, f32, bool) {
     // The formal gate uses a FIXED horizon (not cherry-picked from the sweep).
     let sweep_ts: [f32; 5] = [0.5, 1.0, 1.5, 2.0, 3.0];
     println!("    G1-nl sweep (n_quad=4, informational):");
-    println!("    {:>6} {:>12} {:>12} {:>12} {:>14}", "t", "field_norm", "hk_err", "coarse_err", "improvement");
+    println!(
+        "    {:>6} {:>12} {:>12} {:>12} {:>14}",
+        "t", "field_norm", "hk_err", "coarse_err", "improvement"
+    );
     for &t in &sweep_ts {
-        let fine = nonlinear_euler_trajectory(&cx, &h0, &motor, dim, fine_dt, (t / fine_dt) as usize, relu_slope);
-        let coarse = nonlinear_euler_trajectory(&cx, &h0, &motor, dim, coarse_dt, (t / coarse_dt) as usize, relu_slope);
+        let fine = nonlinear_euler_trajectory(
+            &cx,
+            &h0,
+            &motor,
+            dim,
+            fine_dt,
+            (t / fine_dt) as usize,
+            relu_slope,
+        );
+        let coarse = nonlinear_euler_trajectory(
+            &cx,
+            &h0,
+            &motor,
+            dim,
+            coarse_dt,
+            (t / coarse_dt) as usize,
+            relu_slope,
+        );
         let hk_nl = heat_kernel_trajectory_nonlinear(&cx, &eig, &h0, &motor, dim, t, 4, relu_slope);
         let fnorm = l2_norm(&fine).max(1e-12);
         let hk_e = l2_dist(&hk_nl, &fine) / fnorm;
         let co_e = l2_dist(&coarse, &fine) / fnorm;
         let imp = co_e / hk_e.max(1e-12);
-        println!("    {:>6.1} {:>12.3e} {:>12.3e} {:>12.3e} {:>14.2}×", t, l2_norm(&fine), hk_e, co_e, imp);
+        println!(
+            "    {:>6.1} {:>12.3e} {:>12.3e} {:>12.3e} {:>14.2}×",
+            t,
+            l2_norm(&fine),
+            hk_e,
+            co_e,
+            imp
+        );
     }
 
     // ── n_quad sensitivity sweep at t=1.0 (diagnoses error-floor source) ──
@@ -380,12 +420,29 @@ fn gate_g1_nonlinear_correctness() -> (f32, f32, bool) {
     println!("    G1-nl n_quad sensitivity @t=1.0 (informational):");
     println!("    {:>8} {:>12} {:>14}", "n_quad", "hk_err", "improvement");
     let t_diag = 1.0_f32;
-    let fine_d = nonlinear_euler_trajectory(&cx, &h0, &motor, dim, fine_dt, (t_diag / fine_dt) as usize, relu_slope);
-    let coarse_d = nonlinear_euler_trajectory(&cx, &h0, &motor, dim, coarse_dt, (t_diag / coarse_dt) as usize, relu_slope);
+    let fine_d = nonlinear_euler_trajectory(
+        &cx,
+        &h0,
+        &motor,
+        dim,
+        fine_dt,
+        (t_diag / fine_dt) as usize,
+        relu_slope,
+    );
+    let coarse_d = nonlinear_euler_trajectory(
+        &cx,
+        &h0,
+        &motor,
+        dim,
+        coarse_dt,
+        (t_diag / coarse_dt) as usize,
+        relu_slope,
+    );
     let fnorm_d = l2_norm(&fine_d).max(1e-12);
     let co_e_d = l2_dist(&coarse_d, &fine_d) / fnorm_d;
     for &nq in &[1usize, 2, 4, 6, 8] {
-        let hk_nl = heat_kernel_trajectory_nonlinear(&cx, &eig, &h0, &motor, dim, t_diag, nq, relu_slope);
+        let hk_nl =
+            heat_kernel_trajectory_nonlinear(&cx, &eig, &h0, &motor, dim, t_diag, nq, relu_slope);
         let hk_e = l2_dist(&hk_nl, &fine_d) / fnorm_d;
         let imp = co_e_d / hk_e.max(1e-12);
         println!("    {:>8} {:>12.3e} {:>14.2}×", nq, hk_e, imp);
@@ -407,9 +464,26 @@ fn gate_g1_nonlinear_correctness() -> (f32, f32, bool) {
     let t_gate = 1.0_f32;
     let n_quad = 4usize; // DEFAULT_N_QUAD (confirmed optimal by n_quad sweep)
 
-    let fine = nonlinear_euler_trajectory(&cx, &h0, &motor, dim, fine_dt, (t_gate / fine_dt) as usize, relu_slope);
-    let coarse = nonlinear_euler_trajectory(&cx, &h0, &motor, dim, coarse_dt, (t_gate / coarse_dt) as usize, relu_slope);
-    let hk_nl = heat_kernel_trajectory_nonlinear(&cx, &eig, &h0, &motor, dim, t_gate, n_quad, relu_slope);
+    let fine = nonlinear_euler_trajectory(
+        &cx,
+        &h0,
+        &motor,
+        dim,
+        fine_dt,
+        (t_gate / fine_dt) as usize,
+        relu_slope,
+    );
+    let coarse = nonlinear_euler_trajectory(
+        &cx,
+        &h0,
+        &motor,
+        dim,
+        coarse_dt,
+        (t_gate / coarse_dt) as usize,
+        relu_slope,
+    );
+    let hk_nl =
+        heat_kernel_trajectory_nonlinear(&cx, &eig, &h0, &motor, dim, t_gate, n_quad, relu_slope);
 
     let fine_norm = l2_norm(&fine).max(1e-12);
     let hk_err = l2_dist(&hk_nl, &fine) / fine_norm;
@@ -506,7 +580,8 @@ fn gate_g3_hodge_drift() -> (f32, f32, bool) {
     let hk_drift = 1.0 - cosine_sim(&hk.data, &fine.data);
 
     // Coarse Euler vs fine.
-    let coarse = linear_euler_trajectory(&cx, &h0, &[motor], 1, coarse_dt, (t / coarse_dt) as usize);
+    let coarse =
+        linear_euler_trajectory(&cx, &h0, &[motor], 1, coarse_dt, (t / coarse_dt) as usize);
     let coarse_drift = 1.0 - cosine_sim(&coarse.data, &fine.data);
 
     let pass = hk_drift < coarse_drift;
@@ -591,23 +666,13 @@ fn gate_g5_no_regression_smoke() -> (f32, bool) {
 // ─── Driver ─────────────────────────────────────────────────────────────────
 
 fn verdict(pass: bool) -> &'static str {
-    if pass {
-        "PASS ✅"
-    } else {
-        "FAIL ❌"
-    }
+    if pass { "PASS ✅" } else { "FAIL ❌" }
 }
 
 fn main() {
-    println!(
-        "╔══════════════════════════════════════════════════════════════════════════╗"
-    );
-    println!(
-        "║  Plan 359 — DEC Heat Kernel Trajectory GOAT Gate (G1–G5)                 ║"
-    );
-    println!(
-        "╚══════════════════════════════════════════════════════════════════════════╝"
-    );
+    println!("╔══════════════════════════════════════════════════════════════════════════╗");
+    println!("║  Plan 359 — DEC Heat Kernel Trajectory GOAT Gate (G1–G5)                 ║");
+    println!("╚══════════════════════════════════════════════════════════════════════════╝");
     println!();
     println!("T5.2 (G1-nonlinear) NOW RUN — Phase 3 nonlinear exponential integrator implemented.");
     println!();
@@ -620,10 +685,7 @@ fn main() {
         "G1 linear correctness : single-mode hk rel err @t1 = {:.3e} (informational, eigensolver-limited)  |  multi-mode hk-vs-coarse improvement @t15 = {:.2}×  (gate > 1.5×)",
         hk_rel, improvement
     );
-    println!(
-        "                        → {}",
-        verdict(g1)
-    );
+    println!("                        → {}", verdict(g1));
     all_pass &= g1;
 
     // G1-nl: nonlinear correctness (T5.2). INFORMATIONAL — does NOT gate the
@@ -638,10 +700,7 @@ fn main() {
         "G1-nl nonlinear (T5.2) : hk-vs-coarse improvement @t1.0 = {:.2}×  |  hk_err = {:.3e}  (gate > 1.5×)  [INFORMATIONAL — nonlinear path stays opt-in]",
         nl_improvement, nl_hk_err
     );
-    println!(
-        "                        → {}",
-        verdict(g1_nl)
-    );
+    println!("                        → {}", verdict(g1_nl));
     // NOTE: g1_nl does NOT contribute to all_pass. The linear promotion decision
     // is independent of the nonlinear path's quality.
 
@@ -652,10 +711,7 @@ fn main() {
         "G2 latency             : Krylov(k=30,t=100) = {:.1} µs  |  Euler(T=100) = {:.1} µs  |  ratio = {:.2}×  (gate ≤ 2.0×)",
         krylov_us, euler_us, ratio
     );
-    println!(
-        "                        → {}",
-        verdict(g2)
-    );
+    println!("                        → {}", verdict(g2));
     all_pass &= g2;
 
     // G3: Hodge preservation drift.
@@ -664,10 +720,7 @@ fn main() {
         "G3 Hodge preservation  : hk drift vs fine = {:.3e}  |  coarse Euler drift vs fine = {:.3e}  (gate hk < coarse)",
         hk_drift, coarse_drift
     );
-    println!(
-        "                        → {}",
-        verdict(g3)
-    );
+    println!("                        → {}", verdict(g3));
     all_pass &= g3;
 
     // G4: zero-alloc.
@@ -676,10 +729,7 @@ fn main() {
         "G4 zero-alloc (linear) : allocs / 1000 calls (after precompute) = {}  (gate = 0)",
         allocs
     );
-    println!(
-        "                        → {}",
-        verdict(g4)
-    );
+    println!("                        → {}", verdict(g4));
     all_pass &= g4;
 
     // G5: no-regression smoke (finiteness + stable-decay sanity).
@@ -688,10 +738,7 @@ fn main() {
         "G5 no-regression smoke : ‖h(5)‖/‖h(0)‖ = {:.3e} (stable decay < 1.0) + all-finite",
         decay_ratio
     );
-    println!(
-        "                        → {}",
-        verdict(g5)
-    );
+    println!("                        → {}", verdict(g5));
     all_pass &= g5;
 
     println!();
@@ -699,9 +746,13 @@ fn main() {
         println!("══ ALL LINEAR GATES PASS (G1–G5) — heat_kernel_trajectory PROMOTED (Phase 5) ══");
         println!("   G1+G2+G3 all pass → `heat_kernel_trajectory` is default-on in katgpt-dec.");
         if g1_nl {
-            println!("   G1-nl (nonlinear, T5.2) PASS → nonlinear path is GOAT-worthy (candidate for future promotion).");
+            println!(
+                "   G1-nl (nonlinear, T5.2) PASS → nonlinear path is GOAT-worthy (candidate for future promotion)."
+            );
         } else {
-            println!("   G1-nl (nonlinear, T5.2) FAIL → nonlinear path stays opt-in (correctness-validated, not GOAT-tier).");
+            println!(
+                "   G1-nl (nonlinear, T5.2) FAIL → nonlinear path stays opt-in (correctness-validated, not GOAT-tier)."
+            );
         }
         println!("   (Phase 4 BoM stays opt-in until its own conformal-floor GOAT gate.)");
     } else {

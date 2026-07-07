@@ -22,6 +22,6 @@
 //! | P0 input suff.  | n_wake_events ≥ intrinsic_dim | `katgpt-core::subspace_phase_gate::phase_transition_gate` |
 //! | P1 output conv. | spectral flatness < τ | riir-neuron-db `ConsolidationPipeline::can_freeze` |
 
-pub mod search;
 pub mod math;
+pub mod search;
 pub mod shard_freeze;

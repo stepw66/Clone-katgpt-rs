@@ -153,7 +153,10 @@ mod tests {
         // Pure zeros must not produce NaN — fastmax floor.
         let probs = vec![0.0f32; 8];
         let h = shannon_entropy(&probs);
-        assert!(h.is_finite(), "entropy of all-zeros must be finite, got {h}");
+        assert!(
+            h.is_finite(),
+            "entropy of all-zeros must be finite, got {h}"
+        );
     }
 
     #[test]

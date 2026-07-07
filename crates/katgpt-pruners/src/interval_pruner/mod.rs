@@ -29,4 +29,4 @@ mod simd;
 #[cfg(feature = "interval_pruner")]
 pub use interval::{IntervalMask, IntervalPruner};
 #[cfg(feature = "interval_pruner")]
-pub use simd::{AdaptiveConfig, RouteDecision, INTERVAL_SIMD_THRESHOLD, NERVE_SIMD_THRESHOLD};
+pub use simd::{AdaptiveConfig, INTERVAL_SIMD_THRESHOLD, NERVE_SIMD_THRESHOLD, RouteDecision};

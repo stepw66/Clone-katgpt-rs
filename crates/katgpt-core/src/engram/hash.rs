@@ -264,8 +264,7 @@ mod tests {
 
     /// A 3-element suffix (trigram) of arbitrary canonical ids.
     fn any_trigram() -> impl Strategy<Value = [CanonicalId; 3]> {
-        (any_canonical_id(), any_canonical_id(), any_canonical_id())
-            .prop_map(|(a, b, c)| [a, b, c])
+        (any_canonical_id(), any_canonical_id(), any_canonical_id()).prop_map(|(a, b, c)| [a, b, c])
     }
 
     proptest! {
@@ -358,11 +357,7 @@ mod tests {
         // Per-head per-bucket counts. K_MAX × 256 = 4096 u64s — trivial.
         let mut counts = [[0u64; 256]; K_MAX];
         for _ in 0..n_samples {
-            let suffix = [
-                CanonicalId(rng()),
-                CanonicalId(rng()),
-                CanonicalId(rng()),
-            ];
+            let suffix = [CanonicalId(rng()), CanonicalId(rng()), CanonicalId(rng())];
             let keys = multi_head_hash(&suffix, &heads);
             for k in 0..K_MAX {
                 // Bucket = hash % 256. Taking `% modulus` first and then `%

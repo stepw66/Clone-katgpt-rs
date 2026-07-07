@@ -142,8 +142,7 @@ fn main() {
         );
         println!(
             "  overhead: {:.2} ns/call ({:.1}% relative)",
-            overhead_per_call_ns,
-            overhead_pct
+            overhead_per_call_ns, overhead_pct
         );
         println!("  allocs:   {allocs}");
 
@@ -173,7 +172,10 @@ fn main() {
     }
 
     println!("=== Summary ===");
-    println!("G3 (≤ 5 ns/call absolute overhead): {}", if all_pass_g3 { "PASS ✅" } else { "FAIL ❌" });
+    println!(
+        "G3 (≤ 5 ns/call absolute overhead): {}",
+        if all_pass_g3 { "PASS ✅" } else { "FAIL ❌" }
+    );
     println!("G4 (0 allocs on hot path):           PASS ✅ (verified per-size above)");
     println!(
         "Max relative overhead vs always-false baseline: {:.1}% (informational; absolute gate is the real bar)",

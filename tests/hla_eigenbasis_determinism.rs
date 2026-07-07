@@ -45,7 +45,9 @@ fn canonical_window() -> Vec<f32> {
     for r in 0..t {
         let dom = r % 3;
         for j in 0..d {
-            s = s.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            s = s
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
             let base = if j == dom { 1.0 } else { 0.0 };
             let noise = (s >> 33) as f32 / (1u64 << 31) as f32 * 0.02;
             w[r * d + j] = base + noise;
@@ -69,17 +71,35 @@ fn fast_path_is_deterministic_within_binary() {
     let mut sb = EigenbasisScratch::new();
 
     recover_eigenbasis_from_window_fast(
-        black_box(&window), t, d, black_box(&mut a), black_box(&mut la), &mut sa, k, 5,
+        black_box(&window),
+        t,
+        d,
+        black_box(&mut a),
+        black_box(&mut la),
+        &mut sa,
+        k,
+        5,
     );
     recover_eigenbasis_from_window_fast(
-        black_box(&window), t, d, black_box(&mut b), black_box(&mut lb), &mut sb, k, 5,
+        black_box(&window),
+        t,
+        d,
+        black_box(&mut b),
+        black_box(&mut lb),
+        &mut sb,
+        k,
+        5,
     );
 
     for i in 0..a.len() {
         assert_eq!(a[i].to_bits(), b[i].to_bits(), "eigvec bit mismatch at {i}");
     }
     for i in 0..la.len() {
-        assert_eq!(la[i].to_bits(), lb[i].to_bits(), "eigval bit mismatch at {i}");
+        assert_eq!(
+            la[i].to_bits(),
+            lb[i].to_bits(),
+            "eigval bit mismatch at {i}"
+        );
     }
 }
 
@@ -104,10 +124,18 @@ fn tracker_is_deterministic_within_binary() {
     let (a, la) = run();
     let (b, lb) = run();
     for i in 0..a.len() {
-        assert_eq!(a[i].to_bits(), b[i].to_bits(), "tracker eigvec bit mismatch at {i}");
+        assert_eq!(
+            a[i].to_bits(),
+            b[i].to_bits(),
+            "tracker eigvec bit mismatch at {i}"
+        );
     }
     for i in 0..la.len() {
-        assert_eq!(la[i].to_bits(), lb[i].to_bits(), "tracker eigval bit mismatch at {i}");
+        assert_eq!(
+            la[i].to_bits(),
+            lb[i].to_bits(),
+            "tracker eigval bit mismatch at {i}"
+        );
     }
 }
 
@@ -151,6 +179,9 @@ fn seed_is_independent_of_input_scale() {
             nb += b[row * k + col] * b[row * k + col];
         }
         let cos = (dot / (na.sqrt() * nb.sqrt())).abs();
-        assert!(cos > 0.999, "scale test: col {col} direction cos {cos} < 0.999");
+        assert!(
+            cos > 0.999,
+            "scale test: col {col} direction cos {cos} < 0.999"
+        );
     }
 }

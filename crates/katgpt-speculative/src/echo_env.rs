@@ -524,8 +524,8 @@ mod tests {
     /// Both should produce comparable acceptance rates.
     #[test]
     fn test_goat_echo_predictor_no_regression() {
-        use katgpt_pruners::bandit::{BanditPruner, BanditStrategy};
         use crate::dd_tree::build_dd_tree_screened;
+        use katgpt_pruners::bandit::{BanditPruner, BanditStrategy};
         use katgpt_types::{Config, Rng};
 
         let vocab = 8;

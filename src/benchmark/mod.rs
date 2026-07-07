@@ -57,9 +57,9 @@ pub use infrastructure::{
     bench_raven_vs_flat_cache,
 };
 pub use noise::bench_elf_sde;
+pub use simd::bench_simd_perf;
 #[cfg(feature = "sparse_mlp")]
 pub use sparse::bench_sparse_mlp;
-pub use simd::bench_simd_perf;
 pub use speculative::{
     bench_ar, bench_ddtree_budget_sweep, bench_ddtree_chain_seed, bench_ddtree_screened,
     bench_dflash, bench_dflash_parallel, bench_speculative, bench_speculative_ar,

@@ -103,7 +103,6 @@ impl ShardKVCache {
 
         let mut layers: Vec<ShardLayer> = k_calibrations
             .iter()
-
             .map(|k_cal| {
                 let d_eff = (k_cal.k_d_eff.ceil() as usize).max(1).min(head_dim);
 
@@ -198,7 +197,8 @@ impl ShardKVCache {
         for (layer_idx, layer) in layers.iter_mut().enumerate() {
             let d_eff = layer.d_eff;
             let eigenvectors = &layer.calibration.k_eigenvectors;
-            let mut rng = katgpt_core::types::Rng::new(config.seed.wrapping_add(layer_idx as u64 * 31));
+            let mut rng =
+                katgpt_core::types::Rng::new(config.seed.wrapping_add(layer_idx as u64 * 31));
 
             // Generate K-path synthetic data: normalize → rotate by V^T
             let k_synthetic: Vec<Vec<f32>> = (0..n_synthetic)
@@ -315,11 +315,19 @@ impl ShardKVCache {
         // Allocate storage — inner Vecs pre-sized with `kv_dim` capacity to avoid
         // allocation on the decode hot path (decode always writes exactly `kv_dim` bytes).
         let key_indices = (0..n_layers)
-            .map(|_| (0..max_seq_len).map(|_| Vec::with_capacity(kv_dim)).collect())
+            .map(|_| {
+                (0..max_seq_len)
+                    .map(|_| Vec::with_capacity(kv_dim))
+                    .collect()
+            })
             .collect();
         let key_norms = (0..n_layers).map(|_| vec![0.0f32; max_seq_len]).collect();
         let val_indices = (0..n_layers)
-            .map(|_| (0..max_seq_len).map(|_| Vec::with_capacity(kv_dim)).collect())
+            .map(|_| {
+                (0..max_seq_len)
+                    .map(|_| Vec::with_capacity(kv_dim))
+                    .collect()
+            })
             .collect();
         let val_norms = (0..n_layers).map(|_| vec![0.0f32; max_seq_len]).collect();
 
@@ -433,7 +441,8 @@ impl ShardKVCache {
             let k_b_low = layer_state.k_b_low.max(1);
 
             // 3. Undo RoPE (uses cached RopeFreqs — no allocation)
-            self.rope_freqs.apply(&mut self.scratch_normalized, pos, true);
+            self.rope_freqs
+                .apply(&mut self.scratch_normalized, pos, true);
 
             // 4. PCA rotation (use pre-built rotation, no clone)
             let rotation = &self.k_rotations[layer];
@@ -634,7 +643,8 @@ impl ShardKVCache {
             rotation.unrotate(&self.scratch_rotated, &mut self.scratch_unrotated);
 
             // Reapply RoPE (uses cached RopeFreqs — no allocation)
-            self.rope_freqs.apply(&mut self.scratch_unrotated, pos, false);
+            self.rope_freqs
+                .apply(&mut self.scratch_unrotated, pos, false);
 
             // Scale by norm → output
             out.copy_from_slice(&self.scratch_unrotated);
@@ -865,11 +875,7 @@ fn quantize_to_idx(value: f32, centroids: &[f32]) -> u8 {
     // Pick the closer of the two brackets.
     let d_lo = value - centroids[lo];
     let d_hi = centroids[hi] - value;
-    if d_lo <= d_hi {
-        lo as u8
-    } else {
-        hi as u8
-    }
+    if d_lo <= d_hi { lo as u8 } else { hi as u8 }
 }
 
 fn dequantize_idx(idx: u8, centroids: &[f32]) -> f32 {

@@ -288,7 +288,10 @@ mod tests {
         let mut padded = leaves.clone();
         padded.push([0u8; 32]);
         let root_4 = build_binary_merkle_root(&padded);
-        assert_eq!(root_3, root_4, "padding with zero leaves must not change root");
+        assert_eq!(
+            root_3, root_4,
+            "padding with zero leaves must not change root"
+        );
     }
 
     #[test]

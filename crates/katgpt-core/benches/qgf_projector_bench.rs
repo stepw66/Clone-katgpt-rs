@@ -24,9 +24,7 @@
 //!
 //! Requires `qgf_projector` (Plan 268 F2).
 
-use criterion::{
-    BenchmarkId, Criterion, Throughput, black_box, criterion_group, criterion_main,
-};
+use criterion::{BenchmarkId, Criterion, Throughput, black_box, criterion_group, criterion_main};
 use katgpt_core::SpeculativeGenerator;
 use katgpt_core::qgf::projector::{project_batch, project_one_step};
 
@@ -92,7 +90,8 @@ impl SpeculativeGenerator for TieredGen {
         // Reuse capacity — `Vec::with_capacity(4)` set above, but we clear
         // + push to match the typical generator pattern (allocate-free).
         self.buf.clear();
-        self.buf.extend_from_slice(&[acc, acc + 1, acc + 2, acc + 3]);
+        self.buf
+            .extend_from_slice(&[acc, acc + 1, acc + 2, acc + 3]);
         Ok(core::mem::take(&mut self.buf))
     }
 }
@@ -111,15 +110,19 @@ fn bench_single_overhead(c: &mut Criterion) {
         ("expensive", WORK_EXPENSIVE),
     ] {
         // Baseline: direct generate() call (drafter without QGF).
-        group.bench_with_input(BenchmarkId::new("baseline_generate", name), &work, |b, &w| {
-            let mut generator = TieredGen::new(w);
-            let mut rng = fastrand::Rng::new();
-            let condition = 7u32;
-            b.iter(|| {
-                let cands = generator.generate(black_box(&condition), &mut rng).unwrap();
-                black_box(cands);
-            });
-        });
+        group.bench_with_input(
+            BenchmarkId::new("baseline_generate", name),
+            &work,
+            |b, &w| {
+                let mut generator = TieredGen::new(w);
+                let mut rng = fastrand::Rng::new();
+                let condition = 7u32;
+                b.iter(|| {
+                    let cands = generator.generate(black_box(&condition), &mut rng).unwrap();
+                    black_box(cands);
+                });
+            },
+        );
 
         // Projection: project_one_step() wrapping generate().
         group.bench_with_input(
@@ -130,9 +133,12 @@ fn bench_single_overhead(c: &mut Criterion) {
                 let mut rng = fastrand::Rng::new();
                 let condition = 7u32;
                 b.iter(|| {
-                    let proj =
-                        project_one_step(black_box(&mut generator), black_box(&condition), &mut rng)
-                            .unwrap();
+                    let proj = project_one_step(
+                        black_box(&mut generator),
+                        black_box(&condition),
+                        &mut rng,
+                    )
+                    .unwrap();
                     black_box(proj);
                 });
             },
@@ -176,20 +182,16 @@ fn bench_batch_overhead(c: &mut Criterion) {
         );
 
         // Projection: project_batch().
-        group.bench_with_input(
-            BenchmarkId::new("project_batch", name),
-            &work,
-            |b, &w| {
-                let mut generator = TieredGen::new(w);
-                let mut rng = fastrand::Rng::new();
-                b.iter(|| {
-                    let projs =
-                        project_batch(black_box(&mut generator), black_box(&conditions), &mut rng)
-                            .unwrap();
-                    black_box(projs);
-                });
-            },
-        );
+        group.bench_with_input(BenchmarkId::new("project_batch", name), &work, |b, &w| {
+            let mut generator = TieredGen::new(w);
+            let mut rng = fastrand::Rng::new();
+            b.iter(|| {
+                let projs =
+                    project_batch(black_box(&mut generator), black_box(&conditions), &mut rng)
+                        .unwrap();
+                black_box(projs);
+            });
+        });
     }
 
     group.finish();
@@ -224,9 +226,12 @@ fn bench_goat_gate_overhead_ratio(c: &mut Criterion) {
             let baseline_cands = generator_baseline
                 .generate(black_box(&condition), &mut rng)
                 .unwrap();
-            let proj =
-                project_one_step(black_box(&mut generator_proj), black_box(&condition), &mut rng)
-                    .unwrap();
+            let proj = project_one_step(
+                black_box(&mut generator_proj),
+                black_box(&condition),
+                &mut rng,
+            )
+            .unwrap();
             black_box((baseline_cands, proj));
         });
     });

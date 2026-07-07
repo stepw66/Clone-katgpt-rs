@@ -669,9 +669,10 @@ pub fn make_dct_log_basis(k: usize, d: usize) -> Vec<f32> {
         let mut f = f_raw.clamp(1, max_f as i64);
         // Ensure strictly-greater than the previous frequency.
         if let Some(&prev) = freqs.last()
-            && f <= prev {
-                f = prev + 1;
-            }
+            && f <= prev
+        {
+            f = prev + 1;
+        }
         // If we ran past max_f, clamp (last few frequencies may saturate at
         // max_f — for k > d/2 this is unavoidable).
         if f > max_f as i64 {
@@ -1988,7 +1989,10 @@ mod tests {
                     count += 1;
                 }
             }
-            assert!(count >= 1, "Haar row {i} should have ≥1 sign change (got {count})");
+            assert!(
+                count >= 1,
+                "Haar row {i} should have ≥1 sign change (got {count})"
+            );
             sign_counts.push(count);
         }
         println!("Haar-packet sign-change profile (k={k}, d={d}): {sign_counts:?}");
@@ -2030,8 +2034,18 @@ mod tests {
         ] {
             let mut scratch = FuncAttnScratch::new(n, d, k);
             let mut out = vec![0.0f32; n * d];
-            funcattn_forward(&x, &x, &w_basis, &w_q, &w_k, &w_v, &cfg, &mut scratch, &mut out)
-                .unwrap_or_else(|e| panic!("{label}: forward failed: {e:?}"));
+            funcattn_forward(
+                &x,
+                &x,
+                &w_basis,
+                &w_q,
+                &w_k,
+                &w_v,
+                &cfg,
+                &mut scratch,
+                &mut out,
+            )
+            .unwrap_or_else(|e| panic!("{label}: forward failed: {e:?}"));
             for v in &out {
                 assert!(v.is_finite(), "{label}: non-finite forward output");
             }

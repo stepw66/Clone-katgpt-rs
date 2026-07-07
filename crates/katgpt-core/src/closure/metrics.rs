@@ -161,8 +161,7 @@ pub fn compute_pri(corpus: &[PrimitiveTransitionGraph]) -> PriScores {
     // ── Phase 4: popcount per primitive → PRI scores ──────────────────────
     // Walk every primitive slot once. Most rows are all-zero (the primitive
     // never appeared) — skip them entirely so we don't pollute the scores map.
-    let mut scores: AHashMap<PrimitiveKind, f32> =
-        AHashMap::with_capacity(bits.len() / 8);
+    let mut scores: AHashMap<PrimitiveKind, f32> = AHashMap::with_capacity(bits.len() / 8);
     for prim_idx in 0..PRIM_SPACE {
         let row = &bits[prim_idx * words_per_row..(prim_idx + 1) * words_per_row];
         let mut count: u32 = 0;
@@ -170,7 +169,10 @@ pub fn compute_pri(corpus: &[PrimitiveTransitionGraph]) -> PriScores {
             count += word.count_ones();
         }
         if count > 0 {
-            scores.insert(PrimitiveKind::from_u32(prim_idx as u32), count as f32 / total);
+            scores.insert(
+                PrimitiveKind::from_u32(prim_idx as u32),
+                count as f32 / total,
+            );
         }
     }
     PriScores(scores)
@@ -300,10 +302,7 @@ pub fn motif_multiset(corpus: &[PrimitiveTransitionGraph]) -> AHashMap<[u8; 32],
 /// `min(count_a, count_b)` copies; the union counts `max(count_a, count_b)`.
 /// Returns `0.0` if both maps are empty (no division by zero).
 #[inline]
-fn jaccard_multiset(
-    a: &AHashMap<[u8; 32], u32>,
-    b: &AHashMap<[u8; 32], u32>,
-) -> f32 {
+fn jaccard_multiset(a: &AHashMap<[u8; 32], u32>, b: &AHashMap<[u8; 32], u32>) -> f32 {
     if a.is_empty() && b.is_empty() {
         return 0.0;
     }
@@ -473,10 +472,7 @@ mod tests {
     #[test]
     fn tar_score_jaccard_behavior() {
         // Same corpus on both sides ⇒ TaR = 1.0.
-        let corpus = vec![
-            build_ptg(0, &[0, 1, 2]),
-            build_ptg(1, &[0, 1, 3]),
-        ];
+        let corpus = vec![build_ptg(0, &[0, 1, 2]), build_ptg(1, &[0, 1, 3])];
         let t = compute_tar_score(&corpus, &corpus);
         assert!((t - 1.0).abs() < 1e-6, "same corpus ⇒ 1.0, got {t}");
 
@@ -490,7 +486,10 @@ mod tests {
         let a2 = vec![build_ptg(0, &[0, 1, 2])];
         let b2 = vec![build_ptg(0, &[0, 1, 2]), build_ptg(0, &[3, 4, 5])];
         let t3 = compute_tar_score(&a2, &b2);
-        assert!(t3 > 0.0 && t3 < 1.0, "partial overlap ⇒ fractional, got {t3}");
+        assert!(
+            t3 > 0.0 && t3 < 1.0,
+            "partial overlap ⇒ fractional, got {t3}"
+        );
     }
 
     #[test]

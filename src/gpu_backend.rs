@@ -344,12 +344,12 @@ pub struct GpuBackend {
     // These represent config-derived constants that never change between calls —
     // previously the forward path allocated ~9 + n_layer + 3*n_head*n_layer
     // Metal buffers per call (kernel IPC allocations). See Plan: GPU scalar cache.
-    n_embd_scalar: Option<Buffer>,      // u32 n_embd — doubles as n_embd_in_dim/mlp_in_dim/kv_in_dim
-    kv_dim_scalar: Option<Buffer>,      // u32 kv_dim
-    head_dim_scalar: Option<Buffer>,    // u32 head_dim
-    mlp_hidden_scalar: Option<Buffer>,  // u32 mlp_hidden (mlp_w2 in_dim)
-    eps_scalar: Option<Buffer>,         // f32 rmsnorm eps
-    scale_scalar: Option<Buffer>,       // f32 attention scale (1/sqrt(head_dim))
+    n_embd_scalar: Option<Buffer>, // u32 n_embd — doubles as n_embd_in_dim/mlp_in_dim/kv_in_dim
+    kv_dim_scalar: Option<Buffer>, // u32 kv_dim
+    head_dim_scalar: Option<Buffer>, // u32 head_dim
+    mlp_hidden_scalar: Option<Buffer>, // u32 mlp_hidden (mlp_w2 in_dim)
+    eps_scalar: Option<Buffer>,    // f32 rmsnorm eps
+    scale_scalar: Option<Buffer>,  // f32 attention scale (1/sqrt(head_dim))
     // Per-head offset buffers (q_off, kv_off, out_off) — pre-computed once
     // since head layout is fixed at compile time.
     q_off_bufs: Option<Vec<Buffer>>,
@@ -358,10 +358,10 @@ pub struct GpuBackend {
     // Per-call buffers (values change every forward, but the Metal buffer allocation
     // is reused via `contents()` write). Previously each of these triggered a
     // `device.new_buffer()` IPC call per forward pass.
-    seq_len_scalar: Option<Buffer>,  // u32 seq_len (pos + 1)
-    pos_scalar: Option<Buffer>,      // u32 pos
-    emb_wte_slice: Option<Buffer>,   // [n_embd] wte[token] slice
-    emb_wpe_slice: Option<Buffer>,   // [n_embd] wpe[pos] slice
+    seq_len_scalar: Option<Buffer>, // u32 seq_len (pos + 1)
+    pos_scalar: Option<Buffer>,     // u32 pos
+    emb_wte_slice: Option<Buffer>,  // [n_embd] wte[token] slice
+    emb_wpe_slice: Option<Buffer>,  // [n_embd] wpe[pos] slice
 }
 
 impl GpuBackend {
@@ -478,7 +478,10 @@ impl InferenceBackend for GpuBackend {
         // seq_len grows as context extends; pos advances by 1 each token.
         // Reuse pre-allocated buffers from compile() — write via contents() instead
         // of allocating new Metal buffers each call.
-        let seq_len_buf = self.seq_len_scalar.as_ref().expect("seq_len_scalar missing");
+        let seq_len_buf = self
+            .seq_len_scalar
+            .as_ref()
+            .expect("seq_len_scalar missing");
         let pos_buf = self.pos_scalar.as_ref().expect("pos_scalar missing");
         write_scalar(seq_len_buf, &(seq_len as u32));
         write_scalar(pos_buf, &(pos as u32));

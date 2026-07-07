@@ -25,7 +25,9 @@ pub fn sample_masks(
     rng: &mut fastrand::Rng,
 ) -> Vec<AblationMask> {
     let mut out = Vec::with_capacity(m);
-    if n_heads == 0 { return out }
+    if n_heads == 0 {
+        return out;
+    }
     // Exact ablation count, capped at n_heads − 1 so we never produce an
     // all-zero mask (which would carry no per-head signal).
     let n_ablate_raw = (ablation_fraction * n_heads as f32).round() as i64;
@@ -138,7 +140,11 @@ impl CsKvProbe {
         for mask in &masks {
             let y_m = eval(mask, episodes);
             y.push(y_m - y_baseline);
-            let row: Vec<f32> = mask.bits.iter().map(|&b| if b { 1.0 } else { 0.0 }).collect();
+            let row: Vec<f32> = mask
+                .bits
+                .iter()
+                .map(|&b| if b { 1.0 } else { 0.0 })
+                .collect();
             phi.push(row);
         }
 
@@ -152,7 +158,11 @@ impl CsKvProbe {
         let mut scores = vec![0.0_f32; n_groups];
         let mut counts = vec![0u32; n_groups];
         for (h, &c) in coeffs.iter().enumerate() {
-            let g = if n_heads == 0 { 0 } else { (h * n_kv_heads) / n_heads };
+            let g = if n_heads == 0 {
+                0
+            } else {
+                (h * n_kv_heads) / n_heads
+            };
             // Defensive: GQA divisor can in principle produce g == n_groups when
             // n_kv_heads == 0; clamp to avoid OOB. (n_groups is floored at 1 above.)
             let g = g.min(n_groups - 1);
@@ -186,7 +196,13 @@ mod tests {
             assert_eq!(m.n_heads, n_heads);
             assert_eq!(m.bits.len(), n_heads);
             // Exactly round(0.05 * 64) = 3 ablated.
-            assert_eq!(m.n_ablated(), 3, "mask {:?} ablated {} heads", m.bits, m.n_ablated());
+            assert_eq!(
+                m.n_ablated(),
+                3,
+                "mask {:?} ablated {} heads",
+                m.bits,
+                m.n_ablated()
+            );
             assert!(m.retention_fraction() > 0.0);
         }
     }
@@ -285,7 +301,15 @@ mod tests {
         // expected overlap. Random expected overlap = 2 * 2 / 16 = 0.25 per
         // trial on average; assert CS gets full overlap (2/2 = 1.0), which is
         // a ≥0.5 absolute margin — comfortably above the 15pp G1 bar.
-        let cs_accuracy = cs_top2.intersection(&signal_heads.iter().copied().collect::<std::collections::HashSet<usize>>()).count() as f32 / 2.0;
+        let cs_accuracy = cs_top2
+            .intersection(
+                &signal_heads
+                    .iter()
+                    .copied()
+                    .collect::<std::collections::HashSet<usize>>(),
+            )
+            .count() as f32
+            / 2.0;
         assert!(
             cs_accuracy >= 1.0,
             "G1: CS top-2 accuracy {cs_accuracy} < 1.0 (expected both signal heads)"

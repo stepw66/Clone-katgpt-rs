@@ -33,7 +33,7 @@
 
 #![cfg(feature = "spectral_differentiation")]
 
-use katgpt_core::{spectral_differentiate_into, SpecDiffConfig, SpecDiffScratch};
+use katgpt_core::{SpecDiffConfig, SpecDiffScratch, spectral_differentiate_into};
 use std::time::Instant;
 
 #[path = "../tests/common/mod.rs"]

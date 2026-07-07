@@ -79,7 +79,10 @@ pub struct FuncAttnChiarBlendConfig {
 
 impl Default for FuncAttnChiarBlendConfig {
     fn default() -> Self {
-        Self { tau: DEFAULT_FUNCATTN_CHIAR_TAU, beta: DEFAULT_FUNCATTN_CHIAR_BETA }
+        Self {
+            tau: DEFAULT_FUNCATTN_CHIAR_TAU,
+            beta: DEFAULT_FUNCATTN_CHIAR_BETA,
+        }
     }
 }
 
@@ -260,11 +263,17 @@ mod tests {
         let funcattn_out: Vec<f32> = (0..n * d).map(|i| i as f32).collect();
         let fallback_out: Vec<f32> = (0..n * d).map(|i| 100.0 + i as f32).collect();
         let entropies = vec![0.0f32; n];
-        let cfg = FuncAttnChiarBlendConfig { tau: 0.5, beta: 20.0 };
+        let cfg = FuncAttnChiarBlendConfig {
+            tau: 0.5,
+            beta: 20.0,
+        };
         let mut out = vec![0.0f32; n * d];
         blend_by_entropy_into(&funcattn_out, &fallback_out, &entropies, &cfg, &mut out);
         for (o, f) in out.iter().zip(funcattn_out.iter()) {
-            assert!((o - f).abs() < 1e-2, "H=0 → out≈funcattn (got {o}, want {f})");
+            assert!(
+                (o - f).abs() < 1e-2,
+                "H=0 → out≈funcattn (got {o}, want {f})"
+            );
         }
     }
 
@@ -276,11 +285,17 @@ mod tests {
         let funcattn_out: Vec<f32> = (0..n * d).map(|i| i as f32).collect();
         let fallback_out: Vec<f32> = (0..n * d).map(|i| 100.0 + i as f32).collect();
         let entropies = vec![1.0f32; n];
-        let cfg = FuncAttnChiarBlendConfig { tau: 0.5, beta: 20.0 };
+        let cfg = FuncAttnChiarBlendConfig {
+            tau: 0.5,
+            beta: 20.0,
+        };
         let mut out = vec![0.0f32; n * d];
         blend_by_entropy_into(&funcattn_out, &fallback_out, &entropies, &cfg, &mut out);
         for (o, b) in out.iter().zip(fallback_out.iter()) {
-            assert!((o - b).abs() < 1e-2, "H=1 → out≈fallback (got {o}, want {b})");
+            assert!(
+                (o - b).abs() < 1e-2,
+                "H=1 → out≈fallback (got {o}, want {b})"
+            );
         }
     }
 
@@ -296,8 +311,16 @@ mod tests {
         let mut out = vec![0.0f32; n * d];
         blend_by_entropy_into(&funcattn_out, &fallback_out, &entropies, &cfg, &mut out);
         // out = 0.5*fallback + 0.5*funcattn = 0.5*fallback.
-        assert!((out[0] - 5.0).abs() < 1e-4, "H=τ → 50/50 blend (got {})", out[0]);
-        assert!((out[1] - 10.0).abs() < 1e-4, "H=τ → 50/50 blend (got {})", out[1]);
+        assert!(
+            (out[0] - 5.0).abs() < 1e-4,
+            "H=τ → 50/50 blend (got {})",
+            out[0]
+        );
+        assert!(
+            (out[1] - 10.0).abs() < 1e-4,
+            "H=τ → 50/50 blend (got {})",
+            out[1]
+        );
     }
 
     #[test]
@@ -323,9 +346,24 @@ mod tests {
         let cfg = FuncAttnChiarBlendConfig::default();
         let mut out_lo = vec![0.0f32];
         let mut out_hi = vec![0.0f32];
-        blend_by_entropy_into(&funcattn_out, &fallback_out, &[cfg.tau - 0.01], &cfg, &mut out_lo);
-        blend_by_entropy_into(&funcattn_out, &fallback_out, &[cfg.tau + 0.01], &cfg, &mut out_hi);
+        blend_by_entropy_into(
+            &funcattn_out,
+            &fallback_out,
+            &[cfg.tau - 0.01],
+            &cfg,
+            &mut out_lo,
+        );
+        blend_by_entropy_into(
+            &funcattn_out,
+            &fallback_out,
+            &[cfg.tau + 0.01],
+            &cfg,
+            &mut out_hi,
+        );
         let delta = (out_hi[0] - out_lo[0]).abs();
-        assert!(delta > 0.0 && delta < 0.5, "small entropy change → small output change (delta={delta})");
+        assert!(
+            delta > 0.0 && delta < 0.5,
+            "small entropy change → small output change (delta={delta})"
+        );
     }
 }

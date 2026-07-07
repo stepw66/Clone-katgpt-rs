@@ -37,9 +37,7 @@
 #![cfg(feature = "product_key_memory_episodic")]
 
 use katgpt_core::delta_mem::{DeltaMemoryConfig, DeltaMemoryState};
-use katgpt_core::product_key_memory::{
-    PkmEpisodicStore, PkmScratch, ProductKeyMemory, ScoreFn,
-};
+use katgpt_core::product_key_memory::{PkmEpisodicStore, PkmScratch, ProductKeyMemory, ScoreFn};
 use std::hint::black_box;
 use std::time::Instant;
 
@@ -160,11 +158,7 @@ fn pkm_table_zero_values(seed: u64) -> ProductKeyMemory<SQRT_N, D_K, D_V> {
 /// `top_k` controls how many slots each write touches. k=1 minimizes
 /// collisions (each query writes to a single slot); k=4 provides redundancy
 /// but increases inter-query interference.
-fn pkm_recall(
-    pairs: &[([f32; D_K], [f32; D_V])],
-    weighted: bool,
-    top_k: usize,
-) -> f32 {
+fn pkm_recall(pairs: &[([f32; D_K], [f32; D_V])], weighted: bool, top_k: usize) -> f32 {
     let table = pkm_table_zero_values(2024);
     let mut store = PkmEpisodicStore::new(table);
     let mut scratch = PkmScratch::<SQRT_N, K>::new();
@@ -179,9 +173,25 @@ fn pkm_recall(
         norm_target.copy_from_slice(target);
         l2_normalize(&mut norm_target);
         if weighted {
-            store.write_weighted(q, &norm_target, GATE, ScoreFn::Dot, top_k, &mut out, &mut scratch);
+            store.write_weighted(
+                q,
+                &norm_target,
+                GATE,
+                ScoreFn::Dot,
+                top_k,
+                &mut out,
+                &mut scratch,
+            );
         } else {
-            store.write(q, &norm_target, GATE, ScoreFn::Dot, top_k, &mut out, &mut scratch);
+            store.write(
+                q,
+                &norm_target,
+                GATE,
+                ScoreFn::Dot,
+                top_k,
+                &mut out,
+                &mut scratch,
+            );
         }
     }
 
@@ -191,7 +201,9 @@ fn pkm_recall(
     for (q, target) in pairs {
         norm_target.copy_from_slice(target);
         l2_normalize(&mut norm_target);
-        let n = store.working().query_into(q, ScoreFn::Dot, 1, &mut out, &mut scratch);
+        let n = store
+            .working()
+            .query_into(q, ScoreFn::Dot, 1, &mut out, &mut scratch);
         if n == 0 {
             continue;
         }
@@ -215,9 +227,7 @@ fn pkm_recall(
 /// components of the normalized query). This is a deterministic projection —
 /// the fairest input for a rank-r associative memory that cannot see the full
 /// `D_K`-dim query.
-fn delta_mem_recall(
-    pairs: &[([f32; D_K], [f32; D_V])],
-) -> f32 {
+fn delta_mem_recall(pairs: &[([f32; D_K], [f32; D_V])]) -> f32 {
     let mut dm = DeltaMemoryState::new(DeltaMemoryConfig {
         rank: DM_RANK,
         ..Default::default()
@@ -262,9 +272,20 @@ fn main() {
     println!("═══ Plan 408 Phase 5 — PKM × δ-Mem Fusion Gate (G4) ═══");
     println!();
     println!("Configuration:");
-    println!("  PKM:   SQRT_N={} (N={} slots), D_K={}, D_V={}, K={}, gate={}, k∈{{1,4}}",
-             SQRT_N, SQRT_N * SQRT_N, D_K, D_V, K, GATE);
-    println!("  δ-Mem: rank={} ({} state params)", DM_RANK, DM_RANK * DM_RANK);
+    println!(
+        "  PKM:   SQRT_N={} (N={} slots), D_K={}, D_V={}, K={}, gate={}, k∈{{1,4}}",
+        SQRT_N,
+        SQRT_N * SQRT_N,
+        D_K,
+        D_V,
+        K,
+        GATE
+    );
+    println!(
+        "  δ-Mem: rank={} ({} state params)",
+        DM_RANK,
+        DM_RANK * DM_RANK
+    );
     println!("  Pairs: {} (equal write budget for both)", N_PAIRS);
     println!();
 
@@ -323,8 +344,11 @@ fn main() {
 
     // ── G4 verdict ───────────────────────────────────────────────────────────
     println!("── G4 Fusion Gate ────────────────────────────────────────────────────");
-    println!("  target:  PKM MSE / δ-Mem MSE ≤ {}  (≥{:.1}× lower)",
-             G4_MSE_RATIO_TARGET, 1.0 / G4_MSE_RATIO_TARGET);
+    println!(
+        "  target:  PKM MSE / δ-Mem MSE ≤ {}  (≥{:.1}× lower)",
+        G4_MSE_RATIO_TARGET,
+        1.0 / G4_MSE_RATIO_TARGET
+    );
     let ratios = [
         ("unweighted k=4", pkm_mse_uw_k4),
         ("weighted   k=4", pkm_mse_w_k4),
@@ -334,8 +358,15 @@ fn main() {
     let mut best_label = "";
     for (label, pkm_mse) in &ratios {
         let ratio = *pkm_mse as f64 / dm_mse.max(1e-12) as f64;
-        let verdict = if ratio <= G4_MSE_RATIO_TARGET { "✅ PASS" } else { "❌ FAIL" };
-        println!("  {}:  MSE={:.6}  ratio={:.4}  →  {}", label, pkm_mse, ratio, verdict);
+        let verdict = if ratio <= G4_MSE_RATIO_TARGET {
+            "✅ PASS"
+        } else {
+            "❌ FAIL"
+        };
+        println!(
+            "  {}:  MSE={:.6}  ratio={:.4}  →  {}",
+            label, pkm_mse, ratio, verdict
+        );
         if ratio < best_ratio {
             best_ratio = ratio;
             best_label = label;
@@ -351,18 +382,25 @@ fn main() {
     let alloc_before = ALLOC_COUNT.load(std::sync::atomic::Ordering::Relaxed);
     let (_r, alloc_during) = alloc_delta(|| pkm_recall(&pairs, false, 4));
     let _ = alloc_before;
-    println!("  (informational) PKM unweighted k=4 write+recall allocs: {}", alloc_during);
+    println!(
+        "  (informational) PKM unweighted k=4 write+recall allocs: {}",
+        alloc_during
+    );
     println!();
 
     // ── Final verdict ──────────────────────────────────────────────────────────
     let pass = best_ratio <= G4_MSE_RATIO_TARGET;
     if pass {
-        println!("═══ G4: ✅ PASS — best variant '{}' ratio={:.4} ≤ {} ═══",
-                 best_label, best_ratio, G4_MSE_RATIO_TARGET);
+        println!(
+            "═══ G4: ✅ PASS — best variant '{}' ratio={:.4} ≤ {} ═══",
+            best_label, best_ratio, G4_MSE_RATIO_TARGET
+        );
         // Exit 0 (cargo bench success).
     } else {
-        println!("═══ G4: ❌ FAIL — best variant '{}' ratio={:.4} > {} ═══",
-                 best_label, best_ratio, G4_MSE_RATIO_TARGET);
+        println!(
+            "═══ G4: ❌ FAIL — best variant '{}' ratio={:.4} > {} ═══",
+            best_label, best_ratio, G4_MSE_RATIO_TARGET
+        );
         std::process::exit(1);
     }
 }

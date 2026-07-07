@@ -284,7 +284,11 @@ where
 ///
 /// This ensures the square has edges on all four sides, forming a
 /// proper 2-cube in the cubical nerve.
-fn build_faces<L>(_lattice: &L, _elements: &[ZoneId], edges: &[(ZoneId, ZoneId)]) -> Vec<[ZoneId; 4]>
+fn build_faces<L>(
+    _lattice: &L,
+    _elements: &[ZoneId],
+    edges: &[(ZoneId, ZoneId)],
+) -> Vec<[ZoneId; 4]>
 where
     L: DistributiveMeetSemilattice<Elem = ZoneId>,
 {
@@ -301,7 +305,6 @@ where
     for i in 0..n_edges {
         let (a, b) = edges[i];
         for &(c, d) in &edges[i + 1..n_edges] {
-
             // All four corners must be distinct.
             if a == c || a == d || b == c || b == d {
                 continue;
@@ -642,7 +645,10 @@ mod tests {
             let algo = if n < threshold { "scalar" } else { "optimized" };
             println!(
                 "  n={:>4} algo={:>9} chain={:?} bushy={:?}",
-                n, algo, chain_time / 10, bushy_time / 10
+                n,
+                algo,
+                chain_time / 10,
+                bushy_time / 10
             );
         }
     }
@@ -679,7 +685,7 @@ mod tests {
         let poset = diamond_poset();
 
         let scalar_complex = cubical_nerve_with_threshold(&poset, 1000); // force scalar
-        let optimized_complex = cubical_nerve_with_threshold(&poset, 0);  // force optimized
+        let optimized_complex = cubical_nerve_with_threshold(&poset, 0); // force optimized
 
         // Vertices and edges should be identical.
         let mut sv = scalar_complex.vertices.clone();

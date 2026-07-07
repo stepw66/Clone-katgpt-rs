@@ -56,13 +56,16 @@
 //!   --features conformal_predictive_intervals,sleep_time_anticipation -- --nocapture
 //! ```
 
-#![cfg(all(feature = "conformal_predictive_intervals", feature = "sleep_time_anticipation"))]
+#![cfg(all(
+    feature = "conformal_predictive_intervals",
+    feature = "sleep_time_anticipation"
+))]
 #![allow(clippy::needless_range_loop)]
 
 use katgpt_core::{
     AnticipatedQueryDir, DotPredictabilityScorer, FloorComparisonReport, IdentityFunctorOp,
-    PredictiveInterval, PredictiveOutput, SleepTimeAnticipator,
-    SleepTimeScratch, TrajectoryCorpus, UqPrimitiveUnderTest, run_floor_comparison,
+    PredictiveInterval, PredictiveOutput, SleepTimeAnticipator, SleepTimeScratch, TrajectoryCorpus,
+    UqPrimitiveUnderTest, run_floor_comparison,
 };
 
 /// Delay-embedding dimension (context window length).
@@ -169,9 +172,12 @@ impl SleepTimeAnticipatorAdapter {
         } else {
             let n = self.warmup_residuals.len() as f32;
             let mean: f32 = self.warmup_residuals.iter().sum::<f32>() / n;
-            let var: f32 = self.warmup_residuals.iter()
+            let var: f32 = self
+                .warmup_residuals
+                .iter()
                 .map(|r| (r - mean).powi(2))
-                .sum::<f32>() / n;
+                .sum::<f32>()
+                / n;
             self.residual_scale = var.sqrt().max(1e-6);
         }
         self.scale_finalized = true;
@@ -197,7 +203,9 @@ impl UqPrimitiveUnderTest for SleepTimeAnticipatorAdapter {
         }
 
         // Score all K directions, take p_best = max predictability.
-        let artifact = self.anticipator.anticipate(&self.window, &self.dirs, &mut self.scratch);
+        let artifact = self
+            .anticipator
+            .anticipate(&self.window, &self.dirs, &mut self.scratch);
         let mut p_best: f32 = 0.0;
         for slot in &artifact.slots {
             if slot.predictability > p_best {
@@ -305,11 +313,7 @@ fn pearson_r(a: &[f32], b: &[f32]) -> f32 {
         var_b += db * db;
     }
     let denom = (var_a * var_b).sqrt();
-    if denom < 1e-12 {
-        0.0
-    } else {
-        cov / denom
-    }
+    if denom < 1e-12 { 0.0 } else { cov / denom }
 }
 
 // ===== Difficulty-correlation harness (T4 specific) =====
@@ -357,7 +361,10 @@ fn difficulty_correlation(corpus: &[f32], warmup: usize) -> (f32, f32) {
             0.0
         };
 
-        if let (Some(piv), Some(fiv)) = (prim_out.into_interval(alpha), floor_out.into_interval(alpha)) {
+        if let (Some(piv), Some(fiv)) = (
+            prim_out.into_interval(alpha),
+            floor_out.into_interval(alpha),
+        ) {
             // Anticipator signal = half-width / (z · scale) ≈ (1 − p_best + ε).
             // We invert back to the predictability-derived difficulty proxy.
             // half_width = piv.upper - piv.point; the difficulty signal is
@@ -414,7 +421,13 @@ fn run_and_print(
     corpus: &TrajectoryCorpus,
     alpha: f32,
 ) -> FloorComparisonReport {
-    let report = run_floor_comparison(prim, &corpus.values, alpha, corpus.recommended_warmup, &corpus.name);
+    let report = run_floor_comparison(
+        prim,
+        &corpus.values,
+        alpha,
+        corpus.recommended_warmup,
+        &corpus.name,
+    );
     report.pretty_print();
     report
 }
@@ -425,7 +438,10 @@ fn anticipator_vs_floor_on_seasonal() {
     let mut prim = SleepTimeAnticipatorAdapter::new(1.0, 0.0, 0.05, corpus.recommended_warmup);
     let report = run_and_print(&mut prim, &corpus, 0.05);
 
-    println!("\n[seasonal] Anticipator residual_scale = {:.4}", prim.residual_scale);
+    println!(
+        "\n[seasonal] Anticipator residual_scale = {:.4}",
+        prim.residual_scale
+    );
 
     // The anticipator's predictability is an UNCALIBRATED heuristic.
     // On a stationary seasonal series the floor is near-optimal, so we
@@ -441,7 +457,10 @@ fn anticipator_vs_floor_on_white_noise() {
     let mut prim = SleepTimeAnticipatorAdapter::new(1.0, 0.0, 0.05, corpus.recommended_warmup);
     let report = run_and_print(&mut prim, &corpus, 0.05);
 
-    println!("\n[white_noise] Anticipator residual_scale = {:.4}", prim.residual_scale);
+    println!(
+        "\n[white_noise] Anticipator residual_scale = {:.4}",
+        prim.residual_scale
+    );
 
     assert!(report.n_scored > 0, "must score some steps");
 }
@@ -452,7 +471,10 @@ fn anticipator_vs_floor_on_regime_switching() {
     let mut prim = SleepTimeAnticipatorAdapter::new(1.0, 0.0, 0.05, corpus.recommended_warmup);
     let report = run_and_print(&mut prim, &corpus, 0.05);
 
-    println!("\n[regime_switching] Anticipator residual_scale = {:.4}", prim.residual_scale);
+    println!(
+        "\n[regime_switching] Anticipator residual_scale = {:.4}",
+        prim.residual_scale
+    );
 
     assert!(report.n_scored > 0, "must score some steps");
 }
@@ -467,9 +489,18 @@ fn anticipator_difficulty_correlation_on_regime_switching() {
     let (r_prim, r_floor) = difficulty_correlation(&corpus.values, warmup);
 
     println!("\n=== Difficulty Correlation (regime_switching) ===");
-    println!("  Anticipator (1−p_best)-derived half-width vs |Δy|:  r = {:.4}", r_prim);
-    println!("  Floor half-width vs |Δy|:                            r = {:.4}", r_floor);
-    println!("  Ratio (prim/floor):                                  {:.4}", r_prim / r_floor.max(1e-6));
+    println!(
+        "  Anticipator (1−p_best)-derived half-width vs |Δy|:  r = {:.4}",
+        r_prim
+    );
+    println!(
+        "  Floor half-width vs |Δy|:                            r = {:.4}",
+        r_floor
+    );
+    println!(
+        "  Ratio (prim/floor):                                  {:.4}",
+        r_prim / r_floor.max(1e-6)
+    );
 
     // The floor is calibrated on |Δy|, so r_floor should be high.
     // The anticipator's predictability is an uncalibrated heuristic; we
@@ -507,13 +538,13 @@ fn anticipator_full_report_for_benchmark_doc() {
         ("regime_switching", regime_switching(800, 0xC3)),
     ] {
         println!("\n--- Corpus: {} ---", name);
-        let mut prim =
-            SleepTimeAnticipatorAdapter::new(1.0, 0.0, 0.05, corpus.recommended_warmup);
+        let mut prim = SleepTimeAnticipatorAdapter::new(1.0, 0.0, 0.05, corpus.recommended_warmup);
         let _report = run_and_print(&mut prim, &corpus, 0.05);
 
-        let (r_prim, r_floor) =
-            difficulty_correlation(&corpus.values, corpus.recommended_warmup);
-        println!("  Difficulty correlation: anticipator r = {:.4}, floor r = {:.4}",
-                 r_prim, r_floor);
+        let (r_prim, r_floor) = difficulty_correlation(&corpus.values, corpus.recommended_warmup);
+        println!(
+            "  Difficulty correlation: anticipator r = {:.4}, floor r = {:.4}",
+            r_prim, r_floor
+        );
     }
 }

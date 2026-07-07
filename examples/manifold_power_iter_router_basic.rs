@@ -16,8 +16,8 @@
 #![cfg(feature = "manifold_power_iter_router")]
 
 use katgpt_rs::manifold_power_iter_router::{
-    compute_diagnostics, compute_expert_gram_into, gate_sigmoid_topk, manifold_power_iter_router,
-    MpiRouterConfig,
+    MpiRouterConfig, compute_diagnostics, compute_expert_gram_into, gate_sigmoid_topk,
+    manifold_power_iter_router,
 };
 use katgpt_rs::spectral_retract::PowerRetractScratch;
 use std::time::Instant;
@@ -87,13 +87,17 @@ fn main() {
     println!();
 
     println!("┌──────────────────────────────────────────────────┐");
-    println!("│ λ alignment  before={:.4}   after={:.4}   │", lambda_before, res.lambda_alignment);
-    println!("│ MaxVio       before={:.4}   after={:.4}   │", maxvio_before, res.maxvio);
+    println!(
+        "│ λ alignment  before={:.4}   after={:.4}   │",
+        lambda_before, res.lambda_alignment
+    );
+    println!(
+        "│ MaxVio       before={:.4}   after={:.4}   │",
+        maxvio_before, res.maxvio
+    );
     println!("└──────────────────────────────────────────────────┘");
     println!();
-    println!(
-        "paper targets (§1.4): λ 0.27→0.66 shape, MaxVio 1.13→0.96 shape"
-    );
+    println!("paper targets (§1.4): λ 0.27→0.66 shape, MaxVio 1.13→0.96 shape");
     println!(
         "this run: λ gain = {:.2}×, MaxVio reduction = {:.1}%",
         res.lambda_alignment / lambda_before.abs().max(1e-6),

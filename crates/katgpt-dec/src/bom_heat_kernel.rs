@@ -77,11 +77,7 @@ use core::cmp::Ordering;
 /// `eig.eigenvalues` is sorted descending (largest first). This function
 /// re-sorts by `|a_k|` ascending and returns the `n` smallest. The result is
 /// NOT necessarily contiguous in the original spectrum.
-pub fn near_harmonic_indices(
-    eig: &DecEigendecomposition,
-    motor_d: f32,
-    n: usize,
-) -> Vec<usize> {
+pub fn near_harmonic_indices(eig: &DecEigendecomposition, motor_d: f32, n: usize) -> Vec<usize> {
     let k = eig.k();
     let n_capped = n.min(k);
     let mut scored: Vec<(usize, f32)> = (0..k)
@@ -136,7 +132,10 @@ pub fn near_harmonic_indices(
 ///
 /// Debug-asserts that `near_harmonic_indices` and `noise` have compatible
 /// lengths with `k_hypotheses`.
-#[allow(clippy::too_many_arguments, reason = "BoM perturbation sweep needs eig + field + motor + perturbation params; a config struct would obscure the math")]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "BoM perturbation sweep needs eig + field + motor + perturbation params; a config struct would obscure the math"
+)]
 pub fn heat_kernel_trajectory_bom(
     eig: &DecEigendecomposition,
     h0: &CochainField,
@@ -184,7 +183,10 @@ pub fn heat_kernel_trajectory_bom(
 /// heat-kernel application (`O(n·k·dim)`) plus the perturbation assembly
 /// (`O(n·M)` where `M = near_harmonic_indices.len()`). The total for K
 /// hypotheses is `O(K · (n·k·dim + n·M))`.
-#[allow(clippy::too_many_arguments, reason = "zero-alloc variant mirrors heat_kernel_trajectory_bom; caller-provided scratch/out add the 2 extra args")]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "zero-alloc variant mirrors heat_kernel_trajectory_bom; caller-provided scratch/out add the 2 extra args"
+)]
 pub fn heat_kernel_trajectory_bom_into(
     eig: &DecEigendecomposition,
     h0: &CochainField,
@@ -367,9 +369,7 @@ mod tests {
         let motor = [-10.0f32]; // stable
         let dirs = near_harmonic_indices(&eig, motor[0], 4);
         let noise = gaussian_noise(42, 8 * dirs.len());
-        let trajs = heat_kernel_trajectory_bom(
-            &eig, &h0, &motor, 1, 1.0, 8, 0.1, &dirs, &noise,
-        );
+        let trajs = heat_kernel_trajectory_bom(&eig, &h0, &motor, 1, 1.0, 8, 0.1, &dirs, &noise);
         assert_eq!(trajs.len(), 8, "should return 8 trajectories");
         for (i, t) in trajs.iter().enumerate() {
             assert_eq!(t.n_cells(), h0.n_cells(), "traj {i} n_cells mismatch");
@@ -387,15 +387,23 @@ mod tests {
         let dirs = near_harmonic_indices(&eig, motor[0], 4);
         let noise = gaussian_noise(7, 4 * dirs.len());
 
-        let alloc = heat_kernel_trajectory_bom(
-            &eig, &h0, &motor, 1, 1.0, 4, 0.1, &dirs, &noise,
-        );
+        let alloc = heat_kernel_trajectory_bom(&eig, &h0, &motor, 1, 1.0, 4, 0.1, &dirs, &noise);
         let mut into: Vec<CochainField> = (0..4)
             .map(|_| CochainField::zeros(0, cx.n_cells(0), 1))
             .collect();
         let mut scratch = CochainField::zeros(0, cx.n_cells(0), 1);
         heat_kernel_trajectory_bom_into(
-            &eig, &h0, &motor, 1, 1.0, 4, 0.1, &dirs, &noise, &mut into, &mut scratch,
+            &eig,
+            &h0,
+            &motor,
+            1,
+            1.0,
+            4,
+            0.1,
+            &dirs,
+            &noise,
+            &mut into,
+            &mut scratch,
         );
 
         for k in 0..4 {
@@ -422,9 +430,7 @@ mod tests {
         let motor = [-10.0f32]; // stable
         let dirs = near_harmonic_indices(&eig, motor[0], 4);
         let noise = gaussian_noise(0xCAFE, 8 * dirs.len());
-        let trajs = heat_kernel_trajectory_bom(
-            &eig, &h0, &motor, 1, 1.0, 8, 0.1, &dirs, &noise,
-        );
+        let trajs = heat_kernel_trajectory_bom(&eig, &h0, &motor, 1, 1.0, 8, 0.1, &dirs, &noise);
 
         // Compute pairwise L2 distances.
         let mut max_dist = 0.0f32;
@@ -473,14 +479,10 @@ mod tests {
         // noise doesn't matter when sigma=0, but pass valid-length.
         let noise = gaussian_noise(1, 3 * dirs.len());
 
-        let trajs = heat_kernel_trajectory_bom(
-            &eig, &h0, &motor, 1, 1.0, 3, 0.0, &dirs, &noise,
-        );
+        let trajs = heat_kernel_trajectory_bom(&eig, &h0, &motor, 1, 1.0, 3, 0.0, &dirs, &noise);
 
         // Baseline: unperturbed linear heat kernel.
-        let baseline = crate::heat_kernel::heat_kernel_trajectory_linear(
-            &eig, &h0, &motor, 1, 1.0,
-        );
+        let baseline = crate::heat_kernel::heat_kernel_trajectory_linear(&eig, &h0, &motor, 1, 1.0);
 
         for (k, t) in trajs.iter().enumerate() {
             for i in 0..t.data.len() {
@@ -508,9 +510,7 @@ mod tests {
         let noise = gaussian_noise(99, 6 * dirs.len());
 
         // t=5 — moderately long horizon; field should be well below initial.
-        let trajs = heat_kernel_trajectory_bom(
-            &eig, &h0, &motor, 1, 5.0, 6, 0.1, &dirs, &noise,
-        );
+        let trajs = heat_kernel_trajectory_bom(&eig, &h0, &motor, 1, 5.0, 6, 0.1, &dirs, &noise);
 
         let h0_norm = h0.data.iter().map(|v| v.abs()).fold(0.0f32, f32::max);
         for (k, t) in trajs.iter().enumerate() {
@@ -541,9 +541,8 @@ mod tests {
         let noise = gaussian_noise(0xBEEF, 8 * dirs.len());
 
         let spread = |sigma: f32| -> f32 {
-            let trajs = heat_kernel_trajectory_bom(
-                &eig, &h0, &motor, 1, 1.0, 8, sigma, &dirs, &noise,
-            );
+            let trajs =
+                heat_kernel_trajectory_bom(&eig, &h0, &motor, 1, 1.0, 8, sigma, &dirs, &noise);
             // Max pairwise L2.
             let mut max_d = 0.0f32;
             for i in 0..trajs.len() {
@@ -564,7 +563,13 @@ mod tests {
         let s_large = spread(1.0);
 
         eprintln!("σ-sweep spread: 0.01→{s_small:.6}, 0.1→{s_med:.6}, 1.0→{s_large:.6}");
-        assert!(s_med > s_small, "σ=0.1 spread {s_med} should exceed σ=0.01 {s_small}");
-        assert!(s_large > s_med, "σ=1.0 spread {s_large} should exceed σ=0.1 {s_med}");
+        assert!(
+            s_med > s_small,
+            "σ=0.1 spread {s_med} should exceed σ=0.01 {s_small}"
+        );
+        assert!(
+            s_large > s_med,
+            "σ=1.0 spread {s_large} should exceed σ=0.1 {s_med}"
+        );
     }
 }

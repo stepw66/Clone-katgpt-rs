@@ -22,7 +22,10 @@ impl Episode {
     /// Construct an episode from a flattened KV cache and a success label.
     #[inline]
     pub fn new(kv_cache: Vec<f32>, label_success: bool) -> Self {
-        Self { kv_cache, label_success }
+        Self {
+            kv_cache,
+            label_success,
+        }
     }
 }
 
@@ -41,7 +44,10 @@ pub struct AblationMask {
 impl AblationMask {
     /// Construct an all-retain mask (no head ablated) over `n_heads` heads.
     pub fn all_ones(n_heads: usize) -> Self {
-        Self { bits: vec![true; n_heads], n_heads }
+        Self {
+            bits: vec![true; n_heads],
+            n_heads,
+        }
     }
 
     /// Fraction of heads retained: `count(bits==true) / n_heads`.
@@ -142,7 +148,11 @@ impl DensityBudget {
         let k_dense = (0.87_f32 * d_total as f32).round() as usize;
         let k_sparse = k_sparse.max(1);
         let k_dense = k_dense.clamp(k_sparse, d_total);
-        Self { k_sparse, k_dense, d_total }
+        Self {
+            k_sparse,
+            k_dense,
+            d_total,
+        }
     }
 }
 
@@ -196,7 +206,10 @@ mod tests {
 
     #[test]
     fn empty_mask_retention_is_zero() {
-        let m = AblationMask { bits: vec![], n_heads: 0 };
+        let m = AblationMask {
+            bits: vec![],
+            n_heads: 0,
+        };
         assert_eq!(m.retention_fraction(), 0.0);
     }
 
@@ -211,11 +224,19 @@ mod tests {
         // Same scores → same digest.
         let r1 = KvGroupRanking::from_scores(vec![0.1, 0.9, 0.2, 0.8]);
         let r2 = KvGroupRanking::from_scores(vec![0.1, 0.9, 0.2, 0.8]);
-        assert_eq!(r1.blake3_hash(), r2.blake3_hash(), "equal rankings must hash equal");
+        assert_eq!(
+            r1.blake3_hash(),
+            r2.blake3_hash(),
+            "equal rankings must hash equal"
+        );
 
         // Different scores → different digest.
         let r3 = KvGroupRanking::from_scores(vec![0.1, 0.8, 0.2, 0.8]);
-        assert_ne!(r1.blake3_hash(), r3.blake3_hash(), "distinct rankings must hash distinct");
+        assert_ne!(
+            r1.blake3_hash(),
+            r3.blake3_hash(),
+            "distinct rankings must hash distinct"
+        );
 
         // Different n_groups with same score bytes → different digest (the u64
         // length prefix participates in the hash).

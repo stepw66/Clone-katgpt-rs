@@ -16,9 +16,9 @@
 
 use std::time::Instant;
 
-use katgpt_core::speculative::sampling::sample_from_distribution;
 use katgpt_core::ConstraintPruner;
 use katgpt_core::Rng;
+use katgpt_core::speculative::sampling::sample_from_distribution;
 
 /// Sigmoid function (numerically stable).
 /// Duplicated locally to avoid feature-gated dependency chains.
@@ -755,7 +755,6 @@ fn bt_rank_winner(candidates: &[&[usize]], marginals: &[&[f32]], temperature: f3
     }
     best
 }
-
 
 #[cfg(test)]
 mod tests {

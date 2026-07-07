@@ -10,9 +10,9 @@
 
 use super::rotation::{apply_inverse_rotation, apply_rotation, generate_unit_quaternions};
 use super::types::{IsoQuantConfig, IsoQuantLayer, IsoQuantMode};
-use katgpt_core::simd::simd_scale_inplace;
 use crate::turboquant::codebook::compute_codebook;
 use crate::turboquant::types::TurboQuantCodebook;
+use katgpt_core::simd::simd_scale_inplace;
 use katgpt_core::types;
 
 /// Compressed KV cache using IsoQuant 4D quaternion rotation.
@@ -221,10 +221,7 @@ impl IsoQuantKVCache {
 
         let indices = unpack_indices(&self.key_indices[layer][pos], self.key_bits, self.kv_dim);
         let centroids = &self.key_codebook.centroids;
-        let rotated: Vec<f32> = indices
-            .iter()
-            .map(|&i| centroids[i as usize])
-            .collect();
+        let rotated: Vec<f32> = indices.iter().map(|&i| centroids[i as usize]).collect();
 
         let mut normalized = vec![0.0f32; self.kv_dim];
         apply_inverse_rotation(
@@ -251,10 +248,7 @@ impl IsoQuantKVCache {
 
         let indices = unpack_indices(&self.val_indices[layer][pos], self.val_bits, self.kv_dim);
         let centroids = &self.val_codebook.centroids;
-        let rotated: Vec<f32> = indices
-            .iter()
-            .map(|&i| centroids[i as usize])
-            .collect();
+        let rotated: Vec<f32> = indices.iter().map(|&i| centroids[i as usize]).collect();
 
         let mut normalized = vec![0.0f32; self.kv_dim];
         apply_inverse_rotation(
@@ -492,8 +486,7 @@ fn pack_indices_into(indices: &[u8], bits: u8, out: &mut [u8]) {
             }
             if !n.is_multiple_of(2) {
                 unsafe {
-                    *out.get_unchecked_mut(full_pairs) =
-                        *indices.get_unchecked(n - 1) & 0xF;
+                    *out.get_unchecked_mut(full_pairs) = *indices.get_unchecked(n - 1) & 0xF;
                 }
             }
         }

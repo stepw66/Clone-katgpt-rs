@@ -372,8 +372,8 @@ fn fit_linear_from_scratch(ds: &Dataset, lambda: f32) -> [f32; D * D] {
         }
         // Solve.
         ridge_solve_direct_f32(
-            &mut w_k,    // w_t (length D = d_h × n_out with n_out=1)
-            &mut chol,   // L scratch
+            &mut w_k,  // w_t (length D = d_h × n_out with n_out=1)
+            &mut chol, // L scratch
             &mut z_solve,
             &gram_reg,
             &rhs,
@@ -398,10 +398,18 @@ struct GateResult {
 
 impl GateResult {
     fn pass(name: impl Into<String>, detail: impl Into<String>) -> Self {
-        Self { name: name.into(), passed: true, detail: detail.into() }
+        Self {
+            name: name.into(),
+            passed: true,
+            detail: detail.into(),
+        }
     }
     fn fail(name: impl Into<String>, detail: impl Into<String>) -> Self {
-        Self { name: name.into(), passed: false, detail: detail.into() }
+        Self {
+            name: name.into(),
+            passed: false,
+            detail: detail.into(),
+        }
     }
 }
 
@@ -429,9 +437,18 @@ struct RegimeResult {
 /// - `related = false`: `W_i` independent random `~ U(-0.5, +0.5)`.
 fn build_sources(rng: &mut Lcg, w_star: &[f32; D * D], related: bool) -> [LinearFieldW; N_SOURCES] {
     let mut sources = [
-        LinearFieldW { w: [0.0; D * D], id: 1 },
-        LinearFieldW { w: [0.0; D * D], id: 2 },
-        LinearFieldW { w: [0.0; D * D], id: 3 },
+        LinearFieldW {
+            w: [0.0; D * D],
+            id: 1,
+        },
+        LinearFieldW {
+            w: [0.0; D * D],
+            id: 2,
+        },
+        LinearFieldW {
+            w: [0.0; D * D],
+            id: 3,
+        },
     ];
     for (i, src) in sources.iter_mut().enumerate() {
         if related {
@@ -518,7 +535,10 @@ fn run_regime(regime_name: &'static str, related: bool) -> RegimeResult {
 
     // ── Competitor (c): target-trained-from-scratch ───────────────────────
     let w_approx = fit_linear_from_scratch(&train, LAMBDA_FROM_SCRATCH);
-    let c_field = LinearFieldW { w: w_approx, id: 99 };
+    let c_field = LinearFieldW {
+        w: w_approx,
+        id: 99,
+    };
     let c = Metrics::evaluate(&test, |n, out: &mut [f32; D]| {
         c_field.eval(test.x_row(n), out);
     });
@@ -537,9 +557,7 @@ fn run_regime(regime_name: &'static str, related: bool) -> RegimeResult {
 /// Helper that returns a closure-field of a single anonymous type, so that all
 /// three sources can be stored in `[F; N_SOURCES]`. Inline closures each get
 /// their own anonymous type, which would break the array.
-fn make_field_closure(
-    field: LinearFieldW,
-) -> ClosureField<D, impl Fn(&[f32], &mut [f32; D])> {
+fn make_field_closure(field: LinearFieldW) -> ClosureField<D, impl Fn(&[f32], &mut [f32; D])> {
     make_linear_closure_field(field)
 }
 
@@ -562,7 +580,10 @@ fn print_regime(r: &RegimeResult) {
         "  per-source test MSE: [{:.5}, {:.5}, {:.5}]  (best={} → competitor a)",
         r.per_source_mse[0], r.per_source_mse[1], r.per_source_mse[2], r.best_source_idx
     );
-    println!("  ensemble η = [{:+.4}, {:+.4}, {:+.4}]", r.eta[0], r.eta[1], r.eta[2]);
+    println!(
+        "  ensemble η = [{:+.4}, {:+.4}, {:+.4}]",
+        r.eta[0], r.eta[1], r.eta[2]
+    );
     println!();
     println!("  Competitor metrics (held-out test set):");
     print_metrics_row("(a) single-best source", &r.a);
@@ -580,20 +601,30 @@ fn gate_g2_for_regime(r: &RegimeResult) -> GateResult {
     let mse_b_wins = r.b.mse < r.a.mse;
     let top1_b_wins = r.b.top1 > r.a.top1;
     let rank_b_wins = r.b.mean_rank < r.a.mean_rank;
-    let wins = [mse_b_wins, top1_b_wins, rank_b_wins].iter().filter(|&&w| w).count();
+    let wins = [mse_b_wins, top1_b_wins, rank_b_wins]
+        .iter()
+        .filter(|&&w| w)
+        .count();
 
     let passed = wins >= 2;
     let detail = format!(
         "ensemble vs single-best: MSE {:+.5} vs {:+.5} ({}, Δ={:.2e}); \
          top1 {:.3} vs {:.3} ({}); rank {:.2} vs {:.2} ({}); \
          wins {}/3 (gate ≥ 2). η=[{:+.3}, {:+.3}, {:+.3}]",
-        r.b.mse, r.a.mse,
+        r.b.mse,
+        r.a.mse,
         if mse_b_wins { "b wins" } else { "a wins" },
         r.a.mse - r.b.mse,
-        r.b.top1, r.a.top1, if top1_b_wins { "b wins" } else { "a wins" },
-        r.b.mean_rank, r.a.mean_rank, if rank_b_wins { "b wins" } else { "a wins" },
+        r.b.top1,
+        r.a.top1,
+        if top1_b_wins { "b wins" } else { "a wins" },
+        r.b.mean_rank,
+        r.a.mean_rank,
+        if rank_b_wins { "b wins" } else { "a wins" },
         wins,
-        r.eta[0], r.eta[1], r.eta[2],
+        r.eta[0],
+        r.eta[1],
+        r.eta[2],
     );
     if passed {
         GateResult::pass(format!("G2 ({})", r.regime_name), detail)

@@ -637,8 +637,13 @@ pub fn bench_spectralquant_par_dequant(config: &Config) -> (BenchResult, BenchRe
     let mut into_scratch = DequantizeScratch::new(kvd);
     for _ in 0..5 {
         par_dequantize_spectral_keys_flat_into(
-            &cache, 0, n_positions - 1, kvd, threshold,
-            &mut into_buf, &mut into_scratch,
+            &cache,
+            0,
+            n_positions - 1,
+            kvd,
+            threshold,
+            &mut into_buf,
+            &mut into_scratch,
         );
         std::hint::black_box(&into_buf);
     }
@@ -646,8 +651,13 @@ pub fn bench_spectralquant_par_dequant(config: &Config) -> (BenchResult, BenchRe
     let start = Instant::now();
     for _ in 0..iters {
         par_dequantize_spectral_keys_flat_into(
-            &cache, 0, n_positions - 1, kvd, threshold,
-            &mut into_buf, &mut into_scratch,
+            &cache,
+            0,
+            n_positions - 1,
+            kvd,
+            threshold,
+            &mut into_buf,
+            &mut into_scratch,
         );
         std::hint::black_box(&into_buf);
     }

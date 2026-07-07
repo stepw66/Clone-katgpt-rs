@@ -240,9 +240,7 @@ unsafe fn neon_is_interval_closed(mask: &[bool]) -> bool {
     // Process 16 bools at a time using state machine.
     // Rust's bool is 1 byte (0x00 or 0x01), so we can safely reinterpret
     // the slice as &[u8] for SIMD loading.
-    let bytes: &[u8] = unsafe {
-        std::slice::from_raw_parts(mask.as_ptr() as *const u8, n)
-    };
+    let bytes: &[u8] = unsafe { std::slice::from_raw_parts(mask.as_ptr() as *const u8, n) };
 
     let chunks = n / NEON_U8;
     let remainder = n % NEON_U8;
@@ -260,12 +258,12 @@ unsafe fn neon_is_interval_closed(mask: &[bool]) -> bool {
         for i in 0..NEON_U8 {
             let is_valid = bytes[offset + i] != 0;
             match (state, is_valid) {
-                (0, true) => state = 1,       // first valid
-                (0, false) => {}              // leading invalid
-                (1, true) => {}               // still valid
-                (1, false) => state = 2,      // entered gap
-                (2, true) => return false,    // GAP VIOLATION: valid after gap
-                (2, false) => {}              // still in gap
+                (0, true) => state = 1,    // first valid
+                (0, false) => {}           // leading invalid
+                (1, true) => {}            // still valid
+                (1, false) => state = 2,   // entered gap
+                (2, true) => return false, // GAP VIOLATION: valid after gap
+                (2, false) => {}           // still in gap
                 _ => {}
             }
         }
@@ -299,9 +297,7 @@ unsafe fn avx2_is_interval_closed(mask: &[bool]) -> bool {
     let n = mask.len();
 
     // Rust's bool is 1 byte (0x00 or 0x01), safe to reinterpret as u8.
-    let bytes: &[u8] = unsafe {
-        std::slice::from_raw_parts(mask.as_ptr() as *const u8, n)
-    };
+    let bytes: &[u8] = unsafe { std::slice::from_raw_parts(mask.as_ptr() as *const u8, n) };
 
     let chunks = n / AVX2_U8;
     let remainder = n % AVX2_U8;

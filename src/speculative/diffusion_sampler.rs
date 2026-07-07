@@ -90,11 +90,11 @@ mod tests {
     // training code) to produce weights, then exercise the D2F + DiffusionSampler
     // inference pipeline (now living in katgpt-forward).
     use super::*;
-    use crate::dllm::{generate_pattern_dataset, train_mini_dllm};
-    use crate::speculative::d2f::d2f_decode_block_with_sampler;
-    use crate::speculative::d2f::D2fDecodeConfig;
-    use crate::speculative::types::{NoPruner, NoScreeningPruner};
     use crate::dllm::D2fContext;
+    use crate::dllm::{generate_pattern_dataset, train_mini_dllm};
+    use crate::speculative::d2f::D2fDecodeConfig;
+    use crate::speculative::d2f::d2f_decode_block_with_sampler;
+    use crate::speculative::types::{NoPruner, NoScreeningPruner};
     use crate::types::{Config, Rng};
 
     fn make_config() -> Config {

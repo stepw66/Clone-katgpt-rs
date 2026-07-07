@@ -137,10 +137,7 @@ pub fn construct_probe_via_mean_difference(
         }
     }
     if n_pos == 0 || n_neg == 0 {
-        return Err(MeanDifferenceError::SingleClass {
-            n_pos,
-            n_neg,
-        });
+        return Err(MeanDifferenceError::SingleClass { n_pos, n_neg });
     }
 
     // Centroids.
@@ -299,13 +296,7 @@ mod tests {
             label: true,
         }];
         let err = construct_probe_via_mean_difference(&samples, 0, "x").unwrap_err();
-        assert_eq!(
-            err,
-            MeanDifferenceError::SingleClass {
-                n_pos: 1,
-                n_neg: 0
-            }
-        );
+        assert_eq!(err, MeanDifferenceError::SingleClass { n_pos: 1, n_neg: 0 });
     }
 
     #[test]
@@ -441,8 +432,7 @@ mod tests {
                 label: a[0] > 0.0,
             })
             .collect();
-        let probe =
-            construct_probe_via_mean_difference(&samples, 2, "noisy").expect("noise case");
+        let probe = construct_probe_via_mean_difference(&samples, 2, "noisy").expect("noise case");
         // Direction[0] should dominate (signal is ~30× the noise magnitude).
         // Positive-class activation → high forecast.
         let mut act_pos = vec![0.0_f32; d];

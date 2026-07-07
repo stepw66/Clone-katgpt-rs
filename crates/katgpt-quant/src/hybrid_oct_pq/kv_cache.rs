@@ -327,8 +327,7 @@ impl HybridOctPqKVCache {
         // Copy + zero-pad to even for PQ inverse rotation. Only the padding
         // tail (at most 1 element when kv_dim is odd) needs zeroing — the
         // [..kv_dim] range is fully overwritten by the copy below.
-        self.scratch_rotated[..self.kv_dim]
-            .copy_from_slice(&self.scratch_workspace[..self.kv_dim]);
+        self.scratch_rotated[..self.kv_dim].copy_from_slice(&self.scratch_workspace[..self.kv_dim]);
         if self.kv_dim < self.kv_dim_padded {
             // Only zero the single padding slot (avoids a full-buffer fill).
             self.scratch_rotated[self.kv_dim..self.kv_dim_padded].fill(0.0);
@@ -368,8 +367,7 @@ impl HybridOctPqKVCache {
         decode_vector_into(&self.scratch_indices, cb, &mut self.scratch_workspace);
 
         // Copy + zero-pad to even for PQ inverse rotation (tail-only zeroing).
-        self.scratch_rotated[..self.kv_dim]
-            .copy_from_slice(&self.scratch_workspace[..self.kv_dim]);
+        self.scratch_rotated[..self.kv_dim].copy_from_slice(&self.scratch_workspace[..self.kv_dim]);
         if self.kv_dim < self.kv_dim_padded {
             self.scratch_rotated[self.kv_dim..self.kv_dim_padded].fill(0.0);
         }

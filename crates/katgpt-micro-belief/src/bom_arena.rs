@@ -53,9 +53,7 @@
 //! - Research: [`katgpt-rs/.research/248_DeltaTok_DeltaWorld_BoM_Single_Pass_Diverse_Sampling.md`]
 //! - Source paper: [arXiv:2604.04913](https://arxiv.org/abs/2604.04913)
 
-use crate::{
-    AttractorKernel, BoMSampler, LeakyIntegrator, NoiseQueryConfig,
-};
+use crate::{AttractorKernel, BoMSampler, LeakyIntegrator, NoiseQueryConfig};
 // `MicroRecurrentBeliefState` is needed by the `#[cfg(test)]` module via
 // `use super::*` (the `.step()` / `.dim()` methods are trait methods). Listed
 // separately with `#[cfg(test)]` so the non-test build stays warning-clean.
@@ -238,7 +236,9 @@ pub struct DeterministicPlanner {
 impl DeterministicPlanner {
     /// Construct with the default label.
     pub fn new() -> Self {
-        Self { label: "deterministic" }
+        Self {
+            label: "deterministic",
+        }
     }
 
     /// Construct with a custom label (for ablation runs).
@@ -564,7 +564,11 @@ impl SyntheticThreatArena {
     pub fn new(dim: usize, max_ticks: usize) -> Self {
         assert!(dim >= 2, "SyntheticThreatArena requires dim >= 2");
         // Guard against max_ticks == 0 to avoid div-by-zero in the cached reciprocal.
-        let inv_max_ticks = if max_ticks == 0 { 0.0 } else { 1.0 / max_ticks as f32 };
+        let inv_max_ticks = if max_ticks == 0 {
+            0.0
+        } else {
+            1.0 / max_ticks as f32
+        };
         Self {
             obs: vec![0.0; dim],
             tick_idx: 0,
@@ -623,10 +627,8 @@ impl ArenaEnvironment for SyntheticThreatArena {
         // Score the prior action: if the true threat this tick had positive
         // dot with the action's evade, the NPC evaded; otherwise it was hit.
         let evade = self.last_action.evade_vec();
-        let evasion_dot = evade[0] * self.current_threat[0]
-            + evade[1] * self.current_threat[1];
-        if evasion_dot <= 0.0 && (self.current_threat[0] != 0.0 || self.current_threat[1] != 0.0)
-        {
+        let evasion_dot = evade[0] * self.current_threat[0] + evade[1] * self.current_threat[1];
+        if evasion_dot <= 0.0 && (self.current_threat[0] != 0.0 || self.current_threat[1] != 0.0) {
             self.hits_taken += 1;
         } else if evasion_dot > 0.0 {
             // Successfully evaded a real threat. Use cached reciprocal to
@@ -840,8 +842,7 @@ where
     );
 
     let delta_pp = (candidate_outcome.mean_score - baseline_outcome.mean_score) * 100.0;
-    let win_rate_delta_pp =
-        (candidate_outcome.win_rate - baseline_outcome.win_rate) * 100.0;
+    let win_rate_delta_pp = (candidate_outcome.win_rate - baseline_outcome.win_rate) * 100.0;
     let latency_ratio = if baseline_outcome.total_us == 0 {
         1.0
     } else {
@@ -956,10 +957,7 @@ pub fn bom_minimax_attractor(
 }
 
 /// Build a BoM minimax planner over [`LeakyIntegrator`] with sensible defaults.
-pub fn bom_minimax_leaky(
-    dim: usize,
-    cfg: NoiseQueryConfig,
-) -> BoMMinimaxPlanner<LeakyIntegrator> {
+pub fn bom_minimax_leaky(dim: usize, cfg: NoiseQueryConfig) -> BoMMinimaxPlanner<LeakyIntegrator> {
     let kernel = LeakyIntegrator::hla_default(dim);
     BoMMinimaxPlanner::new(kernel, cfg)
 }
@@ -1249,10 +1247,8 @@ mod tests {
     #[test]
     fn noise_query_config_seed_strategy_affects_arena_outcome() {
         // Just verifies the config types wire through the planner API.
-        let cfg_per_npc =
-            NoiseQueryConfig::default().with_seed_strategy(SeedStrategy::PerNpc);
-        let cfg_per_class =
-            NoiseQueryConfig::default().with_seed_strategy(SeedStrategy::PerClass);
+        let cfg_per_npc = NoiseQueryConfig::default().with_seed_strategy(SeedStrategy::PerNpc);
+        let cfg_per_class = NoiseQueryConfig::default().with_seed_strategy(SeedStrategy::PerClass);
         assert_ne!(cfg_per_npc.commit(), cfg_per_class.commit());
     }
 

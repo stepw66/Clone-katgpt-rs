@@ -109,8 +109,7 @@ mod tests {
             result.converged,
             "MDLM gen-steps + bidirectional-trained model should converge (zero mismatch). \
              forward_passes={}, confidence_history={:?}",
-            result.forward_passes,
-            result.confidence_history,
+            result.forward_passes, result.confidence_history,
         );
         assert_eq!(result.tokens.len(), 8);
         assert!(
@@ -147,8 +146,7 @@ mod tests {
             result.converged,
             "Block-causal gen-steps + bidirectional-trained model should converge on simple patterns. \
              forward_passes={}, confidence_history={:?}",
-            result.forward_passes,
-            result.confidence_history,
+            result.forward_passes, result.confidence_history,
         );
         assert_eq!(result.tokens.len(), 8);
         assert!(
@@ -160,15 +158,15 @@ mod tests {
 
     #[test]
     fn test_set_diffusion_decode_scheduled_trained_model_diffusion_endpoint() {
-    // Full T4.3-CPU-caller bridge with a TRAINED model: schedule → ordering →
-    // gen-steps → decode. Uses PositionOffsetSchedule::diffusion() (w=1, k=1)
-    // which produces uniform-random orderings — the order-agnostic diffusion
-    // endpoint. Combined with a bidirectional-trained model, this is the
-    // lowest-mismatch point of the schedule spectrum.
-    //
-    // This is the canonical end-to-end validation of the Phase 4 bridge:
-    // every piece of plumbing (sample_order, order_to_gen_steps,
-    // set_diffusion_decode) runs against real trained weights.
+        // Full T4.3-CPU-caller bridge with a TRAINED model: schedule → ordering →
+        // gen-steps → decode. Uses PositionOffsetSchedule::diffusion() (w=1, k=1)
+        // which produces uniform-random orderings — the order-agnostic diffusion
+        // endpoint. Combined with a bidirectional-trained model, this is the
+        // lowest-mismatch point of the schedule spectrum.
+        //
+        // This is the canonical end-to-end validation of the Phase 4 bridge:
+        // every piece of plumbing (sample_order, order_to_gen_steps,
+        // set_diffusion_decode) runs against real trained weights.
         let (config, weights) = train_pattern_model(42);
         let forward = CpuSetCausalForward {
             weights: &weights,
@@ -184,21 +182,14 @@ mod tests {
         let schedule = PositionOffsetSchedule::diffusion();
         let mut rng = Rng::new(42);
 
-        let result = set_diffusion_decode_scheduled(
-            &forward,
-            &decode_config,
-            &[],
-            &schedule,
-            8,
-            &mut rng,
-        );
+        let result =
+            set_diffusion_decode_scheduled(&forward, &decode_config, &[], &schedule, 8, &mut rng);
 
         assert!(
             result.converged,
             "Scheduled decode (diffusion endpoint) + trained model should converge. \
              forward_passes={}, confidence_history={:?}",
-            result.forward_passes,
-            result.confidence_history,
+            result.forward_passes, result.confidence_history,
         );
         assert_eq!(result.tokens.len(), 8);
         assert!(
@@ -210,19 +201,19 @@ mod tests {
 
     #[test]
     fn test_set_diffusion_decode_trained_model_prompt_anchored_alternating_pattern() {
-    // The model was trained on [a,b,a,b,a,b,a,b] alternating patterns.
-    // From an all-masked cold start, order-agnostic diffusion has no anchor
-    // to enforce a globally consistent (a,b) pair — different positions may
-    // lock in to different guesses during the greedy denoise commit. This is
-    // the EXPECTED cold-start behavior of a diffusion model without context.
-    //
-    // With a 2-token prompt [a, b] anchoring the pattern, the decode region
-    // should inherit the prompt's (a,b) pair and produce a globally consistent
-    // alternating sequence. This is the realistic usage pattern (conditioned
-    // generation) and the strongest modelless quality claim we can make.
-    //
-    // MDLM gen-steps isolate the pattern-quality claim from any attention-
-    // restriction artifact (zero train/infer mismatch).
+        // The model was trained on [a,b,a,b,a,b,a,b] alternating patterns.
+        // From an all-masked cold start, order-agnostic diffusion has no anchor
+        // to enforce a globally consistent (a,b) pair — different positions may
+        // lock in to different guesses during the greedy denoise commit. This is
+        // the EXPECTED cold-start behavior of a diffusion model without context.
+        //
+        // With a 2-token prompt [a, b] anchoring the pattern, the decode region
+        // should inherit the prompt's (a,b) pair and produce a globally consistent
+        // alternating sequence. This is the realistic usage pattern (conditioned
+        // generation) and the strongest modelless quality claim we can make.
+        //
+        // MDLM gen-steps isolate the pattern-quality claim from any attention-
+        // restriction artifact (zero train/infer mismatch).
         let (config, weights) = train_pattern_model(42);
         let forward = CpuSetCausalForward {
             weights: &weights,
@@ -250,12 +241,36 @@ mod tests {
         assert_eq!(&t[..2], prompt, "prompt must be preserved: {:?}", t);
         // Decode region inherits the prompt's alternating structure.
         // Expected: [5, 2, 5, 2, 5, 2, 5, 2].
-        assert_eq!(t[2], prompt[0], "position 2 must match prompt[0] (alternating): {:?}", t);
-        assert_eq!(t[3], prompt[1], "position 3 must match prompt[1] (alternating): {:?}", t);
-        assert_eq!(t[4], prompt[0], "position 4 must match prompt[0] (alternating): {:?}", t);
-        assert_eq!(t[5], prompt[1], "position 5 must match prompt[1] (alternating): {:?}", t);
-        assert_eq!(t[6], prompt[0], "position 6 must match prompt[0] (alternating): {:?}", t);
-        assert_eq!(t[7], prompt[1], "position 7 must match prompt[1] (alternating): {:?}", t);
+        assert_eq!(
+            t[2], prompt[0],
+            "position 2 must match prompt[0] (alternating): {:?}",
+            t
+        );
+        assert_eq!(
+            t[3], prompt[1],
+            "position 3 must match prompt[1] (alternating): {:?}",
+            t
+        );
+        assert_eq!(
+            t[4], prompt[0],
+            "position 4 must match prompt[0] (alternating): {:?}",
+            t
+        );
+        assert_eq!(
+            t[5], prompt[1],
+            "position 5 must match prompt[1] (alternating): {:?}",
+            t
+        );
+        assert_eq!(
+            t[6], prompt[0],
+            "position 6 must match prompt[0] (alternating): {:?}",
+            t
+        );
+        assert_eq!(
+            t[7], prompt[1],
+            "position 7 must match prompt[1] (alternating): {:?}",
+            t
+        );
     }
 
     // ── GOAT gate: set-causal-trained vs bidirectional-trained (Phase 4 unblock) ──
@@ -306,7 +321,11 @@ mod tests {
     /// Train a bidirectional D2F model on Markov data (shared baseline for GOAT gate).
     fn train_bidirectional_markov_model(
         seed: u64,
-    ) -> (Config, crate::transformer::TransformerWeights, Vec<Vec<usize>>) {
+    ) -> (
+        Config,
+        crate::transformer::TransformerWeights,
+        Vec<Vec<usize>>,
+    ) {
         let config = Config::micro_dllm();
         let mut rng = Rng::new(seed);
         let train_data = generate_markov_token_dataset(&mut rng, 100, 8, 8);
@@ -320,7 +339,11 @@ mod tests {
     fn train_set_causal_markov_model(
         seed: u64,
         schedule: &PositionOffsetSchedule,
-    ) -> (Config, crate::transformer::TransformerWeights, Vec<Vec<usize>>) {
+    ) -> (
+        Config,
+        crate::transformer::TransformerWeights,
+        Vec<Vec<usize>>,
+    ) {
         let config = Config::micro_dllm();
         let mut rng = Rng::new(seed);
         let train_data = generate_markov_token_dataset(&mut rng, 100, 8, 8);
@@ -342,13 +365,17 @@ mod tests {
         let seed = 42;
 
         let (config, bidir_weights, test_data) = train_bidirectional_markov_model(seed);
-        let (_config2, sc_weights, _test_data2) =
-            train_set_causal_markov_model(seed, &schedule);
+        let (_config2, sc_weights, _test_data2) = train_set_causal_markov_model(seed, &schedule);
 
         // Evaluate both under set-causal attention at the SW-SetDLM schedule.
         let mut rng_eval = Rng::new(seed + 1000);
-        let bidir_nelbo =
-            evaluate_set_causal_nelbo(&bidir_weights, &test_data, &config, &schedule, &mut rng_eval);
+        let bidir_nelbo = evaluate_set_causal_nelbo(
+            &bidir_weights,
+            &test_data,
+            &config,
+            &schedule,
+            &mut rng_eval,
+        );
         let mut rng_eval2 = Rng::new(seed + 1000); // Same seed for apples-to-apples.
         let sc_nelbo =
             evaluate_set_causal_nelbo(&sc_weights, &test_data, &config, &schedule, &mut rng_eval2);
@@ -388,8 +415,7 @@ mod tests {
         // This test doesn't compare NELBO — it just confirms the decode
         // pipeline produces coherent output (no mask tokens remain).
         let schedule = PositionOffsetSchedule::new(0.5);
-        let (config, sc_weights, _test_data) =
-            train_set_causal_markov_model(42, &schedule);
+        let (config, sc_weights, _test_data) = train_set_causal_markov_model(42, &schedule);
 
         let forward = CpuSetCausalForward {
             weights: &sc_weights,
@@ -414,8 +440,7 @@ mod tests {
             result.converged,
             "Set-causal-trained model + AR decode should converge. \
              forward_passes={}, confidence_history={:?}",
-            result.forward_passes,
-            result.confidence_history,
+            result.forward_passes, result.confidence_history,
         );
         assert_eq!(result.tokens.len(), 8);
         assert!(

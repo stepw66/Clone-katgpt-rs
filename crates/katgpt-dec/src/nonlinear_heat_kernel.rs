@@ -71,14 +71,14 @@ pub const MAX_N_QUAD: usize = 8;
 /// rule is exact for polynomials of degree `≤ 2n - 1`.
 ///
 /// Panics for `n = 0` or `n > 8`.
-#[allow(clippy::excessive_precision, reason = "canonical Gauss-Legendre nodes/weights kept at full published precision for traceability vs standard references")]
+#[allow(
+    clippy::excessive_precision,
+    reason = "canonical Gauss-Legendre nodes/weights kept at full published precision for traceability vs standard references"
+)]
 fn gauss_legendre_nodes_weights(n: usize) -> (&'static [f64], &'static [f64]) {
     match n {
         1 => (&[0.0_f64], &[2.0_f64]),
-        2 => (
-            &[-0.5773502691896257, 0.5773502691896257],
-            &[1.0, 1.0],
-        ),
+        2 => (&[-0.5773502691896257, 0.5773502691896257], &[1.0, 1.0]),
         3 => (
             &[-0.7745966692414834, 0.0, 0.7745966692414834],
             &[0.5555555555555556, 0.8888888888888888, 0.5555555555555556],
@@ -244,7 +244,10 @@ fn resize_field(field: &mut CochainField, rank: u8, dim: usize, len: usize) {
 ///
 /// See [`heat_kernel_trajectory_nonlinear`] — this function shares the same
 /// parameter set, plus `out` (the accumulation target) and `scratch`.
-#[allow(clippy::too_many_arguments, reason = "nonlinear expm quadrature needs mesh + eig + field + motor + t + quad + relu + out + scratch; matches the paper's operator signature")]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "nonlinear expm quadrature needs mesh + eig + field + motor + t + quad + relu + out + scratch; matches the paper's operator signature"
+)]
 pub fn expm_source_term_quadrature(
     cx: &CellComplex,
     eig: &DecEigendecomposition,
@@ -373,7 +376,10 @@ pub fn expm_source_term_quadrature(
 ///
 /// The field state at time `t`: `h(t) = exp(t·L)·h₀ + ∫₀ᵗ exp((t-s)·L)·N(h(s))ds`.
 #[inline]
-#[allow(clippy::too_many_arguments, reason = "nonlinear heat kernel needs mesh + eig + field + motor + t + quad + relu; matches the paper's operator signature")]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "nonlinear heat kernel needs mesh + eig + field + motor + t + quad + relu; matches the paper's operator signature"
+)]
 pub fn heat_kernel_trajectory_nonlinear(
     cx: &CellComplex,
     eig: &DecEigendecomposition,
@@ -387,7 +393,16 @@ pub fn heat_kernel_trajectory_nonlinear(
     let mut out = CochainField::zeros(h0.rank, h0.n_cells(), h0.dim);
     let mut scratch = NonlinearScratch::new(h0.rank, h0.n_cells(), h0.dim);
     heat_kernel_trajectory_nonlinear_into(
-        cx, eig, h0, motor_vec, motor_dim, t, n_quad, relu_slope, &mut out, &mut scratch,
+        cx,
+        eig,
+        h0,
+        motor_vec,
+        motor_dim,
+        t,
+        n_quad,
+        relu_slope,
+        &mut out,
+        &mut scratch,
     );
     out
 }
@@ -400,7 +415,10 @@ pub fn heat_kernel_trajectory_nonlinear(
 /// allocates **0 bytes** per call (all internal buffers are pre-allocated and
 /// resized in-place if needed).
 #[inline]
-#[allow(clippy::too_many_arguments, reason = "zero-alloc variant mirrors heat_kernel_trajectory_nonlinear; caller-provided out + scratch add 2 args")]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "zero-alloc variant mirrors heat_kernel_trajectory_nonlinear; caller-provided out + scratch add 2 args"
+)]
 pub fn heat_kernel_trajectory_nonlinear_into(
     cx: &CellComplex,
     eig: &DecEigendecomposition,
@@ -483,7 +501,10 @@ mod tests {
     /// with default features only.
     ///
     /// `h_{t+1} = (1+dt·motor)·((1-dt)·h + dt·Δ·ReLU(h))`
-    #[allow(clippy::too_many_arguments, reason = "test-only reference impl mirroring evolve_motor_gated_field (Plan 357); the 8 args (cx, h, motor_vec, motor_dim, dt, relu_slope, scratch_lap, scratch_relu) match the production operator signature by design — drift between this Euler baseline and the production split-step is what the nonlinear heat kernel tests detect, so the signature must match")]
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "test-only reference impl mirroring evolve_motor_gated_field (Plan 357); the 8 args (cx, h, motor_vec, motor_dim, dt, relu_slope, scratch_lap, scratch_relu) match the production operator signature by design — drift between this Euler baseline and the production split-step is what the nonlinear heat kernel tests detect, so the signature must match"
+    )]
     fn nonlinear_euler_step(
         cx: &CellComplex,
         h: &mut CochainField,
@@ -605,7 +626,10 @@ mod tests {
         for n in 1..=MAX_N_QUAD {
             let (_, weights) = gauss_legendre_nodes_weights(n);
             let integral: f64 = weights.iter().sum(); // f(x)=1 → Σ w_j·f(x_j) = Σ w_j
-            assert!((integral - 2.0).abs() < 1e-14, "n={n}: constant integral = {integral}");
+            assert!(
+                (integral - 2.0).abs() < 1e-14,
+                "n={n}: constant integral = {integral}"
+            );
         }
     }
 
@@ -613,7 +637,11 @@ mod tests {
     fn gauss_legendre_integrates_polynomial_exactly() {
         // Test ∫_{-1}^{1} x² dx = 2/3 with n=2 (degree 2 ≤ 2·2-1 = 3). ✓
         let (nodes, weights) = gauss_legendre_nodes_weights(2);
-        let integral: f64 = nodes.iter().zip(weights.iter()).map(|(&x, &w)| w * x * x).sum();
+        let integral: f64 = nodes
+            .iter()
+            .zip(weights.iter())
+            .map(|(&x, &w)| w * x * x)
+            .sum();
         assert!(
             (integral - 2.0 / 3.0).abs() < 1e-14,
             "x² integral = {integral}, expected 2/3"
@@ -650,11 +678,17 @@ mod tests {
         let motor = [-9.0_f32, -8.5];
         let t = 0.1_f32;
 
-        let linear = crate::heat_kernel::heat_kernel_trajectory_linear(
-            &eig, &field, &motor, dim, t,
-        );
+        let linear =
+            crate::heat_kernel::heat_kernel_trajectory_linear(&eig, &field, &motor, dim, t);
         let nonlinear = heat_kernel_trajectory_nonlinear(
-            &cx, &eig, &field, &motor, dim, t, DEFAULT_N_QUAD, 0.0,
+            &cx,
+            &eig,
+            &field,
+            &motor,
+            dim,
+            t,
+            DEFAULT_N_QUAD,
+            0.0,
         );
 
         let dist = l2_dist(&linear, &nonlinear);
@@ -698,14 +732,11 @@ mod tests {
         let t = 0.5_f32;
 
         // Nonlinear heat kernel (5-point quadrature for good accuracy).
-        let hk_nonlinear = heat_kernel_trajectory_nonlinear(
-            &cx, &eig, &field, &motor, dim, t, 5, 0.0,
-        );
+        let hk_nonlinear =
+            heat_kernel_trajectory_nonlinear(&cx, &eig, &field, &motor, dim, t, 5, 0.0);
 
         // Fine Euler (dt=0.001, 500 steps) — the reference.
-        let fine_euler = nonlinear_euler_trajectory(
-            &cx, &field, &motor, dim, 0.001, 500, 0.0,
-        );
+        let fine_euler = nonlinear_euler_trajectory(&cx, &field, &motor, dim, 0.001, 500, 0.0);
 
         let dist = l2_dist(&hk_nonlinear, &fine_euler);
         let norm = l2_norm(&fine_euler).max(1e-10);
@@ -715,7 +746,9 @@ mod tests {
         assert!(
             rel_err < 0.15,
             "nonlinear heat kernel should match fine Euler at t={t}: rel_err = {:.4} ({:.3e}/{:.3e})",
-            rel_err, dist, norm
+            rel_err,
+            dist,
+            norm
         );
     }
 
@@ -751,19 +784,14 @@ mod tests {
         let t = 1.0_f32;
 
         // Fine Euler (dt=0.001, 1000 steps) — the reference.
-        let fine_euler = nonlinear_euler_trajectory(
-            &cx, &field, &motor, dim, 0.001, 1000, 0.0,
-        );
+        let fine_euler = nonlinear_euler_trajectory(&cx, &field, &motor, dim, 0.001, 1000, 0.0);
 
         // Coarse Euler (dt=0.1, 10 steps) — the baseline.
-        let coarse_euler = nonlinear_euler_trajectory(
-            &cx, &field, &motor, dim, 0.1, 10, 0.0,
-        );
+        let coarse_euler = nonlinear_euler_trajectory(&cx, &field, &motor, dim, 0.1, 10, 0.0);
 
         // Nonlinear heat kernel (6-point quadrature).
-        let hk_nonlinear = heat_kernel_trajectory_nonlinear(
-            &cx, &eig, &field, &motor, dim, t, 6, 0.0,
-        );
+        let hk_nonlinear =
+            heat_kernel_trajectory_nonlinear(&cx, &eig, &field, &motor, dim, t, 6, 0.0);
 
         let hk_err = l2_dist(&hk_nonlinear, &fine_euler);
         let coarse_err = l2_dist(&coarse_euler, &fine_euler);
@@ -795,14 +823,22 @@ mod tests {
         let motor = [-7.0_f32, -6.5];
         let t = 3.0_f32;
 
-        let allocating = heat_kernel_trajectory_nonlinear(
-            &cx, &eig, &field, &motor, dim, t, 4, 0.0,
-        );
+        let allocating =
+            heat_kernel_trajectory_nonlinear(&cx, &eig, &field, &motor, dim, t, 4, 0.0);
 
         let mut out = CochainField::zeros(0, cx.n_vertices(), dim);
         let mut scratch = NonlinearScratch::new(0, cx.n_vertices(), dim);
         heat_kernel_trajectory_nonlinear_into(
-            &cx, &eig, &field, &motor, dim, t, 4, 0.0, &mut out, &mut scratch,
+            &cx,
+            &eig,
+            &field,
+            &motor,
+            dim,
+            t,
+            4,
+            0.0,
+            &mut out,
+            &mut scratch,
         );
 
         assert_eq!(allocating.data.len(), out.data.len());
@@ -837,12 +873,9 @@ mod tests {
         let motor = [-7.0_f32];
         let t = 3.0_f32;
 
-        let linear = crate::heat_kernel::heat_kernel_trajectory_linear(
-            &eig, &field, &motor, dim, t,
-        );
-        let nq0 = heat_kernel_trajectory_nonlinear(
-            &cx, &eig, &field, &motor, dim, t, 0, 0.0,
-        );
+        let linear =
+            crate::heat_kernel::heat_kernel_trajectory_linear(&eig, &field, &motor, dim, t);
+        let nq0 = heat_kernel_trajectory_nonlinear(&cx, &eig, &field, &motor, dim, t, 0, 0.0);
 
         let dist = l2_dist(&linear, &nq0);
         assert!(
@@ -871,9 +904,7 @@ mod tests {
 
         let motor = [-10.0_f32];
 
-        let result = heat_kernel_trajectory_nonlinear(
-            &cx, &eig, &field, &motor, dim, 0.0, 4, 0.0,
-        );
+        let result = heat_kernel_trajectory_nonlinear(&cx, &eig, &field, &motor, dim, 0.0, 4, 0.0);
 
         let dist = l2_dist(&result, &field);
         let norm = l2_norm(&field).max(1e-10);
@@ -904,9 +935,7 @@ mod tests {
         let motor = [-7.0_f32];
         let t = 2.0_f32;
 
-        let fine_euler = nonlinear_euler_trajectory(
-            &cx, &field, &motor, dim, 0.001, 2000, 0.0,
-        );
+        let fine_euler = nonlinear_euler_trajectory(&cx, &field, &motor, dim, 0.001, 2000, 0.0);
 
         let err_n2 = {
             let hk = heat_kernel_trajectory_nonlinear(&cx, &eig, &field, &motor, dim, t, 2, 0.0);
@@ -950,7 +979,10 @@ mod tests {
             &cx, &eig, &field, &motor, dim, t, 4, 0.1, // leaky ReLU
         );
 
-        assert!(result.data.iter().all(|&v| v.is_finite()), "all values finite");
+        assert!(
+            result.data.iter().all(|&v| v.is_finite()),
+            "all values finite"
+        );
         assert!(l2_norm(&result) > 0.0, "non-zero output");
     }
 
@@ -978,19 +1010,46 @@ mod tests {
 
         // Call 1
         heat_kernel_trajectory_nonlinear_into(
-            &cx, &eig, &field, &motor, dim, 3.0, 4, 0.0, &mut out, &mut scratch,
+            &cx,
+            &eig,
+            &field,
+            &motor,
+            dim,
+            3.0,
+            4,
+            0.0,
+            &mut out,
+            &mut scratch,
         );
         let result1 = out.data.clone();
 
         // Call 2 (different time)
         heat_kernel_trajectory_nonlinear_into(
-            &cx, &eig, &field, &motor, dim, 5.0, 4, 0.0, &mut out, &mut scratch,
+            &cx,
+            &eig,
+            &field,
+            &motor,
+            dim,
+            5.0,
+            4,
+            0.0,
+            &mut out,
+            &mut scratch,
         );
         let result2 = out.data.clone();
 
         // Call 3 (same as call 1 — should match exactly)
         heat_kernel_trajectory_nonlinear_into(
-            &cx, &eig, &field, &motor, dim, 3.0, 4, 0.0, &mut out, &mut scratch,
+            &cx,
+            &eig,
+            &field,
+            &motor,
+            dim,
+            3.0,
+            4,
+            0.0,
+            &mut out,
+            &mut scratch,
         );
 
         // result1 should match the third call (same parameters).
@@ -999,7 +1058,10 @@ mod tests {
             .zip(out.data.iter())
             .map(|(&a, &b)| (a - b).abs())
             .fold(0.0_f32, f32::max);
-        assert!(max_diff < 1e-6, "scratch reuse should produce identical results");
+        assert!(
+            max_diff < 1e-6,
+            "scratch reuse should produce identical results"
+        );
 
         // result2 should differ from result1 (different time).
         let dist12: f32 = result1
@@ -1008,6 +1070,9 @@ mod tests {
             .map(|(&a, &b)| (a - b) * (a - b))
             .sum::<f32>()
             .sqrt();
-        assert!(dist12 > 1e-6, "different time should produce different results");
+        assert!(
+            dist12 > 1e-6,
+            "different time should produce different results"
+        );
     }
 }

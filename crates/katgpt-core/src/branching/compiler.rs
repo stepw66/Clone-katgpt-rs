@@ -312,9 +312,10 @@ impl BudgetCompiler {
     /// needed. For the homogeneous tiers (`episodic`, `failures`,
     /// `cross_branch_positive`, `working_memory`) the byte cost comes from the
     /// parallel arrays or fixed estimates.
-    #[allow(unused_assignments)] // `remaining` is decremented by `admit!` on the
-                                 // final successful admission; the value is not
-                                 // read afterward because the loop is over.
+    #[allow(unused_assignments)]
+    // `remaining` is decremented by `admit!` on the
+    // final successful admission; the value is not
+    // read afterward because the loop is over.
     #[allow(clippy::too_many_arguments)] // 17 lanes: branching compiler material/context API, bundling fragments generics
     pub fn compile<E, F, W, Q, S, O>(
         &self,
@@ -402,7 +403,8 @@ impl BudgetCompiler {
 
         // Tier 4: Cross-branch positive transfers.
         // Use the parallel-bytes array if it matches length; else compute.
-        let use_xb_parallel = materials.cross_branch_bytes.len() == materials.cross_branch_positive.len();
+        let use_xb_parallel =
+            materials.cross_branch_bytes.len() == materials.cross_branch_positive.len();
         for (i, item) in materials.cross_branch_positive.iter().enumerate() {
             let b = if use_xb_parallel {
                 materials.cross_branch_bytes[i]
@@ -419,7 +421,8 @@ impl BudgetCompiler {
         }
 
         // Tier 6: Working memory.
-        let use_wm_parallel = materials.working_memory_bytes.len() == materials.working_memory.len();
+        let use_wm_parallel =
+            materials.working_memory_bytes.len() == materials.working_memory.len();
         for (i, item) in materials.working_memory.iter().enumerate() {
             let b = if use_wm_parallel {
                 materials.working_memory_bytes[i]
@@ -859,7 +862,8 @@ mod tests {
     #[test]
     fn compiled_context_reset_preserves_capacity_and_budget() {
         let mut ctx = CompiledContext::<&'static str>::with_capacity(8, 256);
-        ctx.items.push(CompiledItem::new(PriorityTier::Query, 10, "x"));
+        ctx.items
+            .push(CompiledItem::new(PriorityTier::Query, 10, "x"));
         ctx.bytes_used = 10;
         ctx.tier_counts[PriorityTier::Query as usize] = 1;
         ctx.reset();
@@ -1073,8 +1077,18 @@ mod tests {
             PriorityTier::WorkingMemory,
             PriorityTier::Query,
         ] {
-            assert_eq!(out.tier_count(tier), 1, "tier {:?} should have 1 item", tier);
-            assert_eq!(out.tier_dropped(tier), 0, "tier {:?} should have 0 dropped", tier);
+            assert_eq!(
+                out.tier_count(tier),
+                1,
+                "tier {:?} should have 1 item",
+                tier
+            );
+            assert_eq!(
+                out.tier_dropped(tier),
+                0,
+                "tier {:?} should have 0 dropped",
+                tier
+            );
         }
         assert_eq!(out.n_items(), 7);
         assert!(out.within_budget());

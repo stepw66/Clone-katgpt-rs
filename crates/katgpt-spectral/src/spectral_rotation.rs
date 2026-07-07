@@ -113,7 +113,13 @@ impl SpectralRotation {
     pub fn unrotate(&self, x: &[f32], out: &mut [f32]) {
         assert_eq!(x.len(), self.head_dim);
         assert_eq!(out.len(), self.head_dim);
-        katgpt_core::simd::simd_matmul_rows(out, &self.eigenvectors, x, self.head_dim, self.head_dim);
+        katgpt_core::simd::simd_matmul_rows(
+            out,
+            &self.eigenvectors,
+            x,
+            self.head_dim,
+            self.head_dim,
+        );
     }
 }
 

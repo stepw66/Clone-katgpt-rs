@@ -114,11 +114,7 @@ pub fn direction_vector_decode_into<const N: usize>(
 /// Bit-identical to [`direction_vector_decode`] for the same inputs when
 /// `state.len() == N` — both delegate to `simd_dot_f32` + `fast_sigmoid`.
 #[inline]
-pub fn direction_vector_decode_slice(
-    state: &[f32],
-    direction: &[f32],
-    temperature: f32,
-) -> f32 {
+pub fn direction_vector_decode_slice(state: &[f32], direction: &[f32], temperature: f32) -> f32 {
     debug_assert_eq!(
         state.len(),
         direction.len(),
@@ -147,7 +143,10 @@ mod tests {
         let state = LatticeVector::<2>::new([1.0, 0.0]);
         let dir = LatticeVector::<2>::new([0.0, 1.0]);
         let score = direction_vector_decode(&state, &dir, 1.0);
-        assert!((score - 0.5).abs() < 1e-6, "orthogonal decode {score} != 0.5");
+        assert!(
+            (score - 0.5).abs() < 1e-6,
+            "orthogonal decode {score} != 0.5"
+        );
     }
 
     #[test]
@@ -189,7 +188,11 @@ mod tests {
         direction_vector_decode_into(&state, &dirs, 2.0, &mut out);
 
         assert!(out[0] > 0.5, "aligned should be > 0.5, got {}", out[0]);
-        assert!((out[1] - 0.5).abs() < 1e-6, "orthogonal should be 0.5, got {}", out[1]);
+        assert!(
+            (out[1] - 0.5).abs() < 1e-6,
+            "orthogonal should be 0.5, got {}",
+            out[1]
+        );
         assert!(out[2] < 0.5, "anti-aligned should be < 0.5, got {}", out[2]);
     }
 
@@ -272,13 +275,7 @@ mod tests {
         // Ranking must match exactly (sigmoid is monotone, so ranking is
         // determined by the dot product alone).
         for (i, (s, r)) in simd_scores.iter().zip(ref_scores.iter()).enumerate() {
-            assert!(
-                (s - r).abs() < 1e-6,
-                "rank {}: simd {} vs ref {}",
-                i,
-                s,
-                r
-            );
+            assert!((s - r).abs() < 1e-6, "rank {}: simd {} vs ref {}", i, s, r);
         }
     }
 }

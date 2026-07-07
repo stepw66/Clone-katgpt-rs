@@ -60,7 +60,7 @@
 //! the G4 GOAT gate. (The `FftPlanner` caches FFT plans internally; the first
 //! call for a given `N` populates the cache, subsequent calls hit the cache.)
 
-use rustfft::{num_complex::Complex, Fft, FftPlanner};
+use rustfft::{Fft, FftPlanner, num_complex::Complex};
 
 // ── Errors ───────────────────────────────────────────────────────
 

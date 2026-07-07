@@ -79,23 +79,28 @@ pub use best_belief::{best_belief_score, best_belief_scores, select_best_belief}
 #[cfg(feature = "conformal_predictive_intervals")]
 pub mod conformal;
 #[cfg(feature = "conformal_predictive_intervals")]
-pub use conformal::{
-    ConformalIntervalCalibrator, DecayUnit, PointForecaster, PredictiveInterval,
-    ResidualMode, ResidualRingBuffer, RingBuffer, SeasonalNaiveForecaster,
-    SeasonalPoolForecaster, seasonal_naive_floor,
+pub use conformal::metrics::{
+    crps, crps_interval, empirical_coverage, mean_crps_interval, mean_winkler, winkler_score,
 };
 #[cfg(feature = "conformal_predictive_intervals")]
-pub use conformal::metrics::{crps, crps_interval, empirical_coverage, mean_crps_interval, mean_winkler, winkler_score};
+pub use conformal::{
+    ConformalIntervalCalibrator, DecayUnit, PointForecaster, PredictiveInterval, ResidualMode,
+    ResidualRingBuffer, RingBuffer, SeasonalNaiveForecaster, SeasonalPoolForecaster,
+    seasonal_naive_floor,
+};
 // Plan 340 Phase 2 (T2.1) — KARC adapter for the conformal overlay.
 // Gated on BOTH features: needs the conformal substrate AND the KARC forecaster.
-#[cfg(all(feature = "conformal_predictive_intervals", feature = "karc_forecaster"))]
+#[cfg(all(
+    feature = "conformal_predictive_intervals",
+    feature = "karc_forecaster"
+))]
 pub use conformal::KarcChannelForecaster;
 // Issue 010 T2 — "Report the Floor" comparison harness. Re-exported for
 // T3–T7 (BoMSampler, Sleep-Time, Best-Belief, Alien Sampler adapters).
 #[cfg(feature = "conformal_predictive_intervals")]
 pub use conformal::{
-    empirical_quantile_interval, FloorAdapter, FloorComparisonReport, OverallVerdict,
-    PredictiveOutput, TrajectoryCorpus, UqMetrics, UqPrimitiveUnderTest, run_floor_comparison,
+    FloorAdapter, FloorComparisonReport, OverallVerdict, PredictiveOutput, TrajectoryCorpus,
+    UqMetrics, UqPrimitiveUnderTest, empirical_quantile_interval, run_floor_comparison,
 };
 #[cfg(feature = "coda_fusion")]
 pub mod coda;
@@ -146,9 +151,9 @@ pub mod proof_cache;
 // Phase 3) to break the katgpt-pruners ↔ katgpt-speculative cycle. Pure
 // 4-variant `#[repr(u8)]` enum, no pruners-specific knowledge. Re-exported
 // by katgpt-pruners and katgpt_rs::speculative for backwards compatibility.
-pub mod thinking_mode;
 #[cfg(feature = "parallax_attn")]
 pub mod parallax_attn;
+pub mod thinking_mode;
 // Algebraic-structure primitives. Currently home to the tropical (max, +)
 // semiring (Plan 337, Research 321). Opt-in via `tropical_algebra`.
 #[cfg(feature = "tropical_algebra")]
@@ -172,8 +177,8 @@ pub mod ssmax;
 // and riir-ai/crates/riir-poc/.
 pub mod set_diffusion_schedule;
 pub use set_diffusion_schedule::{
-    PositionOffsetSchedule, ar_order, block_causal_gen_steps, mdlm_gen_steps,
-    order_to_gen_steps, uniform_order, uniform_order_with,
+    PositionOffsetSchedule, ar_order, block_causal_gen_steps, mdlm_gen_steps, order_to_gen_steps,
+    uniform_order, uniform_order_with,
 };
 // SIMD-accelerated linear algebra kernels (NEON / AVX2 / WASM-SIMD128 /
 // scalar fallback). Spun out to the `katgpt-types` crate (Issue 007 Phase E
@@ -197,12 +202,36 @@ pub use katgpt_types as types;
 pub mod cgsp;
 #[cfg(feature = "cgsp")]
 pub use cgsp::{
-    BatchQualityGate, BreakevenDifficultyFilter, Candidate, CgspConfig, CgspLoop,
-    ColinearityBatchGate, CollapseSignal, ComplexityWeights, CuriosityConjecturer,
-    CuriosityPrioritySnapshot, CycleResult, CycleStats, DEFAULT_HLA_DIM, DEFAULT_K,
-    DEFAULT_POOL_SIZE, DifficultyFilter, Direction, EntropyCollapse, HintDeltaBandit,
-    HlaProjectionGuide, NoOpBatchGate, NoOpDifficultyFilter, PoolConjecturer, Priority,
-    QualityGuide, ScratchBuffers, SolveRate, Solver, Target, entropy_nats,
+    BatchQualityGate,
+    BreakevenDifficultyFilter,
+    Candidate,
+    CgspConfig,
+    CgspLoop,
+    ColinearityBatchGate,
+    CollapseSignal,
+    ComplexityWeights,
+    CuriosityConjecturer,
+    CuriosityPrioritySnapshot,
+    CycleResult,
+    CycleStats,
+    DEFAULT_HLA_DIM,
+    DEFAULT_K,
+    DEFAULT_POOL_SIZE,
+    DifficultyFilter,
+    Direction,
+    EntropyCollapse,
+    HintDeltaBandit,
+    HlaProjectionGuide,
+    NoOpBatchGate,
+    NoOpDifficultyFilter,
+    PoolConjecturer,
+    Priority,
+    QualityGuide,
+    ScratchBuffers,
+    SolveRate,
+    Solver,
+    Target,
+    entropy_nats,
     structural_complexity,
     // Note: `sigmoid` is no longer re-exported here — it's now an always-on
     // top-level `katgpt_core::sigmoid` (Proposal 003 Phase 0.1). The module-local
@@ -342,8 +371,8 @@ pub use hga::{GroupSummaryCache, MixedRopeSummarizer};
 pub mod renoise_ce;
 #[cfg(feature = "renoise_ce")]
 pub use renoise_ce::{
-    best_of_n_stability, renoise_ce_score, verify_and_restart, Proposer, RenoiseCeConfig,
-    RenoiseCeProbe, RenoiseCeScore,
+    Proposer, RenoiseCeConfig, RenoiseCeProbe, RenoiseCeScore, best_of_n_stability,
+    renoise_ce_score, verify_and_restart,
 };
 
 #[cfg(feature = "dual_leo")]
@@ -355,16 +384,16 @@ pub use traits::{AllGoalsUpdate, LeoHead, sigmoid_bounded_q};
 
 // Re-export key types at crate root for convenience
 pub use shard_embedding::{EMBED_DIM, JlProjectionMatrix, STYLE_DIM as JL_STYLE_DIM};
-pub use types::{
-    AttentionMode, AttentionProjection, CacheLayout, CalibrationMode, Config, ConvergenceSelector, DashAttnConfig,
-    DilationConfig, HlaMode, HybridPattern, InferenceOverrides, InferenceResult, LoopMode,
-    LoraAdapter, LoraPair, ModelArchitecture, ResidualGate, RetrievalHeadRole, Rng, RtTurboConfig,
-    SdpaOutputGate, ShardEmbedding, WeightDtype, kv_dim, lora_apply, matmul, matmul_f16,
-    matmul_f16_parallel, matmul_parallel, matmul_relu, rmsnorm, sample_token_into,
-    softmax, softmax_scaled,
-};
 #[allow(deprecated)]
 pub use types::sample_token;
+pub use types::{
+    AttentionMode, AttentionProjection, CacheLayout, CalibrationMode, Config, ConvergenceSelector,
+    DashAttnConfig, DilationConfig, HlaMode, HybridPattern, InferenceOverrides, InferenceResult,
+    LoopMode, LoraAdapter, LoraPair, ModelArchitecture, ResidualGate, RetrievalHeadRole, Rng,
+    RtTurboConfig, SdpaOutputGate, ShardEmbedding, WeightDtype, kv_dim, lora_apply, matmul,
+    matmul_f16, matmul_f16_parallel, matmul_parallel, matmul_relu, rmsnorm, sample_token_into,
+    softmax, softmax_scaled,
+};
 
 #[cfg(feature = "domain_latent")]
 pub use types::DomainLatent;
@@ -467,7 +496,7 @@ pub mod ane_roofline;
 #[cfg(feature = "ane_roofline")]
 pub use ane_roofline::{
     AneBound, AneCost, AneFamily, AneOpShape, AnePeaks, Device, ane_conv3x3_cost, ane_estimate,
-    ane_gemv_cost, ane_gemm_cost,
+    ane_gemm_cost, ane_gemv_cost,
 };
 
 #[cfg(feature = "and_or_dtree")]
@@ -614,16 +643,16 @@ pub use subspace_phase_gate::{
 
 #[cfg(feature = "group_invariance_probe")]
 pub use group_invariance_probe::{
-    GroupAction, SubgroupClass, SubgroupReport, classify_subgroup,
-    classify_subgroup_with, discover_subgroup, discover_subgroup_into,
-    invariance_score, score_concentration, score_variance,
+    GroupAction, SubgroupClass, SubgroupReport, classify_subgroup, classify_subgroup_with,
+    discover_subgroup, discover_subgroup_into, invariance_score, score_concentration,
+    score_variance,
 };
 
 #[cfg(feature = "causal_head_importance")]
 pub use causal_head_importance::{
     ScaleNormalizedFusion, SpanLogitDiffReadout, direct_effect_importance,
-    fuse_across_capabilities, indirect_effect_importance,
-    partition_by_causal_score, per_capability_score,
+    fuse_across_capabilities, indirect_effect_importance, partition_by_causal_score,
+    per_capability_score,
 };
 // Adaptive Causal Calibration (Proposal 004) — cheap-proxy escalate. Opt-in.
 // Re-exported alongside the causal head-importance primitives it builds on.
@@ -757,7 +786,8 @@ pub use compression_drafter::{CompressionDrafter, Lz4FlexDrafter};
 pub mod babel_codec;
 #[cfg(feature = "babel_codec")]
 pub use babel_codec::{
-    BabelCodec, BabelCommitment, BabelPair, CompressedLatent, FixedRuleTextCodec, SigmoidLatentCodec,
+    BabelCodec, BabelCommitment, BabelPair, CompressedLatent, FixedRuleTextCodec,
+    SigmoidLatentCodec,
 };
 
 // Analytic Lattice — k×k transport operator chain composer + ASOC trait shapes
@@ -871,7 +901,7 @@ pub use phase_rotation::{
 pub mod spherical_steering;
 #[cfg(feature = "spherical_steering")]
 pub use spherical_steering::{
-    SlerpError, SlerpScratch, spherical_steering_into, slerp_steering_into, vmf_confidence_gate,
+    SlerpError, SlerpScratch, slerp_steering_into, spherical_steering_into, vmf_confidence_gate,
 };
 
 // ChunkedContentStore — Lore-distilled chunked content-addressed Merkle store (Plan 272, Research 262).
@@ -907,9 +937,7 @@ pub use closure::{
     },
     commitment, deserialize_postcard,
     metrics::{CdgScore, PriScores, compute_cdg, compute_pri, compute_tar_score, motif_multiset},
-    mining::{
-        SleepCycleClosureReport, fold_cdg_at_sleep_cycle, mine_motifs_at_sleep_cycle,
-    },
+    mining::{SleepCycleClosureReport, fold_cdg_at_sleep_cycle, mine_motifs_at_sleep_cycle},
     motif::{
         FixedU32Set, MAX_MOTIF_EDGES, MAX_MOTIF_NODES, Motif, MotifMiner, RING_BUFFER_K,
         enumerate_subgraph_hashes,
@@ -1106,7 +1134,7 @@ pub use engram::{
 pub mod product_key_memory;
 #[cfg(feature = "product_key_memory")]
 pub use product_key_memory::{
-    D_K_FLOOR, PkEntry, PkQuery, PkmScratch, ProductKeyMemory, ScoreFn, SQRT_N_FLOOR, score_dot,
+    D_K_FLOOR, PkEntry, PkQuery, PkmScratch, ProductKeyMemory, SQRT_N_FLOOR, ScoreFn, score_dot,
     score_idw,
 };
 // Phase 4 (F4 fusion) — freeze/thaw wrapper around ProductKeyMemory. Gated
@@ -1230,7 +1258,7 @@ pub use karc::{
 #[cfg(feature = "karc_forecaster")]
 pub mod karc_dp;
 #[cfg(feature = "karc_forecaster")]
-pub use karc_dp::{apply_dp_noise_to_wout, KarcDpNoiseConfig};
+pub use karc_dp::{KarcDpNoiseConfig, apply_dp_noise_to_wout};
 
 // ARG Protocol Primitives — open half of the ARG × Latent Substrate Super-GOAT
 // fusion (Plan 327 Phases 1-3, Research 309, Guide 160 private). Five generic
@@ -1249,12 +1277,12 @@ pub mod arg;
 #[cfg(feature = "arg_protocol")]
 pub use arg::{
     AccessScope, CandidateIntent, CandidateKind, CompareFn, CompareResult,
-    DEFAULT_AUTO_COMMIT_THRESHOLD, Evidence, EvidenceId, GainComponents, InfoKey, InfoOutcomeStatus,
-    InfoRegistry, InfoType, InfoUnit, LabelId, LabelSet, LabelSignature, LifecycleState,
-    MatchResult, MatchScratch, OfflineCandidateScorer, PayloadHash, PayloadHashCompare,
-    PolicyConstraints, PolicyDecision, PolicyEnvelope, PolicyState, Provenance, RedirectTable,
-    ResponseMode, ScoredCandidate, ShouldProceed, TaxonomyKind, TaxonomyNode, TaxonomyValidator,
-    TypedOfflineCandidate, ValidationError, ValidationResult, ValidationScratch,
+    DEFAULT_AUTO_COMMIT_THRESHOLD, Evidence, EvidenceId, GainComponents, InfoKey,
+    InfoOutcomeStatus, InfoRegistry, InfoType, InfoUnit, LabelId, LabelSet, LabelSignature,
+    LifecycleState, MatchResult, MatchScratch, OfflineCandidateScorer, PayloadHash,
+    PayloadHashCompare, PolicyConstraints, PolicyDecision, PolicyEnvelope, PolicyState, Provenance,
+    RedirectTable, ResponseMode, ScoredCandidate, ShouldProceed, TaxonomyKind, TaxonomyNode,
+    TaxonomyValidator, TypedOfflineCandidate, ValidationError, ValidationResult, ValidationScratch,
 };
 
 // Non-Interference Memory Branches — Super-GOAT fusion (Plan 329, Research 310,
@@ -1273,12 +1301,13 @@ pub mod branching;
 #[cfg(feature = "non_interference_branches")]
 pub use branching::{
     AssignError, AssignResult, BranchBank, BranchId, BranchLifecycle, BranchRouter, BranchStats,
-    BudgetCompiler, CognitiveBranch, CompiledContext, CompiledItem, DEFAULT_ASSIGN_MAX_INTERFERENCE,
-    DEFAULT_BUDGET_BYTES, DEFAULT_MAX_BRANCHES, DEFAULT_ORTHOGONAL_EPSILON, DEFAULT_PROJECTION_DIM,
-    DEFAULT_QUARANTINE_CENTROID_THRESH, DEFAULT_TAU_CURIOSITY, DEFAULT_TAU_JACCARD,
-    DEFAULT_TAU_SNAP, DEFAULT_TAU_SPAWN, DEFAULT_TAU_WRITE, EpisodicEntry, FailureEntry,
-    NonInterferenceProjection, PriorityTier, ProceduralRule, RetrievedMaterials, RouteMode,
-    RouteResult, VerifierGate, WriteDecision, max_orthogonal_branches,
+    BudgetCompiler, CognitiveBranch, CompiledContext, CompiledItem,
+    DEFAULT_ASSIGN_MAX_INTERFERENCE, DEFAULT_BUDGET_BYTES, DEFAULT_MAX_BRANCHES,
+    DEFAULT_ORTHOGONAL_EPSILON, DEFAULT_PROJECTION_DIM, DEFAULT_QUARANTINE_CENTROID_THRESH,
+    DEFAULT_TAU_CURIOSITY, DEFAULT_TAU_JACCARD, DEFAULT_TAU_SNAP, DEFAULT_TAU_SPAWN,
+    DEFAULT_TAU_WRITE, EpisodicEntry, FailureEntry, NonInterferenceProjection, PriorityTier,
+    ProceduralRule, RetrievedMaterials, RouteMode, RouteResult, VerifierGate, WriteDecision,
+    max_orthogonal_branches,
 };
 
 // Post-Candidate Branch Router — distilled from Local Branch Routing
@@ -1305,7 +1334,9 @@ pub use branching::{
 #[cfg(feature = "local_branch_routing")]
 pub mod branch_routing;
 #[cfg(feature = "local_branch_routing")]
-pub use branch_routing::{ColliderRouterAdapter, DotProductRouter, PostCandidateRouter, PreservationScorer};
+pub use branch_routing::{
+    ColliderRouterAdapter, DotProductRouter, PostCandidateRouter, PreservationScorer,
+};
 
 // Sleep-Time Query Anticipator — open primitive for offline query anticipation
 // (Plan 334, Research 318, arXiv:2504.13171 Lin et al. Letta/Berkeley).
@@ -1333,9 +1364,10 @@ pub use katgpt_sleep as sleep_time;
 #[cfg(feature = "sleep_time_anticipation")]
 pub use sleep_time::{
     AmortizationCostModel, AnticipatedQueryDir, AnticipatedQuerySet, AnticipatedSlot,
-    DEFAULT_LATENCY_PREMIUM, DotPredictabilityScorer, IdentityFunctorOp, SLEEP_TIME_DEFAULT_K,
-    PredictabilityScorer, SleepTimeAnticipator, SleepTimeComputeOp, SleepTimeScratch, commit_direction,
-    consume, consume_gate, consume_with_match_mode, consume_gate_with_match_mode, ConsumeMatchMode,
+    ConsumeMatchMode, DEFAULT_LATENCY_PREMIUM, DotPredictabilityScorer, IdentityFunctorOp,
+    PredictabilityScorer, SLEEP_TIME_DEFAULT_K, SleepTimeAnticipator, SleepTimeComputeOp,
+    SleepTimeScratch, commit_direction, consume, consume_gate, consume_gate_with_match_mode,
+    consume_with_match_mode,
 };
 
 // PairedLossGap — generic modelless paired token-level loss gap diagnostic
@@ -1405,8 +1437,8 @@ pub mod manifold_bandit;
 pub mod mean_field;
 #[cfg(feature = "mean_field_regime")]
 pub use mean_field::{
-    DEFAULT_CLASSIFIER, HopfParams, MeanFieldOverlap, Regime, RegimeClassifier,
-    hopf_boundary, static_boundary,
+    DEFAULT_CLASSIFIER, HopfParams, MeanFieldOverlap, Regime, RegimeClassifier, hopf_boundary,
+    static_boundary,
 };
 
 // Factorized Transition Action Abstraction — modelless compositional action
@@ -1424,10 +1456,9 @@ pub use mean_field::{
 pub mod factorized_action;
 #[cfg(feature = "factorized_action")]
 pub use factorized_action::{
-    aggregate_action_latent_into, factor_token_into, finalize_factors,
+    AggregatorType, EffectCodebook, FactorizedActionLatent, FilmProjectionBank, MAX_K, MAX_PATCHES,
+    TransitionFactors, aggregate_action_latent_into, factor_token_into, finalize_factors,
     fit_codebook_kmeans_into, motion_input_velocity_into, patchify_1d, relevance_score,
-    AggregatorType, EffectCodebook, FactorizedActionLatent, FilmProjectionBank,
-    TransitionFactors, MAX_K, MAX_PATCHES,
 };
 
 // Velocity-Field Ensemble — Algebraic Combination of Pre-Trained Models
@@ -1460,30 +1491,30 @@ pub use factorized_action::{
 pub mod velocity_field_ensemble;
 #[cfg(feature = "velocity_field_ensemble")]
 pub use velocity_field_ensemble::{
-    accumulate_pair_into, stochastic_interpolant_step_into, ClosureField, EnsembleFitScratch,
-    Schedule, VelocityField, VelocityFieldEnsemble,
+    ClosureField, EnsembleFitScratch, Schedule, VelocityField, VelocityFieldEnsemble,
+    accumulate_pair_into, stochastic_interpolant_step_into,
 };
 
 // ── Phase 10 absorption (Proposal 003, 2026-07-04): modules moved from katgpt-rs/src/.
 // Always-on (no feature gate):
-pub mod alloc;  // Debug-only TrackingAllocator (consumer gates via #[cfg(debug_assertions)])
-pub mod cumprodsum;  // Cumprodsum primitive (Plan 263) — always-on
-pub mod trigger_gate;  // Compute-tier trigger gate — always-on
+pub mod alloc; // Debug-only TrackingAllocator (consumer gates via #[cfg(debug_assertions)])
+pub mod cumprodsum; // Cumprodsum primitive (Plan 263) — always-on
+pub mod trigger_gate; // Compute-tier trigger gate — always-on
 // ── Phase 12 absorption (Proposal 003, 2026-07-04): more modules moved from katgpt-rs/src/.
 // Feature-gated (mirror root feature names):
 #[cfg(feature = "critical_interval_gate")]
-pub mod dllm_solver;  // Discrete Critical Interval Solver Switching (Plan 222)
+pub mod dllm_solver; // Discrete Critical Interval Solver Switching (Plan 222)
 #[cfg(feature = "modality_pruned_load")]
-pub mod pipeline_pruner;  // Pipeline Pruner — modality-aware inference pipeline selection (Plan 227 Phase 3)
+pub mod pipeline_pruner; // Pipeline Pruner — modality-aware inference pipeline selection (Plan 227 Phase 3)
 // ── Phase 12 T4.3: folder moves from katgpt-rs/src/.
-#[cfg(feature = "mux_latent_context")]
-pub mod mux_latent;  // MUX-Latent Context Compression (Research 211, Plan 238)
-#[cfg(feature = "closed_unit_compaction")]
-pub mod compaction;  // Closed-Unit Compaction Gate — CUCG (Plan 333)
-#[cfg(feature = "cubical_nerve")]
-pub mod cubical_nerve;  // CubicalNerve CAT(0) cubical complexes (Plan 252 Phase 3)
 #[cfg(feature = "breakeven_routing")]
-pub mod breakeven;  // Breakeven complexity cost-aware routing (Plan 250)
+pub mod breakeven;
+#[cfg(feature = "closed_unit_compaction")]
+pub mod compaction; // Closed-Unit Compaction Gate — CUCG (Plan 333)
+#[cfg(feature = "cubical_nerve")]
+pub mod cubical_nerve; // CubicalNerve CAT(0) cubical complexes (Plan 252 Phase 3)
+#[cfg(feature = "mux_latent_context")]
+pub mod mux_latent; // MUX-Latent Context Compression (Research 211, Plan 238) // Breakeven complexity cost-aware routing (Plan 250)
 // Feature-gated (mirror root feature names):
 #[cfg(feature = "cce_moderator")]
 pub mod cce;
@@ -1499,12 +1530,12 @@ pub mod salience;
 pub use salience::{
     DelegateToken, FoldbackTarget, SalienceDecision, SalienceTriGate, SilenceToken,
 };
+#[cfg(feature = "channel_simd_align")]
+pub mod channel_simd;
 #[cfg(feature = "skill_opt")]
 pub mod skill_opt;
 #[cfg(feature = "ssd_block")]
 pub mod ssd_block;
-#[cfg(feature = "channel_simd_align")]
-pub mod channel_simd;
 
 // Test-only `#[global_allocator]` so `alloc::tests::*` pass when running
 // `cargo test -p katgpt-core --lib`. Downstream consumers (katgpt-rs root,

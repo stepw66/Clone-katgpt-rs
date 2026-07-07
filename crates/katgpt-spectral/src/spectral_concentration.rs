@@ -420,10 +420,7 @@ mod tests {
         // c = 0.0 → sigmoid(4 * (0.0 - 0.3)) = sigmoid(-1.2) ≈ 0.231
         // extra ≈ 0.231 * max_extra ≈ 2.3 → rounds to 2
         let budget = cot_budget_from_concentration(0.0, 4, 10);
-        assert!(
-            budget <= 7,
-            "c=0.0 → budget {budget}, expected ≤ 7"
-        );
+        assert!(budget <= 7, "c=0.0 → budget {budget}, expected ≤ 7");
     }
 
     #[test]

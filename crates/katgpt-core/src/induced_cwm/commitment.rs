@@ -80,7 +80,11 @@ impl CwmCommitment {
     /// `verify()` here because this struct does not store the bytes themselves
     /// (the kernel does).
     pub fn from_parts(blake3: [u8; 32], version: u64, created_at_tick: u64) -> Self {
-        Self { blake3, version, created_at_tick }
+        Self {
+            blake3,
+            version,
+            created_at_tick,
+        }
     }
 
     /// Returns `true` iff this commitment matches the given kernel's current

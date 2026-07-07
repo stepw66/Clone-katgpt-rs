@@ -44,18 +44,12 @@ struct DemoSpace;
 
 impl InferenceActionSpace<DemoState> for DemoSpace {
     fn actions_at(&self, state: &DemoState) -> &[InferenceAction] {
-        if state.v >= MAX_V {
-            &[]
-        } else {
-            &ACTIONS
-        }
+        if state.v >= MAX_V { &[] } else { &ACTIONS }
     }
 
     fn apply(&self, state: &DemoState, action: InferenceAction) -> DemoState {
         let delta = (action.config_id as u8).min(MAX_V - state.v);
-        DemoState {
-            v: state.v + delta,
-        }
+        DemoState { v: state.v + delta }
     }
 
     fn reward(&self, state: &DemoState) -> Option<f32> {

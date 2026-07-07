@@ -250,9 +250,7 @@ pub fn set_diffusion_decode<F: SetCausalForwardFn>(
 
     // The gen_steps buffer covers only the decode region; offset by prompt_len
     // when indexing into the full token buffer.
-    let gen_step_at = |decode_idx: usize| -> u32 {
-        gen_steps[decode_idx]
-    };
+    let gen_step_at = |decode_idx: usize| -> u32 { gen_steps[decode_idx] };
 
     let max_gen_step = gen_steps.iter().copied().max().unwrap_or(0);
 
@@ -297,13 +295,8 @@ pub fn set_diffusion_decode<F: SetCausalForwardFn>(
                 let logits_end = logits_start + vocab;
                 let logits_p = &logits[logits_start..logits_end];
 
-                let (chosen_token, chosen_prob) = sample_token(
-                    logits_p,
-                    mask,
-                    vocab,
-                    temperature,
-                    rng,
-                );
+                let (chosen_token, chosen_prob) =
+                    sample_token(logits_p, mask, vocab, temperature, rng);
 
                 if chosen_prob >= tau_conf && chosen_token != mask {
                     tokens[p] = chosen_token;
@@ -601,10 +594,13 @@ pub struct CpuSetCausalForward<'a> {
 impl<'a> SetCausalForwardFn for CpuSetCausalForward<'a> {
     fn forward_set_causal(&self, tokens: &[usize], gen_steps: &[u32]) -> Vec<f32> {
         // Convert u32 gen-steps to usize position_order (zero-cost widening on 64-bit).
-        let position_order: Vec<usize> =
-            gen_steps.iter().map(|&g| g as usize).collect();
-        let (logits_2d, _attn_weights) =
-            crate::forward_set_causal::forward_set_causal_positions(self.weights, tokens, self.config, &position_order);
+        let position_order: Vec<usize> = gen_steps.iter().map(|&g| g as usize).collect();
+        let (logits_2d, _attn_weights) = crate::forward_set_causal::forward_set_causal_positions(
+            self.weights,
+            tokens,
+            self.config,
+            &position_order,
+        );
         // Flatten Vec<Vec<f32>> → Vec<f32>.
         let vocab = self.config.vocab_size;
         let mut flat = Vec::with_capacity(logits_2d.len() * vocab);
@@ -643,7 +639,11 @@ mod tests {
             for p in 0..seq_len {
                 let base = p * self.vocab;
                 // The "target" token for position p (deterministic, for testing).
-                let target = if p == 0 { 1 } else { (p % (self.vocab - 1)) + 1 };
+                let target = if p == 0 {
+                    1
+                } else {
+                    (p % (self.vocab - 1)) + 1
+                };
                 for v in 0..self.vocab {
                     if v == self.mask {
                         logits[base + v] = -10.0; // Never pick mask.
@@ -766,7 +766,10 @@ mod tests {
         let result = set_diffusion_decode(&mock, &config, &[], &gen_steps, &mut rng);
 
         assert!(result.converged);
-        assert!(result.forward_passes >= 4, "singleton needs ≥4 passes (one per step)");
+        assert!(
+            result.forward_passes >= 4,
+            "singleton needs ≥4 passes (one per step)"
+        );
     }
 
     #[test]
@@ -804,10 +807,9 @@ mod tests {
         };
         let config = SetDiffusionConfig::default();
         let mut rng = Rng::new(0);
-        let result =
-            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                set_diffusion_decode(&mock, &config, &[], &[], &mut rng)
-            }));
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            set_diffusion_decode(&mock, &config, &[], &[], &mut rng)
+        }));
         assert!(result.is_err(), "empty gen_steps should panic");
     }
 
@@ -831,7 +833,10 @@ mod tests {
 
         let result = set_diffusion_decode(&mock, &config, &[], &gen_steps, &mut rng);
 
-        assert!(result.converged, "greedy with strong signal should converge");
+        assert!(
+            result.converged,
+            "greedy with strong signal should converge"
+        );
     }
 
     #[test]
@@ -911,8 +916,8 @@ mod tests {
     // token correctness — just that the loop runs, converges or not, and
     // produces the right shape.
 
-    use crate::forward_set_causal::forward_set_causal_positions;
     use super::CpuSetCausalForward;
+    use crate::forward_set_causal::forward_set_causal_positions;
     use katgpt_transformer::TransformerWeights;
     use katgpt_types::Config;
 
@@ -940,7 +945,10 @@ mod tests {
 
         // Shape checks.
         assert_eq!(result.tokens.len(), gen_steps.len());
-        assert!(result.forward_passes > 0, "should run at least one forward pass");
+        assert!(
+            result.forward_passes > 0,
+            "should run at least one forward pass"
+        );
         assert!(!result.confidence_history.is_empty());
         // We don't assert converged — random-init model may not produce confident
         // predictions. The point is that the wiring works without panic.
@@ -976,9 +984,10 @@ mod tests {
             for v in 0..vocab {
                 let direct = logits_2d[p][v];
                 let adapter = flat[p * vocab + v];
-                assert!
-                    (direct == adapter,
-                     "logit mismatch at p={p}, v={v}: direct={direct}, adapter={adapter}");
+                assert!(
+                    direct == adapter,
+                    "logit mismatch at p={p}, v={v}: direct={direct}, adapter={adapter}"
+                );
             }
         }
     }
@@ -1093,7 +1102,10 @@ mod tests {
         }
         // Average inversions across 50 draws should be small (≤ 2 per draw).
         let avg = total_inversions as f32 / 50.0;
-        assert!(avg <= 2.0, "AR endpoint should be near-identity, avg inversions = {avg}");
+        assert!(
+            avg <= 2.0,
+            "AR endpoint should be near-identity, avg inversions = {avg}"
+        );
     }
 
     #[test]
@@ -1216,7 +1228,8 @@ mod tests {
 
         // Convenience function with same initial seed.
         let mut rng_b = Rng::new(42);
-        let convenience = set_diffusion_decode_scheduled(&mock, &config, &[], &schedule, 8, &mut rng_b);
+        let convenience =
+            set_diffusion_decode_scheduled(&mock, &config, &[], &schedule, 8, &mut rng_b);
 
         assert_eq!(manual.tokens, convenience.tokens);
         assert_eq!(manual.forward_passes, convenience.forward_passes);

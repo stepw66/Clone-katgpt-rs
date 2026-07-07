@@ -195,7 +195,10 @@ fn goat_g3_stagnation_triggers_fire() {
     }
     let triggers: Vec<_> = gate.check(BranchId(0)).iter().collect();
     assert!(
-        triggers.iter().any(|t| matches!(t, crate::progressive_mcgs::stagnation::StagnationTrigger::IntraBranchEvolve)),
+        triggers.iter().any(|t| matches!(
+            t,
+            crate::progressive_mcgs::stagnation::StagnationTrigger::IntraBranchEvolve
+        )),
         "expected IntraBranchEvolve after τ_branch=3 non-improvements, got {triggers:?}"
     );
 
@@ -205,9 +208,10 @@ fn goat_g3_stagnation_triggers_fire() {
     }
     let triggers: Vec<_> = gate.check(BranchId(0)).iter().collect();
     assert!(
-        triggers
-            .iter()
-            .any(|t| matches!(t, crate::progressive_mcgs::stagnation::StagnationTrigger::MultiBranchAggregation)),
+        triggers.iter().any(|t| matches!(
+            t,
+            crate::progressive_mcgs::stagnation::StagnationTrigger::MultiBranchAggregation
+        )),
         "expected MultiBranchAggregation after τ_global=6 non-breakthroughs, got {triggers:?}"
     );
 }
@@ -274,10 +278,12 @@ fn smoke_full_search_cycle() {
 
         // Check for stagnation triggers.
         let triggers: Vec<_> = gate.check(branch).iter().collect();
-        if triggers
-            .iter()
-            .any(|t| matches!(t, crate::progressive_mcgs::stagnation::StagnationTrigger::IntraBranchEvolve))
-        {
+        if triggers.iter().any(|t| {
+            matches!(
+                t,
+                crate::progressive_mcgs::stagnation::StagnationTrigger::IntraBranchEvolve
+            )
+        }) {
             // Apply intra-branch: pull last-3 ancestors as references.
             let refs = operators::intra_branch_history(&g, new_node, 3);
             for r in refs {
@@ -301,7 +307,10 @@ fn smoke_full_search_cycle() {
 
     // Reference edges may have been added by intra-branch evolution.
     let total_refs = g.total_reference_edges();
-    assert!(total_refs <= 50 * 3, "reference-edge count exploded: {total_refs}");
+    assert!(
+        total_refs <= 50 * 3,
+        "reference-edge count exploded: {total_refs}"
+    );
 }
 
 /// Deterministic replay: same RNG seed → same Q-values.

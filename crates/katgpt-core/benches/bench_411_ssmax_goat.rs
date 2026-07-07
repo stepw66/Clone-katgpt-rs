@@ -173,7 +173,10 @@ fn main() {
 
         println!(
             "{:>10}  {:>14.6}  {:>14.6}  {:>14.6}  {:>14}  {:>10}",
-            n, base_mass, ssmax_fixed_mass, ssmax_adapt_mass,
+            n,
+            base_mass,
+            ssmax_fixed_mass,
+            ssmax_adapt_mass,
             if base_argmax_ok { "✓" } else { "✗" },
             if ssmax_ok { "✓" } else { "✗" }
         );
@@ -197,9 +200,7 @@ fn main() {
         "  G1 verdict: {}",
         if g1_pass { "✅ PASS" } else { "❌ FAIL" }
     );
-    println!(
-        "  (SSMax improves gold mass at all N ≥ 1k; Adaptive (s_L=1/Δ) recovers ≥10× base)"
-    );
+    println!("  (SSMax improves gold mass at all N ≥ 1k; Adaptive (s_L=1/Δ) recovers ≥10× base)");
 
     // ── G5: No-regression at small N ──────────────────────────────────────
     println!("\n── G5 (no-regression): identical ranking at small N ───────────");
@@ -263,8 +264,17 @@ fn main() {
         // SSMax output: apply SSMax then softmax.
         let log_n = (n as f32).ln();
         let mut ssmax_logits = logits.clone();
-        apply_ssmax_inplace(&mut ssmax_logits, &SsmaxMode::Adaptive { rolling_delta: DELTA }, log_n);
-        let max_s = ssmax_logits.iter().copied().fold(f32::NEG_INFINITY, f32::max);
+        apply_ssmax_inplace(
+            &mut ssmax_logits,
+            &SsmaxMode::Adaptive {
+                rolling_delta: DELTA,
+            },
+            log_n,
+        );
+        let max_s = ssmax_logits
+            .iter()
+            .copied()
+            .fold(f32::NEG_INFINITY, f32::max);
         let mut denom_s = 0.0_f32;
         let mut exps_s = vec![0.0_f32; n];
         for j in 0..n {
@@ -285,7 +295,9 @@ fn main() {
         }
         println!(
             "{:>10}  {:>14.6}  {:>14.6}  {:>14}",
-            n, base_cos, ssmax_cos,
+            n,
+            base_cos,
+            ssmax_cos,
             if ssmax_better { "✓" } else { "✗" }
         );
     }
@@ -351,10 +363,7 @@ fn main() {
     let after = ALLOC_COUNT.load(std::sync::atomic::Ordering::Relaxed);
     let alloc_delta = after - before;
 
-    println!(
-        "  apply_ssmax_inplace: {} allocs / 1000 calls",
-        alloc_delta
-    );
+    println!("  apply_ssmax_inplace: {} allocs / 1000 calls", alloc_delta);
     let g4_pass = alloc_delta == 0;
     println!(
         "  G4 verdict: {}",
@@ -364,10 +373,25 @@ fn main() {
     // ── Summary ───────────────────────────────────────────────────────────
     println!("\n══════════════════════════════════════════════════════════════════");
     println!("  GOAT gate summary");
-    println!("  G1 (correctness):     {}", if g1_pass { "✅ PASS" } else { "❌ FAIL" });
-    println!("  G2 (quality):         {}", if g2_pass { "✅ PASS" } else { "❌ FAIL" });
-    println!("  G3 (latency):         {}", if g3_pass { "✅ PASS" } else { "❌ FAIL" });
-    println!("  G4 (alloc-free):      {}", if g4_pass { "✅ PASS" } else { "❌ FAIL" });
-    println!("  G5 (no-regression):   {}", if g5_pass { "✅ PASS" } else { "❌ FAIL" });
+    println!(
+        "  G1 (correctness):     {}",
+        if g1_pass { "✅ PASS" } else { "❌ FAIL" }
+    );
+    println!(
+        "  G2 (quality):         {}",
+        if g2_pass { "✅ PASS" } else { "❌ FAIL" }
+    );
+    println!(
+        "  G3 (latency):         {}",
+        if g3_pass { "✅ PASS" } else { "❌ FAIL" }
+    );
+    println!(
+        "  G4 (alloc-free):      {}",
+        if g4_pass { "✅ PASS" } else { "❌ FAIL" }
+    );
+    println!(
+        "  G5 (no-regression):   {}",
+        if g5_pass { "✅ PASS" } else { "❌ FAIL" }
+    );
     println!("══════════════════════════════════════════════════════════════════\n");
 }

@@ -221,11 +221,7 @@ fn g5_zero_alloc() -> (usize, bool) {
 // ---------------------------------------------------------------------------
 
 fn verdict(pass: bool) -> &'static str {
-    if pass {
-        "PASS ✅"
-    } else {
-        "FAIL ❌"
-    }
+    if pass { "PASS ✅" } else { "FAIL ❌" }
 }
 
 fn main() {

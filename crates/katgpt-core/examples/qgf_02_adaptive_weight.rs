@@ -40,8 +40,8 @@
 
 #![cfg(feature = "qgf_adaptive")]
 
-use katgpt_core::qgf::adaptive_guidance_weight;
 use katgpt_core::qgf::QGuidedDrafter;
+use katgpt_core::qgf::adaptive_guidance_weight;
 use katgpt_core::traits::{QGradientOracle, SpeculativeGenerator};
 
 // ── Constants ───────────────────────────────────────────────────────────────
@@ -67,7 +67,10 @@ fn main() {
 
     // ── Step 1: sigmoid response curve ─────────────────────────────────────
     println!("── Step 1: sigmoid response curve ──");
-    println!("  {:<12} {:>14} {:>14}", "confidence", "weight (k=4)", "weight (k=12)");
+    println!(
+        "  {:<12} {:>14} {:>14}",
+        "confidence", "weight (k=4)", "weight (k=12)"
+    );
     for i in 0..=10 {
         let c = i as f32 / 10.0;
         let w_gentle = adaptive_guidance_weight(c, THRESHOLD, 4.0);
@@ -110,12 +113,16 @@ fn main() {
     );
 
     println!("── Step 2: high-confidence oracle (LeoHead-tier) ──");
-    println!("  confidence = 1.0  →  adaptive weight = {:.6}", weight_high);
+    println!(
+        "  confidence = 1.0  →  adaptive weight = {:.6}",
+        weight_high
+    );
     println!("  tilt applied? {applied_high}");
     println!("  tilted logits: {:?}", logits_high);
     let e_ref = expected_q(&ref_logits, &q_landscape);
     let e_high = expected_q(&logits_high, &q_landscape);
-    println!("  E[Q]: ref={:.4} → guided={:.4}  (relative gain {:.1}%)",
+    println!(
+        "  E[Q]: ref={:.4} → guided={:.4}  (relative gain {:.1}%)",
         e_ref,
         e_high,
         (e_high - e_ref) / e_ref.abs().max(1e-9) * 100.0
@@ -147,11 +154,15 @@ fn main() {
     );
 
     println!("── Step 3: low-confidence oracle (BFN/freeze-tier) ──");
-    println!("  confidence = 0.05  →  adaptive weight = {:.6}", weight_low);
+    println!(
+        "  confidence = 0.05  →  adaptive weight = {:.6}",
+        weight_low
+    );
     println!("  tilt applied? {applied_low}  (weight = 0.0045 → near-zero tilt)");
     println!("  tilted logits: {:?}", logits_low);
     let e_low = expected_q(&logits_low, &q_landscape);
-    println!("  E[Q]: ref={:.4} → 'guided'={:.4}  (relative gain {:.2}%)",
+    println!(
+        "  E[Q]: ref={:.4} → 'guided'={:.4}  (relative gain {:.2}%)",
         e_ref,
         e_low,
         (e_low - e_ref) / e_ref.abs().max(1e-9) * 100.0
@@ -234,12 +245,7 @@ impl QGradientOracle for KnownLandscapeOracle {
         self.q_values.clone()
     }
 
-    fn q_gradient_into(
-        &self,
-        _state: &Self::State,
-        _action: &Self::Action,
-        out: &mut [f32],
-    ) {
+    fn q_gradient_into(&self, _state: &Self::State, _action: &Self::Action, out: &mut [f32]) {
         let n = out.len().min(self.q_values.len());
         out[..n].copy_from_slice(&self.q_values[..n]);
         for slot in &mut out[n..] {

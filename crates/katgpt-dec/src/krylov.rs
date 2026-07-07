@@ -360,7 +360,13 @@ mod tests {
     }
 
     fn vec_approx_eq(a: &[f32], b: &[f32], tol: f32) -> bool {
-        assert_eq!(a.len(), b.len(), "length mismatch: {} vs {}", a.len(), b.len());
+        assert_eq!(
+            a.len(),
+            b.len(),
+            "length mismatch: {} vs {}",
+            a.len(),
+            b.len()
+        );
         for i in 0..a.len() {
             if !approx_eq(a[i], b[i], tol) {
                 return false;
@@ -440,10 +446,26 @@ mod tests {
         let theta = 1.0f32;
         let mat = vec![0.0, theta, -theta, 0.0];
         let result = expm_small(2, &mat);
-        assert!(approx_eq(result[0], theta.cos(), 1e-4), "cos: {}", result[0]);
-        assert!(approx_eq(result[1], theta.sin(), 1e-4), "sin: {}", result[1]);
-        assert!(approx_eq(result[2], -theta.sin(), 1e-4), "-sin: {}", result[2]);
-        assert!(approx_eq(result[3], theta.cos(), 1e-4), "cos: {}", result[3]);
+        assert!(
+            approx_eq(result[0], theta.cos(), 1e-4),
+            "cos: {}",
+            result[0]
+        );
+        assert!(
+            approx_eq(result[1], theta.sin(), 1e-4),
+            "sin: {}",
+            result[1]
+        );
+        assert!(
+            approx_eq(result[2], -theta.sin(), 1e-4),
+            "-sin: {}",
+            result[2]
+        );
+        assert!(
+            approx_eq(result[3], theta.cos(), 1e-4),
+            "cos: {}",
+            result[3]
+        );
     }
 
     #[test]
@@ -454,8 +476,18 @@ mod tests {
         let mat = vec![10.0, 0.0, 0.0, 10.0];
         let result = expm_small(m, &mat);
         let expected = 10.0f32.exp();
-        assert!(approx_eq(result[0], expected, 1e-3), "exp(10) = {} != {}", result[0], expected);
-        assert!(approx_eq(result[3], expected, 1e-3), "exp(10) = {} != {}", result[3], expected);
+        assert!(
+            approx_eq(result[0], expected, 1e-3),
+            "exp(10) = {} != {}",
+            result[0],
+            expected
+        );
+        assert!(
+            approx_eq(result[3], expected, 1e-3),
+            "exp(10) = {} != {}",
+            result[3],
+            expected
+        );
     }
 
     // ── krylov_expmv tests ────────────────────────────────────────────
@@ -463,22 +495,39 @@ mod tests {
     #[test]
     fn krylov_zero_input() {
         let h0 = vec![0.0f32; 5];
-        let result = krylov_expmv(&mut |v: &[f32], out: &mut [f32]| out.copy_from_slice(v), &h0, 5.0, 3);
-        assert!(result.iter().all(|&x| x.abs() < 1e-30), "nonzero result for zero input");
+        let result = krylov_expmv(
+            &mut |v: &[f32], out: &mut [f32]| out.copy_from_slice(v),
+            &h0,
+            5.0,
+            3,
+        );
+        assert!(
+            result.iter().all(|&x| x.abs() < 1e-30),
+            "nonzero result for zero input"
+        );
     }
 
     #[test]
     fn krylov_t_zero_identity() {
         // exp(0·A)·b = b
         let h0 = vec![1.0, 2.0, 3.0, 4.0];
-        let result = krylov_expmv(&mut |v: &[f32], out: &mut [f32]| {
-            // A = diag(1, -1, 2, -2)
-            out[0] = v[0];
-            out[1] = -v[1];
-            out[2] = 2.0 * v[2];
-            out[3] = -2.0 * v[3];
-        }, &h0, 0.0, 4);
-        assert!(vec_approx_eq(&result, &h0, 1e-6), "t=0 should return h0, got {:?}", result);
+        let result = krylov_expmv(
+            &mut |v: &[f32], out: &mut [f32]| {
+                // A = diag(1, -1, 2, -2)
+                out[0] = v[0];
+                out[1] = -v[1];
+                out[2] = 2.0 * v[2];
+                out[3] = -2.0 * v[3];
+            },
+            &h0,
+            0.0,
+            4,
+        );
+        assert!(
+            vec_approx_eq(&result, &h0, 1e-6),
+            "t=0 should return h0, got {:?}",
+            result
+        );
     }
 
     #[test]
@@ -486,7 +535,12 @@ mod tests {
         // A = I → exp(t·I)·b = exp(t)·b
         let h0 = vec![1.0f32, 2.0, 3.0];
         let t = 2.0f32;
-        let result = krylov_expmv(&mut |v: &[f32], out: &mut [f32]| out.copy_from_slice(v), &h0, t, 3);
+        let result = krylov_expmv(
+            &mut |v: &[f32], out: &mut [f32]| out.copy_from_slice(v),
+            &h0,
+            t,
+            3,
+        );
         let scale = t.exp();
         let expected: Vec<f32> = h0.iter().map(|&x| x * scale).collect();
         assert!(
@@ -502,12 +556,17 @@ mod tests {
         // A = diag(1, -1, 2, -2), full k=4 → exact
         let h0 = vec![1.0f32, 1.0, 1.0, 1.0];
         let t = 1.5f32;
-        let result = krylov_expmv(&mut |v: &[f32], out: &mut [f32]| {
-            out[0] = 1.0 * v[0];
-            out[1] = -v[1];
-            out[2] = 2.0 * v[2];
-            out[3] = -2.0 * v[3];
-        }, &h0, t, 4);
+        let result = krylov_expmv(
+            &mut |v: &[f32], out: &mut [f32]| {
+                out[0] = 1.0 * v[0];
+                out[1] = -v[1];
+                out[2] = 2.0 * v[2];
+                out[3] = -2.0 * v[3];
+            },
+            &h0,
+            t,
+            4,
+        );
         // Exact: [exp(t), exp(-t), exp(2t), exp(-2t)]
         let expected = vec![t.exp(), (-t).exp(), (2.0 * t).exp(), (-2.0 * t).exp()];
         assert!(
@@ -534,13 +593,18 @@ mod tests {
 
         // k=1: poor (captures only the mean)
         let r1 = krylov_expmv(&mut a_apply, &h0, t, 1);
-        let err1: f32 = h0.iter().zip(r1.iter().chain(std::iter::repeat(&0.0))).zip(exact.iter())
+        let err1: f32 = h0
+            .iter()
+            .zip(r1.iter().chain(std::iter::repeat(&0.0)))
+            .zip(exact.iter())
             .map(|((&_, &rk), &ex)| (rk - ex).abs())
             .sum();
 
         // k=5: exact (full subspace)
         let r5 = krylov_expmv(&mut a_apply, &h0, t, 5);
-        let err5: f32 = r5.iter().zip(exact.iter())
+        let err5: f32 = r5
+            .iter()
+            .zip(exact.iter())
             .map(|(&rk, &ex)| (rk - ex).abs())
             .sum();
 
@@ -576,11 +640,16 @@ mod tests {
         // A = 2·I, h0 = anything → A·h0 = 2·h0, so v_0 captures everything.
         let h0 = vec![3.0f32, 6.0, 9.0]; // not unit, but A·v = 2v means breakdown at j=0
         let t = 1.0f32;
-        let result = krylov_expmv(&mut |v: &[f32], out: &mut [f32]| {
-            for i in 0..3 {
-                out[i] = 2.0 * v[i];
-            }
-        }, &h0, t, 5);
+        let result = krylov_expmv(
+            &mut |v: &[f32], out: &mut [f32]| {
+                for i in 0..3 {
+                    out[i] = 2.0 * v[i];
+                }
+            },
+            &h0,
+            t,
+            5,
+        );
         // exp(t·2I)·h0 = exp(2t)·h0
         let scale = (2.0 * t).exp();
         let expected: Vec<f32> = h0.iter().map(|&x| x * scale).collect();
@@ -596,7 +665,12 @@ mod tests {
     fn krylov_k_capped_at_kmax() {
         // Request k=1000, should silently cap to KRYLOV_K_MAX (64) and n.
         let h0 = vec![1.0f32; 10];
-        let result = krylov_expmv(&mut |v: &[f32], out: &mut [f32]| out.copy_from_slice(v), &h0, 1.0, 1000);
+        let result = krylov_expmv(
+            &mut |v: &[f32], out: &mut [f32]| out.copy_from_slice(v),
+            &h0,
+            1.0,
+            1000,
+        );
         // exp(1·I)·1 = e ≈ 2.718 for each element
         let expected = vec![(1.0f32).exp(); 10];
         assert!(

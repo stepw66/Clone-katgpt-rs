@@ -27,14 +27,14 @@
 use std::hint::black_box;
 use std::time::Instant;
 
-#[allow(unused_imports)]
-use katgpt_core::closure::{
-    commitment, compute_tar_score, deserialize_postcard,
-    serialize_postcard, GateResult, MotifAdmitter, MotifDirections, MotifMiner, OperatorKind,
-    PrimitiveKind, PrimitiveTransitionGraph, PtgRecorder, ptg_to_motif_embedding, RING_BUFFER_K,
-};
 use katgpt_core::closure::metrics::compute_pri;
 use katgpt_core::closure::motif::enumerate_subgraph_hashes;
+#[allow(unused_imports)]
+use katgpt_core::closure::{
+    GateResult, MotifAdmitter, MotifDirections, MotifMiner, OperatorKind, PrimitiveKind,
+    PrimitiveTransitionGraph, PtgRecorder, RING_BUFFER_K, commitment, compute_tar_score,
+    deserialize_postcard, ptg_to_motif_embedding, serialize_postcard,
+};
 
 // ─── Synthetic corpus helpers ─────────────────────────────────────────────
 
@@ -168,7 +168,8 @@ fn g1_pri_latency_reported_against_100us_target() {
 
     println!(
         "G1: PRI over 1K-trace corpus in {}µs ({} primitives scored) — canonical target 100µs",
-        elapsed_us, scores.0.len(),
+        elapsed_us,
+        scores.0.len(),
     );
 
     // Plan 290 G1 spec: < 100µs per 1K-trace corpus (Hot-tier).
@@ -259,27 +260,30 @@ fn g2_motif_mining_overhead_under_5pct_of_admission() {
 fn g3_tar_synthetic_proxy_monotone_with_overlap() {
     // Baseline corpus: 50 PTGs each consisting *only* of the Search→Verify→Branch motif.
     // Observing the motif directly avoids node-id/edge-index desync.
-    let baseline: Vec<PrimitiveTransitionGraph> = (0..50)
-        .map(search_verify_branch_motif)
-        .collect();
+    let baseline: Vec<PrimitiveTransitionGraph> = (0..50).map(search_verify_branch_motif).collect();
 
     // Perturbed A: same motifs (TaR should be ~1.0).
-    let perturbed_same: Vec<PrimitiveTransitionGraph> = baseline.iter().map(|p| {
-        let mut p2 = p.clone();
-        p2.task_family_id = p.task_family_id.wrapping_add(1000);
-        p2
-    }).collect();
+    let perturbed_same: Vec<PrimitiveTransitionGraph> = baseline
+        .iter()
+        .map(|p| {
+            let mut p2 = p.clone();
+            p2.task_family_id = p.task_family_id.wrapping_add(1000);
+            p2
+        })
+        .collect();
 
     // Perturbed B: completely different motifs — different primitive ids AND
     // different topology. Use primitive ids >= 100 so no overlap with baseline
     // (which uses ids 10/11/12).
-    let perturbed_none: Vec<PrimitiveTransitionGraph> = (0..50).map(|i| {
-        let mut rec = PtgRecorder::new(i + 200);
-        let a = rec.enter(PrimitiveKind::UserDefined(100), 0, None);
-        let b = rec.enter(PrimitiveKind::UserDefined(101), 1, None);
-        rec.exit(a, b, OperatorKind::ParallelJoin);
-        rec.finish()
-    }).collect();
+    let perturbed_none: Vec<PrimitiveTransitionGraph> = (0..50)
+        .map(|i| {
+            let mut rec = PtgRecorder::new(i + 200);
+            let a = rec.enter(PrimitiveKind::UserDefined(100), 0, None);
+            let b = rec.enter(PrimitiveKind::UserDefined(101), 1, None);
+            rec.exit(a, b, OperatorKind::ParallelJoin);
+            rec.finish()
+        })
+        .collect();
 
     let tar_same = compute_tar_score(&baseline, &perturbed_same);
     let tar_none = compute_tar_score(&baseline, &perturbed_none);
@@ -302,7 +306,8 @@ fn g3_tar_synthetic_proxy_monotone_with_overlap() {
     assert!(
         tar_same > tar_none,
         "G3 FAIL: TaR(same) = {:.4} not > TaR(none) = {:.4} (proxy is non-monotone)",
-        tar_same, tar_none,
+        tar_same,
+        tar_none,
     );
     println!("✅ G3 PASSED (synthetic proxy): TaR monotone with motif overlap");
     println!("   TODO: upgrade to real AnchorProfile correlation in Phase 4 wire-up");
@@ -328,8 +333,11 @@ fn g4_snapshot_10k_traces_reported_against_1mb_target() {
     let bytes = postcard::to_allocvec(&corpus).expect("postcard serialize 10K traces");
     let size_mb = bytes.len() as f64 / (1024.0 * 1024.0);
 
-    println!("G4: 10K-trace snapshot (production-realistic, all None) = {:.3} MB ({} bytes)",
-             size_mb, bytes.len());
+    println!(
+        "G4: 10K-trace snapshot (production-realistic, all None) = {:.3} MB ({} bytes)",
+        size_mb,
+        bytes.len()
+    );
 
     // Canonical G4 target: < 1MB. With `blake3_in: Option<[u8; 32]>` and the
     // production-realistic all-`None` corpus, postcard encoding packs each
@@ -348,7 +356,10 @@ fn g4_snapshot_10k_traces_reported_against_1mb_target() {
 
     // BLAKE3 commitment smoke test.
     let hash = commitment(&corpus[0]);
-    assert!(hash.iter().any(|&b| b != 0), "commitment produced all-zero hash");
+    assert!(
+        hash.iter().any(|&b| b != 0),
+        "commitment produced all-zero hash"
+    );
     println!("   Round-trip + commitment OK.");
 }
 
@@ -364,7 +375,10 @@ fn g4_snapshot_upper_bound_all_committed() {
         .collect();
     let bytes = postcard::to_allocvec(&corpus).expect("postcard serialize 10K traces");
     let size_mb = bytes.len() as f64 / (1024.0 * 1024.0);
-    println!("G4 upper bound: 10K-trace snapshot (all Some) = {:.3} MB — informational, NOT asserted", size_mb);
+    println!(
+        "G4 upper bound: 10K-trace snapshot (all Some) = {:.3} MB — informational, NOT asserted",
+        size_mb
+    );
     // Guard against accidental bloat beyond the pre-fix baseline (~1.77MB).
     assert!(
         size_mb < 2.5,
@@ -399,7 +413,10 @@ fn ring_buffer_evicts_oldest_at_capacity() {
     let mined = miner.mine_batch();
     // Mining must not panic and must return *some* motifs (each PTG has at
     // least one 1-node subgraph).
-    assert!(!mined.is_empty(), "miner with full ring buffer returned no motifs");
+    assert!(
+        !mined.is_empty(),
+        "miner with full ring buffer returned no motifs"
+    );
 }
 
 // ─── Bridge function correctness (Phase 3 acceptance) ─────────────────────
@@ -451,8 +468,14 @@ fn motif_admission_recognises_high_pri_motif() {
     let result = admitter.evaluate(&motif, 3, 256.0);
     match result {
         GateResult::Admitted { new_primitive, .. } => {
-            assert!(new_primitive.is_composite(), "admitted primitive should be Composite");
-            println!("✅ motif admitted as {:?} (occurrence_count={})", new_primitive, motif.occurrence_count);
+            assert!(
+                new_primitive.is_composite(),
+                "admitted primitive should be Composite"
+            );
+            println!(
+                "✅ motif admitted as {:?} (occurrence_count={})",
+                new_primitive, motif.occurrence_count
+            );
         }
         GateResult::Rejected { reason } => {
             panic!("high-PRI motif was rejected: {:?}", reason);
@@ -466,7 +489,10 @@ fn motif_admission_recognises_high_pri_motif() {
 fn enumerate_subgraph_hashes_returns_nonempty_for_nontrivial_ptg() {
     let ptg = synth_ptg(4, 1, 7);
     let hashes = enumerate_subgraph_hashes(&ptg);
-    assert!(!hashes.is_empty(), "non-empty PTG yielded no subgraph hashes");
+    assert!(
+        !hashes.is_empty(),
+        "non-empty PTG yielded no subgraph hashes"
+    );
     // Each hash should be well-formed (32 bytes — fixed array, always is).
     for h in &hashes {
         assert_eq!(h[..].len(), 32, "subgraph hash is not 32 bytes");

@@ -294,7 +294,10 @@ mod tests {
     #[test]
     fn select_expand_returns_wide() {
         let cfg = AdaptiveWidthConfig::default();
-        assert!(std::ptr::addr_eq(cfg.select(WidthDecision::Expand), &cfg.wide));
+        assert!(std::ptr::addr_eq(
+            cfg.select(WidthDecision::Expand),
+            &cfg.wide
+        ));
     }
 
     #[test]
@@ -318,7 +321,10 @@ mod tests {
 
     #[test]
     fn default_decision_is_contract() {
-        assert_eq!(AdaptiveWidthConfig::default_decision(), WidthDecision::Contract);
+        assert_eq!(
+            AdaptiveWidthConfig::default_decision(),
+            WidthDecision::Contract
+        );
     }
 
     #[test]

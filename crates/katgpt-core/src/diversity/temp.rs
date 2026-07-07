@@ -108,19 +108,13 @@ pub fn extrapolated_snapshot_schedule(
     );
 
     // BLAKE3 variant: per-j hash when noise is on, zero when off.
-    extrapolated_snapshot_schedule_with_noise(
-        s0,
-        s1,
-        lambda_schedule,
-        out,
-        |j| {
-            if noise_sigma == 0.0 {
-                0.0
-            } else {
-                blake3_noise(noise_seeds[j], noise_sigma)
-            }
-        },
-    );
+    extrapolated_snapshot_schedule_with_noise(s0, s1, lambda_schedule, out, |j| {
+        if noise_sigma == 0.0 {
+            0.0
+        } else {
+            blake3_noise(noise_seeds[j], noise_sigma)
+        }
+    });
 }
 
 /// Shared extrapolation core: writes `theta_j = s0 + lambda_j·(1+xi_j)·(s1−s0)`
@@ -252,19 +246,13 @@ pub fn extrapolated_snapshot_schedule_qmc(
     // QMC variant: affine map of the bulk-drawn uniform to [-noise_sigma, +noise_sigma].
     // Identical mapping to blake3_noise so the two variants are directly comparable
     // on the same sigma.
-    extrapolated_snapshot_schedule_with_noise(
-        s0,
-        s1,
-        lambda_schedule,
-        out,
-        |j| {
-            if noise_sigma == 0.0 {
-                0.0
-            } else {
-                (uniforms_scratch[j] * 2.0 - 1.0) * noise_sigma
-            }
-        },
-    );
+    extrapolated_snapshot_schedule_with_noise(s0, s1, lambda_schedule, out, |j| {
+        if noise_sigma == 0.0 {
+            0.0
+        } else {
+            (uniforms_scratch[j] * 2.0 - 1.0) * noise_sigma
+        }
+    });
 }
 
 // ──────────────────────────────────────────────────────────────────────────
@@ -429,7 +417,13 @@ pub fn select_diverse_subset(
     k_subset: usize,
     scratch: &mut [usize],
 ) -> Vec<usize> {
-    select_diverse_subset_into(loss_vectors, k_subset, scratch, &mut Vec::new(), &mut Vec::new())
+    select_diverse_subset_into(
+        loss_vectors,
+        k_subset,
+        scratch,
+        &mut Vec::new(),
+        &mut Vec::new(),
+    )
 }
 
 /// Same as [`select_diverse_subset`] but accepts caller-provided workspaces
@@ -447,7 +441,10 @@ pub fn select_diverse_subset_into(
 ) -> Vec<usize> {
     let n = loss_vectors.len();
     assert!(k_subset >= 1 && k_subset <= n, "k_subset must be in [1, n]");
-    assert!(scratch.len() >= k_subset, "scratch must hold >= k_subset indices");
+    assert!(
+        scratch.len() >= k_subset,
+        "scratch must hold >= k_subset indices"
+    );
 
     let selected = &mut scratch[..k_subset];
 
@@ -929,7 +926,15 @@ mod tests {
         let mut src = LatticeQmc::new(42);
         let mut scratch = [0.0_f32; 4];
         let mut out = (0..4).map(|_| Vec::with_capacity(2)).collect::<Vec<_>>();
-        extrapolated_snapshot_schedule_qmc(&s0, &s1, &lambda, &mut src, 0.0, &mut out, &mut scratch);
+        extrapolated_snapshot_schedule_qmc(
+            &s0,
+            &s1,
+            &lambda,
+            &mut src,
+            0.0,
+            &mut out,
+            &mut scratch,
+        );
         let expected = [
             [0.0_f32, 0.0],
             [10.0 / 3.0, 20.0 / 3.0],
@@ -938,7 +943,11 @@ mod tests {
         ];
         for (j, exp_j) in expected.iter().enumerate() {
             for i in 0..2 {
-                assert!((out[j][i] - exp_j[i]).abs() < 1e-5, "out[{j}][{i}]={}", out[j][i]);
+                assert!(
+                    (out[j][i] - exp_j[i]).abs() < 1e-5,
+                    "out[{j}][{i}]={}",
+                    out[j][i]
+                );
             }
         }
     }
@@ -954,7 +963,15 @@ mod tests {
         let mut src = LatticeQmc::new(7);
         let mut scratch = [0.0_f32; 1];
         let mut out = vec![Vec::with_capacity(1)];
-        extrapolated_snapshot_schedule_qmc(&s0, &s1, &lambda, &mut src, 0.1, &mut out, &mut scratch);
+        extrapolated_snapshot_schedule_qmc(
+            &s0,
+            &s1,
+            &lambda,
+            &mut src,
+            0.1,
+            &mut out,
+            &mut scratch,
+        );
         // theta_0 = 0 + 0.5*(1+xi)*1 where |xi| <= 0.1 → theta_0 in [0.45, 0.55]
         assert!(
             out[0][0] >= 0.45 && out[0][0] <= 0.55,
@@ -977,8 +994,24 @@ mod tests {
         let mut scratch2 = [0.0_f32; 3];
         let mut out1 = (0..3).map(|_| Vec::with_capacity(3)).collect::<Vec<_>>();
         let mut out2 = (0..3).map(|_| Vec::with_capacity(3)).collect::<Vec<_>>();
-        extrapolated_snapshot_schedule_qmc(&s0, &s1, &lambda, &mut src1, 0.05, &mut out1, &mut scratch1);
-        extrapolated_snapshot_schedule_qmc(&s0, &s1, &lambda, &mut src2, 0.05, &mut out2, &mut scratch2);
+        extrapolated_snapshot_schedule_qmc(
+            &s0,
+            &s1,
+            &lambda,
+            &mut src1,
+            0.05,
+            &mut out1,
+            &mut scratch1,
+        );
+        extrapolated_snapshot_schedule_qmc(
+            &s0,
+            &s1,
+            &lambda,
+            &mut src2,
+            0.05,
+            &mut out2,
+            &mut scratch2,
+        );
         for j in 0..3 {
             assert_eq!(out1[j], out2[j], "run 1 != run 2 at j={j}");
         }
@@ -999,11 +1032,30 @@ mod tests {
         let mut scratch2 = [0.0_f32; 2];
         let mut out1 = vec![Vec::with_capacity(2), Vec::with_capacity(2)];
         let mut out2 = vec![Vec::with_capacity(2), Vec::with_capacity(2)];
-        extrapolated_snapshot_schedule_qmc(&s0, &s1, &lambda, &mut src1, 0.5, &mut out1, &mut scratch1);
-        extrapolated_snapshot_schedule_qmc(&s0, &s1, &lambda, &mut src2, 0.5, &mut out2, &mut scratch2);
+        extrapolated_snapshot_schedule_qmc(
+            &s0,
+            &s1,
+            &lambda,
+            &mut src1,
+            0.5,
+            &mut out1,
+            &mut scratch1,
+        );
+        extrapolated_snapshot_schedule_qmc(
+            &s0,
+            &s1,
+            &lambda,
+            &mut src2,
+            0.5,
+            &mut out2,
+            &mut scratch2,
+        );
         // At least one checkpoint should differ between the two seeds.
         let any_diff = (0..2).any(|j| out1[j] != out2[j]);
-        assert!(any_diff, "different seeds should produce different snapshots");
+        assert!(
+            any_diff,
+            "different seeds should produce different snapshots"
+        );
     }
 
     #[cfg(feature = "qmc_sampling")]
@@ -1018,7 +1070,15 @@ mod tests {
         let mut scratch = [0.0_f32; 1]; // len=1 < k=2
         let mut out = vec![Vec::with_capacity(1), Vec::with_capacity(1)];
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            extrapolated_snapshot_schedule_qmc(&s0, &s1, &lambda, &mut src, 0.1, &mut out, &mut scratch);
+            extrapolated_snapshot_schedule_qmc(
+                &s0,
+                &s1,
+                &lambda,
+                &mut src,
+                0.1,
+                &mut out,
+                &mut scratch,
+            );
         }));
         assert!(result.is_err(), "should panic on short scratch");
     }
@@ -1040,7 +1100,15 @@ mod tests {
         let mut src = LatticeQmc::new(12345);
         let mut scratch = [0.0_f32; 4];
         let mut out: Vec<Vec<f32>> = (0..4).map(|_| Vec::with_capacity(1)).collect();
-        extrapolated_snapshot_schedule_qmc(&s0, &s1, &lambda, &mut src, 0.5, &mut out, &mut scratch);
+        extrapolated_snapshot_schedule_qmc(
+            &s0,
+            &s1,
+            &lambda,
+            &mut src,
+            0.5,
+            &mut out,
+            &mut scratch,
+        );
         // Recover the xi_j from theta_j = lambda_j*(1+xi_j) = 1*(1+xi_j):
         // theta_j = 1+xi_j, so xi_j = theta_j - 1.
         let xis: Vec<f32> = out.iter().map(|t| t[0] - 1.0).collect();
@@ -1441,7 +1509,14 @@ mod tests {
             v.iter().map(|x| x / norm).collect()
         };
         let lambda = [
-            0.0_f32, 1.0 / 7.0, 2.0 / 7.0, 3.0 / 7.0, 4.0 / 7.0, 5.0 / 7.0, 6.0 / 7.0, 1.0,
+            0.0_f32,
+            1.0 / 7.0,
+            2.0 / 7.0,
+            3.0 / 7.0,
+            4.0 / 7.0,
+            5.0 / 7.0,
+            6.0 / 7.0,
+            1.0,
         ];
         let seeds = [0u64; 8];
         let mut theta_schedule = (0..k).map(|_| Vec::with_capacity(d)).collect::<Vec<_>>();
@@ -1538,10 +1613,30 @@ mod tests {
             (theta, loss_vecs, selected)
         }
 
-        let (theta1, loss_vecs1, selected1) =
-            run(&s0, &s1, &lambda, &seeds, noise_sigma, &prefixes, &kernel, d, k, n);
-        let (theta2, loss_vecs2, selected2) =
-            run(&s0, &s1, &lambda, &seeds, noise_sigma, &prefixes, &kernel, d, k, n);
+        let (theta1, loss_vecs1, selected1) = run(
+            &s0,
+            &s1,
+            &lambda,
+            &seeds,
+            noise_sigma,
+            &prefixes,
+            &kernel,
+            d,
+            k,
+            n,
+        );
+        let (theta2, loss_vecs2, selected2) = run(
+            &s0,
+            &s1,
+            &lambda,
+            &seeds,
+            noise_sigma,
+            &prefixes,
+            &kernel,
+            d,
+            k,
+            n,
+        );
 
         for j in 0..k {
             assert_eq!(theta1[j], theta2[j], "theta[{}] differs across runs", j);

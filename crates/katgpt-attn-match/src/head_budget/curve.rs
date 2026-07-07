@@ -125,7 +125,11 @@ mod tests {
         );
         // At r=0.3, halfway between (0.2, 0.7) and (0.4, 0.4) → 0.55.
         let v = c.interpolate(0.3);
-        assert!((v - 0.55).abs() < 1e-6, "interpolate(0.3)={}, expected 0.55", v);
+        assert!(
+            (v - 0.55).abs() < 1e-6,
+            "interpolate(0.3)={}, expected 0.55",
+            v
+        );
     }
 
     #[test]

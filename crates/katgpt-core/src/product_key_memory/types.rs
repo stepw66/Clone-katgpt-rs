@@ -204,9 +204,7 @@ pub struct ProductKeyMemory<const SQRT_N: usize, const D_K: usize, const D_V: us
     pub values: Box<[f32]>,
 }
 
-impl<const SQRT_N: usize, const D_K: usize, const D_V: usize>
-    ProductKeyMemory<SQRT_N, D_K, D_V>
-{
+impl<const SQRT_N: usize, const D_K: usize, const D_V: usize> ProductKeyMemory<SQRT_N, D_K, D_V> {
     /// Half key dimension (`D_K / 2`). Runtime constant — the const-generic
     /// `D_K / 2` cannot be used as an array-size on stable Rust, so it's
     /// computed here and used for row indexing.
@@ -250,11 +248,7 @@ impl<const SQRT_N: usize, const D_K: usize, const D_V: usize>
         let half = Self::key_half_dim();
         debug_assert_eq!(keys_1.len(), SQRT_N * half, "keys_1 wrong length");
         debug_assert_eq!(keys_2.len(), SQRT_N * half, "keys_2 wrong length");
-        debug_assert_eq!(
-            values.len(),
-            SQRT_N * SQRT_N * D_V,
-            "values wrong length"
-        );
+        debug_assert_eq!(values.len(), SQRT_N * SQRT_N * D_V, "values wrong length");
         Self {
             keys_1,
             keys_2,

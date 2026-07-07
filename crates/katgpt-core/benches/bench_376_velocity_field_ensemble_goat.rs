@@ -50,28 +50,44 @@ const MEASURE_ITERS: usize = 10_000;
 // ── Linear fields (P=8 distinct named fns; same type for [F; P]) ──────────
 
 fn field_0(x: &[f32], out: &mut [f32; D]) {
-    for k in 0..D { out[k] = x[k] * 0.1; }
+    for k in 0..D {
+        out[k] = x[k] * 0.1;
+    }
 }
 fn field_1(x: &[f32], out: &mut [f32; D]) {
-    for k in 0..D { out[k] = x[(k + 1) % D] * 0.15; }
+    for k in 0..D {
+        out[k] = x[(k + 1) % D] * 0.15;
+    }
 }
 fn field_2(x: &[f32], out: &mut [f32; D]) {
-    for k in 0..D { out[k] = x[(k + 2) % D] * 0.2 - x[k] * 0.05; }
+    for k in 0..D {
+        out[k] = x[(k + 2) % D] * 0.2 - x[k] * 0.05;
+    }
 }
 fn field_3(x: &[f32], out: &mut [f32; D]) {
-    for k in 0..D { out[k] = x[D - 1 - k] * 0.12; }
+    for k in 0..D {
+        out[k] = x[D - 1 - k] * 0.12;
+    }
 }
 fn field_4(x: &[f32], out: &mut [f32; D]) {
-    for k in 0..D { out[k] = x[k % 4] * 0.18 + x[(k + 4) % D] * 0.07; }
+    for k in 0..D {
+        out[k] = x[k % 4] * 0.18 + x[(k + 4) % D] * 0.07;
+    }
 }
 fn field_5(x: &[f32], out: &mut [f32; D]) {
-    for k in 0..D { out[k] = x[(k + 3) % D] * 0.11 - x[(k + 5) % D] * 0.04; }
+    for k in 0..D {
+        out[k] = x[(k + 3) % D] * 0.11 - x[(k + 5) % D] * 0.04;
+    }
 }
 fn field_6(x: &[f32], out: &mut [f32; D]) {
-    for k in 0..D { out[k] = (x[k] + x[(k + 1) % D]) * 0.09; }
+    for k in 0..D {
+        out[k] = (x[k] + x[(k + 1) % D]) * 0.09;
+    }
 }
 fn field_7(x: &[f32], out: &mut [f32; D]) {
-    for k in 0..D { out[k] = x[(k + 6) % D] * 0.13 + x[(k + 7) % D] * 0.06; }
+    for k in 0..D {
+        out[k] = x[(k + 6) % D] * 0.13 + x[(k + 7) % D] * 0.06;
+    }
 }
 
 type FieldFn = fn(&[f32], &mut [f32; D]);
@@ -103,26 +119,37 @@ struct GateResult {
 fn median_u64(v: &mut [u64]) -> u64 {
     v.sort_unstable();
     let n = v.len();
-    if n % 2 == 1 { v[n / 2] } else { (v[n / 2 - 1] + v[n / 2]) / 2 }
+    if n % 2 == 1 {
+        v[n / 2]
+    } else {
+        (v[n / 2 - 1] + v[n / 2]) / 2
+    }
 }
 
 // ── Gates ─────────────────────────────────────────────────────────────────
 
 fn gate_g4_fit_latency() -> GateResult {
-    println!("\n--- G4: fit_into latency (N={}, P={}, D={}) ---", N_FIT_PAIRS, P, D);
+    println!(
+        "\n--- G4: fit_into latency (N={}, P={}, D={}) ---",
+        N_FIT_PAIRS, P, D
+    );
 
     // Pre-build pairs (one-time alloc, outside the measured region).
     let xs: Vec<[f32; D]> = (0..N_FIT_PAIRS)
         .map(|i| {
             let mut x = [0.0f32; D];
-            for (k, slot) in x.iter_mut().enumerate().take(D) { *slot = ((i + k) as f32) * 0.01; }
+            for (k, slot) in x.iter_mut().enumerate().take(D) {
+                *slot = ((i + k) as f32) * 0.01;
+            }
             x
         })
         .collect();
     let ys: Vec<[f32; D]> = (0..N_FIT_PAIRS)
         .map(|i| {
             let mut y = [0.0f32; D];
-            for (k, slot) in y.iter_mut().enumerate().take(D) { *slot = ((i * 2 + k) as f32) * 0.005; }
+            for (k, slot) in y.iter_mut().enumerate().take(D) {
+                *slot = ((i * 2 + k) as f32) * 0.005;
+            }
             y
         })
         .collect();
@@ -151,7 +178,12 @@ fn gate_g4_fit_latency() -> GateResult {
     }
     let med = median_u64(&mut per_call_ns);
 
-    println!("  fit_into p50: {} ns  (target ≤ {} µs = {} ns)", med, TARGET_FIT_US, TARGET_FIT_US * 1000);
+    println!(
+        "  fit_into p50: {} ns  (target ≤ {} µs = {} ns)",
+        med,
+        TARGET_FIT_US,
+        TARGET_FIT_US * 1000
+    );
 
     let passed = med <= TARGET_FIT_US * 1000;
     if passed {
@@ -170,7 +202,10 @@ fn gate_g4_fit_latency() -> GateResult {
 }
 
 fn gate_g4_eval_latency() -> GateResult {
-    println!("\n--- G4: eval_into latency (single call, P={}, D={}) ---", P, D);
+    println!(
+        "\n--- G4: eval_into latency (single call, P={}, D={}) ---",
+        P, D
+    );
 
     let mut ensemble = build_ensemble();
     let mut scratch = EnsembleFitScratch::<P, D>::new();
@@ -178,14 +213,18 @@ fn gate_g4_eval_latency() -> GateResult {
     let xs_fit: Vec<[f32; D]> = (0..N_FIT_PAIRS)
         .map(|i| {
             let mut x = [0.0f32; D];
-            for (k, slot) in x.iter_mut().enumerate().take(D) { *slot = ((i + k) as f32) * 0.01; }
+            for (k, slot) in x.iter_mut().enumerate().take(D) {
+                *slot = ((i + k) as f32) * 0.01;
+            }
             x
         })
         .collect();
     let ys_fit: Vec<[f32; D]> = (0..N_FIT_PAIRS)
         .map(|i| {
             let mut y = [0.0f32; D];
-            for (k, slot) in y.iter_mut().enumerate().take(D) { *slot = ((i * 2 + k) as f32) * 0.005; }
+            for (k, slot) in y.iter_mut().enumerate().take(D) {
+                *slot = ((i * 2 + k) as f32) * 0.005;
+            }
             y
         })
         .collect();
@@ -199,7 +238,14 @@ fn gate_g4_eval_latency() -> GateResult {
 
     // Warmup.
     for _ in 0..WARMUP_ITERS {
-        { ensemble.eval_into(black_box(&x), black_box(&mut out), black_box(&mut eval_scratch)); black_box(()); }
+        {
+            ensemble.eval_into(
+                black_box(&x),
+                black_box(&mut out),
+                black_box(&mut eval_scratch),
+            );
+            black_box(());
+        }
     }
 
     // Measure.
@@ -209,39 +255,61 @@ fn gate_g4_eval_latency() -> GateResult {
     for _ in 0..iters {
         let t0 = Instant::now();
         for _ in 0..BATCH {
-            { ensemble.eval_into(black_box(&x), black_box(&mut out), black_box(&mut eval_scratch)); black_box(()); }
+            {
+                ensemble.eval_into(
+                    black_box(&x),
+                    black_box(&mut out),
+                    black_box(&mut eval_scratch),
+                );
+                black_box(());
+            }
         }
         let dt = t0.elapsed();
         per_call_ns.push((dt.as_nanos() as u64) / (BATCH as u64));
     }
     let med = median_u64(&mut per_call_ns);
 
-    println!("  eval_into p50: {} ns  (target ≤ {} ns)", med, TARGET_EVAL_NS);
+    println!(
+        "  eval_into p50: {} ns  (target ≤ {} ns)",
+        med, TARGET_EVAL_NS
+    );
 
     let passed = med <= TARGET_EVAL_NS;
     GateResult {
         name: "G4 eval_into latency",
         passed,
-        detail: format!("{} ns {} {} ns target", med, if passed { "≤" } else { ">" }, TARGET_EVAL_NS),
+        detail: format!(
+            "{} ns {} {} ns target",
+            med,
+            if passed { "≤" } else { ">" },
+            TARGET_EVAL_NS
+        ),
     }
 }
 
 fn gate_g4_batch_latency() -> GateResult {
-    println!("\n--- G4: eval_batch_into latency (N_batch={}, P={}, D={}) ---", N_BATCH, P, D);
+    println!(
+        "\n--- G4: eval_batch_into latency (N_batch={}, P={}, D={}) ---",
+        N_BATCH, P, D
+    );
 
     let mut ensemble = build_ensemble();
     let mut scratch = EnsembleFitScratch::<P, D>::new();
     let xs_fit: Vec<[f32; D]> = (0..N_FIT_PAIRS)
         .map(|i| {
             let mut x = [0.0f32; D];
-            for (k, slot) in x.iter_mut().enumerate().take(D) { *slot = ((i + k) as f32) * 0.01; }
+            for (k, slot) in x.iter_mut().enumerate().take(D) {
+                *slot = ((i + k) as f32) * 0.01;
+            }
             x
         })
         .collect();
     let ys_fit: Vec<[f32; D]> = (0..N_FIT_PAIRS)
         .map(|i| {
             let mut y = [0.0f32; D];
-            for (k, slot) in y.iter_mut().enumerate().take(D) { *slot = ((i * 2 + k) as f32) * 0.005; }
+            for (k, slot) in y.iter_mut().enumerate().take(D) {
+                *slot = ((i * 2 + k) as f32) * 0.005;
+            }
             y
         })
         .collect();
@@ -253,7 +321,9 @@ fn gate_g4_batch_latency() -> GateResult {
     let batch_x: Vec<[f32; D]> = (0..N_BATCH)
         .map(|i| {
             let mut x = [0.0f32; D];
-            for (k, slot) in x.iter_mut().enumerate().take(D) { *slot = ((i + k) as f32) * 0.001; }
+            for (k, slot) in x.iter_mut().enumerate().take(D) {
+                *slot = ((i + k) as f32) * 0.001;
+            }
             x
         })
         .collect();
@@ -279,13 +349,21 @@ fn gate_g4_batch_latency() -> GateResult {
     let med = median_u64(&mut per_run_us);
     let med_dur = Duration::from_micros(med);
 
-    println!("  eval_batch_into(N={}) p50: {:?}  (target ≤ {} ms)", N_BATCH, med_dur, TARGET_BATCH_MS);
+    println!(
+        "  eval_batch_into(N={}) p50: {:?}  (target ≤ {} ms)",
+        N_BATCH, med_dur, TARGET_BATCH_MS
+    );
 
     let passed = med <= TARGET_BATCH_MS * 1000;
     GateResult {
         name: "G4 eval_batch_into latency",
         passed,
-        detail: format!("{} µs {} {} µs target", med, if passed { "≤" } else { ">" }, TARGET_BATCH_MS * 1000),
+        detail: format!(
+            "{} µs {} {} µs target",
+            med,
+            if passed { "≤" } else { ">" },
+            TARGET_BATCH_MS * 1000
+        ),
     }
 }
 
@@ -297,14 +375,18 @@ fn gate_g3_zero_alloc() -> GateResult {
     let xs_fit: Vec<[f32; D]> = (0..N_FIT_PAIRS)
         .map(|i| {
             let mut x = [0.0f32; D];
-            for (k, slot) in x.iter_mut().enumerate().take(D) { *slot = ((i + k) as f32) * 0.01; }
+            for (k, slot) in x.iter_mut().enumerate().take(D) {
+                *slot = ((i + k) as f32) * 0.01;
+            }
             x
         })
         .collect();
     let ys_fit: Vec<[f32; D]> = (0..N_FIT_PAIRS)
         .map(|i| {
             let mut y = [0.0f32; D];
-            for (k, slot) in y.iter_mut().enumerate().take(D) { *slot = ((i * 2 + k) as f32) * 0.005; }
+            for (k, slot) in y.iter_mut().enumerate().take(D) {
+                *slot = ((i * 2 + k) as f32) * 0.005;
+            }
             y
         })
         .collect();
@@ -318,12 +400,18 @@ fn gate_g3_zero_alloc() -> GateResult {
 
     // Warmup.
     for _ in 0..100 {
-        { ensemble.eval_into(&x, &mut out, &mut eval_scratch); black_box(()); }
+        {
+            ensemble.eval_into(&x, &mut out, &mut eval_scratch);
+            black_box(());
+        }
     }
 
     let before = ALLOC_COUNT.load(Ordering::Relaxed);
     for _ in 0..1000 {
-        { ensemble.eval_into(&x, &mut out, &mut eval_scratch); black_box(()); }
+        {
+            ensemble.eval_into(&x, &mut out, &mut eval_scratch);
+            black_box(());
+        }
     }
     let delta = ALLOC_COUNT.load(Ordering::Relaxed) - before;
 

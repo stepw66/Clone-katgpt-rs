@@ -250,8 +250,8 @@ fn capture_snapshot(world: &mut bevy_ecs::world::World, events: &[GameEvent]) ->
     let mut powerups = Vec::new();
 
     {
-        let mut q = world
-            .query_filtered::<(&GridPos, &BombFuse), With<katgpt_rs::pruners::bomber::Bomb>>();
+        let mut q =
+            world.query_filtered::<(&GridPos, &BombFuse), With<katgpt_rs::pruners::bomber::Bomb>>();
         for (pos, fuse) in q.iter(world) {
             bombs.push(((pos.x, pos.y), fuse.ticks_remaining));
         }
@@ -263,8 +263,7 @@ fn capture_snapshot(world: &mut bevy_ecs::world::World, events: &[GameEvent]) ->
         }
     }
     {
-        let mut q =
-            world.query_filtered::<(&GridPos, &katgpt_rs::pruners::bomber::PowerUp), ()>();
+        let mut q = world.query_filtered::<(&GridPos, &katgpt_rs::pruners::bomber::PowerUp), ()>();
         for (pos, pu) in q.iter(world) {
             powerups.push(((pos.x, pos.y), pu.kind));
         }

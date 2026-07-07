@@ -246,7 +246,10 @@ unsafe fn wasm32_simd128_dot_f32(a: &[f32], b: &[f32], len: usize) -> f32 {
 
         for _ in 0..chunks4 {
             acc0 = f32x4_add(
-                f32x4_mul(v128_load(a.as_ptr().add(i).cast()), v128_load(b.as_ptr().add(i).cast())),
+                f32x4_mul(
+                    v128_load(a.as_ptr().add(i).cast()),
+                    v128_load(b.as_ptr().add(i).cast()),
+                ),
                 acc0,
             );
             acc1 = f32x4_add(
@@ -287,7 +290,10 @@ unsafe fn wasm32_simd128_dot_f32(a: &[f32], b: &[f32], len: usize) -> f32 {
         let remaining = (len - i) / 4;
         for _ in 0..remaining {
             acc = f32x4_add(
-                f32x4_mul(v128_load(a.as_ptr().add(i).cast()), v128_load(b.as_ptr().add(i).cast())),
+                f32x4_mul(
+                    v128_load(a.as_ptr().add(i).cast()),
+                    v128_load(b.as_ptr().add(i).cast()),
+                ),
                 acc,
             );
             i += 4;

@@ -65,7 +65,6 @@ impl Rng {
     }
 }
 
-
 #[path = "../tests/common/mod.rs"]
 mod common;
 counting_allocator!();

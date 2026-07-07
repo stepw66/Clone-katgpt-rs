@@ -26,9 +26,7 @@
 
 #![cfg(feature = "funcattn")]
 
-use katgpt_core::funcattn::{
-    funcattn_forward, FuncAttnBasis, FuncAttnConfig, FuncAttnScratch,
-};
+use katgpt_core::funcattn::{FuncAttnBasis, FuncAttnConfig, FuncAttnScratch, funcattn_forward};
 use katgpt_core::simd;
 
 // ── Model dimensions (match G6 exactly) ──────────────────────────────────
@@ -41,6 +39,10 @@ const SCALE: f32 = 0.353_553_38; // 1/sqrt(8)
 const ALPHA: f32 = 0.5;
 const TEMPERATURE: f32 = 0.1;
 const SEED_U64: u64 = 0x00C0_FFEE_42AA_u64;
+
+/// Pattern-dataset generator function signature shared by Probe-E's train/eval
+/// composition sweep.
+type PatternGen = fn(&mut Rng, usize, usize, usize) -> Vec<Vec<usize>>;
 
 // ── Deterministic xorshift64* PRNG — MUST match G6 test byte-for-byte ──
 //
@@ -57,7 +59,11 @@ struct Rng {
 impl Rng {
     fn new(seed: u64) -> Self {
         Self {
-            s: if seed == 0 { 0x9E37_79B9_7F4A_7C15 } else { seed },
+            s: if seed == 0 {
+                0x9E37_79B9_7F4A_7C15
+            } else {
+                seed
+            },
         }
     }
     fn next_u64(&mut self) -> u64 {
@@ -142,7 +148,9 @@ fn generate_pattern_dataset_admit_degenerate(
     for _ in 0..n_sequences {
         let a = (rng.next_u64() as usize) % effective_vocab.max(1);
         let b = (rng.next_u64() as usize) % effective_vocab.max(1);
-        let seq: Vec<usize> = (0..seq_len).map(|i| if i % 2 == 0 { a } else { b }).collect();
+        let seq: Vec<usize> = (0..seq_len)
+            .map(|i| if i % 2 == 0 { a } else { b })
+            .collect();
         out.push(seq);
     }
     out
@@ -163,7 +171,9 @@ fn generate_pattern_dataset_reject_degenerate(
             // Bump to the next token; preserves the rest of the stream.
             b = (b + 1) % effective_vocab;
         }
-        let seq: Vec<usize> = (0..seq_len).map(|i| if i % 2 == 0 { a } else { b }).collect();
+        let seq: Vec<usize> = (0..seq_len)
+            .map(|i| if i % 2 == 0 { a } else { b })
+            .collect();
         out.push(seq);
     }
     out
@@ -222,6 +232,8 @@ fn cross_entropy_masked(probs: &[f32], masked_pos: usize, true_token: usize) -> 
 }
 
 // SDPA forward (reference re-implementation; matches G6's SdpaPredictor math).
+// Kept as a reference baseline for manual comparison; not wired into any test.
+#[allow(dead_code)]
 fn sdpa_forward(x: &[f32], w_q: &[f32], w_k: &[f32], w_v: &[f32], out: &mut [f32]) {
     // Per-position QKV projections.
     let mut q = vec![0.0f32; N * D];
@@ -504,8 +516,15 @@ fn probe_a_degenerate_dataset() {
     let eval_admit = generate_pattern_dataset_admit_degenerate(&mut rng, 16, N, EFFECTIVE_VOCAB);
     let n_degen = count_degenerate(&eval_admit);
     eprintln!("  eval sequences: {}", eval_admit.len());
-    eprintln!("  degenerate (a==b) sequences: {} ({:.1}%)", n_degen, 100.0 * n_degen as f32 / eval_admit.len() as f32);
-    eprintln!("  expected P(a==b) per seq with V=8: {:.1}%", 100.0 / EFFECTIVE_VOCAB as f32);
+    eprintln!(
+        "  degenerate (a==b) sequences: {} ({:.1}%)",
+        n_degen,
+        100.0 * n_degen as f32 / eval_admit.len() as f32
+    );
+    eprintln!(
+        "  expected P(a==b) per seq with V=8: {:.1}%",
+        100.0 / EFFECTIVE_VOCAB as f32
+    );
 
     // Re-run G6 with non-degenerate eval set.
     let mut rng2 = Rng::new(SEED_U64);
@@ -513,7 +532,10 @@ fn probe_a_degenerate_dataset() {
     let eval_nd = generate_pattern_dataset_reject_degenerate(&mut rng2, 16, N, EFFECTIVE_VOCAB);
     let eval_samples_nd = make_eval_samples(&eval_nd);
     let n_degen_nd = count_degenerate(&eval_nd);
-    eprintln!("\n  after rejecting a==b: degenerate={} (should be 0)", n_degen_nd);
+    eprintln!(
+        "\n  after rejecting a==b: degenerate={} (should be 0)",
+        n_degen_nd
+    );
 
     // Use the same hyperparams as G6 (K=8, 600 steps, LR=0.05, FD_EPS=1e-2).
     // Smaller step count for debug builds.
@@ -541,7 +563,12 @@ fn probe_b_k_sweep() {
     let steps = if cfg!(debug_assertions) { 40 } else { 600 };
     for &k in &[8usize, 16, 32] {
         let acc = train_and_eval_fa(&train, &eval_samples, k, steps, 0.05, 1e-2, 1);
-        eprintln!("  K={:>2}: FUNCATTN acc = {:.4}{}", k, acc, if acc >= 0.999 { "  *** FLIPS ***" } else { "" });
+        eprintln!(
+            "  K={:>2}: FUNCATTN acc = {:.4}{}",
+            k,
+            acc,
+            if acc >= 0.999 { "  *** FLIPS ***" } else { "" }
+        );
     }
     eprintln!("  (G6 verdict at K=V=8: 0.969. If K=16 or K=32 → 1.000, K=V was a corner case.)");
 }
@@ -559,7 +586,12 @@ fn probe_c_fd_eps_sweep() {
     for &fd_eps in &[1e-2f32, 1e-3] {
         // 1e-4 is ~16x slower; skip unless an env var asks for it.
         let acc = train_and_eval_fa(&train, &eval_samples, 8, steps, 0.05, fd_eps, 1);
-        eprintln!("  FD_EPS={}: FUNCATTN acc = {:.4}{}", fd_eps, acc, if acc >= 0.999 { "  *** FLIPS ***" } else { "" });
+        eprintln!(
+            "  FD_EPS={}: FUNCATTN acc = {:.4}{}",
+            fd_eps,
+            acc,
+            if acc >= 0.999 { "  *** FLIPS ***" } else { "" }
+        );
     }
     eprintln!("  (If smaller FD_EPS → 1.000, the FD gradient noise was the artifact.)");
 }
@@ -576,11 +608,27 @@ fn probe_e_train_vs_eval_composition() {
     eprintln!("\n=== Probe-E: train×eval composition sweep (root-cause nailer) ===");
     let steps = if cfg!(debug_assertions) { 40 } else { 600 };
 
-    let combos: [(&str, fn(&mut Rng, usize, usize, usize) -> Vec<Vec<usize>>, fn(&mut Rng, usize, usize, usize) -> Vec<Vec<usize>>); 4] = [
-        ("train=admit  eval=admit  (G6 ORIGINAL)", generate_pattern_dataset_admit_degenerate, generate_pattern_dataset_admit_degenerate),
-        ("train=admit  eval=reject",              generate_pattern_dataset_admit_degenerate, generate_pattern_dataset_reject_degenerate),
-        ("train=reject eval=admit",              generate_pattern_dataset_reject_degenerate, generate_pattern_dataset_admit_degenerate),
-        ("train=reject eval=reject",             generate_pattern_dataset_reject_degenerate, generate_pattern_dataset_reject_degenerate),
+    let combos: [(&str, PatternGen, PatternGen); 4] = [
+        (
+            "train=admit  eval=admit  (G6 ORIGINAL)",
+            generate_pattern_dataset_admit_degenerate,
+            generate_pattern_dataset_admit_degenerate,
+        ),
+        (
+            "train=admit  eval=reject",
+            generate_pattern_dataset_admit_degenerate,
+            generate_pattern_dataset_reject_degenerate,
+        ),
+        (
+            "train=reject eval=admit",
+            generate_pattern_dataset_reject_degenerate,
+            generate_pattern_dataset_admit_degenerate,
+        ),
+        (
+            "train=reject eval=reject",
+            generate_pattern_dataset_reject_degenerate,
+            generate_pattern_dataset_reject_degenerate,
+        ),
     ];
 
     for (label, train_gen, eval_gen) in combos.iter() {
@@ -593,11 +641,16 @@ fn probe_e_train_vs_eval_composition() {
         let acc = train_and_eval_fa(&train, &eval_samples, 8, steps, 0.05, 1e-2, 1);
         eprintln!(
             "  {}: degen_train={:>2} degen_eval={:>2}  FUNCATTN acc = {:.4}{}",
-            label, n_degen_train, n_degen_eval, acc,
+            label,
+            n_degen_train,
+            n_degen_eval,
+            acc,
             if acc >= 0.999 { "  *** FLIPS ***" } else { "" }
         );
     }
-    eprintln!("  Decision: the row that matches G6's original verdict (acc=0.969) identifies the artifact source.");
+    eprintln!(
+        "  Decision: the row that matches G6's original verdict (acc=0.969) identifies the artifact source."
+    );
 }
 
 // ── Probe D: primitive vs wrapper drift sanity ───────────────────────────
@@ -628,8 +681,18 @@ fn probe_d_primitive_vs_wrapper_drift() {
     // Path 1: shipped primitive.
     let mut scratch = FuncAttnScratch::new(N, D, 8);
     let mut out_primitive = vec![0.0f32; N * D];
-    funcattn_forward(&x, &x, &w_basis, &w_q, &w_k, &w_v, &cfg, &mut scratch, &mut out_primitive)
-        .expect("forward");
+    funcattn_forward(
+        &x,
+        &x,
+        &w_basis,
+        &w_q,
+        &w_k,
+        &w_v,
+        &cfg,
+        &mut scratch,
+        &mut out_primitive,
+    )
+    .expect("forward");
 
     // Path 2: through the wrapper (same code path; the test is really checking
     // that the wrapper's field wiring matches the primitive's arg order).
@@ -641,8 +704,18 @@ fn probe_d_primitive_vs_wrapper_drift() {
     fa.x_buf = x.clone();
     let cfg2 = fa.cfg();
     let mut out_wrapper = vec![0.0f32; N * D];
-    funcattn_forward(&fa.x_buf, &fa.x_buf, &fa.w_basis, &fa.w_q, &fa.w_k, &fa.w_v, &cfg2, &mut fa.scratch, &mut out_wrapper)
-        .expect("forward");
+    funcattn_forward(
+        &fa.x_buf,
+        &fa.x_buf,
+        &fa.w_basis,
+        &fa.w_q,
+        &fa.w_k,
+        &fa.w_v,
+        &cfg2,
+        &mut fa.scratch,
+        &mut out_wrapper,
+    )
+    .expect("forward");
 
     let mut max_diff = 0.0f32;
     for (a, b) in out_primitive.iter().zip(out_wrapper.iter()) {
@@ -652,6 +725,9 @@ fn probe_d_primitive_vs_wrapper_drift() {
         }
     }
     eprintln!("  max |out_primitive - out_wrapper| = {:.2e}", max_diff);
-    assert!(max_diff < 1e-6, "primitive and wrapper disagree — implementation drift!");
+    assert!(
+        max_diff < 1e-6,
+        "primitive and wrapper disagree — implementation drift!"
+    );
     eprintln!("  PASS — no drift between shipped primitive and test wrapper.");
 }

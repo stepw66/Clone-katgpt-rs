@@ -348,8 +348,17 @@ pub fn zone_affective_manifold<'a>(
     let g = config.auto_group_count(n);
     if g > 1 {
         return compute_grouped(
-            crowd_hla, n, d, k, g, out_zone_axes, out_npc_projections, eigenvalues,
-            scratch, prev_zone_axes, config,
+            crowd_hla,
+            n,
+            d,
+            k,
+            g,
+            out_zone_axes,
+            out_npc_projections,
+            eigenvalues,
+            scratch,
+            prev_zone_axes,
+            config,
         );
     }
 
@@ -502,79 +511,87 @@ fn compute_grouped<'a>(
         .zip(group_projs_chunks)
         .enumerate()
         .for_each(|(grp, ((group_axes, group_eig), projs))| {
-        let start = grp * group_n;
-        let group_crowd = &crowd_hla[start * d..(start + group_n) * d];
+            let start = grp * group_n;
+            let group_crowd = &crowd_hla[start * d..(start + group_n) * d];
 
-        // Stack-local scratch (D ≤ 8 enforced by debug_assert).
-        let mut local_cov = [0.0f32; 64];
-        let mut local_mean = [0.0f32; 8];
-        let mut local_v = [0.0f32; 8];
-        let mut local_w = [0.0f32; 8];
-        debug_assert!(d <= 8, "compute_grouped requires d ≤ 8 (got {})", d);
-        let local_cov = &mut local_cov[..dd];
-        let local_mean = &mut local_mean[..d];
-        let local_v = &mut local_v[..d];
-        let local_w = &mut local_w[..d];
+            // Stack-local scratch (D ≤ 8 enforced by debug_assert).
+            let mut local_cov = [0.0f32; 64];
+            let mut local_mean = [0.0f32; 8];
+            let mut local_v = [0.0f32; 8];
+            let mut local_w = [0.0f32; 8];
+            debug_assert!(d <= 8, "compute_grouped requires d ≤ 8 (got {})", d);
+            let local_cov = &mut local_cov[..dd];
+            let local_mean = &mut local_mean[..d];
+            let local_v = &mut local_v[..d];
+            let local_w = &mut local_w[..d];
 
-        // Per-group mean.
-        if config.center {
-            local_mean.fill(0.0);
-            for i in 0..group_n {
-                let row = &group_crowd[i * d..(i + 1) * d];
-                for j in 0..d {
-                    local_mean[j] += row[j];
+            // Per-group mean.
+            if config.center {
+                local_mean.fill(0.0);
+                for i in 0..group_n {
+                    let row = &group_crowd[i * d..(i + 1) * d];
+                    for j in 0..d {
+                        local_mean[j] += row[j];
+                    }
                 }
+                let inv_n = 1.0 / group_n as f32;
+                for slot in local_mean[..d].iter_mut() {
+                    *slot *= inv_n;
+                }
+            } else {
+                local_mean.fill(0.0);
             }
-            let inv_n = 1.0 / group_n as f32;
-            for slot in local_mean[..d].iter_mut() {
-                *slot *= inv_n;
+
+            // Per-group covariance.
+            local_cov.fill(0.0);
+            accumulate_triangle(local_cov, group_crowd, 0, group_n, d, local_mean);
+
+            // Per-group power iteration + deflation.
+            for comp in 0..k {
+                power_iteration_deflate(
+                    local_cov,
+                    d,
+                    local_v,
+                    local_w,
+                    config.n_iters,
+                    &mut group_axes[comp * d..(comp + 1) * d],
+                    &mut group_eig[comp],
+                );
             }
-        } else {
-            local_mean.fill(0.0);
-        }
 
-        // Per-group covariance.
-        local_cov.fill(0.0);
-        accumulate_triangle(local_cov, group_crowd, 0, group_n, d, local_mean);
-
-        // Per-group power iteration + deflation.
-        for comp in 0..k {
-            power_iteration_deflate(
-                local_cov, d, local_v, local_w, config.n_iters,
-                &mut group_axes[comp * d..(comp + 1) * d],
-                &mut group_eig[comp],
-            );
-        }
-
-        // Per-group sign-fixing.
-        if let Some(prev) = prev_zone_axes.filter(|_| config.sign_fix) {
-            let prev_offset = grp * dk;
-            if prev_offset + dk <= prev.len() {
-                let prev_group_axes = &prev[prev_offset..prev_offset + dk];
-                for j in 0..k {
-                    let new_axis = &mut group_axes[j * d..(j + 1) * d];
-                    let prev_axis = &prev_group_axes[j * d..(j + 1) * d];
-                    let dot = simd::simd_dot_f32(new_axis, prev_axis, d);
-                    if dot < 0.0 {
-                        for x in new_axis.iter_mut() {
-                            *x = -*x;
+            // Per-group sign-fixing.
+            if let Some(prev) = prev_zone_axes.filter(|_| config.sign_fix) {
+                let prev_offset = grp * dk;
+                if prev_offset + dk <= prev.len() {
+                    let prev_group_axes = &prev[prev_offset..prev_offset + dk];
+                    for j in 0..k {
+                        let new_axis = &mut group_axes[j * d..(j + 1) * d];
+                        let prev_axis = &prev_group_axes[j * d..(j + 1) * d];
+                        let dot = simd::simd_dot_f32(new_axis, prev_axis, d);
+                        if dot < 0.0 {
+                            for x in new_axis.iter_mut() {
+                                *x = -*x;
+                            }
                         }
                     }
                 }
             }
-        }
 
-        // Per-group NPC projections.
-        let mean_ref = if config.center { local_mean } else { &ZERO_MEAN[..] };
-        for i in 0..group_n {
-            let row = &group_crowd[i * d..(i + 1) * d];
-            let proj_row = &mut projs[i * k..(i + 1) * k];
-            for j in 0..k {
-                let axis = &group_axes[j * d..(j + 1) * d];
-                proj_row[j] = project_centered(row, axis, mean_ref, d);
+            // Per-group NPC projections.
+            let mean_ref = if config.center {
+                local_mean
+            } else {
+                &ZERO_MEAN[..]
+            };
+            for i in 0..group_n {
+                let row = &group_crowd[i * d..(i + 1) * d];
+                let proj_row = &mut projs[i * k..(i + 1) * k];
+                for j in 0..k {
+                    let axis = &group_axes[j * d..(j + 1) * d];
+                    proj_row[j] = project_centered(row, axis, mean_ref, d);
+                }
             }
-        }
-    });
+        });
 
     // Report: group 0 as representative.
     let g0_sum: f32 = eigenvalues[..k].iter().sum();
@@ -847,7 +864,16 @@ mod tests {
         let mut scratch = ZoneManifoldScratch::new(d, k);
         let cfg = ZoneManifoldConfig::default();
         let report = zone_affective_manifold(
-            &crowd, n, d, k, &mut axes, &mut projs, &mut eigvals, &mut scratch, None, &cfg,
+            &crowd,
+            n,
+            d,
+            k,
+            &mut axes,
+            &mut projs,
+            &mut eigvals,
+            &mut scratch,
+            None,
+            &cfg,
         )
         .unwrap();
         for j in 0..k {
@@ -875,7 +901,16 @@ mod tests {
         let mut scratch = ZoneManifoldScratch::new(d, k);
         let cfg = ZoneManifoldConfig::default();
         let report = zone_affective_manifold(
-            &crowd, n, d, k, &mut axes, &mut projs, &mut eigvals, &mut scratch, None, &cfg,
+            &crowd,
+            n,
+            d,
+            k,
+            &mut axes,
+            &mut projs,
+            &mut eigvals,
+            &mut scratch,
+            None,
+            &cfg,
         )
         .unwrap();
         let axis0 = &report.zone_axes[0..d];
@@ -913,7 +948,16 @@ mod tests {
         let mut scratch = ZoneManifoldScratch::new(d, k);
         let cfg = ZoneManifoldConfig::default();
         let report = zone_affective_manifold(
-            &crowd, n, d, k, &mut axes, &mut projs, &mut eigvals, &mut scratch, None, &cfg,
+            &crowd,
+            n,
+            d,
+            k,
+            &mut axes,
+            &mut projs,
+            &mut eigvals,
+            &mut scratch,
+            None,
+            &cfg,
         )
         .unwrap();
         assert!(
@@ -938,7 +982,16 @@ mod tests {
         let mut scratch = ZoneManifoldScratch::new(d, k);
         let cfg = ZoneManifoldConfig::default();
         zone_affective_manifold(
-            &crowd, n, d, k, &mut axes1, &mut projs1, &mut eigvals1, &mut scratch, None, &cfg,
+            &crowd,
+            n,
+            d,
+            k,
+            &mut axes1,
+            &mut projs1,
+            &mut eigvals1,
+            &mut scratch,
+            None,
+            &cfg,
         )
         .unwrap();
 
@@ -946,8 +999,16 @@ mod tests {
         let mut projs2 = vec![0.0; n * k];
         let mut eigvals2 = vec![0.0; k];
         zone_affective_manifold(
-            &crowd, n, d, k, &mut axes2, &mut projs2, &mut eigvals2, &mut scratch,
-            Some(&axes1), &cfg,
+            &crowd,
+            n,
+            d,
+            k,
+            &mut axes2,
+            &mut projs2,
+            &mut eigvals2,
+            &mut scratch,
+            Some(&axes1),
+            &cfg,
         )
         .unwrap();
 
@@ -971,7 +1032,16 @@ mod tests {
             let mut scratch = ZoneManifoldScratch::new(d, k);
             let cfg = ZoneManifoldConfig::default();
             zone_affective_manifold(
-                &crowd, n, d, k, &mut axes, &mut projs, &mut eigvals, &mut scratch, None, &cfg,
+                &crowd,
+                n,
+                d,
+                k,
+                &mut axes,
+                &mut projs,
+                &mut eigvals,
+                &mut scratch,
+                None,
+                &cfg,
             )
             .unwrap();
             (axes, eigvals)
@@ -1004,7 +1074,16 @@ mod tests {
             let mut scratch = ZoneManifoldScratch::new(d, k);
             let cfg = ZoneManifoldConfig::default();
             zone_affective_manifold(
-                crowd, n, d, k, &mut axes, &mut projs, &mut eigvals, &mut scratch, None, &cfg,
+                crowd,
+                n,
+                d,
+                k,
+                &mut axes,
+                &mut projs,
+                &mut eigvals,
+                &mut scratch,
+                None,
+                &cfg,
             )
             .unwrap();
             axes
@@ -1014,10 +1093,7 @@ mod tests {
         let axes_b = run(&crowd_b);
 
         let cos = simd::simd_dot_f32(&axes_a[..d], &axes_b[..d], d).abs();
-        assert!(
-            cos < 0.3,
-            "mood axes should be > 70° apart, |cos| = {cos}"
-        );
+        assert!(cos < 0.3, "mood axes should be > 70° apart, |cos| = {cos}");
     }
 
     #[allow(clippy::field_reassign_with_default)]
@@ -1049,7 +1125,16 @@ mod tests {
             let mut eigvals = vec![0.0; k];
             let mut scratch = ZoneManifoldScratch::new(d, k);
             zone_affective_manifold(
-                &crowd, n, d, k, &mut axes, &mut projs, &mut eigvals, &mut scratch, None, &cfg,
+                &crowd,
+                n,
+                d,
+                k,
+                &mut axes,
+                &mut projs,
+                &mut eigvals,
+                &mut scratch,
+                None,
+                &cfg,
             )
             .unwrap();
             axes
@@ -1080,14 +1165,32 @@ mod tests {
         let cfg = ZoneManifoldConfig::default();
         assert_eq!(
             zone_affective_manifold(
-                &crowd, 10, 8, 9, &mut axes, &mut projs, &mut eigvals, &mut scratch, None, &cfg,
+                &crowd,
+                10,
+                8,
+                9,
+                &mut axes,
+                &mut projs,
+                &mut eigvals,
+                &mut scratch,
+                None,
+                &cfg,
             )
             .unwrap_err(),
             ZoneManifoldError::InvalidK
         );
         assert_eq!(
             zone_affective_manifold(
-                &crowd, 100, 8, 3, &mut axes, &mut projs, &mut eigvals, &mut scratch, None, &cfg,
+                &crowd,
+                100,
+                8,
+                3,
+                &mut axes,
+                &mut projs,
+                &mut eigvals,
+                &mut scratch,
+                None,
+                &cfg,
             )
             .unwrap_err(),
             ZoneManifoldError::DimMismatch

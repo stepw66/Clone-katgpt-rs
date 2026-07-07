@@ -54,8 +54,7 @@ impl TrajectoryHop {
 // ── Pipeline Result ───────────────────────────────────────────
 
 /// Result of executing the speculative pipeline on a trajectory.
-#[derive(Clone, Debug)]
-#[derive(Default)]
+#[derive(Clone, Debug, Default)]
 pub struct PipelineResult {
     /// All committed observations in trajectory order.
     pub committed: Vec<HopObservation>,
@@ -70,7 +69,6 @@ pub struct PipelineResult {
     /// Whether the pipeline terminated early (final answer committed).
     pub early_terminated: bool,
 }
-
 
 impl PipelineResult {
     /// Effective speculator accuracy: `hits / (hits + misses)`.

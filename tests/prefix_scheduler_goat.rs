@@ -41,18 +41,14 @@ fn goat_g1_single_request_no_selection_bias() {
     let r1: &[f32] = &[0.9, 0.8, 0.7, 0.6, 0.5];
     let out = const_scheduler.schedule(&[r1]);
     assert_eq!(
-        out, vec![5],
+        out,
+        vec![5],
         "constant SPS → no truncation → admit all (LeviathanVerifier sees every position)"
     );
 
     // (b) Cliff SPS curve → truncation, but non-anticipating.
-    let cliff_curve = SpsCurve::from_profile(&[
-        (1, 100.0),
-        (2, 100.0),
-        (3, 100.0),
-        (4, 1.0),
-        (10, 1.0),
-    ]);
+    let cliff_curve =
+        SpsCurve::from_profile(&[(1, 100.0), (2, 100.0), (3, 100.0), (4, 1.0), (10, 1.0)]);
     let cliff_scheduler = HardwareAwarePrefixScheduler::new(cliff_curve);
 
     let short: &[f32] = &[0.6, 0.36, 0.216, 0.1296, 0.07776];
@@ -75,7 +71,8 @@ fn goat_g1_single_request_no_selection_bias() {
 
     println!(
         "🐐 G1 PASS: constant-SPS admit-all = {:?}, cliff-SPS non-anticipating truncation = {:?} (stable across suffix extension)",
-        vec![5usize], out_short
+        vec![5usize],
+        out_short
     );
 }
 
@@ -162,7 +159,9 @@ fn goat_g3_feature_isolation_no_regression() {
     assert_eq!(out.len(), 1);
     assert!(out[0] <= 3);
 
-    println!("🐐 G3 PASS: hardware_aware_scheduler is feature-isolated (no deps), symbols reachable");
+    println!(
+        "🐐 G3 PASS: hardware_aware_scheduler is feature-isolated (no deps), symbols reachable"
+    );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -294,13 +293,7 @@ fn appendix_a_counterexample_explicit() {
     // distribution. Adding more low-probability suffix candidates must not
     // change ℓ*.
 
-    let curve = SpsCurve::from_profile(&[
-        (1, 100.0),
-        (2, 100.0),
-        (3, 100.0),
-        (4, 1.0),
-        (10, 1.0),
-    ]);
+    let curve = SpsCurve::from_profile(&[(1, 100.0), (2, 100.0), (3, 100.0), (4, 1.0), (10, 1.0)]);
     let scheduler = HardwareAwarePrefixScheduler::new(curve);
 
     let base: &[f32] = &[0.6, 0.36, 0.216, 0.1296, 0.07776];

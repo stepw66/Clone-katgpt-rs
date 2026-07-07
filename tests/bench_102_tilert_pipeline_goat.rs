@@ -19,10 +19,10 @@
 use std::hint::black_box;
 use std::time::Instant;
 
+use katgpt_rs::ContiguousWeights;
 use katgpt_rs::speculative::StabilitySnapshot;
 use katgpt_rs::transformer::{ForwardContext, MultiLayerKVCache, TransformerWeights, forward};
 use katgpt_rs::types::{Config, Rng};
-use katgpt_rs::ContiguousWeights;
 
 // ── Helpers ───────────────────────────────────────────────────
 
@@ -235,7 +235,10 @@ mod decode_specialize_proofs {
             let mut ctx = ForwardContext::new(&config);
             let logits = forward_decode_stage(&mut ctx, &weights, &mut cache, 0, 0, &config, stage);
             for (i, (a, b)) in logits.iter().zip(std_vec.iter()).enumerate() {
-                assert!((a - b).abs() < PROOF_6_TOL, "{stage:?} logits[{i}]: {a} vs {b}");
+                assert!(
+                    (a - b).abs() < PROOF_6_TOL,
+                    "{stage:?} logits[{i}]: {a} vs {b}"
+                );
             }
         }
         println!("✅ Proof 6 PASSED: Draft/Verify logits within f32 noise floor of forward()");

@@ -365,7 +365,10 @@ impl RuliologyAbsorbCompress {
 
     /// Whether enough observations have been absorbed to trigger compression.
     pub fn should_compress(&self) -> bool {
-        self.total_absorbed > 0 && self.total_absorbed.is_multiple_of(self.config.check_interval)
+        self.total_absorbed > 0
+            && self
+                .total_absorbed
+                .is_multiple_of(self.config.check_interval)
     }
 
     /// Promote arms with stable positive payoff.

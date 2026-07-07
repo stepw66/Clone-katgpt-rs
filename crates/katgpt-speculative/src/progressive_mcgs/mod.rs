@@ -137,15 +137,16 @@ pub mod uct;
 
 pub use graph::{ExpansionOperator, ProgressiveMcgs};
 pub use operators::{
-    cross_branch_top_n, intra_branch_history, multi_branch_aggregate, DEFAULT_AGG_PER_BRANCH,
-    DEFAULT_CROSS_BRANCH_N, DEFAULT_INTRA_BRANCH_K,
+    DEFAULT_AGG_PER_BRANCH, DEFAULT_CROSS_BRANCH_N, DEFAULT_INTRA_BRANCH_K, cross_branch_top_n,
+    intra_branch_history, multi_branch_aggregate,
 };
 pub use scheduler::{EntropyGatedScheduler, RngLite, SelectMode};
-pub use search::{classify_reward, ProgressiveMcgsSearch, SearchDomain, StepResult};
+pub use search::{ProgressiveMcgsSearch, SearchDomain, StepResult, classify_reward};
 pub use stagnation::{
-    BranchStagnationState, GlobalStagnationState, StagnationGate, StagnationTrigger, StagnationTriggers,
+    BranchStagnationState, GlobalStagnationState, StagnationGate, StagnationTrigger,
+    StagnationTriggers,
 };
-pub use types::{BranchId, EdgeKind, NodeId, ProgressiveMcgsConfig, Reward, MAX_REFS_PER_NODE};
+pub use types::{BranchId, EdgeKind, MAX_REFS_PER_NODE, NodeId, ProgressiveMcgsConfig, Reward};
 pub use uct::{exploration_constant, uct_descend_to_leaf, uct_select_child};
 
 #[cfg(test)]

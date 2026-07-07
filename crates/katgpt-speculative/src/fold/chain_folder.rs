@@ -126,7 +126,10 @@ impl ChainFolder {
         // `debug_assert` keeps the invariant check in test builds while removing
         // the O(n) scan from release hot path.
         debug_assert_eq!(
-            decisions.iter().filter(|d| **d != FoldDecision::Fold).count(),
+            decisions
+                .iter()
+                .filter(|d| **d != FoldDecision::Fold)
+                .count(),
             best_keep,
             "build_decisions invariant: kept count must match best_keep"
         );

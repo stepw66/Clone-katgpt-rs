@@ -45,12 +45,7 @@ mod bench {
     }
 
     /// Time apply_with_scratch_masked over `iterations` calls. Returns ns/call.
-    fn bench_masked_ns(
-        adapter: &GpartAdapter,
-        n: usize,
-        mask: &[bool],
-        iterations: usize,
-    ) -> f64 {
+    fn bench_masked_ns(adapter: &GpartAdapter, n: usize, mask: &[bool], iterations: usize) -> f64 {
         let mut weights = vec![0.0f32; n];
         let mut assignments = vec![0usize; n];
         let mut group_sizes = vec![0usize; adapter.d];
@@ -187,12 +182,7 @@ mod bench {
         let mut w_masked = vec![0.0f32; n];
         let mut assignments = vec![0usize; n];
         let mut group_sizes = vec![0usize; d];
-        adapter.apply_with_scratch_masked(
-            &mut w_masked,
-            &mut assignments,
-            &mut group_sizes,
-            &mask,
-        );
+        adapter.apply_with_scratch_masked(&mut w_masked, &mut assignments, &mut group_sizes, &mask);
 
         let rel = relative_l2(&w_ref, &w_masked);
         assert!(

@@ -167,7 +167,10 @@ mod tests {
         // Rank indices by |coefficient|, descending.
         let mut idx: Vec<usize> = (0..n).collect();
         idx.sort_by(|&a, &b| {
-            x_hat[b].abs().partial_cmp(&x_hat[a].abs()).unwrap_or(std::cmp::Ordering::Equal)
+            x_hat[b]
+                .abs()
+                .partial_cmp(&x_hat[a].abs())
+                .unwrap_or(std::cmp::Ordering::Equal)
         });
 
         let top3: std::collections::HashSet<usize> = idx.iter().take(3).copied().collect();

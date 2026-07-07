@@ -19,8 +19,8 @@
 #![cfg(feature = "sleep_time_anticipation")]
 
 use katgpt_core::sleep_time::{
-    consume, consume_gate, AnticipatedQueryDir, DotPredictabilityScorer, IdentityFunctorOp,
-    SleepTimeAnticipator, SleepTimeScratch,
+    AnticipatedQueryDir, DotPredictabilityScorer, IdentityFunctorOp, SleepTimeAnticipator,
+    SleepTimeScratch, consume, consume_gate,
 };
 use std::sync::atomic::Ordering;
 

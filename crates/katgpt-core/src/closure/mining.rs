@@ -42,8 +42,7 @@
 //! [`MotifMiner::mine_batch`]: katgpt_core::closure::MotifMiner::mine_batch
 
 use crate::closure::{
-    CdgScore, GateResult, Motif, MotifAdmitter, MotifMiner, PrimitiveTransitionGraph,
-    PriScores,
+    CdgScore, GateResult, Motif, MotifAdmitter, MotifMiner, PriScores, PrimitiveTransitionGraph,
 };
 use crate::{compute_cdg, compute_pri};
 
@@ -184,9 +183,7 @@ pub fn fold_cdg_at_sleep_cycle(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::closure::{
-        MotifAdmitter, MotifMiner, OperatorKind, PrimitiveKind, PtgRecorder,
-    };
+    use crate::closure::{MotifAdmitter, MotifMiner, OperatorKind, PrimitiveKind, PtgRecorder};
 
     /// Seed the miner with `count` PTGs that each contain the
     /// Search → Verify → Branch motif for task family `family`.
@@ -216,11 +213,7 @@ mod tests {
         // The Search→Verify→Branch (3-node) motif should be present and
         // pass admission (PRI = 3/3 = 1.0 ≥ 0.1; occurrence_count = 30 ≥ 3;
         // dl_old_bits = 10_000 > 8*3 = 24).
-        let three_node: Vec<&Motif> = report
-            .motifs
-            .iter()
-            .filter(|m| m.node_count == 3)
-            .collect();
+        let three_node: Vec<&Motif> = report.motifs.iter().filter(|m| m.node_count == 3).collect();
         assert!(!three_node.is_empty(), "3-node motif missing");
         assert!(report.admitted_count >= 1, "expected ≥1 admission");
     }
@@ -278,7 +271,10 @@ mod tests {
         let prev = CdgScore::default();
         let next = fold_cdg_at_sleep_cycle(&miner, Some(&prev), 0.8);
         // max_train_depth_seen was 0 (default); test_depth = 7 > 0 ⇒ EMA updates.
-        assert_eq!(next.max_train_depth_seen, 0, "max_train not advanced in one shot");
+        assert_eq!(
+            next.max_train_depth_seen, 0,
+            "max_train not advanced in one shot"
+        );
         assert!(
             (next.ema_success_at_extrapolation - 0.8).abs() < 1e-6,
             "first extrapolation initializes EMA to success_rate"

@@ -530,9 +530,7 @@ mod tests {
     fn assign_rejects_interfering_direction() {
         let mut p: NonInterferenceProjection<4> = NonInterferenceProjection::new(8);
         // First branch: e_0.
-        assert!(p
-            .assign_direction(BranchId::new(0), &e_i::<4>(0))
-            .is_ok());
+        assert!(p.assign_direction(BranchId::new(0), &e_i::<4>(0)).is_ok());
         // Second branch: try to also assign e_0 — interference = 1.0 ≥ 0.1.
         let r = p.assign_direction(BranchId::new(1), &e_i::<4>(0));
         assert_eq!(r.error, Some(AssignError::Interferes));
@@ -548,9 +546,7 @@ mod tests {
         let mut p: NonInterferenceProjection<2> =
             NonInterferenceProjection::with_thresholds(4, 1e-6, 0.5);
         // First: e_0 = (1, 0).
-        assert!(p
-            .assign_direction(BranchId::new(0), &[1.0, 0.0])
-            .is_ok());
+        assert!(p.assign_direction(BranchId::new(0), &[1.0, 0.0]).is_ok());
         // Second: 30-degree rotation (cos 30° ≈ 0.866 → interference 0.866 > 0.5).
         let r = p.assign_direction(BranchId::new(1), &[0.866, 0.5]);
         assert!(!r.is_ok(), "0.866 interference should be rejected");
@@ -569,9 +565,10 @@ mod tests {
     fn orthogonal_standard_basis_has_zero_interference() {
         let mut p: NonInterferenceProjection<4> = NonInterferenceProjection::new(8);
         for i in 0..4 {
-            assert!(p
-                .assign_direction(BranchId::new(i as u32), &e_i::<4>(i))
-                .is_ok());
+            assert!(
+                p.assign_direction(BranchId::new(i as u32), &e_i::<4>(i))
+                    .is_ok()
+            );
         }
         // All pairs of standard basis vectors are orthogonal.
         for i in 0..4u32 {
@@ -593,9 +590,10 @@ mod tests {
     fn is_non_interfering_with_all_holds_for_orthogonal_set() {
         let mut p: NonInterferenceProjection<4> = NonInterferenceProjection::new(8);
         for i in 0..4 {
-            assert!(p
-                .assign_direction(BranchId::new(i as u32), &e_i::<4>(i))
-                .is_ok());
+            assert!(
+                p.assign_direction(BranchId::new(i as u32), &e_i::<4>(i))
+                    .is_ok()
+            );
         }
         for i in 0..4u32 {
             assert!(
@@ -609,13 +607,9 @@ mod tests {
     fn project_returns_dot_component() {
         let mut p: NonInterferenceProjection<2> = NonInterferenceProjection::new(4);
         // dir_0 = (1, 0).
-        assert!(p
-            .assign_direction(BranchId::new(0), &[1.0, 0.0])
-            .is_ok());
+        assert!(p.assign_direction(BranchId::new(0), &[1.0, 0.0]).is_ok());
         // dir_1 = (0, 1).
-        assert!(p
-            .assign_direction(BranchId::new(1), &[0.0, 1.0])
-            .is_ok());
+        assert!(p.assign_direction(BranchId::new(1), &[0.0, 1.0]).is_ok());
 
         // vector (3, 4) projects onto dir_0 as 3, onto dir_1 as 4.
         let v = [3.0f32, 4.0];
@@ -638,9 +632,7 @@ mod tests {
     #[test]
     fn interference_unassigned_branch_is_zero() {
         let mut p: NonInterferenceProjection<2> = NonInterferenceProjection::new(4);
-        assert!(p
-            .assign_direction(BranchId::new(0), &[1.0, 0.0])
-            .is_ok());
+        assert!(p.assign_direction(BranchId::new(0), &[1.0, 0.0]).is_ok());
         // Unassigned branch is treated as orthogonal to everything.
         assert!((p.interference(BranchId::new(0), BranchId::new(1))).abs() < 1e-6);
         assert!((p.interference(BranchId::new(2), BranchId::new(3))).abs() < 1e-6);
@@ -649,9 +641,7 @@ mod tests {
     #[test]
     fn clear_direction_resets_to_unassigned() {
         let mut p: NonInterferenceProjection<2> = NonInterferenceProjection::new(4);
-        assert!(p
-            .assign_direction(BranchId::new(0), &[1.0, 0.0])
-            .is_ok());
+        assert!(p.assign_direction(BranchId::new(0), &[1.0, 0.0]).is_ok());
         assert!(p.direction(BranchId::new(0)).is_some());
         p.clear_direction(BranchId::new(0));
         assert!(p.direction(BranchId::new(0)).is_none());
@@ -672,20 +662,14 @@ mod tests {
         assert_eq!(p.capacity(), 5);
         assert_eq!(p.n_assigned(), 0);
         // Can now assign into the grown region.
-        assert!(p
-            .assign_direction(BranchId::new(4), &[1.0, 0.0])
-            .is_ok());
+        assert!(p.assign_direction(BranchId::new(4), &[1.0, 0.0]).is_ok());
     }
 
     #[test]
     fn assigned_directions_iterator() {
         let mut p: NonInterferenceProjection<4> = NonInterferenceProjection::new(8);
-        assert!(p
-            .assign_direction(BranchId::new(0), &e_i::<4>(0))
-            .is_ok());
-        assert!(p
-            .assign_direction(BranchId::new(2), &e_i::<4>(2))
-            .is_ok());
+        assert!(p.assign_direction(BranchId::new(0), &e_i::<4>(0)).is_ok());
+        assert!(p.assign_direction(BranchId::new(2), &e_i::<4>(2)).is_ok());
         let assigned: Vec<BranchId> = p.assigned_directions().map(|(id, _)| id).collect();
         assert_eq!(assigned, vec![BranchId::new(0), BranchId::new(2)]);
         assert_eq!(p.n_assigned(), 2);
@@ -725,9 +709,10 @@ mod tests {
         let mut p: NonInterferenceProjection<8> = NonInterferenceProjection::new(16);
         // Assign 8 standard basis vectors.
         for i in 0..8usize {
-            assert!(p
-                .assign_direction(BranchId::new(i as u32), &e_i::<8>(i))
-                .is_ok());
+            assert!(
+                p.assign_direction(BranchId::new(i as u32), &e_i::<8>(i))
+                    .is_ok()
+            );
         }
         // Try to assign a uniform vector (interferes equally with all 8).
         let uniform = vec![1.0f32 / 8.0f32.sqrt(); 8];

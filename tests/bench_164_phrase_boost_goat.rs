@@ -330,7 +330,11 @@ fn goat_164_phrase_boost_proof() {
         let path_idx = i % 20;
         let depth = 3;
         let tok = i % PERF_VOCAB;
-        let parents: Vec<usize> = vec![path_idx % PERF_VOCAB, (path_idx + 5) % PERF_VOCAB, (path_idx + 10) % PERF_VOCAB];
+        let parents: Vec<usize> = vec![
+            path_idx % PERF_VOCAB,
+            (path_idx + 5) % PERF_VOCAB,
+            (path_idx + 10) % PERF_VOCAB,
+        ];
         let _ = black_box(base_pruner.relevance(depth, tok, &parents));
     }
     let base_dur = t0.elapsed();
@@ -341,7 +345,11 @@ fn goat_164_phrase_boost_proof() {
     let boost_pruner = PhraseBoostPruner::new(NoScreeningPruner, perf_trie, 5.0);
     // Warmup: prime all 20 parent paths in the active_states cache
     for path_idx in 0..20 {
-        let parents: Vec<usize> = vec![path_idx % PERF_VOCAB, (path_idx + 5) % PERF_VOCAB, (path_idx + 10) % PERF_VOCAB];
+        let parents: Vec<usize> = vec![
+            path_idx % PERF_VOCAB,
+            (path_idx + 5) % PERF_VOCAB,
+            (path_idx + 10) % PERF_VOCAB,
+        ];
         for tok in 0..PERF_VOCAB {
             let _ = black_box(boost_pruner.relevance(3, tok, &parents));
         }
@@ -351,7 +359,11 @@ fn goat_164_phrase_boost_proof() {
         let path_idx = i % 20;
         let depth = 3;
         let tok = i % PERF_VOCAB;
-        let parents: Vec<usize> = vec![path_idx % PERF_VOCAB, (path_idx + 5) % PERF_VOCAB, (path_idx + 10) % PERF_VOCAB];
+        let parents: Vec<usize> = vec![
+            path_idx % PERF_VOCAB,
+            (path_idx + 5) % PERF_VOCAB,
+            (path_idx + 10) % PERF_VOCAB,
+        ];
         let _ = black_box(boost_pruner.relevance(depth, tok, &parents));
     }
     let boost_dur = t1.elapsed();
@@ -373,7 +385,11 @@ fn goat_164_phrase_boost_proof() {
         let depth = 3;
         let tok = i % PERF_VOCAB;
         // Unique path per iteration → cold cache (trie walk every time)
-        let parents: Vec<usize> = vec![i % PERF_VOCAB, (i * 37 + 13) % PERF_VOCAB, (i * 71 + 29) % PERF_VOCAB];
+        let parents: Vec<usize> = vec![
+            i % PERF_VOCAB,
+            (i * 37 + 13) % PERF_VOCAB,
+            (i * 71 + 29) % PERF_VOCAB,
+        ];
         let _ = black_box(boost_cold.relevance(depth, tok, &parents));
     }
     let cold_dur = t2.elapsed();
@@ -391,9 +407,7 @@ fn goat_164_phrase_boost_proof() {
         overhead_us < max_overhead_us,
         "Warm-cache overhead must be <{max_overhead_us}μs/step, got {overhead_us:.3}μs"
     );
-    println!(
-        "  ✅ T5 PASS: warm-cache overhead <1μs/step ({overhead_us:.3}μs)"
-    );
+    println!("  ✅ T5 PASS: warm-cache overhead <1μs/step ({overhead_us:.3}μs)");
 
     // ════════════════════════════════════════════════════════════════
     // Summary

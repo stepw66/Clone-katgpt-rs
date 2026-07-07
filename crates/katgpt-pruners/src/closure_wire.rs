@@ -294,7 +294,10 @@ impl<P: AbsorbCompress> AbsorbCompress for PtgTracedPruner<P> {
     /// Review-gated compression check (Plan 036). Delegates to the inner
     /// pruner — the wrapper adds no opinion of its own on review metrics.
     #[inline]
-    fn should_compress_gated(&self, metrics: Option<&katgpt_core::pruners::review_metrics::ReviewMetrics>) -> bool {
+    fn should_compress_gated(
+        &self,
+        metrics: Option<&katgpt_core::pruners::review_metrics::ReviewMetrics>,
+    ) -> bool {
         self.inner.should_compress_gated(metrics)
     }
 }

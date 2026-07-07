@@ -216,27 +216,42 @@ fn main() {
     for (name, pass) in &g1rv_results {
         println!("   {}: {}", name, if *pass { "PASS ✓" } else { "FAIL ✗" });
     }
-    println!("   Result:                {}", if g1rv_pass { "PASS ✓" } else { "FAIL ✗" });
+    println!(
+        "   Result:                {}",
+        if g1rv_pass { "PASS ✓" } else { "FAIL ✗" }
+    );
     println!();
 
     // G1: cross-chip
     let g1cc_pass = g1_cross_chip();
     println!("── G1 (cross-chip): M5 raw peaks strictly better than M1 ──");
-    println!("   Result:                {}", if g1cc_pass { "PASS ✓" } else { "FAIL ✗" });
+    println!(
+        "   Result:                {}",
+        if g1cc_pass { "PASS ✓" } else { "FAIL ✗" }
+    );
     println!();
 
     // G1: family roundtrip
     let g1fr_pass = g1_family_roundtrip();
     println!("── G1 (family roundtrip): A13-A17 resolve, A11Legacy/A12 reject ──");
-    println!("   Result:                {}", if g1fr_pass { "PASS ✓" } else { "FAIL ✗" });
+    println!(
+        "   Result:                {}",
+        if g1fr_pass { "PASS ✓" } else { "FAIL ✗" }
+    );
     println!();
 
     // G2: perf
     let (g2_pass, estimate_ns) = g2_perf();
     println!("── G2 (perf): ane_estimate latency ──");
     println!("   ane_estimate:          {estimate_ns:.2} ns  (target < 1000 ns / 1 µs)");
-    println!("   Headroom:              {:.1}× under the M1 dispatch floor (230 µs)", 230_000.0 / estimate_ns.max(1.0));
-    println!("   Result:                {}", if g2_pass { "PASS ✓" } else { "FAIL ✗" });
+    println!(
+        "   Headroom:              {:.1}× under the M1 dispatch floor (230 µs)",
+        230_000.0 / estimate_ns.max(1.0)
+    );
+    println!(
+        "   Result:                {}",
+        if g2_pass { "PASS ✓" } else { "FAIL ✗" }
+    );
     println!();
 
     // G2-alloc
@@ -244,7 +259,10 @@ fn main() {
     println!("── G2-alloc: zero-alloc hot path ──");
     println!("   ane_estimate × 1000:   {allocs} allocs");
     println!("   Threshold:             0 allocs");
-    println!("   Result:                {}", if g2a_pass { "PASS ✓" } else { "FAIL ✗" });
+    println!(
+        "   Result:                {}",
+        if g2a_pass { "PASS ✓" } else { "FAIL ✗" }
+    );
     println!();
 
     // G3: no-regression (informational — verified at the command line)
@@ -252,7 +270,9 @@ fn main() {
     println!("   cargo check --features ane_roofline               clean ✓");
     println!("   cargo check --no-default-features                 clean ✓ (informational)");
     println!("   cargo check --all-features                        clean ✓ (informational)");
-    println!("   cargo test -p katgpt-core --lib roofline          10/10 still pass ✓ (informational)");
+    println!(
+        "   cargo test -p katgpt-core --lib roofline          10/10 still pass ✓ (informational)"
+    );
     println!("   Feature is opt-in; default path unchanged.");
     println!("   Result:                PASS ✓ (verified separately)");
     println!();
@@ -269,7 +289,10 @@ fn main() {
     println!("   size_of::<AneCost>():   {cost_size} bytes");
     println!("   size_of::<AneOpShape>(): {op_size} bytes");
     println!("   All Copy:               yes");
-    println!("   Result:                 {}", if g4_pass { "PASS ✓" } else { "FAIL ✗" });
+    println!(
+        "   Result:                 {}",
+        if g4_pass { "PASS ✓" } else { "FAIL ✗" }
+    );
     println!();
 
     // G5/G6: modelless
