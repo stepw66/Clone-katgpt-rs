@@ -271,3 +271,91 @@ fn search_returns_none_for_terminal_root() {
     assert_eq!(result.cache_hits, 0);
     assert_eq!(result.cache_misses, 0);
 }
+
+// ── Phase 2 T2.2 — Determinism re-check (debug-only) ────────────────────
+
+#[test]
+fn verify_determinism_returns_zero_on_deterministic_space() {
+    // Populate the cache by running a search, then audit every (state, action)
+    // pair the search could have visited. On a deterministic space, re-applying
+    // the action must reproduce the cached next-state hash exactly.
+    let space = ToySpace;
+    let root = ToyState { v: 0 };
+    let cache: StateActionCache<f32> = StateActionCache::new();
+    let mut scratch = SearchScratch::default();
+    mcts_search_with_state_action_cache(&space, &root, 50, &cache, &mut scratch);
+
+    // Audit all reachable (state, action) pairs on this 4-step graph.
+    // The graph has states v ∈ {0,1,2,3} and actions {0,1,2} (3 actions when
+    // non-terminal). Provide every non-terminal (state, action) pair.
+    let mut samples: Vec<(ToyState, InferenceAction)> = Vec::new();
+    for v in 0..MAX_V {
+        for &a in &ACTIONS {
+            samples.push((ToyState { v }, a));
+        }
+    }
+
+    #[cfg(debug_assertions)]
+    {
+        let mismatches = cache.verify_determinism(&space, &samples);
+        assert_eq!(
+            mismatches, 0,
+            "deterministic space must have 0 determinism mismatches"
+        );
+    }
+}
+
+#[test]
+fn verify_determinism_skips_uncached_pairs() {
+    // If we audit a (state, action) pair that was never cached, verify_determinism
+    // must skip it (a cache miss is not a determinism violation).
+    let space = ToySpace;
+    let cache: StateActionCache<f32> = StateActionCache::new();
+    // Insert one known transition.
+    let s = ToyState { v: 0 };
+    let a = InferenceAction::new(1, 0);
+    let next = space.apply(&s, a);
+    cache.insert(space.state_hash(&s), a, space.state_hash(&next), 0.5);
+
+    // Audit includes the cached pair PLUS an uncached pair.
+    let samples = vec![
+        (s.clone(), a),
+        (ToyState { v: 2 }, InferenceAction::new(2, 0)), // uncached
+    ];
+
+    #[cfg(debug_assertions)]
+    {
+        let mismatches = cache.verify_determinism(&space, &samples);
+        // 0 mismatches: the cached pair is deterministic, the uncached pair is skipped.
+        assert_eq!(mismatches, 0);
+    }
+}
+
+// ── Phase 2 T2.3 — Cache invalidation semantics (clear / re-populate) ──
+
+#[test]
+fn cache_invalidation_clear_then_lookup_returns_none_then_some() {
+    // Full invalidation lifecycle: populate → verify hit → clear → verify miss
+    // → re-populate → verify hit again.
+    let space = ToySpace;
+    let cache: StateActionCache<f32> = StateActionCache::new();
+    let s = ToyState { v: 1 };
+    let a = InferenceAction::new(1, 0);
+    let next_hash = space.state_hash(&space.apply(&s, a));
+
+    // Populate.
+    cache.insert(space.state_hash(&s), a, next_hash, 0.8);
+    assert!(cache.get(space.state_hash(&s), a).is_some(), "after insert: must hit");
+
+    // Clear.
+    cache.clear();
+    assert!(cache.get(space.state_hash(&s), a).is_none(), "after clear: must miss");
+
+    // Re-populate.
+    cache.insert(space.state_hash(&s), a, next_hash, 0.9);
+    let got = cache
+        .get(space.state_hash(&s), a)
+        .expect("after re-insert: must hit");
+    assert!((got.1 - 0.9).abs() < 1e-6, "re-inserted reward must be the new value");
+    assert_eq!(got.0, next_hash, "re-inserted next-state hash must match");
+}

@@ -1114,6 +1114,14 @@ required-features = ["product_key_memory_episodic"]
 name = "mcts_state_action_cache_basic"
 required-features = ["mcts_state_action_cache"]
 
+# Plan 390 Phase 2 T2.1 — Eq. 1 switching-policy dominance property test.
+# Pure-math: verifies Σ_z min_a ε_a(z) ≤ min_a Σ_z ε_a(z) on a synthetic
+# kernel-error landscape (strict when no single action dominates, tight when
+# one does). Does NOT use the cache or search.
+[[test]]
+name = "mcts_state_action_cache_eq1"
+required-features = ["mcts_state_action_cache"]
+
 # Plan 390 Phase 1 T1.6 — runnable example. Demonstrates a synthetic 3-action
 # space over a 4-step deterministic graph, prints cache hit/miss/best-reward,
 # and re-runs with the SAME cache to show 100% hit rate on the second run.

@@ -78,22 +78,25 @@ Goal: prove the theoretical guarantee (Eq. 1: sum-of-mins ≤ min-of-sums) holds
 
 ### Tasks
 
-- [ ] **T2.1** Implement `tests/mcts_state_action_cache_eq1.rs` — a property test of the switching-policy dominance inequality:
-  - [ ] Construct a synthetic kernel-error landscape: `ε_a(z) = known_function(a, z)` for `a ∈ {0,1,2}` (three actions) and `z` ranging over a discrete grid of 100 states.
-  - [ ] Compute LHS: `Σ_z min_a ε_a(z)` (state-dependent switching policy)
-  - [ ] Compute RHS: `min_a Σ_z ε_a(z)` (best static single action)
-  - [ ] Assert `LHS ≤ RHS` (with a small floating-point epsilon)
-  - [ ] Construct a fixture where the strict inequality holds (`LHS < RHS`) — e.g. action 0 wins in states 0..50, action 1 wins in states 50..100. Proves "interleaving beats any single static kernel".
-  - [ ] Construct a fixture where `LHS == RHS` (one action dominates everywhere — switching provides no benefit). Proves the inequality is tight in the trivial case.
-- [ ] **T2.2** Add debug-mode determinism re-check to `StateActionCache`:
-  - [ ] `#[cfg(debug_assertions)] pub fn verify_determinism<S, A>(&self, space: &A, sample_size: usize) -> usize` — picks `sample_size` random cached entries, re-applies the action, BLAKE3-compares the recomputed next_state to the cached next_state. Returns the number of mismatches.
-  - [ ] Document: in release builds, the caller's DeterministicTransition contract is trusted; this re-check is a debug-only diagnostic.
-  - [ ] Add a unit test that constructs a deterministic action space, populates the cache, then runs `verify_determinism` and asserts 0 mismatches.
-- [ ] **T2.3** Add a unit test for cache invalidation semantics:
-  - [ ] Construct a space, populate the cache
-  - [ ] Verify a known `(state, action)` returns the cached `(next_state, reward)`
-  - [ ] `clear()`, verify the same lookup now returns `None`
-  - [ ] Re-populate, verify it returns again
+- [x] **T2.1** Implement `tests/mcts_state_action_cache_eq1.rs` — a property test of the switching-policy dominance inequality:
+  - [x] Construct a synthetic kernel-error landscape: `ε_a(z) = known_function(a, z)` for `a ∈ {0,1,2}` (three actions) and `z` ranging over a discrete grid of 100 states.
+  - [x] Compute LHS: `Σ_z min_a ε_a(z)` (state-dependent switching policy)
+  - [x] Compute RHS: `min_a Σ_z ε_a(z)` (best static single action)
+  - [x] Assert `LHS ≤ RHS` (with a small floating-point epsilon)
+  - [x] Construct a fixture where the strict inequality holds (`LHS < RHS`) — e.g. action 0 wins in states 0..50, action 1 wins in states 50..100. Proves "interleaving beats any single static kernel".
+  - [x] Construct a fixture where `LHS == RHS` (one action dominates everywhere — switching provides no benefit). Proves the inequality is tight in the trivial case.
+  - **Additional test:** `eq1_switching_picks_different_actions_in_different_regions` verifies the argmin actually switches between regions (structural precondition for the strict inequality).
+  - **Gradient fix:** initial gradients (0.01/z) let the decoy action 2 beat action 0 near the z=50 boundary; reduced to 0.002/z (action 0/1) and 0.001/z (decoy) so the winner stays the winner throughout each region.
+- [x] **T2.2** Add debug-mode determinism re-check to `StateActionCache`:
+  - [x] `#[cfg(debug_assertions)] pub fn verify_determinism<S, A>(&self, space: &A, samples: &[(S, InferenceAction)]) -> usize` — for each `(state, action)` sample, re-applies the action, BLAKE3-compares the recomputed next_state hash to the cached next_state hash. Returns the number of mismatches.
+  - [x] Document: in release builds, the caller's DeterministicTransition contract is trusted; this re-check is a debug-only diagnostic.
+  - [x] Add a unit test that constructs a deterministic action space, populates the cache, then runs `verify_determinism` and asserts 0 mismatches.
+  - **Signature deviation:** the plan proposed `verify_determinism(space, sample_size)` that picks random cached entries. But the cache stores `(state_hash, action) → (next_hash, reward)` — it does NOT store the original state, and BLAKE3 is not invertible, so you cannot re-apply an action to a hash. Corrected to `verify_determinism(space, samples: &[(S, InferenceAction)])` where the caller supplies the concrete states to audit (the method computes the hash internally to look up the cache entry). Added a second test (`verify_determinism_skips_uncached_pairs`) for the skip-on-miss path.
+- [x] **T2.3** Add a unit test for cache invalidation semantics:
+  - [x] Construct a space, populate the cache
+  - [x] Verify a known `(state, action)` returns the cached `(next_state, reward)`
+  - [x] `clear()`, verify the same lookup now returns `None`
+  - [x] Re-populate, verify it returns again
 
 ### Phase 2 Exit Criteria
 

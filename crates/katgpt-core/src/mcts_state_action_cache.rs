@@ -227,6 +227,50 @@ impl<R: Copy> StateActionCache<R> {
         // papaya's `clear` takes a guard; `pin()` acquires one implicitly.
         self.inner.pin().clear();
     }
+
+    /// Debug-only determinism re-check. For each `(state, action)` pair in
+    /// `samples`, re-applies the action via `space`, hashes the fresh
+    /// next-state, and BLAKE3-compares it to the cached next-state hash.
+    /// Returns the number of mismatches (0 = contract holds for all samples).
+    ///
+    /// **This is a diagnostic, not a correctness backstop.** In release builds
+    /// the caller's DeterministicTransition contract is trusted (see module
+    /// docs). Use this in tests / debug builds to catch contract violations
+    /// early (e.g. a bug in `apply` that introduces hidden RNG or thread-local
+    /// state).
+    ///
+    /// The cache stores `(state_hash, action) → (next_hash, reward)`, so it
+    /// cannot re-apply actions on its own (BLAKE3 is not invertible). The
+    /// caller supplies the concrete states to audit — typically the set of
+    /// states the search visited, which the caller already has in hand.
+    ///
+    /// Skips pairs whose `(state_hash, action)` is not in the cache (a miss
+    /// is not a determinism violation, just an un-cached pair).
+    #[cfg(debug_assertions)]
+    pub fn verify_determinism<S, A>(
+        &self,
+        space: &A,
+        samples: &[(S, InferenceAction)],
+    ) -> usize
+    where
+        S: Clone,
+        A: InferenceActionSpace<S>,
+    {
+        let mut mismatches = 0usize;
+        for (state, action) in samples {
+            let state_hash = space.state_hash(state);
+            let Some((cached_next_hash, _cached_reward)) = self.get(state_hash, *action) else {
+                // Not in cache — skip (a miss is not a violation).
+                continue;
+            };
+            let fresh_next = space.apply(state, *action);
+            let fresh_next_hash = space.state_hash(&fresh_next);
+            if fresh_next_hash != cached_next_hash {
+                mismatches += 1;
+            }
+        }
+        mismatches
+    }
 }
 
 impl<R: Copy> Default for StateActionCache<R> {
