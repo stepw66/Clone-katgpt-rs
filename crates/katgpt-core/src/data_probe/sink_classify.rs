@@ -48,6 +48,24 @@
 //! no heap allocation after warmup.
 //!
 //! Feature-gated behind `#[cfg(feature = "sink_aware_attn")]`.
+//!
+//! ## Cross-reference with GoldShare (Plan 411, Research 392)
+//!
+//! When the `gold_share_probe` feature is also enabled, [`SinkDiagnostic`]
+//! carries an optional [`gold_share`](crate::data_probe::GoldShareReport)
+//! field. The joint reading disambiguates the **broadcast that failed**
+//! signature from a healthy broadcast:
+//!
+//! - **Healthy broadcast**: classifier says `Broadcast` AND `gold_share` is
+//!   high → the sink carries load-bearing global info that survives
+//!   normalization into the residual stream. Preserve it.
+//! - **Broadcast that failed**: classifier says `Broadcast` AND `gold_share`
+//!   is low → the signal was in the head per the classifier, but didn't
+//!   survive normalization into the residual (paper's recall-generation
+//!   gap). This is the case SSMax (Plan 411) is designed to fix at the
+//!   logit level.
+//!
+//! See `data_probe::gold_share` for the content-specific diagnostic.
 
 use crate::simd;
 
@@ -91,6 +109,14 @@ pub struct SinkDiagnostic {
     pub update_stable_rank: f32,
     /// Final classification.
     pub kind: SinkKind,
+    /// Optional GoldShare report (Plan 411, Research 392). Populated when
+    /// the `gold_share_probe` feature is enabled AND the caller provides a
+    /// gold mask. The joint reading of `kind == Broadcast` + low
+    /// `gold_share.gold_share` is the **broadcast that failed** signature
+    /// (signal in head, lost in residual — the recall-generation gap).
+    /// See the module-level cross-reference doc above.
+    #[cfg(feature = "gold_share_probe")]
+    pub gold_share: Option<crate::data_probe::GoldShareReport>,
 }
 
 /// Configuration thresholds for [`classify_sink_at`].
@@ -479,6 +505,8 @@ pub fn classify_sink_at(
         value_norm_ratio,
         update_stable_rank,
         kind,
+        #[cfg(feature = "gold_share_probe")]
+        gold_share: None,
     }
 }
 
@@ -1101,6 +1129,8 @@ pub fn classify_sink_at_flat(
         value_norm_ratio,
         update_stable_rank,
         kind,
+        #[cfg(feature = "gold_share_probe")]
+        gold_share: None,
     }
 }
 

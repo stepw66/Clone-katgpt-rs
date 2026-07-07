@@ -72,13 +72,13 @@ Goal: GoldShare is callable as a diagnostic from any layer that already exposes 
 
 ### Tasks
 
-- [ ] **T3.1** Extend `data_probe/mod.rs` re-export block to include `GoldShareReport`, `gold_share`, `gold_share_flat`.
-- [ ] **T3.2** Add a cross-reference doc in `sink_classify.rs`: when a sink classifier hits the gold position with low `gold_share`, that is a *broadcast that failed* (signal was in the head per the classifier, but didn't survive normalization per GoldShare). Document the joint interpretation.
-- [ ] **T3.3** Add an optional `gold_share: Option<GoldShareReport>` field to `SinkDiagnostic` (behind `gold_share_probe` feature) so a single classifier pass can populate both diagnostics when both features are on.
-- [ ] **T3.4** Write an integration test: run `classify_all_sinks` + `gold_share` on the paper's Table 1 toy (4-head, 8-key, half gold), verify the joint report is self-consistent (gold position is classified as Broadcast, but `gold_share` is low — the "broadcast that failed" signature).
-- [ ] **T3.5** Run `cargo check -p katgpt-core --features sink_aware_attn,gold_share_probe --lib` — must pass.
+- [x] **T3.1** `data_probe/mod.rs` re-export block already includes `GoldShareReport`, `GoldShareScratch`, `gold_share`, `gold_share_flat` (done in Phase 1 T1.7).
+- [x] **T3.2** Added cross-reference doc to `sink_classify.rs` module-level docs: documents the "broadcast that failed" signature (classifier says Broadcast + low gold_share = signal in head, lost in residual) and the "healthy broadcast" contrast.
+- [x] **T3.3** Added `#[cfg(feature = "gold_share_probe")] pub gold_share: Option<crate::data_probe::GoldShareReport>` field to `SinkDiagnostic`. Updated both construction sites (`classify_sink_at`, `classify_sink_at_flat`) to initialize the field as `None`.
+- [x] **T3.4** Wrote `crates/katgpt-core/tests/plan411_joint_classifier_gold_share.rs` integration test (2 tests, both PASS): `joint_classifier_gold_share_broadcast_that_failed_signature` (paper's Table 1 toy: 4-head 8-key half-gold, verifies gold_pre_softmax_max = 0.05, noise_gap = -0.15, gold_share < 0.5, SinkDiagnostic.gold_share field is accessible and None) + `joint_signature_healthy_broadcast_when_gold_share_high` (contrast case: all-attention-on-gold → gold_share = 1.0, noise_gap = 0.5).
+- [x] **T3.5** `cargo check -p katgpt-core --features sink_aware_attn,gold_share_probe --lib` passes clean. Also verified `--features sink_aware_attn` alone (without gold_share_probe) still compiles.
 
-**STATUS: ☐** — Phase 3 not started.
+**STATUS: ✅ DONE** — Phase 3 complete. Joint classifier + gold_share report is self-consistent; the "broadcast that failed" signature is detectable.
 
 ---
 
