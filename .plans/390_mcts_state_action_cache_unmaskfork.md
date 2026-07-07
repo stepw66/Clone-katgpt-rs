@@ -29,35 +29,39 @@ Goal: a compiling, tested, feature-gated module that implements the state-action
 
 ### Tasks
 
-- [ ] **T1.1** Add feature flag `mcts_state_action_cache = ["dep:papaya", "dep:blake3"]` to `katgpt-rs/crates/katgpt-core/Cargo.toml` features section (after the existing `mcts`-adjacent entries; both deps already optional in this crate). Verify `papaya` and `blake3` are still listed as `optional = true` in `[dependencies]`.
-- [ ] **T1.2** Add `#[cfg(feature = "mcts_state_action_cache")] pub mod mcts_state_action_cache;` to `katgpt-rs/crates/katgpt-core/src/lib.rs` (alphabetical, near `mcts`).
-- [ ] **T1.3** Implement `katgpt-rs/crates/katgpt-core/src/mcts_state_action_cache.rs`:
-  - [ ] `InferenceAction { config_id: u16, strategy_id: u8 }` — `#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]`, `#[repr(C)]` (3 bytes + 1 pad). Opaque action handle; caller-defined semantics (which solver kind / temperature / shard id / remasking strategy).
-  - [ ] `StateActionKey { state: blake3::Hash, action: InferenceAction }` — `#[derive(Clone, Copy, PartialEq, Eq, Hash)]`. The cache key.
-  - [ ] `StateActionCache<R: Copy>` — wraps `papaya::HashMap<StateActionKey, (blake3::Hash, R), BuildHasherDefault<FxHasher>>` (use ahash or std BuildHasherDefault; papaya is already a dep).
-    - `pub fn new() -> Self` — default capacity
-    - `pub fn with_capacity(cap: usize) -> Self`
-    - `pub fn get(&self, state: blake3::Hash, action: InferenceAction) -> Option<(blake3::Hash, R)>` — O(1) lock-free pin
-    - `pub fn insert(&self, state: blake3::Hash, action: InferenceAction, next: blake3::Hash, reward: R)` — inserts (caller MUST have observed the transition deterministically)
-    - `pub fn len(&self) -> usize` and `pub fn is_empty(&self) -> bool`
-    - `pub fn clear(&self)` — for per-search-scope reset
-  - [ ] Document the **`DeterministicTransition` contract** loudly in doc comments: the caller guarantees that for any fixed `(state, action)`, applying `action` to `state` yields a unique `(next_state, reward)`. Violations cause stale cache hits. Debug-mode re-check (re-apply and BLAKE3-compare) is in Phase 2.
-- [ ] **T1.4** Define the generic search trait surface that takes an opaque action axis:
-  - [ ] `pub trait InferenceActionSpace<S> { fn actions_at(&self, state: &S) -> &[InferenceAction]; fn apply(&self, state: &S, action: InferenceAction) -> S; fn reward(&self, state: &S) -> Option<f32>; fn is_terminal(&self, state: &S) -> bool; fn state_hash(&self, state: &S) -> blake3::Hash; }` — the caller implements this; the search is agnostic to action semantics.
-  - [ ] `pub fn mcts_search_with_state_action_cache<S, A>(space: &A, root: &S, budget: usize, cache: &StateActionCache<f32>) -> S::Action` where `A: InferenceActionSpace<S>` — uses UCB1 selection (constant `UCB1_C = 1.414` from existing `mcts.rs`), consults the cache at Expand time, inserts after rollout. Falls back to standard rollout on cache miss.
-  - [ ] Note: this is a *standalone* search — it does NOT reuse the existing `mcts_search` from `mcts.rs` (which is parameterized over `GameState` game actions, not opaque inference actions). Keep the algorithm body small and self-contained; the existing `MCTSNode` struct design (index-based parent/child links, `ArrayVec` for children/unexpanded) is the template.
-- [ ] **T1.5** Write unit tests in `tests/mcts_state_action_cache_basic.rs`:
-  - [ ] Cache insert/get round-trip (deterministic — same key returns same value)
-  - [ ] Same state + different action → different cache entries (the key novelty vs state-only)
-  - [ ] Different state + same action → different cache entries
-  - [ ] Cache `clear()` empties all entries
-  - [ ] `InferenceAction` is 4 bytes (`size_of::<InferenceAction>() == 4`) — verify with `assert_eq!`
-  - [ ] Determinism contract documented in a doc-test
-- [ ] **T1.6** Write a small example `examples/mcts_state_action_cache_basic.rs`:
-  - [ ] Synthetic 3-action space (3 "inference configurations") over a 4-step deterministic transition graph
-  - [ ] Run search with cache, print: total rollouts, cache hits, cache misses, best reward
-  - [ ] Re-run search with the SAME cache populated — show 100% cache hit rate on the second run (zero rollouts)
-- [ ] **T1.7** Document the module in `mcts_state_action_cache.rs` with: paper reference (arXiv:2602.04344), the DeterministicTransition contract, the Eq. 1 motivation, and the "vs state-only transposition" distinction.
+- [x] **T1.1** Add feature flag `mcts_state_action_cache = ["dep:papaya", "dep:blake3"]` to `katgpt-rs/crates/katgpt-core/Cargo.toml` features section (after the existing `mcts`-adjacent entries; both deps already optional in this crate). Verify `papaya` and `blake3` are still listed as `optional = true` in `[dependencies]`.
+  - **Deviation:** `blake3` is non-optional in this crate (line 16), so `dep:blake3` is invalid. Used `mcts_state_action_cache = ["dep:papaya"]` instead. Documented inline in Cargo.toml.
+- [x] **T1.2** Add `#[cfg(feature = "mcts_state_action_cache")] pub mod mcts_state_action_cache;` to `katgpt-rs/crates/katgpt-core/src/lib.rs` (alphabetical, near `mcts`).
+- [x] **T1.3** Implement `katgpt-rs/crates/katgpt-core/src/mcts_state_action_cache.rs`:
+  - [x] `InferenceAction { config_id: u16, strategy_id: u8 }` — `#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]`, `#[repr(C)]` (3 bytes + 1 pad). Opaque action handle; caller-defined semantics (which solver kind / temperature / shard id / remasking strategy).
+  - [x] `StateActionKey { state: blake3::Hash, action: InferenceAction }` — `#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]`. The cache key.
+  - [x] `StateActionCache<R: Copy>` — wraps `papaya::HashMap<StateActionKey, (blake3::Hash, R)>` (papaya default `RandomState`; no custom hasher to keep it simple).
+    - [x] `pub fn new() -> Self` — default capacity
+    - [x] `pub fn with_capacity(cap: usize) -> Self`
+    - [x] `pub fn get(&self, state: blake3::Hash, action: InferenceAction) -> Option<(blake3::Hash, R)>` — O(1) lock-free pin
+    - [x] `pub fn insert(&self, state: blake3::Hash, action: InferenceAction, next: blake3::Hash, reward: R)` — inserts (caller MUST have observed the transition deterministically)
+    - [x] `pub fn len(&self) -> usize` and `pub fn is_empty(&self) -> bool`
+    - [x] `pub fn clear(&self)` — for per-search-scope reset (via `pin().clear()`)
+  - [x] Document the **`DeterministicTransition` contract** loudly in doc comments: the caller guarantees that for any fixed `(state, action)`, applying `action` to `state` yields a unique `(next_state, reward)`. Violations cause stale cache hits. Debug-mode re-check (re-apply and BLAKE3-compare) is in Phase 2.
+  - **Deviation:** used papaya's default `RandomState` instead of `BuildHasherDefault<DefaultHasher>` — simpler construction (`HashMap::new()` / `HashMap::with_capacity()`), and the key already carries 256 bits of BLAKE3 entropy so the hasher choice is not performance-critical.
+- [x] **T1.4** Define the generic search trait surface that takes an opaque action axis:
+  - [x] `pub trait InferenceActionSpace<S> { fn actions_at(&self, state: &S) -> &[InferenceAction]; fn apply(&self, state: &S, action: InferenceAction) -> S; fn reward(&self, state: &S) -> Option<f32>; fn is_terminal(&self, state: &S) -> bool; fn state_hash(&self, state: &S) -> blake3::Hash; }` — the caller implements this; the search is agnostic to action semantics.
+  - [x] `pub fn mcts_search_with_state_action_cache<S, A>(space: &A, root: &S, budget: usize, cache: &StateActionCache<f32>, scratch: &mut SearchScratch) -> SearchResult` where `A: InferenceActionSpace<S>, S: Clone` — uses UCB1 selection (constant `UCB1_C = 1.414` from existing `mcts.rs`), consults the cache at Expand time, inserts after rollout. Falls back to standard rollout on cache miss.
+  - [x] Note: this is a *standalone* search — it does NOT reuse the existing `mcts_search` from `mcts.rs` (which is parameterized over `GameState` game actions, not opaque inference actions). Keep the algorithm body small and self-contained; the existing `MCTSNode` struct design (index-based parent/child links, `ArrayVec` for children/unexpanded) is the template.
+  - **Deviation:** (1) Added `S: Clone` bound (the search re-walks the selection path each iteration, re-applying actions inline, which needs one `root.clone()` per iteration — cheap for fixed-size/refcounted states). (2) Added a `scratch: &mut SearchScratch` parameter for the Phase 3 G4 zero-alloc hot-path gate (pre-allocated tree node vec + path stack). (3) Returns `SearchResult { best_action, cache_hits, cache_misses, tree_size }` instead of bare `S::Action` — richer return for gate reporting.
+- [x] **T1.5** Write unit tests in `tests/mcts_state_action_cache_basic.rs`:
+  - [x] Cache insert/get round-trip (deterministic — same key returns same value)
+  - [x] Same state + different action → different cache entries (the key novelty vs state-only)
+  - [x] Different state + same action → different cache entries
+  - [x] Cache `clear()` empties all entries
+  - [x] `InferenceAction` is 4 bytes (`size_of::<InferenceAction>() == 4`) — verify with `assert_eq!`
+  - [x] Determinism contract documented in the module doc-comments (determinism-across-runs test in the test binary)
+  - **Additional tests beyond the plan:** search-finds-action-on-fresh-cache, second-search-hits-cache, search-is-deterministic-across-runs, search-returns-none-for-terminal-root (4 search-integration tests). Pure-cache tests also duplicated inline in the module under `#[cfg(test)]`.
+- [x] **T1.6** Write a small example `examples/mcts_state_action_cache_basic.rs`:
+  - [x] Synthetic 3-action space (3 "inference configurations") over a 4-step deterministic transition graph
+  - [x] Run search with cache, print: total rollouts, cache hits, cache misses, best reward
+  - [x] Re-run search with the SAME cache populated — show 100% cache hit rate on the second run (zero rollouts). **Verified:** Run 1 = 53.3% hit rate (intra-search reuse), Run 2 = 100% hit rate (graph fully cached).
+- [x] **T1.7** Document the module in `mcts_state_action_cache.rs` with: paper reference (arXiv:2602.04344), the DeterministicTransition contract, the Eq. 1 motivation, and the "vs state-only transposition" distinction.
 
 ### Phase 1 Exit Criteria
 

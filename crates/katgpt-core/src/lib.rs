@@ -108,6 +108,16 @@ pub use katgpt_types::leaky_core;
 /// (`BanditRolloutPolicy` depends on `crate::pruners::bandit::BanditStats`)
 /// stays in the consuming crate.
 pub mod mcts;
+/// State-Action Pair Cache for MCTS over Deterministic Inference Actions
+/// (Plan 390, Research 386, arXiv:2602.04344 UnMaskFork).
+///
+/// Opt-in extension to [`mcts`]: a standalone search over an opaque
+/// `InferenceActionSpace` (no `GameState` / game-IP coupling), backed by a
+/// lock-free `StateActionCache` keyed on `(blake3::Hash, InferenceAction)`.
+/// Gated behind `mcts_state_action_cache` so the always-on `mcts` substrate
+/// stays dep-free.
+#[cfg(feature = "mcts_state_action_cache")]
+pub mod mcts_state_action_cache;
 // Shared freeze/thaw disk I/O for `repr(C)` knowledge structs.
 // Extracted from `katgpt-pruners::freeze` (Plan 388 Phase 1) to break the
 // katgpt-pruners ↔ katgpt-speculative cycle. Pure stdlib (Path + fs + mem).
