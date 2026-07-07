@@ -47,9 +47,9 @@ Applies to ReLU, sigmoid, tanh, Leaky-ReLU, ELU — *any* coordinate-wise monoto
 
 | Mechanism | Why it breaks the homotopy argument | Construction |
 |---|---|---|
-| **Non-monotonic activation** (GELU, Swish, Mish, `|x|`) | Local extremum creates a fold line; the straight-line homotopy crosses it, allowing mirror-image points to collide | Coordinate-wise `|x|` applied iteratively (Fig 4 / 9) |
-| **ResNet skip connection** | `|x| = x + 2·ReLU(−x)` — a single residual block realizes the fold map with only monotonic ReLU + skip | Theorem 5.2 |
-| **Attention (pure transformer)** | Two-token attention with distinct positional encodings gives attention weight `α₂₁ = sigmoid(q₂(k₁−k₂))`; explicit scalar weights produce a smoothed V-shape near the origin | Theorem 5.3, Fig 5b |
+| **Non-monotonic activation** (GELU, Swish, Mish, `abs`) | Local extremum creates a fold line; the straight-line homotopy crosses it, allowing mirror-image points to collide | Coordinate-wise `abs(x)` applied iteratively (Fig 4 / 9) |
+| **ResNet skip connection** | A single residual block realizes the fold map with only monotonic ReLU + skip: `abs(x) = x + 2·ReLU(−x)` | Theorem 5.2 |
+| **Attention (pure transformer)** | Two-token attention with distinct positional encodings yields a sigmoid attention weight; explicit scalar weights produce a smoothed V-shape near the origin | Theorem 5.3, Fig 5b |
 | **Width ≥ d+1** | Hanin–Sellke universal approximation kicks in | Theorem D.1 |
 
 ### 1.4 Algorithm 1 — link detection for point clouds (§H)
