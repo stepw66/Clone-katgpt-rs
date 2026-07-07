@@ -269,6 +269,7 @@ impl AdmmScratch {
 /// User-friendly entry point: asserts cochain shapes then delegates to
 /// [`sheaf_admm_step_into`]. All three cochains must be rank-0, `dim == d_v`,
 /// `n_cells == cx.n_vertices()`.
+#[allow(clippy::too_many_arguments)]  // ADMM solver — all 10 params are genuinely needed
 #[inline]
 pub fn sheaf_admm_step(
     cx: &CellComplex,
@@ -348,6 +349,7 @@ pub fn sheaf_admm_step(
 ///    `z ← z − η (L_F z)`. Writes `z^{k+1}`.
 /// 3. **u-update** — `u^{k+1} = u^k + x^{k+1} − z^{k+1}`. Reads the post-step
 ///    `x^{k+1}` and `z^{k+1}`.
+#[allow(clippy::too_many_arguments)]  // ADMM solver — all 10 params are genuinely needed
 #[inline]
 pub fn sheaf_admm_step_into(
     cx: &CellComplex,
@@ -432,34 +434,34 @@ fn soft_threshold(x: f32, t: f32) -> f32 {
     }
 }
 
-/// Compute the sheaf Laplacian applied to `z` into `scratch.sheaf_laplacian_z`.
-///
-/// `L_F z` accumulates, per edge `e = (v_tail, v_head)`:
-/// ```text
-/// disagreement = F_{i→e} z_{v_tail} − F_{j→e} z_{v_head}    (d_e-dim)
-/// (L_F z)_{v_tail} += F_{i→e}^T · disagreement              (d_v-dim)
-/// (L_F z)_{v_head} −= F_{j→e}^T · disagreement              (d_v-dim)
-/// ```
-///
-/// Edges are iterated via `cx.boundary_entries(0).chunks_exact(2)`, matching
-/// the `(v_tail, e, −1), (v_head, e, +1)` pair ordering of `grid_2d` /
-/// `from_edges`. The current edge's `d_e`-dim disagreement is staged in the
-/// first `d_e` slots of `scratch.edge_projections` (compute-then-accumulate to
-/// keep the `F^T · d` accumulation cache-friendly).
-///
-/// # Identity fast path (Plan 407 T2.4 — Phase 2)
-///
-/// When `maps.is_identity`, the restriction maps are `[I_{d_e}; 0]` for every
-/// edge/endpoint. The sheaf Laplacian then reduces bit-for-bit to the graph
-/// Laplacian on the first `d_e` dims (dims `d_e..d_v` have zero disagreement).
-/// We skip the explicit `F^T F` matvec (which wastes ~`d_v` scalar multiplies
-/// per row, most against zero entries) and directly compute the graph-Laplacian
-/// difference per edge on the first `d_e` dims. This is the G4 latency
-/// optimization — turns a ~`O(|E|·d_e·d_v)` general matvec into a lean
-/// `O(|E|·d_e)` identity matvec with no wasted multiplies-against-zero. On
-/// regular grids, the identity path further delegates to
-/// [`sheaf_laplacian_identity_grid_into`] (the 5-point-stencil variant) for
-/// single-write cache-friendly output.
+// Compute the sheaf Laplacian applied to `z` into `scratch.sheaf_laplacian_z`.
+//
+// `L_F z` accumulates, per edge `e = (v_tail, v_head)`:
+// ```text
+// disagreement = F_{i→e} z_{v_tail} − F_{j→e} z_{v_head}    (d_e-dim)
+// (L_F z)_{v_tail} += F_{i→e}^T · disagreement              (d_v-dim)
+// (L_F z)_{v_head} −= F_{j→e}^T · disagreement              (d_v-dim)
+// ```
+//
+// Edges are iterated via `cx.boundary_entries(0).chunks_exact(2)`, matching
+// the `(v_tail, e, −1), (v_head, e, +1)` pair ordering of `grid_2d` /
+// `from_edges`. The current edge's `d_e`-dim disagreement is staged in the
+// first `d_e` slots of `scratch.edge_projections` (compute-then-accumulate to
+// keep the `F^T · d` accumulation cache-friendly).
+//
+// # Identity fast path (Plan 407 T2.4 — Phase 2)
+//
+// When `maps.is_identity`, the restriction maps are `[I_{d_e}; 0]` for every
+// edge/endpoint. The sheaf Laplacian then reduces bit-for-bit to the graph
+// Laplacian on the first `d_e` dims (dims `d_e..d_v` have zero disagreement).
+// We skip the explicit `F^T F` matvec (which wastes ~`d_v` scalar multiplies
+// per row, most against zero entries) and directly compute the graph-Laplacian
+// difference per edge on the first `d_e` dims. This is the G4 latency
+// optimization — turns a ~`O(|E|·d_e·d_v)` general matvec into a lean
+// `O(|E|·d_e)` identity matvec with no wasted multiplies-against-zero. On
+// regular grids, the identity path further delegates to
+// [`sheaf_laplacian_identity_grid_into`] (the 5-point-stencil variant) for
+// single-write cache-friendly output.
 
 /// 5-point-stencil sheaf Laplacian for identity maps on a regular `w×h` grid.
 ///
@@ -751,9 +753,9 @@ mod tests {
             (rho * (z_pre[2] - u_pre[2]) - 1.0) / (2.0 + rho), // v1d0
             (rho * (z_pre[3] - u_pre[3]) - (-1.0)) / (2.0 + rho), // v1d1
         ];
-        for k in 0..4 {
-            assert!((primal_x.data[k] - expected[k]).abs() < 1e-5,
-                "x_update v{k}: got {}, expected {}", primal_x.data[k], expected[k]);
+        for (k, (&got, &exp)) in primal_x.data.iter().zip(&expected).enumerate() {
+            assert!((got - exp).abs() < 1e-5,
+                "x_update v{k}: got {got}, expected {exp}");
         }
     }
 
@@ -795,9 +797,9 @@ mod tests {
         ];
         // Sanity: xq0 should indeed be zeroed.
         assert!((expected[0]).abs() < 1e-6, "v0d0 should be soft-zeroed, got {}", expected[0]);
-        for k in 0..4 {
-            assert!((primal_x.data[k] - expected[k]).abs() < 1e-5,
-                "x_update_l1 v{k}: got {}, expected {}", primal_x.data[k], expected[k]);
+        for (k, (&got, &exp)) in primal_x.data.iter().zip(&expected).enumerate() {
+            assert!((got - exp).abs() < 1e-5,
+                "x_update_l1 v{k}: got {got}, expected {exp}");
         }
     }
 
@@ -828,9 +830,9 @@ mod tests {
 
         // Post-step x and z are exactly what the u-update read; the invariant
         // is bit-exact because both sides compute the same expression.
-        for k in 0..total {
-            let du = dual_u.data[k] - u_before[k];
-            let dxz = primal_x.data[k] - consensus_z.data[k];
+        for (k, ((&u_post, &u_pre), (&x_val, &z_val))) in dual_u.data.iter().zip(&u_before).zip(primal_x.data.iter().zip(&consensus_z.data)).enumerate() {
+            let du = u_post - u_pre;
+            let dxz = x_val - z_val;
             assert!((du - dxz).abs() < 1e-6,
                 "u invariant k={k}: du={du}, x-z={dxz}");
         }

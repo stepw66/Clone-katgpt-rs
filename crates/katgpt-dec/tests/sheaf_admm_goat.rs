@@ -278,8 +278,8 @@ fn g2_dual_conservation_bit_exact() {
     // Bit-exact comparison: u_diff == xz_diff.
     let mut all_match = true;
     let mut first_mismatch = None;
-    for k in 0..total {
-        let u_diff = dual_u.data[k] - u_before[k];
+    for (k, (&u_post, &u_pre)) in dual_u.data.iter().zip(&u_before).enumerate() {
+        let u_diff = u_post - u_pre;
         let xz_diff = primal_x.data[k] - consensus_z.data[k];
         if u_diff.to_bits() != xz_diff.to_bits() {
             all_match = false;
@@ -373,13 +373,13 @@ fn g3_heterogeneous_restriction_compresses() {
         // Random x ∈ R^{d_v}, normalized to unit norm.
         let mut x = [0.0f32; 8];
         let mut norm_sq = 0.0f32;
-        for d in 0..d_v {
-            x[d] = rng.next_f32();
-            norm_sq += x[d] * x[d];
+        for x_val in x.iter_mut().take(d_v) {
+            *x_val = rng.next_f32();
+            norm_sq += *x_val * *x_val;
         }
         let norm = norm_sq.sqrt().max(1e-30);
-        for d in 0..d_v {
-            x[d] /= norm;
+        for x_val in x.iter_mut().take(d_v) {
+            *x_val /= norm;
         }
 
         // For each edge endpoint, compute F x and check ‖F x‖ ≤ ‖x‖ = 1.

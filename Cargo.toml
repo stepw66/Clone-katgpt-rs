@@ -327,6 +327,7 @@ datrie_vocab = ["katgpt-tokenizer/datrie_vocab"]  # Alias: forwards to katgpt-to
 event_log = ["katgpt-pruners/event_log"]  # Event-sourced game traces with fork-and-diff (Plan 124, Research 081)
 vpd_em_distill = ["sdar_gate", "bandit", "katgpt-pruners/vpd_em_distill"]  # VPD EM-style co-evolutionary distillation (Plan 120, Research 080)
 progressive_mcgs = ["katgpt-speculative/progressive_mcgs"]  # Progressive MCGS — graph search with reference edges + entropy-gated schedule (Plan 272, Research 239). Phase 12 (2026-07-04): module moved to katgpt-speculative; root forwards.
+fastrand = ["katgpt-speculative/fastrand"]  # Forwards katgpt-speculative's fastrand feature so consumers of progressive_mcgs get the `impl RngLite for fastrand::Rng` adapter. The module itself is zero-dep; this feature only activates the optional adapter.
 proof_sketch_evolution = ["bandit", "katgpt-pruners/proof_sketch_evolution"]  # Proof Sketch Evolution — Elo-rated population + global goal cache (Plan 128, Research 088)
 opus_selection = ["bandit", "katgpt-pruners/opus_selection"]  # OPUS Boltzmann + redundancy selection — CountSketch + softmax sampling (Plan 129, Research 089)
 epiplexity_scoring = ["katgpt-pruners/epiplexity_scoring"]  # Epiplexity structural information scoring — loss-curve area above final (Plan 130, Research 090)
