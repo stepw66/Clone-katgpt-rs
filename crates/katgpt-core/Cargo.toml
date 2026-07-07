@@ -1101,6 +1101,25 @@ name = "bench_408_pkm_goat"
 harness = false
 required-features = ["product_key_memory"]
 
+# Plan 410 — Linking-Fold GOAT gate (G1 correctness smoke + G2 detector cold-path
+# ≤50ms @ n=2×1000,d=8 + G2 fold hot-path ≤50ns @ d=8 / ≤500ns @ d=64 + G5
+# determinism). G4 (alloc-free hot path) is the separate CountingAllocator test
+# binary `linking_fold_alloc_check`; G3 is the feature-flag build matrix.
+# std::time::Instant + harness = false (mirrors bench_377 / bench_408).
+[[bench]]
+name = "bench_410_linking_fold_goat"
+harness = false
+required-features = ["linking_fold"]
+
+# Plan 410 T4.2 — G4 zero-alloc hot-path gate for fold_projection_into +
+# fold_gelu_into. Separate test binary (matches the karc_alloc_check /
+# sleep_time_alloc_check pattern) so the CountingAllocator doesn't pick up
+# allocations from parallel GOAT tests. The detector is cold-path and NOT
+# gated here (it may allocate).
+[[test]]
+name = "linking_fold_alloc_check"
+required-features = ["linking_fold"]
+
 # Plan 408 Phase 5 — PKM δ-rule write gate (F1 fusion: PKM × δ-Mem).
 # G4 fusion gate: PkmEpisodicStore (N slots, √N scoring) vs DeltaMemoryState
 # (rank r) at equal write budget on a synthetic associative recall task.

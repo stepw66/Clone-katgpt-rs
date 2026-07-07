@@ -4,18 +4,19 @@
 **Research:** [katgpt-rs/.research/391_Low_Dimensional_Topology_Linking_Number.md](../.research/391_Low_Dimensional_Topology_Linking_Number.md)
 **Source paper:** [arXiv:2606.31856](https://arxiv.org/abs/2606.31856) — Ren & Lim, *Low-dimensional topology of deep neural networks*, ICML 2026 (PMLR 306)
 **Target:** `katgpt-rs/crates/katgpt-core/src/linking_fold.rs` (new module) + Cargo feature `linking_fold`
-**Status:** Active — Phase 1 ✅, Phase 2 ✅, Phase 3 ✅, Phase 4 partial (G1/G3/G5 verified, G2/G4 deferred), Phase 5 in-progress (this commit).
+**Status:** Active — Phase 1 ✅, Phase 2 ✅, Phase 3 ✅, Phase 4 ✅ (G2 detector FAILS original budget — see Issue 050), Phase 5 ✅.
 
-**GOAT gate summary (verified 2026-07-07):**
-| Gate | Status |
-|---|---|
-| G1 (correctness) | ✅ PASS — 16/16 unit tests (Hopf link = ±1, unlinked = 0, fold unlinks, 6 degenerate-input cases) |
-| G3 (no-regression) | ✅ PASS — `cargo check -p katgpt-core --features linking_fold --lib` clean |
-| G5 (determinism) | ✅ PASS — `verdict_deterministic_across_runs` + `fold_abs_deterministic_bit_identical` tests |
-| G2 (perf) | ⚠️ DEFERRED — bench binary `bench_410_linking_fold_goat` not yet created |
-| G4 (alloc-free hot path) | ⚠️ DEFERRED — alloc-check test `linking_fold_alloc_check` not yet created |
+**GOAT gate summary (verified 2026-07-07, bench + alloc test run):**
+| Gate | Status | Evidence |
+|---|---|---|
+| G1 (correctness) | ✅ PASS | 16/16 unit tests + bench G1 smoke (Hopf = −1, unlinked = 0, fold unlinks) |
+| G2 fold hot-path | ✅ PASS | 12.5 ns @ D=8 (Abs), 16.1 ns @ D=8 (Gelu), 16.8 ns @ D=64 (Abs), 16.9 ns @ D=64 (Gelu) — all under 50 ns / 500 ns budgets |
+| G2 detector cold-path | ❌ FAIL original (50 ms @ n=2×1000); ⚠️ PASS recalibrated (500 ms @ n=2×200, audit cadence) | 407 ms measured @ n=2×200; minutes extrapolated @ n=2×1000. See [Issue 050](../.issues/050_linking_fold_detector_cold_path_perf.md) |
+| G3 (no-regression) | ✅ PASS | `cargo check --features linking_fold` clean |
+| G4 (alloc-free hot path) | ✅ PASS | `linking_fold_alloc_check`: 0 allocs / 1000 calls × 4 (Abs/Gelu × D=8/D=64) |
+| G5 (determinism) | ✅ PASS | bit-identical detector (link ×3) + fold (×100) |
 
-**Promotion decision (T4.4):** NOT MADE. `linking_fold` stays **opt-in** until G2+G4 are run and pass. Promotion is blocked, not denied — the G1/G3/G5 evidence is sufficient to ship opt-in but insufficient to default-on (per AGENTS.md Feature Flag Discipline, all five gates must pass for promotion).
+**Promotion decision (T4.4):** **BLOCKED.** `linking_fold` stays **opt-in**. The fold (hot-path) passes all gates, but the detector fails its original G2 budget. Per AGENTS.md Feature Flag Discipline, silent goalpost-moving (50 ms → 500 ms) to make the gate “pass” is not honest — the budget revision requires an explicit decision tracked in [Issue 050](../.issues/050_linking_fold_detector_cold_path_perf.md) (Options A/B/C). The fold passing alone is insufficient because both primitives ship under one feature flag.
 
 ---
 
@@ -107,16 +108,16 @@ Goal: the modelless unlinking correction. Hot-path; zero-alloc.
 
 ## Phase 4 — GOAT gate (benchmarks + tests)
 
-**STATUS: PARTIAL (2026-07-07) — G1/G3/G5 verified by running the tests; G2/G4 deferred.**
+**STATUS: COMPLETE (2026-07-07) — all gates run. G2 detector FAILS original budget; promotion BLOCKED per Issue 050.**
 
-The G1/G3/G5 evidence below was gathered by actually running `cargo test` and `cargo check` (see header table). G2 (perf) and G4 (alloc-free hot path) require dedicated binaries that have not yet been created; they are filed as follow-up tasks, not silently skipped.
+All five gates have been measured. The fold (hot-path) passes everything; the detector (cold-path) fails its original 50 ms @ n=2×1000 budget but passes a recalibrated 500 ms @ n=2×200 audit-cadence budget. Promotion to `default` is blocked until Issue 050 (budget recalibration vs optimization vs feature split) is resolved.
 
 ### Tasks
 
-- [x] **T4.1** G1/G5 verification via the in-tree unit tests (16/16 PASS: Hopf link detected as ±1, unlinked circles = 0, fold unlinks, 6 degenerate-input cases, determinism bit-identical). G2 perf bench `bench_410_linking_fold_goat` — **deferred** to a follow-up commit.
-- [-] **T4.2** Alloc-check test `linking_fold_alloc_check` (G4) — **deferred**. The fold's zero-alloc property is structurally obvious (in-place `&mut [f32]` write, `#[inline]`, no Vec/String in the hot path) but not yet CountingAllocator-verified.
-- [x] **T4.3** Gates run so far: G1 ✅, G3 ✅ (`cargo check --features linking_fold` clean), G5 ✅. G2/G4 pending T4.1/T4.2 follow-up.
-- [-] **T4.4** **BLOCKED** on G2+G4. `linking_fold` stays opt-in until those gates pass. Do NOT promote to `default` on G1/G3/G5 alone.
+- [x] **T4.1** Bench `bench_410_linking_fold_goat` created and run. G1 smoke ✅, G2 fold hot-path ✅ (12–17 ns), G2 detector cold-path **407 ms @ n=2×200** (FAILS original 50 ms @ n=2×1000; the brute-force implementation is O(β²) and the original budget underestimated β). G5 determinism ✅. The bench reports both the original and a recalibrated audit-cadence budget transparently. See [Issue 050](../.issues/050_linking_fold_detector_cold_path_perf.md) for the budget-revision decision.
+- [x] **T4.2** Alloc test `linking_fold_alloc_check` created and run. G4 ✅ — `fold_projection_into` and `fold_gelu_into` both 0 allocs / 1000 calls at D=8 and D=64 (CountingAllocator). Detector is cold-path and explicitly NOT gated.
+- [x] **T4.3** All five gates run; verdicts recorded in the header table above and in the bench output.
+- [-] **T4.4** **BLOCKED.** The fold passes all gates, but the detector fails its original G2 budget. Per AGENTS.md Feature Flag Discipline, silent goalpost-moving is not honest — the budget revision requires an explicit decision. [Issue 050](../.issues/050_linking_fold_detector_cold_path_perf.md) tracks the three resolution options (A: accept recalibrated budget, B: optimize detector, C: split the feature). `linking_fold` stays **opt-in** until one is chosen.
 
 ---
 
@@ -135,4 +136,9 @@ The G1/G3/G5 evidence below was gathered by actually running `cargo test` and `c
 
 Shipped `linking_detector` (Algorithm 1: PCA-3D + ε-kNN + cycle basis + Gauss integral) + `fold_projection_into` / `fold_gelu_into` (coordinate-wise `|x−c|` unlinking correction, paper §5 / Eq. 1) behind feature flag `linking_fold` in `katgpt-rs/crates/katgpt-core/src/linking_fold.rs`. Pure modelless (closed-form PCA + brute-force k-NN + Gauss quadrature + abs-fold; no training, no GD).
 
-**GOAT gate status (honest accounting, 2026-07-07):** G1 ✅ (16/16 tests PASS — Hopf link = ±1, unlinked = 0, fold unlinks, 6 degenerate cases), G3 ✅ (`cargo check --features linking_fold` clean), G5 ✅ (bit-identical determinism tests). **G2 (perf bench) and G4 (alloc-free hot-path test) DEFERRED** — their binaries (`bench_410_linking_fold_goat`, `linking_fold_alloc_check`) have not yet been created. **Promotion to `default`: BLOCKED** until G2+G4 pass. Ships opt-in.
+**GOAT gate status (honest accounting, 2026-07-07, all gates run):**
+- **Fold (hot-path) — all gates PASS:** G1 ✅, G2 ✅ (12–17 ns/call at D=8/D=64), G4 ✅ (0 allocs/1000 calls × 4), G5 ✅ (bit-identical).
+- **Detector (cold-path) — G2 FAILS original budget:** 407 ms @ n=2×200 vs planned 50 ms @ n=2×1000. Passes a recalibrated 500 ms audit-cadence budget, but silent goalpost-moving is not honest.
+- **G3 ✅** (`cargo check --features linking_fold` clean).
+
+**Promotion to `default`: BLOCKED** — see [Issue 050](../.issues/050_linking_fold_detector_cold_path_perf.md) (Options A/B/C: accept recalibrated budget / optimize detector / split the feature). `linking_fold` ships **opt-in**. The fold is GOAT-worthy on its own; the detector needs either an explicit budget-acceptance decision or optimization before the bundled feature can go default-on.
