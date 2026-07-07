@@ -33,12 +33,32 @@
 //!    integer. The first non-zero integral is the witness.
 //! 5. If all pairs integrate to 0 → not linked.
 //!
-//! # Cold-path
+//! # Cold-path + audit-cadence contract (Issue 050, resolved 2026-07-07)
 //!
 //! The detector is O(n²) brute-force k-NN + O(k·n) cycle-basis extraction
-//! + O(β_X · β_Y · L² · N_sub²) Gauss integral. On n ≈ 2×1000 clouds this
-//! is a few milliseconds — fine for audit cadence (every N ticks), too
-//! slow for per-tick. The fold is the hot path.
+//! + O(β_X · β_Y · L² · N_sub²) Gauss integral. The dominant term is the
+//! Gauss pair loop: `β` (cycle rank ≈ E − V + C) grows ~linearly with `n`
+//! for `k = 8`, so the pair count is quadratic-ish in `n`.
+//!
+//! ## Measured scale
+//!
+//! | n (per cloud) | d | median latency |
+//! |---|---|---|
+//! | 80  | 3 | ~25 ms (lib-test scale) |
+//! | 200 | 8 | **~407 ms** (bench G2, audit-cadence budget 500 ms ✅) |
+//! | 1000 | 8 | minutes (extrapolated — **do not call without subsampling**) |
+//!
+//! ## Cadence contract — audit only, never per-tick
+//!
+//! This function is explicitly **audit-cadence**: call it at most once per
+//! session / sleep-cycle / map-region transition, never per NPC tick. The
+//! hot-path unlinking correction is [`fold_projection_into`](super::fold),
+//! not this detector. Calling this on n > 500 clouds without subsampling
+//! will block for tens of seconds to minutes.
+//!
+//! If a consumer needs n > 500, subsample first (random or farthest-point)
+//! to ≤ 200 per cloud, or wait for the Issue 050 Option B optimization
+//! (batch early-exit on bbox separation + short-cycle pruning) to land.
 
 use std::collections::VecDeque;
 

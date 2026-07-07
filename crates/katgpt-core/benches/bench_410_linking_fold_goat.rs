@@ -17,9 +17,14 @@
 //!   pass per axis on the Hopf link → `link = 0`. Mirrors the three headline
 //!   unit tests but at the bench's larger n=1000 scale (vs n=80 in the lib
 //!   tests), confirming the detector scales.
-//! - **G2 detector cold-path**: `detect_linking` on n = 2×1000 point clouds
-//!   at d = 8 (HLA scale), median of 11 runs. Target: ≤ 50 ms. Audit-cadence
-//!   budget, not per-tick.
+//! - **G2 detector cold-path**: `detect_linking` on n = 2×200 point clouds
+//!   at d = 8 (HLA scale), median of 11 runs. **Target: ≤ 500 ms**
+//!   (audit-cadence budget, Issue 050 Option A, resolved 2026-07-07).
+//!   The original plan budgeted 50 ms @ n = 2×1000; the brute-force
+//!   implementation is O(β²) and that target is unreachable without
+//!   algorithmic work (tracked as the Option B follow-up). The detector
+//!   is explicitly audit-cadence (run once per session / sleep-cycle),
+//!   not per-tick — see the `linking_detector.rs` module doc.
 //! - **G2 fold hot-path**: `fold_projection_into` and `fold_gelu_into` median
 //!   latency at d = 8 (HLA tick budget) and d = 64 (shard scale). Targets:
 //!   ≤ 50 ns/call at d = 8, ≤ 500 ns/call at d = 64.
@@ -56,33 +61,37 @@ const D_HLA: usize = 8;
 /// Shard-scale ambient dimension (NeuronShard style_weights).
 const D_SHARD: usize = 64;
 /// Per-cloud point count for the G2 detector cold-path gate.
-/// NOTE: the original plan budgeted n=2×1000 at ≤50ms, but the brute-force
+///
+/// The original plan budgeted n=2×1000 at ≤50ms, but the brute-force
 /// implementation's cost is O(β_X · β_Y · L² · N_sub²) where β (cycle rank)
 /// grows ~linearly with n for a k=8 graph — at n=1000, β≈3000/cloud and the
-/// full β_X×β_Y Gauss sweep takes minutes. This bench uses n=200 per cloud
-/// (β≈400/cloud), which lands the cold-path detector in the ~100ms range —
-/// realistic for an audit-cadence diagnostic. The honest G2 verdict below
-/// reports the measured latency against a recalibrated budget. See the plan's
-/// Phase 4 notes for the budget-revision rationale.
+/// full β_X×β_Y Gauss sweep takes minutes. n=200 per cloud (β≈400/cloud)
+/// lands the cold-path detector at ~407ms, which fits the audit-cadence
+/// budget of 500ms (Issue 050 Option A, resolved 2026-07-07). The detector
+/// is explicitly audit-cadence (once per session / sleep-cycle); see the
+/// `linking_detector.rs` module doc for the n-scaling guidance.
 const N_DETECTOR: usize = 200;
 /// Fold latency iterations (matches bench_377's ITERS).
 const FOLD_ITERS: usize = 10_000;
 /// Detector latency iterations — cold path, so fewer runs (each is expensive).
 const DETECTOR_ITERS: usize = 11;
-const DETECTOR_BUDGET_MS: f64 = 50.0;
-/// Recalibrated audit-cadence budget. The original plan budgeted 50ms at
-/// n=2×1000, but the brute-force implementation is O(β_X · β_Y · L² · N_sub²)
-/// where β (cycle rank) grows ~linearly with n for a k=8 graph. Measured cost:
+/// **Audit-cadence budget** (Issue 050 Option A, resolved 2026-07-07). The
+/// detector is explicitly audit-cadence (run once per session / sleep-cycle,
+/// not per-tick) — see `linking_detector.rs` module doc. A 500ms budget at
+/// n=2×200 is the fit-for-purpose target for that cadence. Measured cost:
 ///   n=2×80  (lib tests):   ~25 ms
-///   n=2×200 (this bench):  ~410 ms
-///   n=2×1000 (plan target): minutes (extrapolated)
-/// The detector is explicitly **audit-cadence** (run once per session or
-/// sleep-cycle, not per-tick) — see `linking_detector.rs` module doc. A 500ms
-/// budget at n=2×200 is the honest fit-for-purpose target for that cadence.
-/// The original 50ms budget is reported alongside as a reference; the detector
-/// does NOT meet it, and an optimization issue should be filed before any
-/// promotion that relies on the tighter budget.
+///   n=2×200 (this bench):  ~407 ms ✅ (this budget)
+///   n=2×1000 (plan target): minutes (extrapolated — do not call without subsampling)
+///
+/// The `DETECTOR_ORIG_BUDGET_MS` below is reported alongside as historical
+/// context only — the detector does NOT meet it, and reaching it requires
+/// the Option B optimization (batch early-exit + cycle pruning).
 const DETECTOR_AUDIT_BUDGET_MS: f64 = 500.0;
+/// Historical original-plan budget (50 ms @ n=2×1000). Reported for context;
+/// the detector does NOT pass this and the target is unreachable without
+/// algorithmic work. Kept here so the bench verdict output is honest about
+/// the gap between original intent and measured reality.
+const DETECTOR_ORIG_BUDGET_MS: f64 = 50.0;
 const FOLD_HLA_BUDGET_NS: f64 = 50.0;
 const FOLD_SHARD_BUDGET_NS: f64 = 500.0;
 
@@ -149,11 +158,11 @@ fn main() {
     println!("  VERDICT");
     println!("──────────────────────────────────────────────────────────────────");
     println!("  G1 correctness smoke:         {}  (Hopf=±1, unlinked=0, fold unlinks)", verdict(g1));
-    println!("  G2 detector cold-path:        {}  ({:.2} ms; orig budget {:.0} ms {}, audit budget {:.0} ms {} @ n=2×{}, d={})",
-             verdict(g2_detector.pass_audit), g2_detector.ms, DETECTOR_BUDGET_MS,
-             verdict(g2_detector.ms <= DETECTOR_BUDGET_MS),
+    println!("  G2 detector cold-path:        {}  ({:.2} ms; audit budget {:.0} ms {} @ n=2×{}, d={}; orig budget {:.0} ms {} — historical, unreachable w/o Option B)",
+             verdict(g2_detector.pass_audit), g2_detector.ms,
              DETECTOR_AUDIT_BUDGET_MS, verdict(g2_detector.pass_audit),
-             N_DETECTOR, D_HLA);
+             N_DETECTOR, D_HLA,
+             DETECTOR_ORIG_BUDGET_MS, verdict(g2_detector.ms <= DETECTOR_ORIG_BUDGET_MS));
     println!("  G2 fold hot-path (Abs, D={}):  {}  ({:.2} ns ≤ {:.0} ns)",
              D_HLA, verdict(g2_fold_hla_abs.pass), g2_fold_hla_abs.ns, FOLD_HLA_BUDGET_NS);
     println!("  G2 fold hot-path (Gelu, D={}): {}  ({:.2} ns ≤ {:.0} ns)",
@@ -220,9 +229,10 @@ struct DetectorResult {
 fn gate_g2_detector_cold_path() -> DetectorResult {
     println!("\n── G2: detector cold-path (n=2×{}, d={}, {} runs, median) ──",
              N_DETECTOR, D_HLA, DETECTOR_ITERS);
-    println!("   (audit-cadence: orig plan budget {:.0}ms @ n=2×1000 was unrealistic —", DETECTOR_BUDGET_MS);
-    println!("    brute-force O(β²) cost. Recalibrated to {:.0}ms @ n=2×{} for audit use.)",
-             DETECTOR_AUDIT_BUDGET_MS, N_DETECTOR);
+    println!("   audit-cadence budget: {:.0}ms @ n=2×{}, d={}",
+             DETECTOR_AUDIT_BUDGET_MS, N_DETECTOR, D_HLA);
+    println!("   (orig plan budget {:.0}ms @ n=2×1000 was unreachable; the detector is O(β²).)",
+             DETECTOR_ORIG_BUDGET_MS);
     let (x, y) = thickened_hopf_link_d(N_DETECTOR, 0.05, D_HLA);
     let cfg = LinkingDetectorConfig::default();
 
