@@ -4,7 +4,7 @@
 **Research:** [katgpt-rs/.research/388_jacobian_lens_single_layer_concept_readout.md](../.research/388_jacobian_lens_single_layer_concept_readout.md)
 **Source paper:** [transformer-circuits.pub/2026/workspace](https://transformer-circuits.pub/2026/workspace/index.html) — Gurnee, Sofroniew, Lindsey et al., "Verbalizable Representations Form a Global Workspace in Language Models" (Anthropic, 2026-07-06)
 **Target:** `riir-ai/crates/riir-poc/` (defend-wrong PoC crate per research skill §3.6)
-**Status:** Active — Phase 1 (PoC scaffolding)
+**Status:** Active — Phase 1 COMPLETE; Phase 2 (latency bench) next.
 
 ---
 
@@ -71,15 +71,31 @@ Minimal skeleton that imports both primitives and runs one trial of each strateg
 
 ### Tasks
 
-- [ ] **T1.1** Add new module `riir-ai/crates/riir-poc/src/jlens_poc.rs` exposing:
+- [x] **T1.1** Add new module `riir-ai/crates/riir-poc/src/jlens_poc.rs` exposing:
   - `LinearFaithfulConsumer { w: Vec<Vec<f32>> }` — implements the consumer as a closure `Fn(&[f32], &mut [f32])` so `jacobian_svd_at_into` can call it.
   - `SigmoidFaithfulConsumer { w: Vec<Vec<f32>> }` — same, with per-output sigmoid.
   - `GroundTruthVerdict` enum (`Faithful | Unfaithful`) computed by construction (known row-space membership for regime 1) or by `FaithfulnessProbe` (regimes 2 and 3).
   - `PrefilterVerdict` enum (`Accept | Reject`) computed by the Jacobian-SVD projection.
   - `run_trial(consumer, x, memory, k, rho, scratch, probe, rng) -> TrialResult` — runs all three strategies on one trial and returns per-strategy latency + verdict.
-- [ ] **T1.2** Wire the module into `riir-ai/crates/riir-poc/src/lib.rs` with `pub mod jlens_poc;`.
-- [ ] **T1.3** Add a `#[test]` in `jlens_poc.rs` that runs one trial of each strategy on a linear-faithful consumer with `n=8, m=8, rank=4`, target memory in the row-space. Assert: Strategy A says Faithful, Strategy B says Accept, latencies are in expected ranges (A ≥ 10 µs, B ≤ 2 µs on this small case).
-- [ ] **T1.4** Isolated build check: `CARGO_TARGET_DIR=/tmp/plan409_p1 cargo check -p riir-poc --features faithfulness_probe` (the FaithfulnessProbe feature must be enabled). Clean up `/tmp/plan409_p1` when done per AGENTS.md.
+- [x] **T1.2** Wire the module into `riir-ai/crates/riir-poc/src/lib.rs` with `pub mod jlens_poc;`.
+- [x] **T1.3** Add a `#[test]` in `jlens_poc.rs` that runs one trial of each strategy on a linear-faithful consumer with `n=8, m=8, rank=4`, target memory in the row-space. Assert: Strategy A says Faithful, Strategy B says Accept, latencies are in expected ranges (A ≥ 10 µs, B ≤ 2 µs on this small case).
+- [x] **T1.4** Isolated build check: `CARGO_TARGET_DIR=/tmp/plan409_p1 cargo check -p riir-poc --features faithfulness_probe` (the FaithfulnessProbe feature must be enabled). Clean up `/tmp/plan409_p1` when done per AGENTS.md.
+
+### Phase 1 results
+
+**All 5 tests pass.** Phase 1 surfaced three findings that adjust Phase 3's design:
+
+1. **Gram-Schmidt bug fixed.** `make_memory_orthogonal_to_rowspace` was over-subtracting (used `dot * row` instead of `(dot / ‖row‖²) * row` since rows are scaled by singular values). Fixed; the orthogonal memory now genuinely projects to ~0 onto the top-k right singular vectors.
+
+2. **KEY FINDING — nullspace memories are Faithful per the probe, NOT Unfaithful.** A memory in the nullspace of W produces `W·mem = 0` at the current point, but the probe's shuffle/corrupt interventions break the nullspace structure (shuffling moves components into the rowspace), so the consumer reacts and the probe says Faithful. The pre-filter correctly says Reject (projection ~0), which is a **false negative** vs the probe. This is exactly the risk Research 388 §2.5 Fusion A flagged. The test `phase1_finding_nullspace_memory_is_faithful_per_probe` records this.
+
+3. **Implication: the pre-filter and the probe measure DIFFERENT things.** The pre-filter asks "is this direction in the local principal subspace?" (representational); the probe asks "does perturbing this memory change behavior?" (causal). For any consumer that READS its memory, the probe considers almost every non-degenerate memory Faithful. Genuinely Unfaithful verdicts require a consumer that structurally ignores the memory (the new `ConstantConsumer`). This narrows Fusion A's value proposition: the pre-filter's speedup only materializes on the `ConstantConsumer` class (structurally ignored memories), not on nullspace-of-active-consumer memories.
+
+4. **Latency via the generic bridge path is ~890 µs** (allocations per Jacobian column eval). Phase 2's criterion bench must use the native `eval_into` path to measure the true ~455 ns hot-path cost. The `run_trial` bridge is for correctness, not perf.
+
+5. **Degenerate-case handling added.** `prefilter_verdict` now rejects when all top-k singular values are negligible (zero Jacobian → constant consumer), so the `ConstantConsumer` case is correctly rejected.
+
+These findings do NOT refute Fusion A — they sharpen it. The pre-filter is useful for the `ConstantConsumer` class (structurally ignored memories, where the probe wastes ~1 ms to return Unfaithful). Phase 3's quality bench must include a regime that produces a meaningful fraction of such memories to quantify the speedup. The nullspace-of-active-consumer regime produces false negatives and should NOT be counted as a speedup win.
 
 **Phase 1 unblocks Phase 2** by confirming the two public primitives compose. If composition fails (e.g. `FaithfulnessProbe::faithfulness_profile` signature mismatch, or `jacobian_svd_at_into` requires a specific closure shape the consumer cannot provide), Phase 1 surfaces it before any bench harness is written.
 
