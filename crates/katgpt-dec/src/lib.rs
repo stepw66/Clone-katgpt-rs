@@ -118,7 +118,8 @@ pub use bom_heat_kernel::{
 // the Phase 2 GOAT gate G1–G6 passes).
 #[cfg(feature = "sheaf_admm")]
 pub use sheaf_admm::{
-    AdmmScratch, LocalObjective, SheafMaps, sheaf_admm_step, sheaf_admm_step_into,
+    AdmmScratch, LocalObjective, SheafMaps,
+    sheaf_admm_step, sheaf_admm_step_cg_into, sheaf_admm_step_into, sheaf_admm_step_soft_into,
 };
 
 pub use types::{CellComplex, CoboundaryIndex, CochainField, MAX_RANK};

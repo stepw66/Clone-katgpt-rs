@@ -78,8 +78,14 @@ use crate::types::{CellComplex, CochainField};
 ///
 /// `is_identity` marks maps constructed via [`SheafMaps::identity`] (or a
 /// selector that happens to pick dims `0..d_e` in order). The flag is reserved
-/// for the Phase 2 identity fast path; Phase 1 ignores it and always runs the
-/// general explicit-maps matvec.
+/// for the identity fast path (5-point grid stencil or edge-list difference).
+///
+/// `is_selector` (Plan 407 T3.2) marks per-edge selector maps built via
+/// [`SheafMaps::selector_per_edge`] / [`SheafMaps::selector_per_edge_topk`].
+/// When `true`, the compact row-selection indices live in `selector_indices`
+/// and `maps` is empty (no dense matrix is materialized — the gather-scatter
+/// fast path uses `selector_indices` directly, `O(d_e)` per edge instead of
+/// `O(d_e·d_v)` dense matvec).
 #[derive(Clone, Debug)]
 pub struct SheafMaps {
     /// Edge stalk dimension (≤ `d_v`).
@@ -87,9 +93,21 @@ pub struct SheafMaps {
     /// Vertex stalk dimension.
     pub d_v: usize,
     /// Flat map storage: `n_edges * 2 * d_e * d_v` row-major floats.
+    /// Empty when `is_selector` (compact indices in `selector_indices`).
     pub maps: Vec<f32>,
     /// `true` iff every map equals `[I_{d_e}; 0]` (identity block). Fast-path hint.
     pub is_identity: bool,
+    /// `true` iff maps are compact per-edge selector (row-selection) maps. When
+    /// `true`, `maps` is empty and `selector_indices` holds the compact indices;
+    /// the laplacian fast path uses gather-scatter (`O(d_e)` per edge).
+    pub is_selector: bool,
+    /// Compact selector indices: `n_edges * 2 * d_e` entries (u16). For edge
+    /// `e`, endpoint `p`, row `r`: `selector_indices[(e*2 + p) * d_e + r]` is the
+    /// vertex dim that row `r` selects. Empty when `!is_selector`.
+    ///
+    /// u16 supports `d_v ≤ 65535` — well beyond any practical vertex stalk
+    /// (HLA=8, shards=64).
+    pub selector_indices: Vec<u16>,
     /// Number of edges covered (= `cx.n_edges()` at construction).
     pub n_edges: usize,
 }
@@ -129,6 +147,8 @@ impl SheafMaps {
             d_v,
             maps,
             is_identity: true,
+            is_selector: false,
+            selector_indices: Vec::new(),
             n_edges,
         }
     }
@@ -176,14 +196,172 @@ impl SheafMaps {
             d_v,
             maps,
             is_identity,
+            is_selector: false,
+            selector_indices: Vec::new(),
             n_edges,
         }
     }
 
+    /// Per-edge selector restriction maps (Plan 407 T3.2 — Issue 396).
+    ///
+    /// `dim_indices_per_edge[e]` selects the `d_e` dims for edge `e` (applied
+    /// to **both** endpoints — per-endpoint asymmetry is deferred). Each edge
+    /// can select a **different** dim subset, enabling per-edge-type
+    /// heterogeneous consensus (spatial edges select 5 dims, faction edges
+    /// select 3, etc. — Research 314 §1.3).
+    ///
+    /// # Storage
+    ///
+    /// Maps are stored in **compact selector form** (`selector_indices`), not
+    /// dense — `maps` is empty. The laplacian fast path does gather-scatter in
+    /// `O(d_e)` per edge (vs `O(d_e·d_v)` for dense matvec). This is the
+    /// server-scale (K>1000) latency win.
+    ///
+    /// # Uniform `d_e` constraint
+    ///
+    /// All per-edge slices MUST have the same length `d_e` (the `AdmmScratch`
+    /// layout requires a uniform edge stalk dim). For heterogeneous effective
+    /// `d_e` (e.g. spatial=5, faction=3), pad shorter selectors to `d_e_max`
+    /// with any valid dim index — the caller's conviction-vector weighting
+    /// handles the effective dim reduction (the conviction vector, not the map
+    /// row count, is the G8 load-bearing mechanism).
+    ///
+    /// # Panics
+    /// If `dim_indices_per_edge.len() != cx.n_edges()`, any slice length is 0
+    /// or `> d_v`, slices have unequal lengths, or any index `>= d_v`.
+    pub fn selector_per_edge(
+        cx: &CellComplex,
+        d_v: usize,
+        dim_indices_per_edge: &[&[usize]],
+    ) -> Self {
+        let n_edges = cx.n_edges();
+        assert_eq!(
+            dim_indices_per_edge.len(),
+            n_edges,
+            "SheafMaps::selector_per_edge: dim_indices_per_edge.len() {} != n_edges {}",
+            dim_indices_per_edge.len(),
+            n_edges
+        );
+        assert!(!dim_indices_per_edge.is_empty(), "SheafMaps::selector_per_edge: no edges");
+        let d_e = dim_indices_per_edge[0].len();
+        assert!(
+            d_e > 0 && d_e <= d_v,
+            "SheafMaps::selector_per_edge: d_e ({d_e}) must be in 1..={d_v}"
+        );
+        for (e, slice) in dim_indices_per_edge.iter().enumerate() {
+            assert_eq!(
+                slice.len(),
+                d_e,
+                "SheafMaps::selector_per_edge: uniform d_e required, but edge {e} has {} (expected {d_e})",
+                slice.len()
+            );
+            for (r, &idx) in slice.iter().enumerate() {
+                assert!(
+                    idx < d_v,
+                    "SheafMaps::selector_per_edge: edge {e} dim_indices[{r}] = {idx} >= d_v {d_v}"
+                );
+            }
+        }
+        // Compact u16 storage: n_edges * 2 * d_e indices (both endpoints).
+        let mut selector_indices = vec![0u16; n_edges * 2 * d_e];
+        for e in 0..n_edges {
+            let base = e * 2 * d_e;
+            for r in 0..d_e {
+                let idx = dim_indices_per_edge[e][r] as u16;
+                selector_indices[base + r] = idx; // endpoint 0 (tail)
+                selector_indices[base + d_e + r] = idx; // endpoint 1 (head)
+            }
+        }
+        // is_identity iff every edge selects dims [0, 1, …, d_e-1] in order.
+        let is_identity = dim_indices_per_edge.iter().all(|slice| {
+            slice.iter().enumerate().all(|(r, &idx)| idx == r)
+        });
+        Self {
+            d_e,
+            d_v,
+            maps: Vec::new(),
+            is_identity,
+            is_selector: true,
+            selector_indices,
+            n_edges,
+        }
+    }
+
+    /// Top-k selector maps from per-edge importance scores (Plan 407 T3.2 —
+    /// Issue 397). Convenience constructor that picks the top-`k` dims per edge
+    /// via partial sort, then delegates to [`Self::selector_per_edge`].
+    ///
+    /// `scores_per_edge[e]` is a `d_v`-length importance score vector for edge
+    /// `e` (e.g. Mind-Reading CS-rankings for spatial edges, Latent Functor
+    /// direction loadings for faction edges). The top-`k` highest-scoring dims
+    /// become the restriction-map rows for that edge.
+    ///
+    /// # Ties
+    ///
+    /// Ties are broken by dim index (lower index wins) — deterministic. This
+    /// means scores with many equal values bias toward lower dims, which is
+    /// acceptable for the modelless mandate (no stochastic tie-breaking).
+    ///
+    /// # Panics
+    /// If `k == 0` or `k > d_v`, or any score slice length `!= d_v`.
+    pub fn selector_per_edge_topk(
+        cx: &CellComplex,
+        d_v: usize,
+        scores_per_edge: &[&[f32]],
+        k: usize,
+    ) -> Self {
+        assert!(
+            k > 0 && k <= d_v,
+            "SheafMaps::selector_per_edge_topk: k ({k}) must be in 1..={d_v}"
+        );
+        assert_eq!(
+            scores_per_edge.len(),
+            cx.n_edges(),
+            "SheafMaps::selector_per_edge_topk: scores_per_edge.len() != n_edges"
+        );
+        let mut indices_per_edge: Vec<&[usize]> = Vec::with_capacity(cx.n_edges());
+        let mut owned: Vec<Vec<usize>> = Vec::with_capacity(cx.n_edges());
+        for scores in scores_per_edge {
+            assert_eq!(
+                scores.len(),
+                d_v,
+                "SheafMaps::selector_per_edge_topk: score slice len {} != d_v {d_v}",
+                scores.len()
+            );
+            // Partial sort: pick top-k dims by score (descending), tie-break by
+            // index (ascending). Build (score, dim) pairs, sort by (-score, dim).
+            let mut pairs: Vec<(f32, usize)> =
+                scores.iter().copied().enumerate().map(|(d, s)| (s, d)).collect();
+            pairs.sort_unstable_by(|a, b| {
+                // Higher score first; on tie, lower dim first.
+                b.0.partial_cmp(&a.0)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+                    .then(a.1.cmp(&b.1))
+            });
+            let selected: Vec<usize> =
+                pairs.iter().take(k).map(|&(_, d)| d).collect();
+            owned.push(selected);
+        }
+        for v in &owned {
+            indices_per_edge.push(v.as_slice());
+        }
+        Self::selector_per_edge(cx, d_v, &indices_per_edge)
+    }
+
     /// Read the restriction map for `endpoint` (0 = tail, 1 = head) of edge
     /// `edge_idx`. Returns a `d_e × d_v` row-major slice.
+    ///
+    /// # Panics if `is_selector`
+    ///
+    /// Selector maps do not materialize a dense matrix — calling this on a
+    /// selector map panics. Use [`Self::selector_edge_indices`] instead.
     #[inline]
     pub fn edge_map(&self, edge_idx: usize, endpoint: usize) -> &[f32] {
+        assert!(
+            !self.is_selector,
+            "SheafMaps::edge_map: dense map access on selector maps is not supported; \
+             use selector_edge_indices() instead"
+        );
         debug_assert!(
             edge_idx < self.n_edges,
             "SheafMaps::edge_map: edge_idx {edge_idx} >= n_edges {}",
@@ -196,6 +374,29 @@ impl SheafMaps {
         let per_map = self.d_e * self.d_v;
         let start = edge_idx * 2 * per_map + endpoint * per_map;
         &self.maps[start..start + per_map]
+    }
+
+    /// Read the compact selector indices for `endpoint` (0 = tail, 1 = head) of
+    /// edge `edge_idx`. Returns a `d_e`-length slice of vertex dim indices.
+    ///
+    /// # Panics if `!is_selector`.
+    #[inline]
+    pub fn selector_edge_indices(&self, edge_idx: usize, endpoint: usize) -> &[u16] {
+        assert!(
+            self.is_selector,
+            "SheafMaps::selector_edge_indices: not a selector map (is_selector is false)"
+        );
+        debug_assert!(
+            edge_idx < self.n_edges,
+            "SheafMaps::selector_edge_indices: edge_idx {edge_idx} >= n_edges {}",
+            self.n_edges
+        );
+        debug_assert!(
+            endpoint < 2,
+            "SheafMaps::selector_edge_indices: endpoint {endpoint} must be 0 or 1"
+        );
+        let base = (edge_idx * 2 + endpoint) * self.d_e;
+        &self.selector_indices[base..base + self.d_e]
     }
 }
 
@@ -247,15 +448,31 @@ pub struct AdmmScratch {
     /// `L_F · z` output (sheaf Laplacian applied to the consensus cochain),
     /// length `n_vertices * d_v`. Zeroed at the start of each matvec.
     pub sheaf_laplacian_z: Vec<f32>,
+    /// Warm-start snapshot `b = x + u` for the soft-constraint z-update (T3.3).
+    /// Length `n_vertices * d_v`. Only touched by [`sheaf_admm_step_soft_into`];
+    /// the hard-constraint step leaves it at zero (no overhead).
+    pub warm_start_b: Vec<f32>,
+    /// CG residual `r = b − L_F z`, length `n_vertices * d_v`.
+    /// Only touched by [`sheaf_admm_step_cg_into`].
+    pub cg_r: Vec<f32>,
+    /// CG search direction `p`, length `n_vertices * d_v`.
+    pub cg_p: Vec<f32>,
+    /// CG matvec output `Ap = L_F p`, length `n_vertices * d_v`.
+    pub cg_ap: Vec<f32>,
 }
 
 impl AdmmScratch {
     /// Allocate scratch sized for a cell complex with the given vertex / edge
     /// stalk dimensions.
     pub fn new(cx: &CellComplex, d_v: usize, d_e: usize) -> Self {
+        let total = cx.n_vertices() * d_v;
         Self {
             edge_projections: vec![0.0; cx.n_edges() * 2 * d_e],
-            sheaf_laplacian_z: vec![0.0; cx.n_vertices() * d_v],
+            sheaf_laplacian_z: vec![0.0; total],
+            warm_start_b: vec![0.0; total],
+            cg_r: vec![0.0; total],
+            cg_p: vec![0.0; total],
+            cg_ap: vec![0.0; total],
         }
     }
 }
@@ -411,7 +628,7 @@ pub fn sheaf_admm_step_into(
         consensus_z.data[k] = primal_x.data[k] + dual_u.data[k];
     }
     for _ in 0..diffusion_steps {
-        sheaf_laplacian_via_maps(cx, maps, consensus_z, scratch);
+        sheaf_laplacian_via_maps(cx, maps, &consensus_z.data, scratch);
         for k in 0..total {
             consensus_z.data[k] -= eta * scratch.sheaf_laplacian_z[k];
         }
@@ -421,6 +638,241 @@ pub fn sheaf_admm_step_into(
     // Reads post-step x^{k+1} (primal_x) and z^{k+1} (consensus_z).
     for k in 0..total {
         dual_u.data[k] += primal_x.data[k] - consensus_z.data[k];
+    }
+}
+
+/// One ADMM iteration with a **soft-constraint** z-update (Plan 407 T3.3 —
+/// paper eq. 25). Same x-update and u-update as [`sheaf_admm_step_into`], but
+/// the z-update minimizes `½ z^T L_F z + (γ/2)‖z − b‖²` (where `b = x + u`)
+/// instead of the hard-constraint projection onto `ker(L_F)`.
+///
+/// # When `gamma == 0.0`
+///
+/// Delegates to the hard-constraint diffusion path (identical to
+/// [`sheaf_admm_step_into`]). This lets callers switch between hard and soft
+/// constraints without changing the call site — just pass `gamma = 0.0` for
+/// hard, `gamma > 0.0` for soft.
+///
+/// # When `gamma > 0.0`
+///
+/// The z-update diffusion step becomes:
+/// ```text
+/// z ← z − η (L_F z + γ (z − b))
+/// ```
+/// The `γ(z − b)` term pulls `z` back toward the warm-start `b`, preventing
+/// full consensus. This is useful when NPCs should preserve some individual
+/// variation — e.g. faction members agree on faction-relevant dims but retain
+/// distinct personalities on the remaining dims.
+///
+/// The warm-start `b` is snapshotted into `scratch.warm_start_b` before the
+/// diffusion loop and read from there (avoids re-reading `x + u` each step).
+#[allow(clippy::too_many_arguments)]  // ADMM solver + gamma = 11 params
+#[inline]
+pub fn sheaf_admm_step_soft_into(
+    cx: &CellComplex,
+    maps: &SheafMaps,
+    primal_x: &mut CochainField,
+    consensus_z: &mut CochainField,
+    dual_u: &mut CochainField,
+    objective: &LocalObjective,
+    rho: f32,
+    eta: f32,
+    gamma: f32,
+    diffusion_steps: usize,
+    scratch: &mut AdmmScratch,
+) {
+    let n = cx.n_vertices();
+    let d_v = maps.d_v;
+    let total = n * d_v;
+
+    // ---- x-update: identical to hard-constraint ---------------------------
+    x_update(primal_x, consensus_z, dual_u, objective, rho, total);
+
+    // ---- z-update: warm-start z = x + u into both z and warm_start_b -------
+    for k in 0..total {
+        let b_k = primal_x.data[k] + dual_u.data[k];
+        consensus_z.data[k] = b_k;
+        scratch.warm_start_b[k] = b_k;
+    }
+    if gamma == 0.0 {
+        // Hard-constraint path: identical to sheaf_admm_step_into.
+        for _ in 0..diffusion_steps {
+            sheaf_laplacian_via_maps(cx, maps, &consensus_z.data, scratch);
+            for k in 0..total {
+                consensus_z.data[k] -= eta * scratch.sheaf_laplacian_z[k];
+            }
+        }
+    } else {
+        // Soft-constraint path: z ← z − η (L_F z + γ(z − b)).
+        for _ in 0..diffusion_steps {
+            sheaf_laplacian_via_maps(cx, maps, &consensus_z.data, scratch);
+            for k in 0..total {
+                let gradient = scratch.sheaf_laplacian_z[k]
+                    + gamma * (consensus_z.data[k] - scratch.warm_start_b[k]);
+                consensus_z.data[k] -= eta * gradient;
+            }
+        }
+    }
+
+    // ---- u-update: identical to hard-constraint ----------------------------
+    for k in 0..total {
+        dual_u.data[k] += primal_x.data[k] - consensus_z.data[k];
+    }
+}
+
+/// One ADMM iteration with a **conjugate-gradient** z-update (Plan 407 T3.1 —
+/// paper Appendix B.2). Instead of `diffusion_steps` gradient-descent steps on
+/// `½ z^T L_F z` (the hard-constraint path), this solves `L_F z = 0` via CG up
+/// to `max_cg_iters` iterations or residual tolerance `tol`.
+///
+/// CG converges in `O(√κ)` iterations vs GD's `O(κ)` for condition number `κ`
+/// (the sheaf Laplacian's spectral range). On sparse graphs with poor
+/// conditioning (large zones, pathological adjacency), CG reaches a given
+/// residual in fewer matvecs — **if** the conditioning is bad enough to offset
+/// CG's higher per-iteration cost (3 vector axpy + 1 matvec + 2 dot products vs
+/// GD's 1 matvec + 1 axpy).
+///
+/// # The CG system
+///
+/// The z-update projects `b = x + u` onto `ker(L_F)`. Since `L_F` is
+/// singular (constant/harmonic modes are in the kernel), CG on `L_F z = 0`
+/// starting from `z₀ = b` converges to the projection (the component of `b`
+/// orthogonal to `ker(L_F)` decays to zero). This is the same inexact
+/// projection as the GD path, but with a faster-converging iterate.
+///
+/// # Modelless
+///
+/// CG is a deterministic linear-algebra solver — no training, no gradient
+/// descent on weights. The sheaf Laplacian is fixed by the restriction maps.
+#[allow(clippy::too_many_arguments)]  // ADMM solver + CG params = 12 params
+#[inline]
+pub fn sheaf_admm_step_cg_into(
+    cx: &CellComplex,
+    maps: &SheafMaps,
+    primal_x: &mut CochainField,
+    consensus_z: &mut CochainField,
+    dual_u: &mut CochainField,
+    objective: &LocalObjective,
+    rho: f32,
+    max_cg_iters: usize,
+    tol: f32,
+    scratch: &mut AdmmScratch,
+) {
+    let n = cx.n_vertices();
+    let d_v = maps.d_v;
+    let total = n * d_v;
+
+    // ---- x-update: identical to hard-constraint ---------------------------
+    x_update(primal_x, consensus_z, dual_u, objective, rho, total);
+
+    // ---- z-update: CG on L_F z = 0, warm-started from z₀ = x + u -----------
+    // r₀ = b − L_F z₀ = b − L_F b. Since b = x + u, r₀ = b − L_F b.
+    for k in 0..total {
+        consensus_z.data[k] = primal_x.data[k] + dual_u.data[k];
+    }
+    sheaf_laplacian_via_maps(cx, maps, &consensus_z.data, scratch);
+    let mut rsold: f32 = 0.0;
+    for k in 0..total {
+        let r_k = -scratch.sheaf_laplacian_z[k]; // r = 0 − L_F z₀ (target is 0)
+        scratch.cg_r[k] = r_k;
+        scratch.cg_p[k] = r_k; // p₀ = r₀
+        rsold += r_k * r_k;
+    }
+    // If the residual is already below tol, skip CG entirely.
+    let mut cg_iters_run = 0usize;
+    if rsold > tol * tol {
+        for _ in 0..max_cg_iters {
+            // Ap = L_F p (zero-alloc: pass cg_p slice directly, no clone).
+            sheaf_laplacian_matvec(
+                cx,
+                maps,
+                &scratch.cg_p,
+                &mut scratch.sheaf_laplacian_z,
+                &mut scratch.edge_projections,
+            );
+            // matvec wrote into sheaf_laplacian_z; copy to cg_ap before the
+            // next iteration clobbers it.
+            scratch.cg_ap.copy_from_slice(&scratch.sheaf_laplacian_z[0..total]);
+
+            // alpha = (r·r) / (p·Ap)
+            let p_ap: f32 = scratch.cg_p.iter().zip(scratch.cg_ap.iter())
+                .map(|(&p, &ap)| p * ap).sum();
+            if p_ap <= 0.0 || !p_ap.is_finite() {
+                break; // L_F is PSD; p_ap ≤ 0 means we hit the kernel — done.
+            }
+            let alpha = rsold / p_ap;
+
+            // z += alpha * p; r -= alpha * Ap
+            let mut rsnew: f32 = 0.0;
+            for k in 0..total {
+                consensus_z.data[k] += alpha * scratch.cg_p[k];
+                scratch.cg_r[k] -= alpha * scratch.cg_ap[k];
+                rsnew += scratch.cg_r[k] * scratch.cg_r[k];
+            }
+            cg_iters_run += 1;
+            if rsnew <= tol * tol {
+                break;
+            }
+            // beta = (r_new·r_new) / (r_old·r_old); p = r + beta * p
+            let beta = rsnew / rsold;
+            for k in 0..total {
+                scratch.cg_p[k] = scratch.cg_r[k] + beta * scratch.cg_p[k];
+            }
+            rsold = rsnew;
+        }
+    }
+    let _ = cg_iters_run; // (used in tests via debug_assert only)
+
+    // ---- u-update: identical to hard-constraint ----------------------------
+    for k in 0..total {
+        dual_u.data[k] += primal_x.data[k] - consensus_z.data[k];
+    }
+}
+
+/// x-update helper: shared by all three step variants (hard, soft, CG).
+#[inline]
+fn x_update(
+    primal_x: &mut CochainField,
+    consensus_z: &CochainField,
+    dual_u: &CochainField,
+    objective: &LocalObjective,
+    rho: f32,
+    total: usize,
+) {
+    match objective {
+        LocalObjective::DiagonalQuadratic { diag_q, q } => {
+            debug_assert_eq!(diag_q.len(), total, "DiagonalQuadratic: diag_q.len() != n*d_v");
+            debug_assert_eq!(q.len(), total, "DiagonalQuadratic: q.len() != n*d_v");
+            for k in 0..total {
+                let denom = diag_q[k] + rho;
+                debug_assert!(
+                    denom > 0.0,
+                    "x_update: non-positive denom (diag_q[k]={} + rho={})",
+                    diag_q[k],
+                    rho
+                );
+                primal_x.data[k] =
+                    (rho * (consensus_z.data[k] - dual_u.data[k]) - q[k]) / denom;
+            }
+        }
+        LocalObjective::DiagonalQuadL1 { diag_q, q, lambda } => {
+            debug_assert_eq!(diag_q.len(), total, "DiagonalQuadL1: diag_q.len() != n*d_v");
+            debug_assert_eq!(q.len(), total, "DiagonalQuadL1: q.len() != n*d_v");
+            debug_assert_eq!(lambda.len(), total, "DiagonalQuadL1: lambda.len() != n*d_v");
+            for k in 0..total {
+                let denom = diag_q[k] + rho;
+                debug_assert!(
+                    denom > 0.0,
+                    "x_update: non-positive denom (diag_q[k]={} + rho={})",
+                    diag_q[k],
+                    rho
+                );
+                let x_quad =
+                    (rho * (consensus_z.data[k] - dual_u.data[k]) - q[k]) / denom;
+                let thresh = lambda[k] / denom;
+                primal_x.data[k] = soft_threshold(x_quad, thresh);
+            }
+        }
     }
 }
 
@@ -475,7 +927,7 @@ fn soft_threshold(x: f32, t: f32) -> f32 {
 /// stalls; the stencil writes once, reads in row-major order, and
 /// auto-vectorizes cleanly.
 ///
-/// `scratch.sheaf_laplacian_z` is written directly (dims `d_e..d_v` left at
+/// `sheaf_laplacian_z` is written directly (dims `d_e..d_v` left at
 /// the zero value from the caller's `.fill(0.0)`).
 #[inline]
 fn sheaf_laplacian_identity_grid_into(
@@ -483,11 +935,11 @@ fn sheaf_laplacian_identity_grid_into(
     h: usize,
     d_v: usize,
     d_e: usize,
-    z: &CochainField,
-    scratch: &mut AdmmScratch,
+    z_data: &[f32],
+    sheaf_laplacian_z: &mut [f32],
 ) {
-    let p = z.data.as_ptr();
-    let o = scratch.sheaf_laplacian_z.as_mut_ptr();
+    let p = z_data.as_ptr();
+    let o = sheaf_laplacian_z.as_mut_ptr();
     let stride = w * d_v;
 
     // Interior: 4 neighbors, branch-free. deg = 4.
@@ -581,12 +1033,35 @@ fn sheaf_laplacian_identity_grid_into(
     }
 }
 
+/// Compute `L_F · z` into `scratch.sheaf_laplacian_z`. Thin wrapper around
+/// [`sheaf_laplacian_matvec`] that splits the scratch borrow.
 #[inline]
 fn sheaf_laplacian_via_maps(
     cx: &CellComplex,
     maps: &SheafMaps,
-    z: &CochainField,
+    z_data: &[f32],
     scratch: &mut AdmmScratch,
+) {
+    sheaf_laplacian_matvec(
+        cx,
+        maps,
+        z_data,
+        &mut scratch.sheaf_laplacian_z,
+        &mut scratch.edge_projections,
+    );
+}
+
+/// Real matvec: computes the sheaf Laplacian `L_F · z` into `sheaf_laplacian_z`.
+/// Takes individual scratch field slices (not the whole `AdmmScratch`) so the
+/// CG path can pass `scratch.cg_p` as `z_data` without an aliasing violation
+/// (the input and output are disjoint memory).
+#[inline]
+fn sheaf_laplacian_matvec(
+    cx: &CellComplex,
+    maps: &SheafMaps,
+    z_data: &[f32],
+    sheaf_laplacian_z: &mut [f32],
+    edge_projections: &mut [f32],
 ) {
     let d_v = maps.d_v;
     let d_e = maps.d_e;
@@ -600,11 +1075,11 @@ fn sheaf_laplacian_via_maps(
         // no scattered read-modify-write). Processes the first `d_e` dims with a
         // stride-`d_v` 5-point stencil, explicitly zeros dims `d_e..d_v`.
         if let Some((w, h)) = cx.grid_dims() {
-            sheaf_laplacian_identity_grid_into(w, h, d_v, d_e, z, scratch);
+            sheaf_laplacian_identity_grid_into(w, h, d_v, d_e, z_data, sheaf_laplacian_z);
             return;
         }
         // Edge-list fallback for non-grid complexes (needs fill for dims d_e..d_v).
-        scratch.sheaf_laplacian_z.fill(0.0);
+        sheaf_laplacian_z.fill(0.0);
         let entries = cx.boundary_entries(0);
         for pair in entries.chunks_exact(2) {
             let v_tail = pair[0].0;
@@ -612,16 +1087,61 @@ fn sheaf_laplacian_via_maps(
             let tail_base = v_tail * d_v;
             let head_base = v_head * d_v;
             for d in 0..d_e {
-                let diff = z.data[tail_base + d] - z.data[head_base + d];
-                scratch.sheaf_laplacian_z[tail_base + d] += diff;
-                scratch.sheaf_laplacian_z[head_base + d] -= diff;
+                let diff = z_data[tail_base + d] - z_data[head_base + d];
+                sheaf_laplacian_z[tail_base + d] += diff;
+                sheaf_laplacian_z[head_base + d] -= diff;
+            }
+        }
+        return;
+    }
+
+    // ── Selector fast path (Plan 407 T3.2) ─────────────────────────────────
+    // F_{i→e}[r, :] = e_{idx_tail[r]}, F_{j→e}[r, :] = e_{idx_head[r]} ⟹
+    //   disagreement[r] = z_tail[idx_tail[r]] − z_head[idx_head[r]]
+    //   (L_F z)_tail[idx_tail[r]] += disagreement[r]
+    //   (L_F z)_head[idx_head[r]] −= disagreement[r]
+    // This is O(d_e) per edge (gather-scatter), vs O(d_e·d_v) for the dense
+    // matvec — the server-scale (K>1000) latency win.
+    if maps.is_selector {
+        sheaf_laplacian_z.fill(0.0);
+        let entries = cx.boundary_entries(0);
+        let idx = &maps.selector_indices;
+        for pair in entries.chunks_exact(2) {
+            let v_tail = pair[0].0;
+            let e = pair[0].1;
+            let v_head = pair[1].0;
+            debug_assert_eq!(
+                pair[1].1, e,
+                "sheaf_laplacian_matvec: mismatched edge idx in boundary pair"
+            );
+            let z_tail_base = v_tail * d_v;
+            let z_head_base = v_head * d_v;
+            let idx_base = e * 2 * d_e;
+            let idx_tail = &idx[idx_base..idx_base + d_e];
+            let idx_head = &idx[idx_base + d_e..idx_base + 2 * d_e];
+            // Gather: disagreement[r] = z_tail[idx_tail[r]] − z_head[idx_head[r]]
+            // + scatter-add into tail slot and scatter-sub into head slot.
+            // Stage disagreement into edge_projections[0..d_e] first (avoids
+            // read-after-write hazard if tail == head on a self-loop).
+            let disagreement = &mut edge_projections[0..d_e];
+            for r in 0..d_e {
+                let it = idx_tail[r] as usize;
+                let ih = idx_head[r] as usize;
+                disagreement[r] = z_data[z_tail_base + it] - z_data[z_head_base + ih];
+            }
+            for r in 0..d_e {
+                let d_r = disagreement[r];
+                let it = idx_tail[r] as usize;
+                let ih = idx_head[r] as usize;
+                sheaf_laplacian_z[z_tail_base + it] += d_r;
+                sheaf_laplacian_z[z_head_base + ih] -= d_r;
             }
         }
         return;
     }
 
     // General explicit-maps path: zero-fill then accumulate.
-    scratch.sheaf_laplacian_z.fill(0.0);
+    sheaf_laplacian_z.fill(0.0);
 
     let entries = cx.boundary_entries(0);
     for pair in entries.chunks_exact(2) {
@@ -630,7 +1150,7 @@ fn sheaf_laplacian_via_maps(
         let v_head = pair[1].0;
         debug_assert_eq!(
             pair[1].1, e,
-            "sheaf_laplacian_via_maps: mismatched edge idx in boundary pair"
+            "sheaf_laplacian_matvec: mismatched edge idx in boundary pair"
         );
 
         let f_tail = maps.edge_map(e, 0);
@@ -641,9 +1161,9 @@ fn sheaf_laplacian_via_maps(
         // Stage disagreement[r] = F_tail[r,:]·z_tail − F_head[r,:]·z_head into
         // the first d_e slots of edge_projections.
         {
-            let disagreement = &mut scratch.edge_projections[0..d_e];
-            let z_tail = &z.data[z_tail_base..z_tail_base + d_v];
-            let z_head = &z.data[z_head_base..z_head_base + d_v];
+            let disagreement = &mut edge_projections[0..d_e];
+            let z_tail = &z_data[z_tail_base..z_tail_base + d_v];
+            let z_head = &z_data[z_head_base..z_head_base + d_v];
             for r in 0..d_e {
                 let f_tail_row = &f_tail[r * d_v..(r + 1) * d_v];
                 let f_head_row = &f_head[r * d_v..(r + 1) * d_v];
@@ -656,12 +1176,12 @@ fn sheaf_laplacian_via_maps(
         // Accumulate F^T · disagreement back into the vertex slots. Direct
         // indexing keeps the two disjoint vertex writes borrow-checker-friendly.
         for r in 0..d_e {
-            let d_r = scratch.edge_projections[r];
+            let d_r = edge_projections[r];
             let f_tail_row = &f_tail[r * d_v..(r + 1) * d_v];
             let f_head_row = &f_head[r * d_v..(r + 1) * d_v];
             for c in 0..d_v {
-                scratch.sheaf_laplacian_z[z_tail_base + c] += f_tail_row[c] * d_r;
-                scratch.sheaf_laplacian_z[z_head_base + c] -= f_head_row[c] * d_r;
+                sheaf_laplacian_z[z_tail_base + c] += f_tail_row[c] * d_r;
+                sheaf_laplacian_z[z_head_base + c] -= f_head_row[c] * d_r;
             }
         }
     }
@@ -852,7 +1372,7 @@ mod tests {
         }
         let mut scratch = AdmmScratch::new(&cx, d_v, d_v);
 
-        sheaf_laplacian_via_maps(&cx, &maps, &z, &mut scratch);
+        sheaf_laplacian_via_maps(&cx, &maps, &z.data, &mut scratch);
         let gl = graph_laplacian(&cx, &z);
 
         // f32 accumulation order differs between the two paths; use a loose-but-safe tol.
@@ -970,5 +1490,418 @@ mod tests {
             }
         }
         max_d
+    }
+
+    // ========================================================================
+    // Plan 407 Phase 3 — T3.2 (selector_per_edge + topk + fast-path)
+    // ========================================================================
+
+    /// `selector_per_edge` builds compact indices for per-edge dim subsets.
+    #[test]
+    fn selector_per_edge_construct_correctly() {
+        // 3 vertices, 2 edges: 0-1, 1-2.
+        let cx = CellComplex::from_edges(3, &[(0, 1), (1, 2)]);
+        let d_v = 4;
+        // Edge 0 selects dims [0, 2], edge 1 selects dims [1, 3].
+        let maps = SheafMaps::selector_per_edge(
+            &cx, d_v, &[&[0, 2], &[1, 3]]
+        );
+        assert_eq!(maps.d_e, 2);
+        assert_eq!(maps.d_v, 4);
+        assert_eq!(maps.n_edges, 2);
+        assert!(maps.is_selector);
+        assert!(!maps.is_identity, "heterogeneous selectors should not be identity");
+        assert!(maps.maps.is_empty(), "selector maps should not materialize dense maps");
+        assert_eq!(maps.selector_indices.len(), 2 * 2 * 2); // n_edges * 2 * d_e
+        // Edge 0, endpoint 0 (tail): indices [0, 2].
+        assert_eq!(maps.selector_edge_indices(0, 0), &[0, 2]);
+        // Edge 0, endpoint 1 (head): same [0, 2] (both endpoints).
+        assert_eq!(maps.selector_edge_indices(0, 1), &[0, 2]);
+        // Edge 1, endpoint 0: [1, 3].
+        assert_eq!(maps.selector_edge_indices(1, 0), &[1, 3]);
+    }
+
+    /// `selector_per_edge` detects identity when all edges pick [0, 1, …, d_e-1].
+    #[test]
+    fn selector_per_edge_collapses_to_identity_when_uniform_ordered() {
+        let cx = CellComplex::from_edges(3, &[(0, 1), (1, 2)]);
+        let maps = SheafMaps::selector_per_edge(&cx, 4, &[&[0, 1], &[0, 1]]);
+        assert!(maps.is_identity, "uniform ordered selectors should detect identity");
+    }
+
+    /// `selector_per_edge_topk` picks the top-k dims by score per edge.
+    #[test]
+    fn selector_per_edge_topk_picks_highest_scoring_dims() {
+        let cx = CellComplex::from_edges(2, &[(0, 1)]);
+        let d_v = 4;
+        // Scores: dim 3 has highest, dim 1 second. Top-2 should pick [3, 1].
+        let scores: &[&[f32]] = &[&[0.1, 0.5, 0.2, 0.9]];
+        let maps = SheafMaps::selector_per_edge_topk(&cx, d_v, scores, 2);
+        assert_eq!(maps.d_e, 2);
+        let indices = maps.selector_edge_indices(0, 0);
+        assert_eq!(indices, &[3, 1], "top-2 should be [3, 1] by descending score");
+    }
+
+    /// `selector_per_edge_topk` breaks ties deterministically (lower dim wins).
+    #[test]
+    fn selector_per_edge_topk_tie_breaks_by_lower_dim() {
+        let cx = CellComplex::from_edges(2, &[(0, 1)]);
+        // All scores equal → ties broken by lower dim → picks [0, 1].
+        let scores: &[&[f32]] = &[&[0.5, 0.5, 0.5, 0.5]];
+        let maps = SheafMaps::selector_per_edge_topk(&cx, 4, scores, 2);
+        assert_eq!(maps.selector_edge_indices(0, 0), &[0, 1]);
+    }
+
+    /// Selector fast path: matvec result matches the dense selector matvec
+    /// bit-for-bit (both compute `L_F z` for the same selector maps). This is
+    /// the correctness gate for the T3.2 gather-scatter fast path.
+    #[test]
+    fn selector_fast_path_matches_dense_selector_matvec() {
+        // 4 vertices, 3 edges: 0-1, 1-2, 2-3 (path graph).
+        let cx = CellComplex::from_edges(4, &[(0, 1), (1, 2), (2, 3)]);
+        let d_v = 4;
+        let d_e = 2;
+
+        // Dense selector (uniform dims [1, 3] for all edges).
+        let dense_maps = SheafMaps::selector(&cx, d_v, &[1, 3]);
+        // Compact selector (same dims [1, 3] per edge).
+        let compact_maps = SheafMaps::selector_per_edge(
+            &cx, d_v, &[&[1, 3], &[1, 3], &[1, 3]]
+        );
+
+        // Random z.
+        let mut z = CochainField::zeros(0, cx.n_vertices(), d_v);
+        for k in 0..z.data.len() {
+            z.data[k] = (0.1 * (k as f32) + 0.3).sin();
+        }
+
+        // Compute L_F z with both paths.
+        let mut dense_scratch = AdmmScratch::new(&cx, d_v, d_e);
+        sheaf_laplacian_via_maps(&cx, &dense_maps, &z.data, &mut dense_scratch);
+
+        let mut compact_scratch = AdmmScratch::new(&cx, d_v, d_e);
+        sheaf_laplacian_via_maps(&cx, &compact_maps, &z.data, &mut compact_scratch);
+
+        // Both must produce the same result (selector maps are mathematically
+        // identical; only the storage/compute path differs).
+        for k in 0..z.data.len() {
+            assert_eq!(
+                dense_scratch.sheaf_laplacian_z[k],
+                compact_scratch.sheaf_laplacian_z[k],
+                "dense vs compact selector matvec mismatch at k={k}: dense={}, compact={}",
+                dense_scratch.sheaf_laplacian_z[k],
+                compact_scratch.sheaf_laplacian_z[k]
+            );
+        }
+    }
+
+    /// Selector maps reach consensus (full ADMM run with selector_per_edge).
+    /// Mirrors `identity_maps_reach_consensus` but with per-edge selector maps.
+    #[test]
+    fn selector_per_edge_reaches_consensus() {
+        let cx = CellComplex::grid_2d(4, 4);
+        let d_v = 2;
+        let d_e = 2;
+        // Uniform selector [0, 1] = identity for all edges (via selector_per_edge).
+        let n_edges = cx.n_edges();
+        let dims: Vec<&[usize]> = vec![&[0, 1]; n_edges];
+        let maps = SheafMaps::selector_per_edge(&cx, d_v, &dims);
+        // The maps are identity-flagged (uniform [0,1]), so they'll take the
+        // identity fast path — still exercises the selector constructor + ADMM.
+        assert!(maps.is_identity);
+
+        let total = cx.n_vertices() * d_v;
+        let diag_q_val = 1.0;
+        let rho = 1.0;
+        let mut target = vec![0.0f32; total];
+        for i in 0..cx.n_vertices() {
+            for d in 0..d_v {
+                target[i * d_v + d] = (0.3 * (i as f32) + 0.7 * (d as f32)) * 0.5;
+            }
+        }
+        let q: Vec<f32> = target.iter().map(|t| -t * diag_q_val).collect();
+        let objective = LocalObjective::DiagonalQuadratic {
+            diag_q: vec![diag_q_val; total],
+            q,
+        };
+        let mut primal_x = CochainField::zeros(0, cx.n_vertices(), d_v);
+        primal_x.data.copy_from_slice(&target);
+        let mut consensus_z = CochainField::zeros(0, cx.n_vertices(), d_v);
+        let mut dual_u = CochainField::zeros(0, cx.n_vertices(), d_v);
+        let mut scratch = AdmmScratch::new(&cx, d_v, d_e);
+
+        let d_initial = max_edge_disagreement(&cx, &primal_x);
+        for _ in 0..30 {
+            sheaf_admm_step(&cx, &maps, &mut primal_x, &mut consensus_z, &mut dual_u,
+                &objective, rho, 0.2, 50, &mut scratch);
+        }
+        let d_final = max_edge_disagreement(&cx, &primal_x);
+        assert!(
+            d_final < 0.1 * d_initial,
+            "selector_per_edge consensus failed: d_final={d_final} >= 0.1*d_initial={}",
+            0.1 * d_initial
+        );
+    }
+
+    /// Heterogeneous selector maps (different dims per edge) still drive
+    /// consensus on the selected dims. The non-selected dims should retain
+    /// their disagreement (no coordination).
+    #[test]
+    fn selector_per_edge_heterogeneous_drives_partial_consensus() {
+        // Path graph 0-1-2. d_v=4, d_e=2.
+        // Edge 0 selects dims [0, 1], edge 1 selects dims [2, 3].
+        // After ADMM: dims 0,1 agree on edge 0's vertices; dims 2,3 agree on
+        // edge 1's vertices. But since edge 0 doesn't coordinate dims 2,3 and
+        // edge 1 doesn't coordinate dims 0,1, cross-edge consensus is limited.
+        let cx = CellComplex::from_edges(3, &[(0, 1), (1, 2)]);
+        let d_v = 4;
+        let d_e = 2;
+        let maps = SheafMaps::selector_per_edge(&cx, d_v, &[&[0, 1], &[2, 3]]);
+
+        let total = cx.n_vertices() * d_v;
+        let objective = LocalObjective::DiagonalQuadratic {
+            diag_q: vec![1.0; total],
+            q: vec![0.0; total],
+        };
+        // Initial primal: vertex 0 = [1,1,1,1], v1 = [0,0,0,0], v2 = [1,1,1,1].
+        let mut primal_x = CochainField::from_vec(0, d_v, vec![1.0, 1.0, 1.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0]);
+        let mut consensus_z = CochainField::zeros(0, 3, d_v);
+        let mut dual_u = CochainField::zeros(0, 3, d_v);
+        let mut scratch = AdmmScratch::new(&cx, d_v, d_e);
+
+        // Run 50 ADMM steps (enough to converge on a 3-vertex path).
+        for _ in 0..50 {
+            sheaf_admm_step(&cx, &maps, &mut primal_x, &mut consensus_z, &mut dual_u,
+                &objective, 1.0, 0.25, 50, &mut scratch);
+        }
+
+        // Edge 0 (v0-v1) coordinates dims 0,1 → |x0[0] - x1[0]| should be small.
+        let edge0_dim0_diff = (primal_x.data[0] - primal_x.data[4]).abs();
+        assert!(edge0_dim0_diff < 0.1, "edge 0 dim 0 should agree: diff={edge0_dim0_diff}");
+
+        // Edge 1 (v1-v2) coordinates dims 2,3 → |x1[2] - x2[2]| should be small.
+        let edge1_dim2_diff = (primal_x.data[4 + 2] - primal_x.data[8 + 2]).abs();
+        assert!(edge1_dim2_diff < 0.1, "edge 1 dim 2 should agree: diff={edge1_dim2_diff}");
+    }
+
+    // ========================================================================
+    // Plan 407 Phase 3 — T3.1 (conjugate-gradient z-update)
+    // ========================================================================
+
+    /// CG z-update reaches consensus at least as well as GD on identity maps.
+    #[test]
+    fn cg_z_update_reaches_consensus() {
+        let cx = CellComplex::grid_2d(4, 4);
+        let d_v = 2;
+        let d_e = 2;
+        let maps = SheafMaps::identity(&cx, d_v, d_e);
+        let total = cx.n_vertices() * d_v;
+        let diag_q_val = 1.0;
+        let rho = 1.0;
+        let mut target = vec![0.0f32; total];
+        for i in 0..cx.n_vertices() {
+            for d in 0..d_v {
+                target[i * d_v + d] = (0.3 * (i as f32) + 0.7 * (d as f32)) * 0.5;
+            }
+        }
+        let q: Vec<f32> = target.iter().map(|t| -t * diag_q_val).collect();
+        let objective = LocalObjective::DiagonalQuadratic {
+            diag_q: vec![diag_q_val; total],
+            q,
+        };
+        let mut primal_x = CochainField::zeros(0, cx.n_vertices(), d_v);
+        primal_x.data.copy_from_slice(&target);
+        let mut consensus_z = CochainField::zeros(0, cx.n_vertices(), d_v);
+        let mut dual_u = CochainField::zeros(0, cx.n_vertices(), d_v);
+        let mut scratch = AdmmScratch::new(&cx, d_v, d_e);
+
+        let d_initial = max_edge_disagreement(&cx, &primal_x);
+        // CG with 20 iters + tight tol.
+        for _ in 0..30 {
+            sheaf_admm_step_cg_into(
+                &cx, &maps, &mut primal_x, &mut consensus_z, &mut dual_u,
+                &objective, rho, 20, 1e-8, &mut scratch,
+            );
+        }
+        let d_final = max_edge_disagreement(&cx, &primal_x);
+        eprintln!("cg_z_update_reaches_consensus: d_initial={d_initial:.5}, d_final={d_final:.5}");
+        assert!(
+            d_final < 0.1 * d_initial,
+            "CG consensus failed: d_final={d_final} >= 0.1*d_initial={}",
+            0.1 * d_initial
+        );
+    }
+
+    /// CG z-update produces a lower-residual projection than GD at the same
+    /// matvec count, on a graph where CG's convergence advantage is
+    /// meaningful (a larger grid where GD's `O(κ)` vs CG's `O(√κ)` matters).
+    #[test]
+    fn cg_beats_gd_on_residual_at_equal_matvec_count() {
+        // 8×8 grid (64 vertices). Condition number κ ≈ λ_max/λ_min ≈
+        // 8/(2−2cos(π/8)) ≈ 8/0.152 ≈ 53. CG's √κ ≈ 7.3 vs GD's κ ≈ 53.
+        let cx = CellComplex::grid_2d(8, 8);
+        let d_v = 1;
+        let d_e = 1;
+        let maps = SheafMaps::identity(&cx, d_v, d_e);
+        let total = cx.n_vertices() * d_v;
+
+        // Objective with a per-vertex preferred target so the primal is
+        // non-trivial (non-constant → has components outside ker(L_F)).
+        // q = -target, diag_q = 1.0 → x-update = (rho*(z-u) + target) / (1+rho).
+        let mut target = vec![0.0f32; total];
+        for k in 0..total {
+            target[k] = (0.1 * (k as f32)).sin();
+        }
+        let objective = LocalObjective::DiagonalQuadratic {
+            diag_q: vec![1.0; total],
+            q: target.iter().map(|t| -t).collect(),
+        };
+
+        // Identical non-zero initial state for both paths.
+        let make_state = || {
+            let mut x = CochainField::zeros(0, cx.n_vertices(), d_v);
+            for k in 0..total { x.data[k] = target[k]; }
+            let z = CochainField::zeros(0, cx.n_vertices(), d_v);
+            let u = CochainField::zeros(0, cx.n_vertices(), d_v);
+            (x, z, u)
+        };
+        let (mut primal_gd, mut z_gd, mut u_gd) = make_state();
+        let (mut primal_cg, mut z_cg, mut u_cg) = make_state();
+        let mut scratch_gd = AdmmScratch::new(&cx, d_v, d_e);
+        let mut scratch_cg = AdmmScratch::new(&cx, d_v, d_e);
+
+        // One step with GD (T=20 diffusion) vs CG (20 iters, same matvec count).
+        sheaf_admm_step_into(
+            &cx, &maps, &mut primal_gd, &mut z_gd, &mut u_gd,
+            &objective, 1.0, 0.2, 20, &mut scratch_gd,
+        );
+        sheaf_admm_step_cg_into(
+            &cx, &maps, &mut primal_cg, &mut z_cg, &mut u_cg,
+            &objective, 1.0, 20, 1e-12, &mut scratch_cg,
+        );
+
+        // Measure residual ‖L_F z‖ (should be near zero if z is in ker(L_F)).
+        let mut scratch_r = AdmmScratch::new(&cx, d_v, d_e);
+        sheaf_laplacian_via_maps(&cx, &maps, &z_gd.data, &mut scratch_r);
+        let gd_residual: f32 = scratch_r.sheaf_laplacian_z.iter().map(|x| x.abs()).sum();
+        sheaf_laplacian_via_maps(&cx, &maps, &z_cg.data, &mut scratch_r);
+        let cg_residual: f32 = scratch_r.sheaf_laplacian_z.iter().map(|x| x.abs()).sum();
+
+        eprintln!("cg_beats_gd: gd_residual={gd_residual:.6}, cg_residual={cg_residual:.6}");
+        // CG should have a lower residual (better projection).
+        assert!(
+            cg_residual < gd_residual,
+            "CG residual {cg_residual} should be < GD residual {gd_residual}"
+        );
+    }
+
+    // ========================================================================
+    // Plan 407 Phase 3 — T3.3 (soft-constraint variant)
+    // ========================================================================
+
+    /// Soft-constraint with gamma=0 matches the hard-constraint path exactly.
+    #[test]
+    fn soft_constraint_gamma_zero_matches_hard() {
+        let cx = CellComplex::grid_2d(3, 3);
+        let d_v = 2;
+        let d_e = 2;
+        let maps = SheafMaps::identity(&cx, d_v, d_e);
+        let total = cx.n_vertices() * d_v;
+
+        let objective = LocalObjective::DiagonalQuadratic {
+            diag_q: vec![1.0; total],
+            q: vec![-0.5; total],
+        };
+
+        // Identical initial state for both paths.
+        let init = |x: &mut CochainField| {
+            for k in 0..total {
+                x.data[k] = (0.1 * (k as f32)).sin();
+            }
+        };
+        let mut x_hard = CochainField::zeros(0, cx.n_vertices(), d_v); init(&mut x_hard);
+        let mut z_hard = CochainField::zeros(0, cx.n_vertices(), d_v); init(&mut z_hard);
+        let mut u_hard = CochainField::zeros(0, cx.n_vertices(), d_v); init(&mut u_hard);
+        let mut x_soft = CochainField::zeros(0, cx.n_vertices(), d_v); init(&mut x_soft);
+        let mut z_soft = CochainField::zeros(0, cx.n_vertices(), d_v); init(&mut z_soft);
+        let mut u_soft = CochainField::zeros(0, cx.n_vertices(), d_v); init(&mut u_soft);
+
+        let mut scratch_hard = AdmmScratch::new(&cx, d_v, d_e);
+        let mut scratch_soft = AdmmScratch::new(&cx, d_v, d_e);
+
+        sheaf_admm_step_into(
+            &cx, &maps, &mut x_hard, &mut z_hard, &mut u_hard,
+            &objective, 1.0, 0.2, 10, &mut scratch_hard,
+        );
+        sheaf_admm_step_soft_into(
+            &cx, &maps, &mut x_soft, &mut z_soft, &mut u_soft,
+            &objective, 1.0, 0.2, 0.0, 10, &mut scratch_soft,
+        );
+
+        // Bit-identical: gamma=0 takes the hard path.
+        for k in 0..total {
+            assert_eq!(x_hard.data[k], x_soft.data[k], "x mismatch at {k}");
+            assert_eq!(z_hard.data[k], z_soft.data[k], "z mismatch at {k}");
+            assert_eq!(u_hard.data[k], u_soft.data[k], "u mismatch at {k}");
+        }
+    }
+
+    /// Soft-constraint with gamma>0 preserves individual variation: the primal
+    /// retains MORE disagreement than the hard-constraint path after the same
+    /// number of ADMM steps. The `γ(z − b)` term resists full consensus.
+    #[test]
+    fn soft_constraint_gamma_positive_preserves_variation() {
+        let cx = CellComplex::grid_2d(4, 4);
+        let d_v = 2;
+        let d_e = 2;
+        let maps = SheafMaps::identity(&cx, d_v, d_e);
+        let total = cx.n_vertices() * d_v;
+
+        // Each vertex has a distinct target → the hard path drives all toward
+        // consensus, the soft path retains individual variation.
+        let mut target = vec![0.0f32; total];
+        for i in 0..cx.n_vertices() {
+            for d in 0..d_v {
+                target[i * d_v + d] = (0.3 * (i as f32) + 0.7 * (d as f32)) * 0.5;
+            }
+        }
+        let q: Vec<f32> = target.iter().map(|t| -t).collect();
+        let objective = LocalObjective::DiagonalQuadratic {
+            diag_q: vec![1.0; total],
+            q,
+        };
+
+        let init_primal = |x: &mut CochainField| { x.data.copy_from_slice(&target); };
+
+        let mut x_hard = CochainField::zeros(0, cx.n_vertices(), d_v); init_primal(&mut x_hard);
+        let mut z_hard = CochainField::zeros(0, cx.n_vertices(), d_v);
+        let mut u_hard = CochainField::zeros(0, cx.n_vertices(), d_v);
+
+        let mut x_soft = CochainField::zeros(0, cx.n_vertices(), d_v); init_primal(&mut x_soft);
+        let mut z_soft = CochainField::zeros(0, cx.n_vertices(), d_v);
+        let mut u_soft = CochainField::zeros(0, cx.n_vertices(), d_v);
+
+        let mut scratch_hard = AdmmScratch::new(&cx, d_v, d_e);
+        let mut scratch_soft = AdmmScratch::new(&cx, d_v, d_e);
+
+        for _ in 0..30 {
+            sheaf_admm_step_into(
+                &cx, &maps, &mut x_hard, &mut z_hard, &mut u_hard,
+                &objective, 1.0, 0.2, 50, &mut scratch_hard,
+            );
+            sheaf_admm_step_soft_into(
+                &cx, &maps, &mut x_soft, &mut z_soft, &mut u_soft,
+                &objective, 1.0, 0.2, 0.5, 50, &mut scratch_soft,
+            );
+        }
+
+        let hard_disagree = max_edge_disagreement(&cx, &x_hard);
+        let soft_disagree = max_edge_disagreement(&cx, &x_soft);
+        eprintln!("soft_preserves_variation: hard={hard_disagree:.6}, soft={soft_disagree:.6}");
+        // Soft should retain MORE disagreement (less consensus).
+        assert!(
+            soft_disagree > hard_disagree,
+            "soft constraint should preserve more variation: soft={soft_disagree} > hard={hard_disagree}"
+        );
     }
 }
