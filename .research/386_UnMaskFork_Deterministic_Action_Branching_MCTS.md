@@ -193,7 +193,18 @@ Re-cast UMF's "action = inference configuration" as a discrete selection over ea
 
 ## 3. Verdict
 
-**Tier: GOAT (pending benchmark).**
+**Tier: Gain (revised from GOAT-pending-benchmark, 2026-07-07).**
+
+**Revision rationale (Plan 390 Phase 3 GOAT gate, 2026-07-07):** The G2
+budget-expansion gate FAILED on the synthetic domain (1.00× vs 1.4×
+target) because the domain was too small for the cache's cumulative
+savings to manifest as reward-convergence speedup. The cache works
+(G1 42% hit rate, G3 no-regression, G5 bounded), but the headline GOAT
+metric could not be validated. See `.issues/044_*` for the full gap
+analysis and re-gate conditions. Verdict revised GOAT → Gain: the
+primitive is a correct modelless caching improvement, but does not
+meet the GOAT threshold on the available benchmark. Re-gate contingent
+on a larger domain or real dLLM PoC (Plan 5).
 
 | Question | Answer |
 |---|---|
