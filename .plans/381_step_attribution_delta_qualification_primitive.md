@@ -182,7 +182,7 @@ pub trait StepLocalizer<Dir, W> {
   - **Implementation:** `WasmTestGateAdapter` + `ScalarStateExecutor` + `ReplaceScalar` added to `step_attribution_qualifier.rs`. Delegates to `StepAttributionQualifier::new(ScalarStateExecutor, SumAggregator, 0.0)` — proves subsumption by construction.
   - **Module doc updated:** added "# Prior art: R172 ITSE `WasmTestGate`" section.
   - **Tests:** 6 new tests (commit/rollback/equal/strict-threshold/subsumption-sweep/default-equals-new). All 20 tests green (14 original + 6 new). Doc-test still passes. `--all-features` clean (G6 no-regression).
-- [ ] **T4.2** **DEFERRED** — adapter for `ClosedUnitCompactionGate` (Plan 333). CUCG's rubric is structurally different (predicate-list + FireRule, not Δ-comparison); the adapter would translate a rubric verdict into a ScoreAggregator output. Out of scope for Phase 1-3; track in `.issues/` if the G6 PoC (riir-ai Plan 313) shows CUCG-style rubrics would benefit from Δ unification.
+- [-] **T4.2** **DEFERRED** — adapter for `ClosedUnitCompactionGate` (Plan 333). CUCG's rubric is structurally different (predicate-list + FireRule, not Δ-comparison); the adapter would translate a rubric verdict into a ScoreAggregator output. Out of scope for Phase 1-3; track in `.issues/` if the G6 PoC (riir-ai Plan 313) shows CUCG-style rubrics would benefit from Δ unification.
 
 ## Phase 5 — Promotion Gate (BLOCKED on riir-ai Plan 313 G6)
 

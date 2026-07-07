@@ -4,7 +4,7 @@
 **Research:** [katgpt-rs/.research/384](../.research/384_Sheaf_ADMM_Multi_Agent_Coordination.md)
 **Source paper:** [arXiv:2605.31005](https://arxiv.org/abs/2605.31005) — Seely, Cupiał, Jones, "Learning Multi-Agent Coordination via Sheaf-ADMM", ICML 2026
 **Target:** `katgpt-rs/crates/katgpt-dec/src/sheaf_admm.rs` (new module) + Cargo feature `sheaf_admm`
-**Status:** Phase 2 (GOAT gate) COMPLETE — promoted to default-on (2026-07-07). All G1–G6 PASS.
+**Status:** ✅ CLOSED (2026-07-07). Phase 2 (GOAT gate) COMPLETE — promoted to default-on. All G1–G6 PASS. Phase 3 post-promotion optimizations (T3.1–T3.3) extracted to Issues 045/046/047 per the `AGENTS.md` rule (optimizations → `.issues/`, not plan execution).
 
 ---
 
@@ -49,9 +49,9 @@ The z-update IS sheaf diffusion, which IS gradient descent on the Hodge energy `
 
 ### Tasks
 
-- [ ] **T3.1** Conjugate-gradient z-update variant for ill-conditioned large zones (paper Appendix B.2). The shipped `hodge_laplacian` uses gradient descent; CG converges faster on sparse graphs with poor conditioning. Target: K=1000 vertices, condition number > 100. Bench GD-vs-CG; promote CG only if it wins on latency at fixed residual.
-- [ ] **T3.2** Top-k sparse restriction maps for K>1000 (server scale). Currently `SheafMaps` materializes all edges; for very large zones, build a CSR-like sparse representation. Coordinate with riir-ai Plan 394 Phase 3 (Crowd MCGS integration).
-- [ ] **T3.3** Soft-constraint variant (paper eq. 25): replace hard `Fz = 0` with quadratic penalty `γ/2 ‖Fz‖²`. Adds one knob `γ`; useful when exact consensus is undesirable (e.g., NPCs should preserve some individual variation). Bench hard-vs-soft on a synthetic "faction disagreement" scenario.
+- [-] **T3.1** Conjugate-gradient z-update variant for ill-conditioned large zones (paper Appendix B.2). The shipped `hodge_laplacian` uses gradient descent; CG converges faster on sparse graphs with poor conditioning. Target: K=1000 vertices, condition number > 100. Bench GD-vs-CG; promote CG only if it wins on latency at fixed residual. **→ Extracted to [`.issues/045_sheaf_admm_cg_z_update_variant.md`](../.issues/045_sheaf_admm_cg_z_update_variant.md)** (optimization → issue per `AGENTS.md`).
+- [-] **T3.2** Top-k sparse restriction maps for K>1000 (server scale). Currently `SheafMaps` materializes all edges; for very large zones, build a CSR-like sparse representation. Coordinate with riir-ai Plan 394 Phase 3 (Crowd MCGS integration). **→ Extracted to [`.issues/046_sheaf_admm_sparse_restriction_maps.md`](../.issues/046_sheaf_admm_sparse_restriction_maps.md)** (optimization → issue per `AGENTS.md`).
+- [-] **T3.3** Soft-constraint variant (paper eq. 25): replace hard `Fz = 0` with quadratic penalty `γ/2 ‖Fz‖²`. Adds one knob `γ`; useful when exact consensus is undesirable (e.g., NPCs should preserve some individual variation). Bench hard-vs-soft on a synthetic "faction disagreement" scenario. **→ Extracted to [`.issues/047_sheaf_admm_soft_constraint_variant.md`](../.issues/047_sheaf_admm_soft_constraint_variant.md)** (feature variant → issue per `AGENTS.md`).
 - [x] **T3.4** Example in `katgpt-rs/examples/sheaf_admm_consensus.rs`: 16 agents on a 4×4 grid, identity maps, show primal/consensus/dual converging over K=50 iterations. Print the dual `u_i` vectors to show they start at zero and grow with disagreement. Adoptable demo for the open-source funnel. **DONE (2026-07-07):** example ships with eta=0.25, T=50, K=50 → `max_edge_disagree = 1.22e-4 < 1e-3` (consensus ✅). Tuned from the spec's starting point (eta=0.2, T=20 → plateau at 2.79e-2) — the inexact z-projection with finite T=20 retains too much of the slowest non-harmonic mode (λ_min ≈ 0.152 on 4×4 grid); T=50 + eta=0.25 clears the bar in 50 iterations. Feature chain: root `sheaf_admm` → `katgpt-core/sheaf_admm` → `katgpt-dec/sheaf_admm` (default-on).
 
 ## GOAT gate summary
