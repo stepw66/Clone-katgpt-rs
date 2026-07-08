@@ -103,11 +103,16 @@ impl MultiLayerKVCache {
 
     /// Snapshot KV cache state up to position `pos`.
     /// Copies only filled slots [0..pos) per layer — cheap at our model scale.
+    ///
+    /// **Allocating:** makes `1 + 2*n_layer` heap allocations per call. For the
+    /// per-speculation-step hot path, prefer [`snapshot_into`](Self::snapshot_into)
+    /// with a hoisted scratch buffer (zero alloc in steady state). This variant
+    /// remains for cold paths and convenience wrappers that don't have a
+    /// reusable buffer.
     pub fn snapshot(&self, pos: usize, config: &Config) -> KVSnapshot {
         let kd = types::kv_dim(config);
         let end = pos * kd;
         // Pre-allocate outer Vec to avoid collect() reallocation jitter.
-        // Called per-speculation-step (step.rs L149/L354/L487/L649/L1083).
         let mut layers = Vec::with_capacity(self.layers.len());
         for layer in &self.layers {
             layers.push(KVLayerSnapshot {
@@ -174,12 +179,18 @@ impl MultiLayerKVCache {
 
 /// Cheap snapshot of KV cache state up to position `pos`.
 /// Only copies filled slots [0..pos) per layer, not the entire block_size buffer.
+///
+/// `Default` is derived so callers can construct an empty snapshot for use as
+/// a reusable scratch buffer with [`MultiLayerKVCache::snapshot_into`] — the
+/// zero-alloc variant on the per-speculation-step hot path.
+#[derive(Default)]
 pub struct KVSnapshot {
     pub pos: usize,
     pub layers: Vec<KVLayerSnapshot>,
 }
 
 /// Per-layer snapshot of KV cache data.
+#[derive(Default)]
 pub struct KVLayerSnapshot {
     pub key: Vec<f32>,   // [pos * kv_dim]
     pub value: Vec<f32>, // [pos * kv_dim]

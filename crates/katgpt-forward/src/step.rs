@@ -358,9 +358,24 @@ pub fn speculative_step_rollback_with(
     let _num_steps = dflash_predict_with(draft_sctx, draft_weights, draft_config, token, pos);
     let vocab_size = draft_config.vocab_size;
 
-    // OPT: stack-allocated marginals view (avoids Vec allocation per call)
+    // OPT: stack-allocated marginals view (avoids Vec allocation per call).
+    // Split-borrow draft_sctx by direct field access so the borrow checker
+    // sees marginals_flat (immutable) as disjoint from target_snap (mutable,
+    // borrowed below for snapshot_into).
+    let steps_populated = draft_sctx.steps_populated;
+    let marginals_flat = &draft_sctx.marginals_flat;
     let mut marginals_buf: [&[f32]; 64] = [&[]; 64];
-    let marginals = draft_sctx.marginals_into(&mut marginals_buf, vocab_size);
+    let count = steps_populated.min(64);
+    for (i, slot) in marginals_buf.iter_mut().enumerate().take(count) {
+        let start = i * vocab_size;
+        let end = start + vocab_size;
+        *slot = if end <= marginals_flat.len() && i < steps_populated {
+            &marginals_flat[start..end]
+        } else {
+            &[]
+        };
+    }
+    let marginals = &marginals_buf[..count];
 
     // 2. Build DDTree (reuses pre-allocated heap/tree buffers)
     let tree = tree_builder.build(marginals, draft_config, &NoPruner, false);
@@ -373,12 +388,14 @@ pub fn speculative_step_rollback_with(
         return (vec![fallback], 1);
     }
 
-    // 4. Snapshot target KV cache at current position
-    let snapshot = target_cache.snapshot(pos, target_config);
+    // 4. Snapshot target KV cache at current position (zero-alloc: reuse
+    //    hoisted scratch buffer from SpeculativeContext instead of allocating
+    //    a fresh KVSnapshot + per-layer Vecs every speculation step).
+    target_cache.snapshot_into(pos, target_config, &mut draft_sctx.target_snap);
 
     // 5. Try each candidate path with rollback on rejection
     for path in &paths {
-        target_cache.restore(&snapshot, target_config);
+        target_cache.restore(&draft_sctx.target_snap, target_config);
 
         let mut accepted = Vec::with_capacity(path.len());
         let mut all_accepted = true;
@@ -437,7 +454,7 @@ pub fn speculative_step_rollback_with(
     }
 
     // All paths exhausted: restore and sample from target
-    target_cache.restore(&snapshot, target_config);
+    target_cache.restore(&draft_sctx.target_snap, target_config);
     let logits = forward(
         target_ctx,
         target_weights,
@@ -481,9 +498,21 @@ pub fn speculative_step_rollback_with_router(
     let _num_steps = dflash_predict_with(draft_sctx, draft_weights, draft_config, token, pos);
     let vocab_size = draft_config.vocab_size;
 
-    // 2. Build marginals view
+    // 2. Build marginals view (split-borrow: see speculative_step_rollback_with)
+    let steps_populated = draft_sctx.steps_populated;
+    let marginals_flat = &draft_sctx.marginals_flat;
     let mut marginals_buf: [&[f32]; 64] = [&[]; 64];
-    let marginals = draft_sctx.marginals_into(&mut marginals_buf, vocab_size);
+    let count = steps_populated.min(64);
+    for (i, slot) in marginals_buf.iter_mut().enumerate().take(count) {
+        let start = i * vocab_size;
+        let end = start + vocab_size;
+        *slot = if end <= marginals_flat.len() && i < steps_populated {
+            &marginals_flat[start..end]
+        } else {
+            &[]
+        };
+    }
+    let marginals = &marginals_buf[..count];
 
     // 3. Observe kurtosis at each drafted position → router EMA update
     for (depth, marginal) in marginals.iter().enumerate() {
@@ -506,12 +535,13 @@ pub fn speculative_step_rollback_with_router(
         return (vec![fallback], 1);
     }
 
-    // 6. Snapshot target KV cache
-    let snapshot = target_cache.snapshot(pos, target_config);
+    // 6. Snapshot target KV cache (zero-alloc: reuse hoisted scratch from
+    //    SpeculativeContext — see speculative_step_rollback_with for rationale).
+    target_cache.snapshot_into(pos, target_config, &mut draft_sctx.target_snap);
 
     // 7. Try each candidate path with rollback on rejection
     for path in &paths {
-        target_cache.restore(&snapshot, target_config);
+        target_cache.restore(&draft_sctx.target_snap, target_config);
 
         let mut accepted = Vec::with_capacity(path.len());
         let mut all_accepted = true;
@@ -569,7 +599,7 @@ pub fn speculative_step_rollback_with_router(
     }
 
     // All paths exhausted
-    target_cache.restore(&snapshot, target_config);
+    target_cache.restore(&draft_sctx.target_snap, target_config);
     let logits = forward(
         target_ctx,
         target_weights,
@@ -878,11 +908,21 @@ pub fn speculative_step_with_configurator(
     let vocab_size = draft_config.vocab_size;
 
     // Build marginals view — stack array (avoids Vec<&[f32]> heap alloc per step).
-    // Matches the pattern used in speculative_step_rollback_with / conditioned_with.
+    // Split-borrow draft_sctx by direct field access so the borrow checker
+    // sees marginals_flat (immutable) as disjoint from target_snap (mutable,
+    // borrowed below for snapshot_into).
+    let marginals_flat = &draft_sctx.marginals_flat;
+    let steps_populated = draft_sctx.steps_populated;
     let mut marginals_buf: [&[f32]; 64] = [&[]; 64];
     let num_steps_bounded = num_steps.min(marginals_buf.len());
     for step in 0..num_steps_bounded {
-        marginals_buf[step] = draft_sctx.marginal_slice(step, vocab_size);
+        let start = step * vocab_size;
+        let end = start + vocab_size;
+        marginals_buf[step] = if end <= marginals_flat.len() && step < steps_populated {
+            &marginals_flat[start..end]
+        } else {
+            &[]
+        };
     }
     let marginals: &[&[f32]] = &marginals_buf[..num_steps_bounded];
 
@@ -930,12 +970,13 @@ pub fn speculative_step_with_configurator(
                 return (vec![fallback], 1, decision);
             }
 
-            // Snapshot target KV cache at current position
-            let snapshot = target_cache.snapshot(pos, target_config);
+            // Snapshot target KV cache at current position (zero-alloc: reuse
+            // hoisted scratch from SpeculativeContext).
+            target_cache.snapshot_into(pos, target_config, &mut draft_sctx.target_snap);
 
             // Try each candidate path with rollback on rejection
             for path in &paths {
-                target_cache.restore(&snapshot, target_config);
+                target_cache.restore(&draft_sctx.target_snap, target_config);
 
                 let mut accepted = Vec::with_capacity(path.len());
                 let mut all_accepted = true;
@@ -1000,7 +1041,7 @@ pub fn speculative_step_with_configurator(
             }
 
             // All paths exhausted: restore and sample from target
-            target_cache.restore(&snapshot, target_config);
+            target_cache.restore(&draft_sctx.target_snap, target_config);
             let logits = forward(
                 target_ctx,
                 target_weights,

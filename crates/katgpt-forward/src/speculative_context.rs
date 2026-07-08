@@ -13,7 +13,7 @@
 
 use crate::ForwardContext;
 use katgpt_core::speculative::types::SdeConfig;
-use katgpt_transformer::MultiLayerKVCache;
+use katgpt_transformer::{KVSnapshot, MultiLayerKVCache};
 use katgpt_types::Config;
 
 /// Pre-allocated buffers for zero-alloc speculative decoding.
@@ -50,6 +50,11 @@ pub struct SpeculativeContext {
     pub steps_populated: usize,
     /// SDE noise injection config for DDTree expansion (ELF Plan 079).
     pub sde_config: SdeConfig,
+    /// Reusable target-cache snapshot scratch for `snapshot_into` (zero-alloc
+    /// rollback path in `speculative_step_rollback_with*`). Hoisted out of the
+    /// per-step loop so the per-layer `key`/`value` Vecs are allocated once
+    /// and reused across all speculation steps in the AR decode loop.
+    pub target_snap: KVSnapshot,
 }
 
 impl SpeculativeContext {
@@ -70,6 +75,7 @@ impl SpeculativeContext {
             p_distributions_flat: vec![0.0f32; (draft_lookahead + 1) * vocab_size],
             steps_populated: 0,
             sde_config: SdeConfig::default(),
+            target_snap: KVSnapshot::default(),
         }
     }
 
