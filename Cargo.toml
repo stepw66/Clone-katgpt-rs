@@ -2305,6 +2305,16 @@ name = "bench_413_snapshot_into_goat"
 path = "benches/bench_413_snapshot_into_goat.rs"
 harness = false
 
+# Plan 406 T2.2 follow-up — quantifies the PagedKVCache::ensure_pages ArrayVec
+# fast-path gain (zero scratch heap allocs) vs the legacy per-layer Vec slow-path.
+# Measures the speculative-decode steady state (rollback→re-alloc cycle with warm
+# free list). Primary gate = G4 alloc hygiene; G2 perf is secondary (modest gain
+# because alloc_page's fill(0.0) dominates and is identical in both paths).
+[[bench]]
+name = "bench_414_ensure_pages_goat"
+path = "benches/bench_414_ensure_pages_goat.rs"
+harness = false
+
 # Plan 358 Phase 3 — CausalHeadImportance G2 (bystander discrimination) gate.
 # Compares causal partition vs RTPurbo's real calibrate_from_scores on a
 # synthetic bystander harness. Lives in root tests/ because it needs the root
