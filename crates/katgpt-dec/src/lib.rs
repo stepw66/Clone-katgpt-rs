@@ -57,6 +57,8 @@ pub mod flow;
 #[cfg(feature = "heat_kernel_trajectory")]
 pub mod heat_kernel;
 pub mod hodge;
+#[cfg(feature = "htno_v_cycle")]
+pub mod htno;
 #[cfg(feature = "heat_kernel_trajectory")]
 pub mod krylov;
 #[cfg(feature = "motor_gated_field")]
@@ -121,6 +123,11 @@ pub use sheaf_admm::{
     AdmmScratch, LocalObjective, SheafMaps, sheaf_admm_step, sheaf_admm_step_cg_into,
     sheaf_admm_step_into, sheaf_admm_step_soft_into,
 };
+
+// Multi-scale V-cycle via selector restriction maps — opt-in. Composes the
+// single-complex DEC operators into a two-level fine→coarse→fine hierarchy.
+#[cfg(feature = "htno_v_cycle")]
+pub use htno::{VCycleRestriction, VCycleScratch, grid_coarsen_2x2, htno_v_cycle, htno_v_cycle_into};
 
 pub use types::{CellComplex, CoboundaryIndex, CochainField, MAX_RANK};
 

@@ -66,6 +66,11 @@ default = ["heat_kernel_trajectory", "sheaf_admm"]
 motor_gated_field = []
 heat_kernel_trajectory = []
 sheaf_admm = []  # DEFAULT-ON (Plan 407 Phase 2 GOAT G1–G6 ALL PASS)
+# Multi-scale V-cycle on cell complexes via selector restriction maps
+# (gather-scatter fine→coarse→fine). Composes the single-complex DEC
+# operators into a two-level hierarchy. Opt-in — commutativity is verified
+# on grid coarsenings (the production path) and path-complex coarsenings.
+htno_v_cycle = []
 
 [[bench]]
 name = "bench_407_sheaf_admm_goat"
