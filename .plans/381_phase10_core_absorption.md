@@ -84,7 +84,7 @@ katgpt-core gains an always-compiled `alloc` module (no feature gate; the `debug
   - **clippy**: workspace zero warnings, zero errors.
   - **Mid-fix discovery**: `trigger_gate.rs`'s `#[cfg(feature = "rv_gated_routing")]` gate (RvThresholds + rv_tier_boost) was dead post-move because `rv_gated_routing` was root-only. Added `rv_gated_routing = []` feature to katgpt-core + updated root's `rv_gated_routing` forward to include `katgpt-core/rv_gated_routing`. Workspace check then passed.
   - **Mid-fix discovery**: `mux_demux.rs`'s `#[cfg(all(feature = "mux_demux", feature = "rcd_residual"))]` gate was dead post-move (rcd_residual is root-only). Dropped the dead half of the AND-gate → `#[cfg(feature = "mux_demux")]`. Strictly more permissive (fn now available whenever mux_demux is on); no regression risk.
-- [x] **T9.** Update `proposals/003_src_consolidation_master.md` Phase 10 → DONE. — DONE: comprehensive Phase 10 entry added with all 4 mid-fixes documented + GOAT gate G3 results.
+- [x] **T9.** Update `.proposals/003_src_consolidation_master.md` Phase 10 → DONE. — DONE: comprehensive Phase 10 entry added with all 4 mid-fixes documented + GOAT gate G3 results.
 - [x] **T10.** Commit on `develop` with `refactor(core):` prefix. — DONE: commit `61f18225` on `develop` (33 files changed: 22 renames + 8 modifies + 1 add + Cargo.lock + plan). Explicit pathspec used to avoid sweeping sibling WIP.
 
 ## Deferral protocol
@@ -93,6 +93,6 @@ If a module has a true root dep that can't be resolved via shim or import rewrit
 
 ## Reference
 
-- Proposal: `proposals/003_src_consolidation_master.md` Phase 10 (L684-686) + destination map (L143-167)
+- Proposal: `.proposals/003_src_consolidation_master.md` Phase 10 (L684-686) + destination map (L143-167)
 - Phase 9 prior art: `.plans/380_phase9_transformer_absorption.md`
 - Crate current state: `crates/katgpt-core/` (77 modules, 60+ features, default list of ~40 features)

@@ -84,7 +84,7 @@ back-compat shim.
   - Doctest failures in `answer_extract.rs` (3) — pre-existing from Plan 386,
     verified on baseline.
 - [x] **Phase 4.6 — Docs + commit**
-  - [x] Update `proposals/003_src_consolidation_master.md` Phase 18 → add Phase 19.
+  - [x] Update `.proposals/003_src_consolidation_master.md` Phase 18 → add Phase 19.
   - [x] Mark this plan DONE.
 
 ## Import rewrite patterns (extends Phase 16/17/18 table)

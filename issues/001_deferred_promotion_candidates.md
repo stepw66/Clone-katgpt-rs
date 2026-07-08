@@ -20,7 +20,7 @@ The earlier "all candidates scheduled in Proposal 003" claim was aspirational
 and inaccurate. This issue remains the live tracker for Candidates A and B.
 Created: 2026-07-01
 Status corrected: 2026-07-04
-Related proposal: `proposals/003_src_consolidation_master.md` (covers Candidate C only)
+Related proposal: `.proposals/003_src_consolidation_master.md` (covers Candidate C only)
 
 ## Context
 
@@ -247,7 +247,7 @@ to the quant promotion. Distinct from both `katgpt-core`'s base attention
 primitives and `katgpt-attn-match` (KV compaction, Plan 271).
 
 - [x] Write Proposal 002 — `katgpt-dash-attn` crate promotion. See
-      `proposals/002_dash_attn_crate_promotion.md`.
+      `.proposals/002_dash_attn_crate_promotion.md`.
       **Key nuance captured:** unlike the quant family, `dash_attn` is NOT
       a clean leaf — `forward.rs` + `tests.rs` are hard-coupled to
       `crate::transformer::ForwardContext` (which lives in root, not in

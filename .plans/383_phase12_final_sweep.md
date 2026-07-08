@@ -210,6 +210,6 @@ Per Proposal 003 §"GOAT gate" (L299-315):
 
 ## References
 
-- Proposal 003: `katgpt-rs/proposals/003_src_consolidation_master.md`
+- Proposal 003: `katgpt-rs/.proposals/003_src_consolidation_master.md`
 - Plan 382 (Phase 11 close-out): `katgpt-rs/.plans/382_phase11_domain_crates.md`
 - Phase 12 spec: proposal L817-822

@@ -2,7 +2,7 @@
 
 Status: **RESOLVED** (2026-07-01) — T1–T4 done, Phase 0.5 unblocked
 Created: 2026-07-01
-Related: `proposals/003_src_consolidation_master.md` (Phase 0.5 is gated on this)
+Related: `.proposals/003_src_consolidation_master.md` (Phase 0.5 is gated on this)
 
 ## TL;DR
 
@@ -119,7 +119,7 @@ feature-gated primitive as a "loser" (false failure). Lodestar specifically
 
 - Plan 207: `.plans/207_lodestar_completion_distance_pruning.md`
 - Bench 055: `.benchmarks/055_lodestar_overhead_goat.md` (GOAT 5/5)
-- Proposal 003: `proposals/003_src_consolidation_master.md` (Phase 0.5)
+- Proposal 003: `.proposals/003_src_consolidation_master.md` (Phase 0.5)
 
 ## TL;DR
 

@@ -45,7 +45,7 @@ For each module, identify:
 - [x] **T10.** Delete original files from `src/` — DONE (kept only shims + deferred files).
 - [x] **T11.** Update root `Cargo.toml` features to forward to crate — DONE.
 - [x] **T12.** GOAT gate G3 — DONE: workspace check (3 configs) + katgpt-transformer lib tests (122 PASS) + root lib tests (1397 PASS) + external consumer tests (mbu/tf_loop/dense_mesh/swir) + clippy.
-- [x] **T13.** Update `proposals/003_src_consolidation_master.md` Phase 9 → DONE — DONE.
+- [x] **T13.** Update `.proposals/003_src_consolidation_master.md` Phase 9 → DONE — DONE.
 - [x] **T14.** Commit on `develop` with `refactor(transformer):` prefix — pending.
 
 ## Deferral protocol
@@ -59,6 +59,6 @@ the feature has cross-crate coupling that doesn't forward, defer.
 
 ## Reference
 
-- Proposal: `proposals/003_src_consolidation_master.md` Phase 9 (L636-637)
+- Proposal: `.proposals/003_src_consolidation_master.md` Phase 9 (L636-637)
 - Phase 8 prior art: `.plans/378_phase8_pruners_attn_match_absorption.md`
 - Crate current state: `crates/katgpt-transformer/` (6 src files, 5 features)

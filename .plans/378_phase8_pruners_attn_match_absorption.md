@@ -39,7 +39,7 @@ Proposal 003 Phase 8 destination map:
 - [x] T6. Update root `Cargo.toml` (forward features to crates) + `src/lib.rs` (re-export shims)
 - [x] T7. Delete originals from `src/`
 - [x] T8. GOAT gate G3: workspace check (all-features, default, no-default), test suites
-- [x] T9. Update `proposals/003_src_consolidation_master.md` — Phase 8 DONE
+- [x] T9. Update `.proposals/003_src_consolidation_master.md` — Phase 8 DONE
 - [x] T10. Commit on `develop` with `refactor:` prefix
 
 ## Validation plan

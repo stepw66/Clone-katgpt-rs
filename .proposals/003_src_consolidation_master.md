@@ -1415,8 +1415,8 @@ Any of these (all outside Proposal 003's scope) would unlock more moves:
   `riir-neuron-db/AGENTS.md`.
 - Modelless mandate + GOAT gate: `katgpt-rs/AGENTS.md` §§ "Modelless-first
   mandate", "Feature Flag Discipline".
-- Supersedes: `proposals/001_quant_crate_promotion.md`,
-  `proposals/002_dash_attn_crate_promotion.md` (absorbed as Phases 1–2).
+- Supersedes: `.proposals/001_quant_crate_promotion.md`,
+  `.proposals/002_dash_attn_crate_promotion.md` (absorbed as Phases 1–2).
 
 ## TL;DR
 

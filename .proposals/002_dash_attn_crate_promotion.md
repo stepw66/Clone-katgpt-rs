@@ -6,7 +6,7 @@ The narrow `katgpt-dash-attn` is widened to the full attention stack
 gdn2 + hla + dash_attn + rat_bridge + static_cal + chiaroscuro + funcattn_compose.
 Branch: `develop` (per global rule — no feature branches)
 Owner: unassigned
-Predecessor: `proposals/001_quant_crate_promotion.md`
+Predecessor: `.proposals/001_quant_crate_promotion.md`
 
 ## TL;DR
 

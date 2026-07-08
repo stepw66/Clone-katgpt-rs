@@ -95,7 +95,7 @@ All files have zero `crate::` refs OR only leaf-reexport refs. Grouped by gate:
 - [x] `bench_023_adaptive_gamma` smoke — PASS
 
 ### T7: Docs + commit
-- [x] Update proposals/003_src_consolidation_master.md (Phase 16 entry)
+- [x] Update .proposals/003_src_consolidation_master.md (Phase 16 entry)
 - [x] Commit on develop
 
 ## Defers (Phase 2+ candidates)

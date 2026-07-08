@@ -102,7 +102,7 @@ The workspace has **26 in-tree crates** (plus the root) organized in four
 layers: shared leaves, `katgpt-core` (traits + cognitive kernels), domain
 stacks, and the root crate (`katgpt-rs`) which is the feature-aggregation
 surface that wires every domain crate into the transformer runtime via
-`ForwardContext`. See `proposals/003_src_consolidation_master.md` for the
+`ForwardContext`. See `.proposals/003_src_consolidation_master.md` for the
 full Phase 0–11 consolidation history; Plans 378–404 completed the Phase 12
 substrate-extraction sweep (only training code + benchmark tooling remain
 permanently root-resident).
@@ -2143,7 +2143,7 @@ A long refactor series that relocated pure-substrate code from the root `src/` i
 - **Plans 398–403**: moved the entire d2f/diffusion_sampler/flashar/denoise-loop clusters (~5.7K LOC) from root to `katgpt-forward`.
 - **Plan 404** (endgame audit): only training code + benchmark tooling remain permanently root-resident; pure-substrate clusters all extracted.
 
-See `proposals/003_src_consolidation_master.md` for the full Phase 0–12 history.
+See `.proposals/003_src_consolidation_master.md` for the full Phase 0–12 history.
 
 ---
 
@@ -2613,7 +2613,7 @@ benches/                 Criterion benchmarks
 - [HOLA Hippocampal Exact KV Cache](.plans/395_hippocampal_exact_kv_cache.md)
 - [Spherical Geodesic Steering](.plans/405_spherical_steering_geodesic_primitive.md)
 - [Renoise-CE Self-Verifier](.plans/406_renoise_ce_self_verifier.md)
-- [Proposal 003 — src/ consolidation master (Phases 0–12)](proposals/003_src_consolidation_master.md)
+- [Proposal 003 — src/ consolidation master (Phases 0–12)](.proposals/003_src_consolidation_master.md)
 - [Sigmoid-not-Softmax: The Universality-Class Escape (Research 315, Liu & Gore 2606.25008)](.docs/31_universality_class_escape.md)
 
 ## 📜 References

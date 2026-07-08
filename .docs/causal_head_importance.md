@@ -33,7 +33,7 @@ katgpt-rs = { version = "...", features = ["causal_head_importance", "rt_turbo"]
 
 - **`causal_head_importance`** (opt-in, katgpt-core): enables the scorer module + `ScaleNormalizedFusion`. The root crate forwards it via passthrough.
 - **`rt_turbo`** (opt-in, root): additionally enables `calibrate_from_causal_scores` + the `CalibrationMode::CausalNecessity` enum variant wired into `RtTurboConfig`.
-- **`adaptive_causal_calibration`** (opt-in, Proposal 004): adds the cheap-proxy escalate mode — `suspect_indices` + `adaptive_partition` in katgpt-core, `calibrate_from_adaptive_causal` + `CalibrationMode::AdaptiveCausal` in root. Implies `causal_head_importance`. **OUR INVENTION, not from HydraHead.** The OV-circuit proxy is an unvalidated hypothesis — promotion to default is blocked on G1 (proxy precision) + G2 (cost reduction), both deferred to riir-engine. See [Proposal 004](../proposals/004_adaptive_causal_calibration.md).
+- **`adaptive_causal_calibration`** (opt-in, Proposal 004): adds the cheap-proxy escalate mode — `suspect_indices` + `adaptive_partition` in katgpt-core, `calibrate_from_adaptive_causal` + `CalibrationMode::AdaptiveCausal` in root. Implies `causal_head_importance`. **OUR INVENTION, not from HydraHead.** The OV-circuit proxy is an unvalidated hypothesis — promotion to default is blocked on G1 (proxy precision) + G2 (cost reduction), both deferred to riir-engine. See [Proposal 004](../.proposals/004_adaptive_causal_calibration.md).
 
 ---
 

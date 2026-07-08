@@ -207,7 +207,7 @@ Key findings per crate:
   self-documented as "Root-resident by design, Issue 033 §C Option C").
   Also coupled to `main.rs` (6 call sites) — Phase 12 deletes `main.rs`,
   dissolving that coupling. Re-evaluate after Phase 12. ✅
-- [x] **T7.** Update `proposals/003_src_consolidation_master.md` Phase 11 →
+- [x] **T7.** Update `.proposals/003_src_consolidation_master.md` Phase 11 →
   DONE (5 of 6 crates; bench deferred). ✅ (see T7 edit below)
 - [x] **T8.** Commit on `develop` with `refactor:` prefix. ✅
   - Commit `f18b128b` on `develop`. 52 files changed: 5 new crate Cargo.toml +
@@ -238,6 +238,6 @@ rewrite, defer to Phase 12. Document the blocker. Do NOT move half a module.
 
 ## Reference
 
-- Proposal: `proposals/003_src_consolidation_master.md` Phase 11 (L744-745).
+- Proposal: `.proposals/003_src_consolidation_master.md` Phase 11 (L744-745).
 - Phase 10 prior art: `.plans/381_phase10_core_absorption.md`.
 - Audit reports: this file's "Pre-extraction audit" section above.

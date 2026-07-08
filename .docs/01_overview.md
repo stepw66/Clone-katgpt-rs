@@ -94,7 +94,7 @@ A from-scratch Rust implementation of a GPT-2 style transformer with speculative
 > pre-Phase-7 snapshot. The canonical crate layout lives in
 > [`README.md` § Crate Dependency DAG](../README.md#crate-dependency-dag) and
 > the migration history lives in
-> [`proposals/003_src_consolidation_master.md`](../proposals/003_src_consolidation_master.md)
+[`.proposals/003_src_consolidation_master.md`](../.proposals/003_src_consolidation_master.md)
 > (Phases 0–11 DONE; Phase 12 final sweep pending). Notable moves not reflected
 > below: Phase 8 (`closure_wire`, `screening` → `katgpt-pruners`; `rerank` →
 > `katgpt-attn-match`), Phase 9 (`mbu`, `tf_loop`, `dense_mesh`, `swir` →
