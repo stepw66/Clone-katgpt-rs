@@ -1,11 +1,10 @@
 #![allow(unexpected_cfgs)]
-// Issue 413: device backends (inference_backend trait + CpuBackend +
+// Issue 413 (resolved): device backends (inference_backend trait + CpuBackend +
 // AneBackend + GpuBackend) extracted to the `katgpt-backend` leaf crate. Root
 // re-exports the leaf as `inference_backend` so all historical
 // `katgpt_rs::inference_backend::*` paths resolve (Issue 014/015 re-export
 // contract). The historical `katgpt_rs::{ane_backend, gpu_backend}` module
-// paths also re-export from the leaf for back-compat. See
-// issues/413_backend_extraction_to_crate.md.
+// paths also re-export from the leaf for back-compat.
 pub use katgpt_backend as inference_backend;
 #[cfg(all(target_os = "macos", feature = "ane"))]
 pub mod ane_backend {

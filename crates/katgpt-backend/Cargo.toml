@@ -14,14 +14,14 @@ publish = false  # only katgpt-core ships to crates.io
 # (Plan 385 moved `forward`; Issue 007 Phase F moved `ForwardContext`).
 # This leaf sits ABOVE those leaves — zero circular deps, which is why the
 # historical "root-resident by design" argument (Issue 033 §C) no longer
-# applies and this extraction is safe. See issues/413_backend_extraction_to_crate.md.
+# applies and this extraction is safe (Issue 413, resolved).
 katgpt-forward = { path = "../katgpt-forward", default-features = false }  # forward(), ForwardContext
 katgpt-transformer = { path = "../katgpt-transformer" }  # TransformerWeights, MultiLayerKVCache
 katgpt-types = { path = "../katgpt-types" }              # Config, kv_dim
 log = "0.4"  # auto_backend() logs the selected device
 
 # macOS-only optional device deps. Moved here from root's
-# `[target.'cfg(target_os = "macos")'.dependencies]` as part of Issue 413.
+# `[target.'cfg(target_os = "macos")'.dependencies]` as part of Issue 413 (resolved).
 # Root `ane` / `gpu_inference` features forward to this crate's features.
 
 [target.'cfg(target_os = "macos")'.dependencies]
