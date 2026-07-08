@@ -1,0 +1,39 @@
+[package]
+name = "katgpt-backend"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+description = "Device inference backends (CPU/ANE/GPU) for the transformer forward pass — the InferenceBackend trait + provider impls (Issue 413)"
+repository = "https://github.com/katopz/katgpt-rs"
+keywords = ["inference", "backend", "ane", "gpu", "metal"]
+categories = ["data-structures"]
+publish = false  # only katgpt-core ships to crates.io
+
+[dependencies]
+# All forward-pass types the backends import now live in leaf crates
+# (Plan 385 moved `forward`; Issue 007 Phase F moved `ForwardContext`).
+# This leaf sits ABOVE those leaves — zero circular deps, which is why the
+# historical "root-resident by design" argument (Issue 033 §C) no longer
+# applies and this extraction is safe. See issues/413_backend_extraction_to_crate.md.
+katgpt-forward = { path = "../katgpt-forward", default-features = false }  # forward(), ForwardContext
+katgpt-transformer = { path = "../katgpt-transformer" }  # TransformerWeights, MultiLayerKVCache
+katgpt-types = { path = "../katgpt-types" }              # Config, kv_dim
+log = "0.4"  # auto_backend() logs the selected device
+
+# macOS-only optional device deps. Moved here from root's
+# `[target.'cfg(target_os = "macos")'.dependencies]` as part of Issue 413.
+# Root `ane` / `gpu_inference` features forward to this crate's features.
+
+[target.'cfg(target_os = "macos")'.dependencies]
+metal = { version = "0.33", optional = true }        # GPU compute pipelines (Plan 176)
+coreml-native = { version = "0.2", optional = true } # Apple Neural Engine runtime (Plan 176)
+coreml-proto = { version = "0.1", optional = true }  # CoreML protobuf spec builder (Plan 176)
+prost = { version = "0.14", optional = true }        # Protobuf serialization for CoreML spec (Plan 176)
+
+[features]
+default = []
+
+# Apple Neural Engine backend (CoreML). Enables ane.rs.
+ane = ["dep:coreml-native", "dep:coreml-proto", "dep:prost"]
+# GPU inference backend (Metal compute). Enables gpu.rs.
+gpu_inference = ["dep:metal"]

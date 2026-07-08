@@ -26,9 +26,10 @@ use metal::{
     Buffer, CommandQueue, CompileOptions, ComputePipelineState, Device, MTLResourceOptions, MTLSize,
 };
 
-use crate::inference_backend::{CompileError, InferenceBackend};
-use crate::transformer::{ForwardContext, MultiLayerKVCache, TransformerWeights};
-use crate::types::{Config, kv_dim};
+use crate::{CompileError, InferenceBackend};
+use katgpt_forward::ForwardContext;
+use katgpt_transformer::{MultiLayerKVCache, TransformerWeights};
+use katgpt_types::{Config, kv_dim};
 
 // ---------------------------------------------------------------------------
 // Metal shader source
@@ -421,7 +422,7 @@ impl InferenceBackend for GpuBackend {
     ) -> &'a mut [f32] {
         // Fall back to CPU if not compiled
         if !self.compiled {
-            return crate::transformer::forward(ctx, weights, cache, token, pos, config);
+            return katgpt_forward::forward(ctx, weights, cache, token, pos, config);
         }
 
         let pipelines = self
@@ -928,8 +929,8 @@ impl InferenceBackend for GpuBackend {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::transformer;
-    use crate::types::Rng;
+    use katgpt_forward as transformer;
+    use katgpt_types::Rng;
 
     /// Create micro test fixtures (small model config + random weights).
     fn micro_fixtures() -> (

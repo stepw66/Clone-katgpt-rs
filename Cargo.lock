@@ -1751,6 +1751,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "katgpt-backend"
+version = "0.1.0"
+dependencies = [
+ "coreml-native",
+ "coreml-proto",
+ "katgpt-forward",
+ "katgpt-transformer",
+ "katgpt-types",
+ "log",
+ "metal",
+ "prost",
+]
+
+[[package]]
 name = "katgpt-band"
 version = "0.1.0"
 dependencies = [
@@ -1931,8 +1945,6 @@ dependencies = [
  "bevy_ecs",
  "blake3",
  "bytemuck",
- "coreml-native",
- "coreml-proto",
  "crossterm",
  "fastrand",
  "getrandom 0.2.17",
@@ -1940,6 +1952,7 @@ dependencies = [
  "half",
  "katgpt-attn",
  "katgpt-attn-match",
+ "katgpt-backend",
  "katgpt-band",
  "katgpt-claim",
  "katgpt-core",
@@ -1958,11 +1971,9 @@ dependencies = [
  "katgpt-transformer",
  "katgpt-validator",
  "log",
- "metal",
  "papaya",
  "plotters",
  "postcard",
- "prost",
  "ratatui",
  "rayon",
  "reqwest",

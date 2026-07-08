@@ -4,7 +4,9 @@
 > "Create issue at ./issues for optimization or refactor task".
 > Numbering follows the shared global counter (latest: 412 in `.plans/`).
 
-Status: **OPEN**
+Status: **✅ DONE** — extraction shipped 2026-07-08; all gates green except one
+pre-existing test failure (`goat_p3`, unrelated to this refactor — fails identically
+on HEAD prior to extraction).
 Created: 2026-07-08
 Type: Refactor / modularity
 Related: Issue 033 (original root-residency decision — **stale**, see §1),
@@ -99,36 +101,34 @@ Don't force-fit.
 
 ### Target A — `katgpt-backend` crate (new)
 
-- [ ] **A0:** Create `crates/katgpt-backend/` skeleton (`Cargo.toml` +
+- [x] **A0:** Create `crates/katgpt-backend/` skeleton (`Cargo.toml` +
       `src/lib.rs`). Deps: `katgpt-forward`, `katgpt-transformer`, `katgpt-types`.
       Optional macOS deps (behind features): `metal` (gpu_inference),
       `coreml-native` + `coreml-proto` + `prost` (ane). `publish = false`
-      (matches every leaf except katgpt-core).
-- [ ] **A1:** Move `inference_backend.rs` → `crates/katgpt-backend/src/lib.rs`:
+      (matches every leaf except katgpt-core). Also added `log = "0.4"` (used by
+      `auto_backend()` — was transitive in root).
+- [x] **A1:** Move `inference_backend.rs` → `crates/katgpt-backend/src/lib.rs`:
       - `InferenceBackend` trait
       - `CompileError`
       - `CpuBackend` (delegates to `katgpt_forward::forward`)
       - `BackendKind` enum
       - `auto_backend()` selector
-      - Rewrite imports: `crate::transformer::*` → `katgpt_forward::*` /
+      - Rewrote imports: `crate::transformer::*` → `katgpt_forward::*` /
         `katgpt_transformer::*`; `crate::types::*` → `katgpt_types::*`.
-      - **Fix the stale line-8 doc comment** — replace the Issue 033 §C note
+      - **Fixed the stale line-8 doc comment** — replaced the Issue 033 §C note
         with the actual reason this is now a leaf (forward/ForwardContext
         moved to katgpt-forward in Plan 385).
-- [ ] **A2:** Move `gpu_backend.rs` → `crates/katgpt-backend/src/gpu.rs`
+- [x] **A2:** Move `gpu_backend.rs` → `crates/katgpt-backend/src/gpu.rs`
       (gated `#[cfg(all(target_os = "macos", feature = "gpu_inference"))]`).
-      Move the `metal = "0.33"` dep from root `[target.'cfg(target_os = "macos")'.dependencies]`
-      into the leaf.
-- [ ] **A3:** Move `ane_backend.rs` → `crates/katgpt-backend/src/ane.rs`
+      Moved the `metal = "0.33"` dep into the leaf's macOS target-deps.
+- [x] **A3:** Move `ane_backend.rs` → `crates/katgpt-backend/src/ane.rs`
       (gated `#[cfg(all(target_os = "macos", feature = "ane"))]`).
-      Move `coreml-native`, `coreml-proto`, `prost` deps into the leaf.
-- [ ] **A4:** Root `src/lib.rs` re-export for back-compat (mirrors Issue 014/015
-      re-export contract used for every prior extraction):
-      ```rust
-      pub use katgpt_backend as inference_backend;
-      ```
-      Delete the three root `src/*_backend.rs` files +
-      `src/inference_backend.rs`.
+      Moved `coreml-native`, `coreml-proto`, `prost` deps into the leaf.
+- [x] **A4:** Root `src/lib.rs` re-exports for back-compat (mirrors Issue 014/015):
+      `pub use katgpt_backend as inference_backend;` + thin `ane_backend` /
+      `gpu_backend` module shims re-exporting `AneBackend`/`GpuBackend` for the
+      historical `katgpt_rs::{ane_backend,gpu_backend}` paths. Deleted the three
+      root `src/*_backend.rs` + `src/inference_backend.rs`.
 
 ### Target B — root stays (documented for completeness)
 
@@ -187,23 +187,33 @@ the established back-compat pattern. Only touch them if a test goes red.
 
 ## 8. Acceptance
 
-- [ ] Issue created (this file).
-- [ ] A0: `katgpt-backend` skeleton compiles standalone
+- [x] Issue created (this file).
+- [x] A0: `katgpt-backend` skeleton compiles standalone
       (`cargo check -p katgpt-backend --no-default-features`).
-- [ ] A1-A3: trait + 3 device backends moved, imports rewritten to leaf paths.
-- [ ] A4: root re-exports `katgpt_backend as inference_backend`; three root
+- [x] A1-A3: trait + 3 device backends moved, imports rewritten to leaf paths.
+- [x] A4: root re-exports `katgpt_backend as inference_backend`; three root
       files deleted.
-- [ ] Feature forwards threaded (§6); `kog_cpu_fusion` implication preserved.
-- [ ] `cargo check --workspace` green.
-- [ ] `cargo check --workspace --all-features` green (combo-regression guard,
+- [x] Feature forwards threaded (§6); `kog_cpu_fusion` implication preserved.
+- [x] `cargo check --workspace` green.
+- [x] `cargo check --workspace --all-features` green (combo-regression guard,
       the `merkle_root` lesson class).
-- [ ] `cargo test --workspace --lib` green — no behavior change, no public API
-      rename (paths resolve via re-export).
-- [ ] The 3 `tests/*_176_*.rs` files pass unchanged (re-export holds).
-- [ ] Stale Issue 033 doc comment rewritten in the moved trait file.
-- [ ] `inference_router.rs` one-line import update (`crate::inference_backend` →
-      `katgpt_backend`); stays root, confirmed compiles.
-- [ ] Commit on `develop` with `refactor:` prefix.
+- [x] `cargo test -p katgpt-rs --lib` green — **206 tests, 0 failures**.
+- [x] `cargo test -p katgpt-backend --all-features --lib` green — **46 tests**
+      (CPU + GPU + ANE, incl. GOAT + benchmarks).
+- [x] `tests/goat_176_trigger_gate.rs` — **14/14 pass** (router + backend
+      selection through the re-export, end-to-end).
+- [x] `tests/bench_176_ane_inference_backend.rs` — **3/3 pass**.
+- [-] `tests/goat_176_ane_inference_backend.rs` — **7/8 pass**. `goat_p3`
+      fails but is a **pre-existing failure** unrelated to this refactor:
+      reproduced identically on HEAD prior to extraction (commit `181f89d0`,
+      verified via throwaway worktree). The test unconditionally asserts
+      `auto_backend(Auto) == "CPU"`, but on macOS with `ane` compiled `Auto`
+      selects ANE by design. Not fixed per global rule "do not fix unrelated
+      broken tests" — flagged for follow-up.
+- [x] Stale Issue 033 doc comment rewritten in the moved trait file.
+- [x] `inference_router.rs` unchanged — `crate::inference_backend::InferenceBackend`
+      resolves through the re-export, confirmed compiles + 14 router tests pass.
+- [x] Commit on `develop` with `refactor:` prefix.
 
 ## 9. Non-goals
 

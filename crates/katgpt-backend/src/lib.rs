@@ -3,14 +3,33 @@
 //! Defines the [`InferenceBackend`] trait that decouples the high-level generate
 //! loop from the concrete compute backend (CPU, Apple Neural Engine, etc.).
 //!
-//! The default [`CpuBackend`] delegates to [`crate::transformer::forward`].
+//! The default [`CpuBackend`] delegates to [`katgpt_forward::forward`].
 //!
-//! _Root-resident by design (Issue 033 §C, Option C)._ Defines the `InferenceBackend` trait (the forward abstraction itself — same signature as a proposed `ForwardPass` trait would have). Its providers (CpuBackend/AneBackend/GpuBackend) all delegate to root's `crate::transformer::forward`. The trait cannot move without its providers; the providers cannot move without root's forward. A redundant `ForwardPass` trait was rejected as non-production-grade.
+//! _Extracted to this leaf crate (Issue 413)._ Previously root-resident per
+//! Issue 033 §C's circular-dependency argument ("the trait cannot move without
+//! its providers; the providers cannot move without root's forward"). That
+//! argument became stale when `forward` + `ForwardContext` moved to the
+//! `katgpt-forward` leaf (Plan 385 / Issue 007 Phase F, 2026-07-05): every
+//! type the backends import now lives in a leaf crate, so this crate sits
+//! above `katgpt-forward` / `katgpt-transformer` / `katgpt-types` with zero
+//! circular deps. A redundant `ForwardPass` trait was rejected earlier as
+//! non-production-grade and remains rejected — this is the same trait, moved.
 
 use std::fmt;
 
-use crate::transformer::{ForwardContext, MultiLayerKVCache, TransformerWeights};
-use crate::types::Config;
+use katgpt_forward::ForwardContext;
+use katgpt_transformer::{MultiLayerKVCache, TransformerWeights};
+use katgpt_types::Config;
+
+#[cfg(all(target_os = "macos", feature = "gpu_inference"))]
+mod gpu;
+#[cfg(all(target_os = "macos", feature = "gpu_inference"))]
+pub use gpu::GpuBackend;
+
+#[cfg(all(target_os = "macos", feature = "ane"))]
+mod ane;
+#[cfg(all(target_os = "macos", feature = "ane"))]
+pub use ane::{AneBackend, AneError, build_conv2d_linear_model_spec, validate_residency};
 
 /// Error type for backend weight compilation.
 #[derive(Debug)]
@@ -117,7 +136,7 @@ impl InferenceBackend for CpuBackend {
         pos: usize,
         config: &Config,
     ) -> &'a mut [f32] {
-        crate::transformer::forward(ctx, weights, cache, token, pos, config)
+        katgpt_forward::forward(ctx, weights, cache, token, pos, config)
     }
 
     fn device_name(&self) -> &'static str {
@@ -203,7 +222,7 @@ fn try_ane_backend(
 ) -> Result<Box<dyn InferenceBackend>, String> {
     #[cfg(all(target_os = "macos", feature = "ane"))]
     {
-        use crate::ane_backend::AneBackend;
+        use crate::ane::AneBackend;
 
         let backend = AneBackend::new();
         log::info!("Backend: ANE (available, awaiting compile())");
@@ -219,8 +238,8 @@ fn try_ane_backend(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::transformer;
-    use crate::types::Rng;
+    use katgpt_forward as transformer;
+    use katgpt_types::Rng;
 
     fn micro_fixtures() -> (
         Config,

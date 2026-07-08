@@ -1,6 +1,20 @@
 #![allow(unexpected_cfgs)]
+// Issue 413: device backends (inference_backend trait + CpuBackend +
+// AneBackend + GpuBackend) extracted to the `katgpt-backend` leaf crate. Root
+// re-exports the leaf as `inference_backend` so all historical
+// `katgpt_rs::inference_backend::*` paths resolve (Issue 014/015 re-export
+// contract). The historical `katgpt_rs::{ane_backend, gpu_backend}` module
+// paths also re-export from the leaf for back-compat. See
+// issues/413_backend_extraction_to_crate.md.
+pub use katgpt_backend as inference_backend;
 #[cfg(all(target_os = "macos", feature = "ane"))]
-pub mod ane_backend;
+pub mod ane_backend {
+    pub use katgpt_backend::{AneBackend, AneError};
+}
+#[cfg(all(target_os = "macos", feature = "gpu_inference"))]
+pub mod gpu_backend {
+    pub use katgpt_backend::GpuBackend;
+}
 // Issue 359: `attn_match` extracted to the katgpt-attn-match leaf. The root
 // re-exports the leaf as `attn_match` so all historical `katgpt_rs::attn_match::*`
 // paths continue to resolve (Issue 014/015 re-export contract). The
@@ -162,8 +176,6 @@ pub use katgpt_core::cce;
 pub use katgpt_pruners::freq_bandit;
 #[cfg(feature = "gdn2_attention")]
 pub mod gdn2;
-#[cfg(all(target_os = "macos", feature = "gpu_inference"))]
-pub mod gpu_backend;
 #[cfg(feature = "hla_attention")]
 pub mod hla;
 // katgpt-quant re-export (Proposal 003 Phase 1, 2026-07-01): quantization codecs
@@ -171,7 +183,8 @@ pub mod hla;
 // paths resolve.
 #[cfg(feature = "hybrid_oct_pq")]
 pub use katgpt_quant::hybrid_oct_pq;
-pub mod inference_backend;
+// (Issue 413: inference_backend moved to katgpt-backend leaf; re-exported
+// at top of this file as `pub use katgpt_backend as inference_backend;`.)
 pub mod inference_router;
 #[cfg(feature = "interval_pruner")]
 // Phase 12 absorption (Proposal 003, 2026-07-04): module moved to katgpt-pruners.

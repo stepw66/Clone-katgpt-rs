@@ -35,9 +35,10 @@
 use coreml_native as coreml;
 use prost::Message;
 
-use crate::inference_backend::InferenceBackend;
-use crate::transformer::{ForwardContext, MultiLayerKVCache, TransformerWeights};
-use crate::types::Config;
+use crate::InferenceBackend;
+use katgpt_forward::ForwardContext;
+use katgpt_transformer::{MultiLayerKVCache, TransformerWeights};
+use katgpt_types::Config;
 
 // ── CoreML proto imports ──────────────────────────────────────────────────
 //
@@ -210,7 +211,7 @@ impl InferenceBackend for AneBackend {
         config: &Config,
     ) -> &'a mut [f32] {
         // Run the full CPU forward pass to get logits.
-        crate::transformer::forward(ctx, weights, cache, token, pos, config);
+        katgpt_forward::forward(ctx, weights, cache, token, pos, config);
 
         // If we have a compiled CoreML model, run the lm_head on ANE and
         // override the CPU-computed logits. This proves the pipeline works.
@@ -734,7 +735,7 @@ fn run_lm_head_into(
 /// in microseconds. Returns `AneError::ResidencyFailed` if latency exceeds
 /// the 1000µs threshold, indicating the model likely fell back to CPU.
 pub fn validate_residency(model: &coreml::Model, config: &Config) -> Result<u64, AneError> {
-    let mut rng = crate::types::Rng::new(0);
+    let mut rng = katgpt_types::Rng::new(0);
     let hidden: Vec<f32> = (0..config.n_embd).map(|_| rng.uniform()).collect();
     let mut logits = vec![0.0f32; config.vocab_size];
 
@@ -838,7 +839,7 @@ mod tests {
         assert!(!backend.is_compiled());
 
         let config = Config::micro();
-        let mut rng = crate::types::Rng::new(42);
+        let mut rng = katgpt_types::Rng::new(42);
         let weights = TransformerWeights::new(&config, &mut rng);
 
         backend.compile(&weights, &config).unwrap();
@@ -862,7 +863,7 @@ mod tests {
 
         // compile() clears the flag
         let config = Config::micro();
-        let mut rng = crate::types::Rng::new(42);
+        let mut rng = katgpt_types::Rng::new(42);
         let weights = TransformerWeights::new(&config, &mut rng);
         backend.compile(&weights, &config).unwrap();
         assert!(
@@ -905,7 +906,7 @@ mod tests {
     fn test_ane_compile_from_micro_weights() {
         // Verify that compile() succeeds with micro config weights.
         let config = Config::micro();
-        let mut rng = crate::types::Rng::new(42);
+        let mut rng = katgpt_types::Rng::new(42);
         let weights = TransformerWeights::new(&config, &mut rng);
 
         let mut backend = AneBackend::new();
@@ -919,7 +920,7 @@ mod tests {
         // Run a forward pass on CPU, then run the lm_head separately on ANE.
         // The ANE logits should match the CPU logits with cosine similarity ≥ 0.997.
         let config = Config::micro();
-        let mut rng = crate::types::Rng::new(42);
+        let mut rng = katgpt_types::Rng::new(42);
         let weights = TransformerWeights::new(&config, &mut rng);
 
         // Compile the lm_head into CoreML.
@@ -929,7 +930,7 @@ mod tests {
         // Run a CPU forward pass for token 0, position 0.
         let mut ctx = ForwardContext::new(&config);
         let mut cache = MultiLayerKVCache::new(&config);
-        let logits = crate::transformer::forward(&mut ctx, &weights, &mut cache, 0, 0, &config);
+        let logits = katgpt_forward::forward(&mut ctx, &weights, &mut cache, 0, 0, &config);
         let cpu_logits = logits[..config.vocab_size].to_vec();
 
         // Run the lm_head on ANE using the same hidden state.
@@ -963,14 +964,14 @@ mod tests {
         // Verify that forward() through AneBackend produces the same logits
         // as the direct CPU forward pass.
         let config = Config::micro();
-        let mut rng = crate::types::Rng::new(42);
+        let mut rng = katgpt_types::Rng::new(42);
         let weights = TransformerWeights::new(&config, &mut rng);
 
         // Direct CPU forward.
         let mut ctx1 = ForwardContext::new(&config);
         let mut cache1 = MultiLayerKVCache::new(&config);
         let cpu_logits =
-            crate::transformer::forward(&mut ctx1, &weights, &mut cache1, 0, 0, &config).to_vec();
+            katgpt_forward::forward(&mut ctx1, &weights, &mut cache1, 0, 0, &config).to_vec();
 
         // AneBackend forward (compiles lm_head, runs CPU forward + ANE override).
         let mut backend = AneBackend::new();
@@ -1010,7 +1011,7 @@ mod tests {
     #[test]
     fn test_build_transformer_model_spec_structure() {
         let config = Config::micro();
-        let mut rng = crate::types::Rng::new(42);
+        let mut rng = katgpt_types::Rng::new(42);
         let weights = TransformerWeights::new(&config, &mut rng);
 
         let spec = build_transformer_model_spec(&weights, &config);
@@ -1054,7 +1055,7 @@ mod tests {
     #[test]
     fn test_build_transformer_model_spec_serializes() {
         let config = Config::micro();
-        let mut rng = crate::types::Rng::new(42);
+        let mut rng = katgpt_types::Rng::new(42);
         let weights = TransformerWeights::new(&config, &mut rng);
 
         let spec = build_transformer_model_spec(&weights, &config);
@@ -1186,7 +1187,7 @@ mod tests {
     #[test]
     fn test_ane_residency_validation() {
         let config = Config::micro();
-        let mut rng = crate::types::Rng::new(42);
+        let mut rng = katgpt_types::Rng::new(42);
         let weights = TransformerWeights::new(&config, &mut rng);
 
         let mut backend = AneBackend::new();
@@ -1223,7 +1224,7 @@ mod tests {
     #[test]
     fn test_goat_ane_forward_matches_cpu() {
         let config = Config::micro();
-        let mut rng = crate::types::Rng::new(42);
+        let mut rng = katgpt_types::Rng::new(42);
         let weights = TransformerWeights::new(&config, &mut rng);
 
         let pairs: [(usize, usize); 5] = [(0, 0), (1, 1), (3, 2), (7, 4), (5, 9)];
@@ -1234,7 +1235,7 @@ mod tests {
             let mut ctx = ForwardContext::new(&config);
             let mut cache = MultiLayerKVCache::new(&config);
             let logits =
-                crate::transformer::forward(&mut ctx, &weights, &mut cache, token, pos, &config)
+                katgpt_forward::forward(&mut ctx, &weights, &mut cache, token, pos, &config)
                     .to_vec();
             cpu_logits_all.push(logits);
         }
@@ -1274,14 +1275,14 @@ mod tests {
     #[test]
     fn bench_ane_forward_latency_vs_cpu() {
         let config = Config::micro();
-        let mut rng = crate::types::Rng::new(42);
+        let mut rng = katgpt_types::Rng::new(42);
         let weights = TransformerWeights::new(&config, &mut rng);
 
         // CPU warm-up
         for _ in 0..100 {
             let mut ctx = ForwardContext::new(&config);
             let mut cache = MultiLayerKVCache::new(&config);
-            crate::transformer::forward(&mut ctx, &weights, &mut cache, 0, 0, &config);
+            katgpt_forward::forward(&mut ctx, &weights, &mut cache, 0, 0, &config);
         }
 
         // CPU timed
@@ -1290,7 +1291,7 @@ mod tests {
             for _ in 0..1000 {
                 let mut ctx = ForwardContext::new(&config);
                 let mut cache = MultiLayerKVCache::new(&config);
-                crate::transformer::forward(&mut ctx, &weights, &mut cache, 0, 0, &config);
+                katgpt_forward::forward(&mut ctx, &weights, &mut cache, 0, 0, &config);
             }
             start.elapsed()
         };
@@ -1328,7 +1329,7 @@ mod tests {
     #[test]
     fn bench_ane_compilation_time() {
         let config = Config::micro();
-        let mut rng = crate::types::Rng::new(42);
+        let mut rng = katgpt_types::Rng::new(42);
         let weights = TransformerWeights::new(&config, &mut rng);
 
         let init_elapsed = {

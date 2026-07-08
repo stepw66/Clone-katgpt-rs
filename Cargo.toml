@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/katgpt-attn", "crates/katgpt-attn-match", "crates/katgpt-band", "crates/katgpt-claim", "crates/katgpt-core", "crates/katgpt-dec", "crates/katgpt-deprecated", "crates/katgpt-forward", "crates/katgpt-hla", "crates/katgpt-kv", "crates/katgpt-micro-belief", "crates/katgpt-percepta", "crates/katgpt-personality", "crates/katgpt-proof-cert", "crates/katgpt-pruners", "crates/katgpt-quant", "crates/katgpt-ruliology", "crates/katgpt-sense", "crates/katgpt-sleep", "crates/katgpt-sparse", "crates/katgpt-spectral", "crates/katgpt-speculative", "crates/katgpt-tokenizer", "crates/katgpt-transformer", "crates/katgpt-types", "crates/katgpt-validator", "."]
+members = ["crates/katgpt-attn", "crates/katgpt-attn-match", "crates/katgpt-backend", "crates/katgpt-band", "crates/katgpt-claim", "crates/katgpt-core", "crates/katgpt-dec", "crates/katgpt-deprecated", "crates/katgpt-forward", "crates/katgpt-hla", "crates/katgpt-kv", "crates/katgpt-micro-belief", "crates/katgpt-percepta", "crates/katgpt-personality", "crates/katgpt-proof-cert", "crates/katgpt-pruners", "crates/katgpt-quant", "crates/katgpt-ruliology", "crates/katgpt-sense", "crates/katgpt-sleep", "crates/katgpt-sparse", "crates/katgpt-spectral", "crates/katgpt-speculative", "crates/katgpt-tokenizer", "crates/katgpt-transformer", "crates/katgpt-types", "crates/katgpt-validator", "."]
 resolver = "3"
 
 [package]
@@ -25,6 +25,13 @@ katgpt-validator = { path = "crates/katgpt-validator" }
 # so every historical call site resolves unchanged. Non-optional — the 33
 # root forward-pass functions access ctx.<field> directly.
 katgpt-forward = { path = "crates/katgpt-forward", default-features = false }
+# katgpt-backend (Issue 413, 2026-07-08): device inference backends — the
+# `InferenceBackend` trait + `CpuBackend` + `AneBackend` (CoreML) + `GpuBackend`
+# (Metal). Non-optional — root re-exports the leaf as `inference_backend` so
+# all historical `katgpt_rs::inference_backend::*` paths resolve. The macOS-only
+# device deps (metal/coreml-*/prost) live in the leaf; root's `ane` /
+# `gpu_inference` features forward to the leaf's features.
+katgpt-backend = { path = "crates/katgpt-backend" }
 # katgpt-deprecated (Proposal 003 Phase 3a, 2026-07-01): the loser crate.
 # Exiled primitives (dead stubs, GOAT-failed, off-topic). Never default-on.
 katgpt-deprecated = { path = "crates/katgpt-deprecated" }
@@ -139,11 +146,11 @@ rustfft = { version = "6", optional = true }  # CHIAR per-token DCT entropy (Pla
 getrandom = { version = "0.3", features = ["wasm_js"] }
 getrandom_02 = { package = "getrandom", version = "0.2", features = ["js"] }
 
-[target.'cfg(target_os = "macos")'.dependencies]
-coreml-native = { version = "0.2", optional = true }  # Apple Neural Engine inference backend (Plan 176)
-coreml-proto = { version = "0.1", optional = true }  # CoreML protobuf spec builder for runtime compilation (Plan 176)
-prost = { version = "0.14", optional = true }  # Protobuf serialization for CoreML spec (Plan 176)
-metal = { version = "0.33", optional = true }  # GPU inference backend via Metal compute (Plan 176)
+# (Issue 413, 2026-07-08): coreml-native / coreml-proto / prost / metal moved
+# into crates/katgpt-backend/Cargo.toml's macOS target-deps section. The
+# historical `ane` / `gpu_inference` features now forward to katgpt-backend's
+# own `ane` / `gpu_inference` features, which gate the optional device deps
+# inside the leaf.
 
 [dev-dependencies]
 ratatui = "0.29"
@@ -386,8 +393,8 @@ rim_slots = ["katgpt-core/rim_slots", "katgpt-pruners/rim_slots"]  # RiM Reasoni
 budget_adaptation = ["katgpt-speculative/budget_adaptation", "katgpt-forward/budget_adaptation"]  # Compression-adaptive decode budget — PFlash complexity signal (Plan 167, Research R050). Plan 387: module moved to katgpt-speculative. Plan 394: forwarded to katgpt-forward so the moved prefill.rs's block_compression_ratio re-export compiles.
 adaptive_gamma_forecast = ["katgpt-forward/adaptive_gamma_forecast"]  # AcceptanceForecast — entropy-bounded adaptive γ from proven linear α≈a−b·H bound (Issue 023, Research 243, arXiv:2606.12370 §3,§7.6). GOAT-gated, default OFF until ≥5% throughput gain proven on entropy-varying workload. Plan 394: forwarded to katgpt-forward so the moved verifier.rs's AcceptanceForecast cfg block compiles.
 wall_attention = ["katgpt-core/wall_attention", "katgpt-transformer/wall_attention", "katgpt-attn/diagonal_gate", "katgpt-forward/wall_attention"]  # Wall Attention — diagonal forget gates replacing RoPE (Plan 173, Research Wall Attention) — opt-in, requires Wall-trained model weights. Forwarded to katgpt-forward so ForwardContext.wall_prefix compiles (Issue 007 Phase F).
-ane = ["dep:coreml-native", "dep:coreml-proto", "dep:prost", "kog_cpu_fusion"]  # Apple Neural Engine inference backend (Plan 176). Implies kog_cpu_fusion: ane_backend reads attn_norm_gamma / mlp_norm_gamma unconditionally.
-gpu_inference = ["dep:metal", "kog_cpu_fusion"]  # GPU inference backend via Metal compute pipelines (Plan 176). Implies kog_cpu_fusion: gpu_backend reads attn_norm_gamma / mlp_norm_gamma unconditionally.
+ane = ["katgpt-backend/ane", "kog_cpu_fusion"]  # Apple Neural Engine inference backend (Plan 176). Issue 413: coreml-*/prost deps + src/ane_backend.rs moved to katgpt-backend leaf; feature forwards there. Implies kog_cpu_fusion: ane_backend reads attn_norm_gamma / mlp_norm_gamma unconditionally.
+gpu_inference = ["katgpt-backend/gpu_inference", "kog_cpu_fusion"]  # GPU inference backend via Metal compute pipelines (Plan 176). Issue 413: metal dep + src/gpu_backend.rs moved to katgpt-backend leaf; feature forwards there. Implies kog_cpu_fusion: gpu_backend reads attn_norm_gamma / mlp_norm_gamma unconditionally.
 inference_router = ["gpu_inference", "ane"]  # Full inference routing: TriggerGate + InferenceRouter + GPU + ANE (Plan 176)
 # (Removed 2026-06-28: `ane_npc = ["ane", "katgpt-core/sense_composition"]` — dead feature.
 #  Issue 007 Phase C moved npc_ane_backend + npc_brain_router to riir-engine (NPC runtime IP).
