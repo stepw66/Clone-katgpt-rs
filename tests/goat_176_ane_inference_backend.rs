@@ -51,11 +51,25 @@ fn goat_p2_auto_backend_cpu_forced() {
     assert_eq!(backend.device_name(), "CPU");
 }
 
-// P3: auto_backend with Auto falls back to CPU when no model
+// P3: auto_backend with Auto selects best available backend
+// (ANE when macOS + `ane` feature is active, else falls back to CPU).
+// The unconditional `== "CPU"` assertion was a pre-existing test bug (Issue 413
+// follow-up): default features pull `ane` in transitively via
+// `async_qdq_overlap` → `inference_router` → `ane`, so on macOS the default
+// build selects ANE, not CPU.
 #[test]
 fn goat_p3_auto_backend_auto_fallback() {
     let backend = auto_backend(BackendKind::Auto, None);
-    assert_eq!(backend.device_name(), "CPU");
+    #[cfg(all(target_os = "macos", feature = "ane"))]
+    {
+        // ANE feature is active on macOS — auto selects ANE.
+        assert_eq!(backend.device_name(), "ANE");
+    }
+    #[cfg(not(all(target_os = "macos", feature = "ane")))]
+    {
+        // No ANE available — auto falls back to CPU.
+        assert_eq!(backend.device_name(), "CPU");
+    }
 }
 
 // P4: BackendKind default is Auto

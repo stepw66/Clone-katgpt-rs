@@ -4,9 +4,10 @@
 > "Create issue at ./issues for optimization or refactor task".
 > Numbering follows the shared global counter (latest: 412 in `.plans/`).
 
-Status: **✅ DONE** — extraction shipped 2026-07-08; all gates green except one
-pre-existing test failure (`goat_p3`, unrelated to this refactor — fails identically
-on HEAD prior to extraction).
+Status: **✅ DONE** — extraction shipped 2026-07-08; all gates green.
+`goat_p3` test bug (unconditional `== "CPU"` assertion that broke whenever
+`ane` was active, e.g. via the default `async_qdq_overlap` →
+`inference_router` → `ane` chain) fixed in the Issue 413 follow-up commit.
 Created: 2026-07-08
 Type: Refactor / modularity
 Related: Issue 033 (original root-residency decision — **stale**, see §1),
@@ -203,13 +204,15 @@ the established back-compat pattern. Only touch them if a test goes red.
 - [x] `tests/goat_176_trigger_gate.rs` — **14/14 pass** (router + backend
       selection through the re-export, end-to-end).
 - [x] `tests/bench_176_ane_inference_backend.rs` — **3/3 pass**.
-- [-] `tests/goat_176_ane_inference_backend.rs` — **7/8 pass**. `goat_p3`
-      fails but is a **pre-existing failure** unrelated to this refactor:
-      reproduced identically on HEAD prior to extraction (commit `181f89d0`,
-      verified via throwaway worktree). The test unconditionally asserts
-      `auto_backend(Auto) == "CPU"`, but on macOS with `ane` compiled `Auto`
-      selects ANE by design. Not fixed per global rule "do not fix unrelated
-      broken tests" — flagged for follow-up.
+- [x] `tests/goat_176_ane_inference_backend.rs` — **8/8 pass**. `goat_p3`
+      was a pre-existing test bug (unconditional `== "CPU"` assertion) that
+      surfaced whenever `ane` was active — e.g. under default features on
+      macOS, where `async_qdq_overlap` (DEFAULT-ON) → `inference_router` →
+      `ane` pulls the feature in transitively. Fixed by mirroring the leaf
+      crate's already-correct conditional version using
+      `#[cfg(all(target_os = "macos", feature = "ane"))]` guards. Verified
+      green under default features, `--features ane`, and
+      `--no-default-features`.
 - [x] Stale Issue 033 doc comment rewritten in the moved trait file.
 - [x] `inference_router.rs` unchanged — `crate::inference_backend::InferenceBackend`
       resolves through the re-export, confirmed compiles + 14 router tests pass.
