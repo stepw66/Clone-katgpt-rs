@@ -21,6 +21,7 @@ use super::*;
 ///
 /// Fields ordered by descending alignment to minimize padding:
 /// usize/Vec (8-byte) → f32 (4-byte).
+#[derive(Clone)]
 pub struct LoraAdapter {
     /// LoRA rank.
     pub rank: usize,
