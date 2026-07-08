@@ -2170,6 +2170,29 @@ Two modelless primitives distilled from Gollapudi et al., *Can Language Models A
 
 ---
 
+### 🔷 Subspace Steering Field — k-dim Manifold Steering (Plan 412, arxiv 2606.25234)
+
+The k-dim generalization of `LatentSteeringVector` (Plan 309). The 1D primitive is strictly `s' = s + α·v`; this generalizes to a k-dim orthonormal block `{u_1..u_k}` + per-axis strengths `{α_1..α_k}`, with math `s' = s + Σ_j α_j · u_j`. At `K=1` it is **bit-identical** to Plan 309; at `K≥2` it enables **manifold walking** — sweeping `alphas` over a grid to generate concept variations within the subspace (the Goodfire "pretzel manifold" pattern, adapted to our latent-state substrate).
+
+The block basis is **pre-discovered** (Plan 301 Jacobian SVD, SpectralQuant offline eigenbasis, or hand-constructed orthogonal sets) — no training at inference. The primitive is the *consumer* of discovered blocks, not the featurizer trainer.
+
+**GOAT gate** (all PASS):
+
+| Gate | Result |
+|---|---|
+| G1 (K=1 parity) | ✅ 0 element mismatches / 800 comparisons (100 random pairs × D=8) — bit-identical to `apply_latent_steering` |
+| G3 (alloc-free) | ✅ 0 allocs + 0 deallocs / 1000 calls × K={1,2,4} |
+| G4 (size + latency) | ✅ struct sizes 68/104/176 bytes exact (D=8 K=1/2/4); 100k K=4 applies under headroom |
+| G5 (determinism) | ✅ commitment deterministic; `walk_manifold` bit-identical for fixed alpha_grid |
+
+**Phase 3 finding (algorithm pivot):** the plan specified Newton-Schulz for the `from_directions_orthonormalize` constructor, but empirical testing found NS **diverges** on non-square K<D matrices (the Muon-tuned coefficients are designed for square weight gradients). Gram-Schmidt is exact, stable, and the standard algorithm for K<D orthonormalization — it's the right tool here.
+
+**Promotion**: `subspace_steering` is **DEFAULT-ON** (Plan 412 Phase 5, 2026-07-08) — all four GOAT gates pass; zero runtime cost unless a caller constructs `SubspaceSteeringField`. Coexists with Plan 309 (the 1D niche, lower overhead for callers that only need 1D).
+
+📖 Plan: [`.plans/412_subspace_steering_field_primitive.md`](.plans/412_subspace_steering_field_primitive.md). Research: [`.research/393_Block_Sparse_Featurizer_Subspace_Concept_Primitive.md`](.research/393_Block_Sparse_Featurizer_Subspace_Concept_Primitive.md). Paper: [arXiv:2606.25234](https://arxiv.org/abs/2606.25234).
+
+---
+
 ## 🔧 KV Compression
 
 Default: **Hybrid OCT+PQ** (OCTOPUS triplet encoding + PlanarQuant 2D Givens rotation). Best MSE + 64× fewer rotation FMAs.

@@ -111,14 +111,16 @@ pub struct SubspaceSteeringField<const D: usize, const K: usize> {
 
 Run with: `cargo test -p katgpt-core --features subspace_steering --test bench_412_subspace_steering_goat -- --test-threads=1`
 
-## Phase 5 — Promotion Decision
+## Phase 5 — Promotion Decision ✅ DONE (2026-07-08)
 
 ### Tasks
 
-- [ ] **T5.1** If G1–G5 all PASS: promote `subspace_steering` to default-on in `katgpt-core`. **Do NOT demote Plan 309** — they coexist: Plan 309 is the simple 1D case (lower overhead for callers that only need 1D), Plan 412 is the k-dim case (for manifold walking). The per-stack ledger records both in the "steering" slot.
-- [ ] **T5.2** If G2 FAILS (norm bounds violated): keep opt-in, document the failure mode, do NOT promote.
-- [ ] **T5.3** Update `katgpt-rs/README.md` Feature Showcase with a `### 🔷 Subspace Steering Field — k-dim Manifold Steering (Plan 412, arxiv 2606.25234)` section.
-- [ ] **T5.4** Commit on `develop`: `feat(steering): subspace steering field — k-dim manifold walking primitive (Plan 412)`.
+- [x] **T5.1** If G1–G5 all PASS: promote `subspace_steering` to default-on in `katgpt-core`. **Do NOT demote Plan 309** — they coexist: Plan 309 is the simple 1D case (lower overhead for callers that only need 1D), Plan 412 is the k-dim case (for manifold walking). The per-stack ledger records both in the "steering" slot. **DONE** — promoted to DEFAULT-ON (Phase 14, 2026-07-08).
+- [x] **T5.2** If G2 FAILS (norm bounds violated): keep opt-in, document the failure mode, do NOT promote. **N/A** — G2 passed (Phase 2 T2.3 norm bounds held across 25-output grid).
+- [x] **T5.3** Update `katgpt-rs/README.md` Feature Showcase with a `### 🔷 Subspace Steering Field — k-dim Manifold Steering (Plan 412, arxiv 2606.25234)` section. **DONE**.
+- [x] **T5.4** Commit on `develop`: `feat(steering): subspace steering field — k-dim manifold walking primitive (Plan 412)`. **DONE** — this commit.
+
+**Plan 412 FULLY COMPLETE (2026-07-08).** All 5 phases done. `subspace_steering` is DEFAULT-ON in katgpt-core.
 
 ## Per-stack tracking (steering slot)
 
@@ -127,7 +129,7 @@ Run with: `cargo test -p katgpt-core --features subspace_steering --test bench_4
 | `LatentSteeringVector` (Plan 309) | 1D | `s + α·v` | DEFAULT-ON |
 | `Phase-Modulated Coupling` (Plan 322) | 2D (single pair) | cos/sin rotation in `(a,b)` plane | DEFAULT-ON |
 | `Spherical Steering` (Plan 405) | 1D target | Slerp toward target direction | DEFAULT-ON |
-| **`SubspaceSteeringField` (Plan 412)** | **k-dim** | **`s + Σ α_j·u_j`, manifold walk** | **opt-in (this plan)** |
+| **`SubspaceSteeringField` (Plan 412)** | **k-dim** | **`s + Σ α_j·u_j`, manifold walk** | **DEFAULT-ON (2026-07-08)** |
 
 All four coexist — each occupies a distinct steering niche. Plan 412 does NOT demote any sibling; it adds the k-dim manifold-walk capability.
 
