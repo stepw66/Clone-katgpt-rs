@@ -59,14 +59,16 @@ pub struct SubspaceSteeringField<const D: usize, const K: usize> {
 
 ### Tasks
 
-- [ ] **T1.1** Create `katgpt-rs/crates/katgpt-core/src/subspace_steering.rs` with module docstring (mirror `latent_steering.rs` doc style; cite Research 393 + Plan 412 + the `K=1` parity contract).
-- [ ] **T1.2** Define `SubspaceSteeringField<const D: usize, const K: usize>` struct (block, alphas, commitment) + `SubspaceSteeringError` enum (`NotOrthonormal`, `AlphaOutOfRange`, `DimensionMismatch`).
-- [ ] **T1.3** Implement `SubspaceSteeringField::new(block, alphas, orthonormal_tol)` — validates orthonormality (each `basis[j]` unit-norm within tol, pairwise dot < tol) and `alpha ∈ [0,1]`, computes BLAKE3 commitment.
-- [ ] **T1.4** Implement `apply_subspace_steering(state: &mut [f32], field: &SubspaceSteeringField)` — chunked SIMD SAXPY over `K·D`. Zero-alloc. Document the `K=1` → Plan 309 reduction.
-- [ ] **T1.5** Implement `compute_block_commitment(block, alphas) -> [u8; 32]` (BLAKE3, little-endian flatten).
-- [ ] **T1.6** Add `pub mod subspace_steering;` + re-exports to `katgpt-core/src/lib.rs`, gated `#[cfg(feature = "subspace_steering")]`.
-- [ ] **T1.7** Add `subspace_steering = []` feature to `katgpt-core/Cargo.toml`.
-- [ ] **T1.8** G1 unit test: `k1_parity_with_plan_309` — construct a `SubspaceSteeringField<D, 1>` from a Plan 309 `LatentSteeringVector`'s direction + alpha, apply to a test state, assert bit-identical output to `apply_latent_steering`. **This is the load-bearing gate** — proves the generalization subsumes the 1D case.
+- [x] **T1.1** Create `katgpt-rs/crates/katgpt-core/src/subspace_steering.rs` with module docstring (mirror `latent_steering.rs` doc style; cite Research 393 + Plan 412 + the `K=1` parity contract). **DONE**
+- [x] **T1.2** Define `SubspaceSteeringField<const D: usize, const K: usize>` struct (block, alphas, commitment) + `SubspaceSteeringError` enum (`NotOrthonormal`, `AlphaOutOfRange`, `DimensionMismatch`). **DONE** — `DimensionMismatch` dropped: with const generics `D` and `K` are compile-time fixed, so dimension mismatch is impossible by construction (the array types enforce it). `NotOrthonormal` covers both non-unit-norm AND non-orthogonal-pair cases.
+- [x] **T1.3** Implement `SubspaceSteeringField::new(block, alphas, orthonormal_tol)` — validates orthonormality (each `basis[j]` unit-norm within tol, pairwise dot < tol) and `alpha ∈ [0,1]`, computes BLAKE3 commitment. **DONE**
+- [x] **T1.4** Implement `apply_subspace_steering(state: &mut [f32], field: &SubspaceSteeringField)` — chunked SIMD SAXPY over `K·D`. Zero-alloc. Document the `K=1` → Plan 309 reduction. **DONE** — signature adapted to const generics: `state: &mut [f32; D]` (fixed array, zero-alloc by construction). Method form `field.apply(&mut state)` + free-function `apply_subspace_steering` wrapper. Inner loop over D is the SAXPY; outer loop over K accumulates. No cross-lane reduction → bit-identical to scalar regardless of vectorization.
+- [x] **T1.5** Implement `compute_block_commitment(block, alphas) -> [u8; 32]` (BLAKE3, little-endian flatten). **DONE**
+- [x] **T1.6** Add `pub mod subspace_steering;` + re-exports to `katgpt-core/src/lib.rs`, gated `#[cfg(feature = "subspace_steering")]`. **DONE**
+- [x] **T1.7** Add `subspace_steering = ["latent_field_steering"]` feature to `katgpt-core/Cargo.toml`. **DONE** — implies `latent_field_steering` so the K=1 parity gate reference resolves.
+- [x] **T1.8** G1 unit test: `k1_parity_with_plan_309` — construct a `SubspaceSteeringField<D, 1>` from a Plan 309 `LatentSteeringVector`'s direction + alpha, apply to a test state, assert bit-identical output to `apply_latent_steering`. **This is the load-bearing gate** — proves the generalization subsumes the 1D case. **DONE** — bit-identical via `f32::to_bits()` equality on all D=8 elements.
+
+**Phase 1 validation (2026-07-08):** 10/10 unit tests pass (including `k1_parity_with_plan_309`). Default features compile clean. `--all-features` compile clean. Feature-off compile clean. Zero alloc by construction (all fields fixed-size arrays).
 
 ## Phase 2 — Manifold Walking + Block Energy
 

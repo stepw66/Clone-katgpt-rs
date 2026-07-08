@@ -1,0 +1,491 @@
+//! Subspace Steering Field — k-dim manifold steering primitive (Plan 412).
+//!
+//! The k-dim generalization of [`LatentSteeringVector`](crate::latent_steering::LatentSteeringVector)
+//! (Plan 309). The existing primitive is strictly 1D (`direction: Vec<f32>` +
+//! scalar `α`, math `s' = s + α·v`). This module generalizes it to a k-dim
+//! orthonormal block `{u_1..u_k}` + per-axis strengths `{α_1..α_k}`, with math
+//! `s' = s + Σ_j α_j · u_j`. At `K=1` it is bit-identical to Plan 309; at
+//! `K≥2` it enables **manifold walking** — sweeping `alphas` over a grid to
+//! generate concept variations (the Goodfire "pretzel manifold" pattern,
+//! adapted to our latent-state substrate).
+//!
+//! The block basis comes from **pre-discovered** sources (Plan 301 Jacobian
+//! SVD, SpectralQuant offline eigenbasis, or hand-constructed orthogonal sets)
+//! — no training at inference. The primitive is the *consumer* of discovered
+//! blocks, not the featurizer trainer (that's riir-train).
+//!
+//! # Const generics
+//!
+//! [`SubspaceSteeringField<const D, const K>`] is parameterized by:
+//! - `D` — the latent dimension (e.g. 8 for HLA, 64 for shards)
+//! - `K` — the block size (number of orthonormal directions)
+//!
+//! All storage is fixed-size arrays (`[[f32; D]; K]`, `[f32; K]`, `[u8; 32]`),
+//! so the struct is stack-only and zero-alloc by construction.
+//!
+//! # K=1 parity contract (the load-bearing gate)
+//!
+//! `SubspaceSteeringField<D, 1>` with a Plan 309 direction + alpha must produce
+//! bit-identical output to [`apply_latent_steering`]. This is verified by the
+//! `k1_parity_with_plan_309` unit test and is the foundation of the GOAT gate
+//! (Plan 412 Phase 4 T4.5 expands it to 100 random pairs).
+//!
+//! # References
+//!
+//! - Plan: `.plans/412_subspace_steering_field_primitive.md`
+//! - Research: `.research/393_Block_Sparse_Featurizer_Subspace_Concept_Primitive.md`
+//! - Source paper: [arXiv:2606.25234](https://arxiv.org/abs/2606.25234) —
+//!   Goodfire, Block-Sparse Featurizers
+//! - 1D sibling: Plan 309 (`latent_steering.rs`, DEFAULT-ON)
+
+use blake3::Hasher;
+
+// ── Errors ──────────────────────────────────────────────────────────────────
+
+/// Errors returned by [`SubspaceSteeringField::new`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SubspaceSteeringError {
+    /// A block row is not unit-norm within `orthonormal_tol`, OR two rows are
+    /// not mutually orthogonal within `orthonormal_tol` (off-diagonal of
+    /// `block · blockᵀ` exceeds the tolerance).
+    NotOrthonormal,
+    /// A per-axis strength `α_j` is outside `[0.0, 1.0]`.
+    AlphaOutOfRange,
+}
+
+// ── Field ───────────────────────────────────────────────────────────────────
+
+/// A k-dim orthonormal block + per-axis strengths, BLAKE3-committed.
+///
+/// Generalization of [`LatentSteeringVector`](crate::latent_steering::LatentSteeringVector)
+/// (Plan 309) from 1D to k-dim. At `K=1` this is bit-identical to Plan 309
+/// (single direction + scalar α). At `K≥2` it enables manifold walking — sweep
+/// `alphas` over a grid to generate concept variations within the subspace.
+///
+/// The block basis `{u_1..u_k}` is PRE-DISCOVERED (Plan 301 Jacobian SVD,
+/// SpectralQuant offline eigenbasis, or hand-constructed orthogonal set). No
+/// training at inference. The primitive is the *consumer* of discovered blocks,
+/// not the featurizer trainer.
+///
+/// # Construction
+///
+/// Use [`new`](Self::new) to validate orthonormality + alpha range. Use
+/// [`from_directions_orthonormalize`](Self::from_directions_orthonormalize)
+/// to apply Newton-Schulz orthogonalization (Plan 152) to a set of
+/// nearly-orthogonal directions first.
+///
+/// # Allocation
+///
+/// Zero heap allocations by construction — `block`, `alphas`, and `commitment`
+/// are all fixed-size arrays. `size_of::<SubspaceSteeringField<D, K>>()` ==
+/// `K*D*4 + K*4 + 32` bytes.
+#[derive(Debug, Clone)]
+pub struct SubspaceSteeringField<const D: usize, const K: usize> {
+    /// Orthonormal block basis, row-major. Each `block[j]` is unit-norm and
+    /// orthogonal to `block[i]` for `i != j`. Constructed via
+    /// [`new`](Self::new) (validated) or
+    /// [`from_directions_orthonormalize`](Self::from_directions_orthonormalize)
+    /// (Newton-Schulz).
+    pub block: [[f32; D]; K],
+    /// Per-axis strengths `α_j ∈ [0, 1]`, sigmoid-bounded at construction.
+    pub alphas: [f32; K],
+    /// `BLAKE3(block_le || alphas_le)` — content-addressed commitment.
+    pub commitment: [u8; 32],
+}
+
+impl<const D: usize, const K: usize> SubspaceSteeringField<D, K> {
+    /// Construct a steering field, validating orthonormality and alpha range.
+    ///
+    /// Returns [`SubspaceSteeringError::NotOrthonormal`] if any `block[j]` is
+    /// not unit-norm within `orthonormal_tol`, or if any pair `block[i]`,
+    /// `block[j]` (`i != j`) has `|dot| > orthonormal_tol` (not orthogonal).
+    /// Returns [`SubspaceSteeringError::AlphaOutOfRange`] if any `alphas[j]`
+    /// is outside `[0, 1]`.
+    pub fn new(
+        block: [[f32; D]; K],
+        alphas: [f32; K],
+        orthonormal_tol: f32,
+    ) -> Result<Self, SubspaceSteeringError> {
+        for &a in &alphas {
+            if !(0.0..=1.0).contains(&a) {
+                return Err(SubspaceSteeringError::AlphaOutOfRange);
+            }
+        }
+        // Each row must be unit-norm.
+        for row in &block {
+            let norm = row_norm(row);
+            if (norm - 1.0).abs() > orthonormal_tol {
+                return Err(SubspaceSteeringError::NotOrthonormal);
+            }
+        }
+        // Each pair of distinct rows must be orthogonal (dot ~ 0).
+        for i in 0..K {
+            for j in (i + 1)..K {
+                let dot = dot_product(&block[i], &block[j]);
+                if dot.abs() > orthonormal_tol {
+                    return Err(SubspaceSteeringError::NotOrthonormal);
+                }
+            }
+        }
+        let commitment = compute_block_commitment(&block, &alphas);
+        Ok(Self {
+            block,
+            alphas,
+            commitment,
+        })
+    }
+
+    /// Construct without validation. Caller guarantees orthonormality +
+    /// alpha range. Used when the block comes from a trusted frozen artifact.
+    pub fn new_unchecked(block: [[f32; D]; K], alphas: [f32; K]) -> Self {
+        let commitment = compute_block_commitment(&block, &alphas);
+        Self {
+            block,
+            alphas,
+            commitment,
+        }
+    }
+
+    /// Re-check orthonormality (within `tol`) AND that the stored commitment
+    /// matches the current contents. Returns `false` if either check fails.
+    pub fn verify(&self, tol: f32) -> bool {
+        for row in &self.block {
+            let norm = row_norm(row);
+            if (norm - 1.0).abs() > tol {
+                return false;
+            }
+        }
+        for i in 0..K {
+            for j in (i + 1)..K {
+                let dot = dot_product(&self.block[i], &self.block[j]);
+                if dot.abs() > tol {
+                    return false;
+                }
+            }
+        }
+        compute_block_commitment(&self.block, &self.alphas) == self.commitment
+    }
+
+    /// Apply the field to a single latent state slice. Zero-alloc.
+    ///
+    /// Computes `state[j] += Σ_k alphas[k] * block[k][j]` over `K·D` elements.
+    /// At `K=1` this reduces to Plan 309's
+    /// [`apply_latent_steering`](crate::latent_steering::apply_latent_steering).
+    ///
+    /// Written as an explicit nested loop (outer over K, inner over D) to keep
+    /// the shape friendly to LLVM's auto-vectorizer on the inner D-loop
+    /// (per AGENTS.md hot-loop rule). No cross-lane reduction → bit-identical
+    /// to scalar regardless of vectorization.
+    #[inline]
+    pub fn apply(&self, state: &mut [f32; D]) {
+        for k in 0..K {
+            let a = self.alphas[k];
+            // Inner loop is the SAXPY `state[j] += a * block[k][j]`.
+            let row = &self.block[k];
+            for j in 0..D {
+                state[j] += a * row[j];
+            }
+        }
+    }
+
+    /// The latent dimension `D`.
+    #[inline]
+    #[must_use]
+    pub const fn dim(&self) -> usize {
+        D
+    }
+
+    /// The block size `K`.
+    #[inline]
+    #[must_use]
+    pub const fn block_size(&self) -> usize {
+        K
+    }
+}
+
+// ── Free functions ──────────────────────────────────────────────────────────
+
+/// Apply the field to a single latent state slice. Zero-alloc.
+///
+/// Thin wrapper over [`SubspaceSteeringField::apply`] for callers that hold a
+/// reference (not the owned field). Computes
+/// `state[j] += Σ_k alphas[k] * block[k][j]`.
+#[inline]
+pub fn apply_subspace_steering<const D: usize, const K: usize>(
+    state: &mut [f32; D],
+    field: &SubspaceSteeringField<D, K>,
+) {
+    field.apply(state);
+}
+
+/// Compute the BLAKE3 commitment over `block_le || alphas_le` (little-endian).
+///
+/// Deterministic, quorum-verifiable. Mirrors the `LatentSteeringVector`
+/// commitment convention (`compute_commitment` in `latent_steering.rs`).
+pub fn compute_block_commitment<const D: usize, const K: usize>(
+    block: &[[f32; D]; K],
+    alphas: &[f32; K],
+) -> [u8; 32] {
+    let mut hasher = Hasher::new();
+    for row in block.iter() {
+        for &f in row.iter() {
+            hasher.update(&f.to_le_bytes());
+        }
+    }
+    for &a in alphas.iter() {
+        hasher.update(&a.to_le_bytes());
+    }
+    let mut out = [0u8; 32];
+    hasher.finalize_xof().fill(&mut out);
+    out
+}
+
+// ── Internal helpers ────────────────────────────────────────────────────────
+
+#[inline]
+fn row_norm<const D: usize>(row: &[f32; D]) -> f32 {
+    row.iter().map(|x| x * x).sum::<f32>().sqrt()
+}
+
+#[inline]
+fn dot_product<const D: usize>(a: &[f32; D], b: &[f32; D]) -> f32 {
+    a.iter().zip(b.iter()).map(|(x, y)| x * y).sum()
+}
+
+// ── Tests ───────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Build a unit-norm 1D direction from a seed (deterministic, varied).
+    fn make_unit_direction_1d(seed: u8, d: usize) -> Vec<f32> {
+        let mut v: Vec<f32> = (0..d).map(|i| (seed as f32) * 0.1 + i as f32).collect();
+        let norm = v.iter().map(|x| x * x).sum::<f32>().sqrt();
+        for x in &mut v {
+            *x /= norm;
+        }
+        v
+    }
+
+    /// Build a K-row orthonormal block from K seed directions via Gram-Schmidt
+    /// (deterministic test fixture; production uses Newton-Schulz in T3.1).
+    fn gram_schmidt_block<const D: usize, const K: usize>(seeds: [[u8; D]; K]) -> [[f32; D]; K] {
+        let mut rows: Vec<[f32; D]> = (0..K).map(|_| [0f32; D]).collect();
+        for (i, seed) in seeds.iter().enumerate() {
+            // Raw direction from seed.
+            let mut v: [f32; D] = [0f32; D];
+            for j in 0..D {
+                v[j] = seed[j] as f32 * 0.1 + (j as f32) + 1.0;
+            }
+            // Subtract projections onto already-orthonormalized rows.
+            for prev in rows[..i].iter() {
+                let proj = dot_product(&v, prev);
+                for j in 0..D {
+                    v[j] -= proj * prev[j];
+                }
+            }
+            // Normalize.
+            let n = row_norm(&v);
+            for j in 0..D {
+                v[j] /= n;
+            }
+            rows[i] = v;
+        }
+        // Copy into fixed array.
+        let mut out = [[0f32; D]; K];
+        for i in 0..K {
+            out[i] = rows[i];
+        }
+        out
+    }
+
+    /// `new` rejects non-unit-norm block rows.
+    #[test]
+    fn new_rejects_non_unit_norm() {
+        let block = [[2.0f32; 8]]; // norm = sqrt(8*4) = 5.66, not 1.
+        let alphas = [0.5f32];
+        let err = SubspaceSteeringField::<8, 1>::new(block, alphas, 1e-5).unwrap_err();
+        assert_eq!(err, SubspaceSteeringError::NotOrthonormal);
+    }
+
+    /// `new` rejects out-of-range alphas.
+    #[test]
+    fn new_rejects_alpha_out_of_range() {
+        let block = [
+            {
+                let mut v = [0f32; 8];
+                v[0] = 1.0;
+                v
+            },
+        ];
+        let err = SubspaceSteeringField::<8, 1>::new(block, [1.5], 1e-5).unwrap_err();
+        assert_eq!(err, SubspaceSteeringError::AlphaOutOfRange);
+        let err = SubspaceSteeringField::<8, 1>::new(block, [-0.1], 1e-5).unwrap_err();
+        assert_eq!(err, SubspaceSteeringError::AlphaOutOfRange);
+    }
+
+    /// `new` rejects non-orthogonal rows (K ≥ 2).
+    #[test]
+    fn new_rejects_non_orthogonal_rows() {
+        // Two identical rows → dot = 1.0 (not orthogonal).
+        let row = {
+            let mut v = [0f32; 8];
+            v[0] = 1.0;
+            v
+        };
+        let block = [row, row];
+        let err = SubspaceSteeringField::<8, 2>::new(block, [0.5, 0.5], 1e-5).unwrap_err();
+        assert_eq!(err, SubspaceSteeringError::NotOrthonormal);
+    }
+
+    /// `verify` round-trips: construct → verify → true.
+    #[test]
+    fn verify_round_trip_passes() {
+        let seeds = [[1u8; 8], [2u8; 8]];
+        let block = gram_schmidt_block::<8, 2>(seeds);
+        let field = SubspaceSteeringField::<8, 2>::new(block, [0.3, 0.7], 1e-4).unwrap();
+        assert!(field.verify(1e-4), "verify must pass for a freshly-built field");
+    }
+
+    /// `compute_block_commitment` is deterministic (same inputs → same hash).
+    #[test]
+    fn commitment_is_deterministic() {
+        let seeds = [[3u8; 8], [4u8; 8]];
+        let block = gram_schmidt_block::<8, 2>(seeds);
+        let alphas = [0.2f32, 0.6];
+        let h1 = compute_block_commitment(&block, &alphas);
+        let h2 = compute_block_commitment(&block, &alphas);
+        assert_eq!(h1, h2, "commitment must be deterministic");
+        // And non-trivial (not all-zeros).
+        assert_ne!(h1, [0u8; 32]);
+    }
+
+    /// Commitment is sensitive to a bit flip in the block or alphas.
+    #[test]
+    fn commitment_sensitive_to_tamper() {
+        let seeds = [[5u8; 8], [6u8; 8]];
+        let block = gram_schmidt_block::<8, 2>(seeds);
+        let alphas = [0.2f32, 0.6];
+        let h1 = compute_block_commitment(&block, &alphas);
+
+        // Flip one element in block[0].
+        let mut tampered_block = block;
+        tampered_block[0][0] += 0.001;
+        let h2 = compute_block_commitment(&tampered_block, &alphas);
+        assert_ne!(h1, h2, "block tamper must change commitment");
+
+        // Flip one alpha.
+        let mut tampered_alphas = alphas;
+        tampered_alphas[1] += 0.001;
+        let h3 = compute_block_commitment(&block, &tampered_alphas);
+        assert_ne!(h1, h3, "alpha tamper must change commitment");
+    }
+
+    /// `apply` shifts the state along the block's weighted sum direction.
+    #[test]
+    fn apply_shifts_state_along_weighted_block() {
+        // K=1, D=8: state += alpha * block[0].
+        let seeds = [[7u8; 8]];
+        let block = gram_schmidt_block::<8, 1>(seeds);
+        let field = SubspaceSteeringField::<8, 1>::new(block, [0.5], 1e-4).unwrap();
+
+        let mut state = [0.1f32; 8];
+        let original = state;
+        field.apply(&mut state);
+
+        // state[j] = original[j] + 0.5 * block[0][j].
+        for j in 0..8 {
+            let expected = original[j] + 0.5 * field.block[0][j];
+            assert!(
+                (state[j] - expected).abs() < 1e-6,
+                "j={j}: got {}, expected {}",
+                state[j],
+                expected
+            );
+        }
+    }
+
+    /// **THE LOAD-BEARING GATE (T1.8):** `SubspaceSteeringField<D, 1>` is
+    /// bit-identical to Plan 309's `apply_latent_steering`.
+    ///
+    /// Constructs a K=1 field from a Plan 309 direction + alpha, applies it to
+    /// a test state, and asserts bit-identical output to the scalar reference.
+    /// This proves the generalization subsumes the 1D case.
+    #[test]
+    fn k1_parity_with_plan_309() {
+        // Plan 309 ships DEFAULT-ON, so it's always available.
+        use crate::latent_steering::{apply_latent_steering, LatentSteeringVector};
+
+        const D: usize = 8;
+        let direction_v = make_unit_direction_1d(42, D);
+        let alpha = 0.3f32;
+
+        // Plan 309 reference.
+        let steering =
+            LatentSteeringVector::new_unchecked(direction_v.clone(), alpha);
+
+        // Plan 412 K=1 field from the same direction + alpha.
+        let mut block = [[0f32; D]];
+        block[0].copy_from_slice(&direction_v);
+        let field = SubspaceSteeringField::<D, 1>::new(block, [alpha], 1e-5).unwrap();
+
+        // Identical starting state.
+        let state_plan309 = [0.1f32, -0.2, 0.3, 0.0, 0.5, -0.1, 0.2, 0.4];
+        let mut s_ref = state_plan309;
+        let mut s_412 = state_plan309;
+
+        apply_latent_steering(&mut s_ref, &steering);
+        field.apply(&mut s_412);
+
+        // Bit-identical: same operation (state += alpha * direction), same
+        // element-wise rounding.
+        for j in 0..D {
+            assert_eq!(
+                s_ref[j].to_bits(),
+                s_412[j].to_bits(),
+                "K=1 parity FAIL at j={j}: plan309={} plan412={}",
+                s_ref[j],
+                s_412[j]
+            );
+        }
+    }
+
+    /// K=2 field: `apply` is the sum of two weighted orthonormal directions.
+    /// Each axis shifts independently (orthonormality means no cross-term).
+    #[test]
+    fn k2_apply_sums_two_orthonormal_axes() {
+        const D: usize = 8;
+        let seeds = [[1u8; D], [2u8; D]];
+        let block = gram_schmidt_block::<D, 2>(seeds);
+        let alphas = [0.4f32, 0.6];
+        let field = SubspaceSteeringField::<D, 2>::new(block, alphas, 1e-4).unwrap();
+
+        let mut state = [0.0f32; D];
+        field.apply(&mut state);
+
+        // state[j] = 0.4 * block[0][j] + 0.6 * block[1][j] (starting from 0).
+        for j in 0..D {
+            let expected = alphas[0] * field.block[0][j] + alphas[1] * field.block[1][j];
+            assert!(
+                (state[j] - expected).abs() < 1e-6,
+                "j={j}: got {}, expected {}",
+                state[j],
+                expected
+            );
+        }
+    }
+
+    /// `new` with K=0 degenerate case: no rows, no alphas. The field is a
+    /// no-op (apply does nothing). Commitment is BLAKE3 of empty input.
+    #[test]
+    fn k0_field_is_noop() {
+        let field = SubspaceSteeringField::<8, 0>::new([], [], 1e-5).unwrap();
+        let mut state = [0.5f32; 8];
+        let original = state;
+        field.apply(&mut state);
+        assert_eq!(state, original, "K=0 field must be a no-op");
+        // Commitment is still well-defined (BLAKE3 of empty).
+        assert_ne!(field.commitment, [0u8; 32]);
+    }
+}

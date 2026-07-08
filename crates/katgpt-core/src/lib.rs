@@ -869,6 +869,22 @@ pub use latent_steering::{
     apply_latent_steering, apply_latent_steering_weighted, kernel_weight,
 };
 
+// Subspace Steering Field — k-dim manifold steering (Plan 412, Research 393,
+// arxiv 2606.25234 Goodfire BSF). The k-dim generalization of Plan 309: an
+// orthonormal block `{u_1..u_k}` + per-axis strengths `{α_1..α_k}`, math
+// `s' = s + Σ_j α_j · u_j`. At K=1 bit-identical to Plan 309; at K≥2 enables
+// manifold walking (sweep alphas over a grid → concept variations). Pure
+// modelless consumer of pre-discovered blocks (Plan 301 Jacobian SVD,
+// SpectralQuant eigenbasis, or hand-constructed sets). Opt-in until G1–G5
+// GOAT gate passes (G1 K=1 parity with Plan 309 is the load-bearing gate).
+#[cfg(feature = "subspace_steering")]
+pub mod subspace_steering;
+#[cfg(feature = "subspace_steering")]
+pub use subspace_steering::{
+    SubspaceSteeringError, SubspaceSteeringField, apply_subspace_steering,
+    compute_block_commitment,
+};
+
 // Phase-Modulated Subspace Rotation Gate — norm-preserving latent coupling
 // `cos α ⊙ a + sin α ⊙ b` with phase from a sigmoid projection onto a frozen
 // direction vector (Plan 322, Research 305, arxiv 2605.12700 UFO). The
