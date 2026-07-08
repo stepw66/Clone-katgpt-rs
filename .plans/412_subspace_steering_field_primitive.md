@@ -70,14 +70,16 @@ pub struct SubspaceSteeringField<const D: usize, const K: usize> {
 
 **Phase 1 validation (2026-07-08):** 10/10 unit tests pass (including `k1_parity_with_plan_309`). Default features compile clean. `--all-features` compile clean. Feature-off compile clean. Zero alloc by construction (all fields fixed-size arrays).
 
-## Phase 2 — Manifold Walking + Block Energy
+## Phase 2 — Manifold Walking + Block Energy ✅ DONE (2026-07-08)
 
 ### Tasks
 
-- [ ] **T2.1** Implement `block_energy(block, state) -> [f32; K]` — per-axis dot-product projection. SIMD.
-- [ ] **T2.2** Implement `walk_manifold(state, field, alpha_grid: &[[f32; K]], out_grid: &mut [[f32; D]])` — for each row in `alpha_grid`, compute `state + Σ_k alpha_grid[i][k] * block[k]` into `out_grid[i]`. Zero-alloc after grid allocation.
-- [ ] **T2.3** G2 unit test: `k2_walk_preserves_norm_bounds` — walk a 2D grid over a `K=2` field, assert each output state has L2 norm within `[‖state‖ − ε, ‖state‖ + Σ_k |α_k|]` (norm inflation bounded by the steering magnitude, per Plan 322's norm-preservation analysis).
-- [ ] **T2.4** G2 unit test: `k2_walk_covers_grid` — verify the walked grid produces `grid_rows` distinct output states (no duplicates unless alphas repeat).
+- [x] **T2.1** Implement `block_energy(block, state) -> [f32; K]` — per-axis dot-product projection. SIMD. **DONE** — zero-alloc (output is a fixed `[f32; K]` stack array). Read-side counterpart of `apply_subspace_steering`: apply writes energy INTO state, this reads energy ALREADY PRESENT along each axis.
+- [x] **T2.2** Implement `walk_manifold(state, field, alpha_grid: &[[f32; K]], out_grid: &mut [[f32; D]])` — for each row in `alpha_grid`, compute `state + Σ_k alpha_grid[i][k] * block[k]` into `out_grid[i]`. Zero-alloc after grid allocation. **DONE** — signature adapted to const generics (`state: &[f32; D]`, `block: &[[f32; D]; K]`). Caller owns both grids. This is the "pretzel manifold" pattern.
+- [x] **T2.3** G2 unit test: `k2_walk_preserves_norm_bounds` — walk a 2D grid over a `K=2` field, assert each output state has L2 norm within `[‖state‖ − ε, ‖state‖ + Σ_k |α_k|]` (norm inflation bounded by the steering magnitude, per Plan 322's norm-preservation analysis). **DONE** — 5×5 grid over `[-0.5, 0.5]²`, triangle-inequality bound holds for all 25 outputs.
+- [x] **T2.4** G2 unit test: `k2_walk_covers_grid` — verify the walked grid produces `grid_rows` distinct output states (no duplicates unless alphas repeat). **DONE** — 4 distinct alpha pairs → 4 distinct outputs (block rows linearly independent); repeated alphas → identical outputs (determinism).
+
+**Phase 2 validation (2026-07-08):** 5/5 new tests pass. Total 15/15 (10 Phase 1 + 5 Phase 2). Default + `--all-features` + feature-off all compile clean.
 
 ## Phase 3 — Orthonormality Construction Helper
 

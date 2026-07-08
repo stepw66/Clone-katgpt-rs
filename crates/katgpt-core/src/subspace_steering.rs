@@ -240,6 +240,85 @@ pub fn compute_block_commitment<const D: usize, const K: usize>(
     out
 }
 
+/// Per-axis projection energy `dot(block[k], state)` for `k in 0..K`.
+///
+/// Returns a fixed `[f32; K]` array where `out[k] = ⟨block[k], state⟩`. Used
+/// for block-wise TopK consumption — which blocks are active in the current
+/// state. Zero-alloc (output is a stack array).
+///
+/// This is the read-side counterpart of [`apply_subspace_steering`]: the
+/// apply writes energy INTO the state (additive steering), this reads the
+/// energy ALREADY PRESENT along each block axis (projection).
+#[inline]
+#[must_use]
+pub fn block_energy<const D: usize, const K: usize>(
+    block: &[[f32; D]; K],
+    state: &[f32; D],
+) -> [f32; K] {
+    let mut out = [0f32; K];
+    for k in 0..K {
+        out[k] = dot_product(&block[k], state);
+    }
+    out
+}
+
+/// Sweep `alphas` over a grid and write the steered state at each grid point.
+///
+/// For each row `i` of `alpha_grid`, computes
+/// `out_grid[i] = state + Σ_k alpha_grid[i][k] * block[k]` and writes it into
+/// `out_grid[i]`. Zero-alloc after grid allocation (caller owns both grids).
+///
+/// This is the "pretzel manifold" pattern: each grid point is one concept
+/// variation within the k-dim subspace. For `K=2`, a 2D `alpha_grid` sweeps a
+/// surface; for `K=1`, a 1D grid sweeps a line.
+///
+/// # Panics
+///
+/// Panics (debug) if `alpha_grid.len() != out_grid.len()` or if
+/// `alpha_grid[i].len() != K`. In release the lengths are trusted (the const
+/// generic `K` makes the inner check a no-op when `alpha_grid` is `&[[f32; K]]`).
+///
+/// # Example
+///
+/// ```
+/// use katgpt_core::subspace_steering::{walk_manifold, SubspaceSteeringField};
+///
+/// // K=1, D=8: sweep alpha over {0.0, 0.5, 1.0} → 3 steered states.
+/// let mut block = [[0f32; 8]];
+/// block[0][0] = 1.0;
+/// let field = SubspaceSteeringField::<8, 1>::new_unchecked(block, [0.0]);
+/// let state = [0f32; 8];
+/// let alpha_grid = [[0.0f32], [0.5], [1.0]];
+/// let mut out_grid = [[0f32; 8]; 3];
+/// walk_manifold(&state, &field.block, &alpha_grid, &mut out_grid);
+/// // out_grid[1] = state + 0.5 * block[0] = [0.5, 0, 0, 0, 0, 0, 0, 0]
+/// assert_eq!(out_grid[1], [0.5, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]);
+/// ```
+pub fn walk_manifold<const D: usize, const K: usize>(
+    state: &[f32; D],
+    block: &[[f32; D]; K],
+    alpha_grid: &[[f32; K]],
+    out_grid: &mut [[f32; D]],
+) {
+    debug_assert_eq!(
+        alpha_grid.len(),
+        out_grid.len(),
+        "alpha_grid and out_grid must have the same length"
+    );
+    for (alphas, out) in alpha_grid.iter().zip(out_grid.iter_mut()) {
+        // Start from the base state.
+        *out = *state;
+        // Add Σ_k alphas[k] * block[k].
+        for k in 0..K {
+            let a = alphas[k];
+            let row = &block[k];
+            for (oj, &rj) in out.iter_mut().zip(row.iter()) {
+                *oj += a * rj;
+            }
+        }
+    }
+}
+
 // ── Internal helpers ────────────────────────────────────────────────────────
 
 #[inline]
@@ -275,28 +354,26 @@ mod tests {
         for (i, seed) in seeds.iter().enumerate() {
             // Raw direction from seed.
             let mut v: [f32; D] = [0f32; D];
-            for j in 0..D {
-                v[j] = seed[j] as f32 * 0.1 + (j as f32) + 1.0;
+            for (j, (vj, &sj)) in v.iter_mut().zip(seed.iter()).enumerate() {
+                *vj = sj as f32 * 0.1 + (j as f32) + 1.0;
             }
             // Subtract projections onto already-orthonormalized rows.
             for prev in rows[..i].iter() {
                 let proj = dot_product(&v, prev);
-                for j in 0..D {
-                    v[j] -= proj * prev[j];
+                for (vj, &pj) in v.iter_mut().zip(prev.iter()) {
+                    *vj -= proj * pj;
                 }
             }
             // Normalize.
             let n = row_norm(&v);
-            for j in 0..D {
-                v[j] /= n;
+            for vj in v.iter_mut() {
+                *vj /= n;
             }
             rows[i] = v;
         }
         // Copy into fixed array.
         let mut out = [[0f32; D]; K];
-        for i in 0..K {
-            out[i] = rows[i];
-        }
+        out.copy_from_slice(&rows);
         out
     }
 
@@ -465,12 +542,12 @@ mod tests {
         field.apply(&mut state);
 
         // state[j] = 0.4 * block[0][j] + 0.6 * block[1][j] (starting from 0).
-        for j in 0..D {
+        for (j, &sj) in state.iter().enumerate() {
             let expected = alphas[0] * field.block[0][j] + alphas[1] * field.block[1][j];
             assert!(
-                (state[j] - expected).abs() < 1e-6,
+                (sj - expected).abs() < 1e-6,
                 "j={j}: got {}, expected {}",
-                state[j],
+                sj,
                 expected
             );
         }
@@ -487,5 +564,155 @@ mod tests {
         assert_eq!(state, original, "K=0 field must be a no-op");
         // Commitment is still well-defined (BLAKE3 of empty).
         assert_ne!(field.commitment, [0u8; 32]);
+    }
+
+    // ──────────────────────────────────────────────────────────────────────
+    // Plan 412 Phase 2 — block_energy + walk_manifold tests
+    // ──────────────────────────────────────────────────────────────────────
+
+    /// `block_energy` returns the per-axis dot projection of state onto each
+    /// block row.
+    #[test]
+    fn block_energy_returns_per_axis_projection() {
+        const D: usize = 8;
+        // Two orthonormal axes: e_0 and e_1 (standard basis).
+        let mut block = [[0f32; D]; 2];
+        block[0][0] = 1.0;
+        block[1][1] = 1.0;
+        let state = [0.3f32, 0.7, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
+        let energy = block_energy(&block, &state);
+        assert!((energy[0] - 0.3).abs() < 1e-6, "axis 0 energy = dot(e_0, state) = 0.3");
+        assert!((energy[1] - 0.7).abs() < 1e-6, "axis 1 energy = dot(e_1, state) = 0.7");
+    }
+
+    /// `block_energy` on a state aligned with block[0] returns high energy on
+    /// axis 0 and ~0 on the orthogonal axes.
+    #[test]
+    fn block_energy_aligned_state_dominates_one_axis() {
+        const D: usize = 8;
+        // Use standard basis vectors e_0, e_1, e_2 — a trivially orthonormal
+        // block (no Gram-Schmidt numerical-conditioning concerns).
+        let mut block = [[0f32; D]; 3];
+        block[0][0] = 1.0;
+        block[1][1] = 1.0;
+        block[2][2] = 1.0;
+        // State = exactly block[0] (perfectly aligned with axis 0).
+        let state = block[0];
+        let energy = block_energy(&block, &state);
+        // Energy on axis 0 = dot(block[0], block[0]) = 1.0 (unit norm).
+        assert!((energy[0] - 1.0).abs() < 1e-6, "aligned axis energy ~ 1.0, got {}", energy[0]);
+        // Energy on orthogonal axes ~ 0 (by orthonormality).
+        assert!(energy[1].abs() < 1e-6, "orthogonal axis 1 energy ~ 0, got {}", energy[1]);
+        assert!(energy[2].abs() < 1e-6, "orthogonal axis 2 energy ~ 0, got {}", energy[2]);
+    }
+
+    /// `walk_manifold` produces steered states at each grid point.
+    /// K=1: sweep alpha over a line.
+    #[test]
+    fn walk_manifold_k1_sweeps_a_line() {
+        const D: usize = 8;
+        let mut block = [[0f32; D]];
+        block[0][0] = 1.0; // e_0
+        let field = SubspaceSteeringField::<D, 1>::new(block, [0.0], 1e-5).unwrap();
+        let state = [0.5f32; D];
+        let alpha_grid = [[0.0f32], [0.5], [1.0], [2.0]];
+        let mut out_grid = [[0f32; D]; 4];
+        walk_manifold(&state, &field.block, &alpha_grid, &mut out_grid);
+
+        // out_grid[i] = state + alpha_grid[i][0] * e_0
+        for i in 0..4 {
+            let expected_first = state[0] + alpha_grid[i][0];
+            assert!((out_grid[i][0] - expected_first).abs() < 1e-6);
+            // Other components unchanged.
+            for j in 1..D {
+                assert!((out_grid[i][j] - state[j]).abs() < 1e-6);
+            }
+        }
+    }
+
+    /// **T2.3:** K=2 walk preserves norm bounds — each walked output's L2 norm
+    /// is within `[‖state‖ − ε, ‖state‖ + Σ_k |α_k|]`. Per Plan 322's
+    /// norm-preservation analysis, the norm inflation from additive steering
+    /// is bounded by the steering magnitude (triangle inequality).
+    #[test]
+    fn k2_walk_preserves_norm_bounds() {
+        const D: usize = 8;
+        // Distinct per-element seeds for well-conditioned Gram-Schmidt.
+        let seeds = [
+            [1u8, 2, 3, 4, 5, 6, 7, 8],
+            [8u8, 7, 6, 5, 4, 3, 2, 1],
+        ];
+        let block = gram_schmidt_block::<D, 2>(seeds);
+        let field = SubspaceSteeringField::<D, 2>::new(block, [0.0, 0.0], 1e-4).unwrap();
+
+        let state = [0.1f32, 0.2, 0.1, 0.05, 0.15, 0.1, 0.0, 0.08];
+        let state_norm = row_norm(&state);
+
+        // Sweep a 5x5 grid over [-0.5, 0.5]^2.
+        let mut alpha_grid: Vec<[f32; 2]> = Vec::new();
+        for a0 in [-0.5f32, -0.25, 0.0, 0.25, 0.5] {
+            for a1 in [-0.5f32, -0.25, 0.0, 0.25, 0.5] {
+                alpha_grid.push([a0, a1]);
+            }
+        }
+        let mut out_grid = vec![[0f32; D]; alpha_grid.len()];
+        walk_manifold(&state, &field.block, &alpha_grid, &mut out_grid);
+
+        for (i, out) in out_grid.iter().enumerate() {
+            let out_norm = row_norm(out);
+            let sum_abs_alpha = alpha_grid[i].iter().map(|a| a.abs()).sum::<f32>();
+            // The steering adds a vector of norm <= Σ_k |α_k| (each block row
+            // is unit-norm, so ||Σ α_k u_k|| <= Σ |α_k|). By triangle inequality:
+            //   |out_norm - state_norm| <= ||Σ α_k u_k|| <= Σ |α_k|.
+            let lower = state_norm - sum_abs_alpha - 1e-5;
+            let upper = state_norm + sum_abs_alpha + 1e-5;
+            assert!(
+                out_norm >= lower && out_norm <= upper,
+                "T2.3 norm bound FAIL at grid i={i}: out_norm={out_norm}, state_norm={state_norm}, sum_abs_alpha={sum_abs_alpha}, bounds=[{lower}, {upper}]"
+            );
+        }
+    }
+
+    /// **T2.4:** K=2 walk covers the grid — the walked grid produces distinct
+    /// output states (no duplicates unless alphas repeat).
+    #[test]
+    fn k2_walk_covers_grid() {
+        const D: usize = 8;
+        // Distinct per-element seeds for well-conditioned Gram-Schmidt.
+        let seeds = [
+            [1u8, 2, 3, 4, 5, 6, 7, 8],
+            [8u8, 7, 6, 5, 4, 3, 2, 1],
+        ];
+        let block = gram_schmidt_block::<D, 2>(seeds);
+        let field = SubspaceSteeringField::<D, 2>::new(block, [0.0, 0.0], 1e-4).unwrap();
+
+        let state = [0.0f32; D];
+        // 4 distinct alpha pairs → 4 distinct output states (block rows are
+        // linearly independent, so different alpha pairs give different sums).
+        let alpha_grid = [
+            [0.0f32, 0.0],
+            [1.0, 0.0],
+            [0.0, 1.0],
+            [1.0, 1.0],
+        ];
+        let mut out_grid = [[0f32; D]; 4];
+        walk_manifold(&state, &field.block, &alpha_grid, &mut out_grid);
+
+        // All 4 outputs must be distinct (different alpha pairs → different
+        // linear combinations of two linearly-independent block rows).
+        for i in 0..4 {
+            for j in (i + 1)..4 {
+                assert_ne!(
+                    out_grid[i], out_grid[j],
+                    "T2.4 grid coverage FAIL: out_grid[{i}] == out_grid[{j}] for distinct alphas"
+                );
+            }
+        }
+
+        // Repeated alpha pair → repeated output (determinism).
+        let alpha_repeat = [[0.5f32, 0.5], [0.5, 0.5]];
+        let mut out_repeat = [[0f32; D]; 2];
+        walk_manifold(&state, &field.block, &alpha_repeat, &mut out_repeat);
+        assert_eq!(out_repeat[0], out_repeat[1], "repeated alphas must give identical outputs");
     }
 }

@@ -882,7 +882,7 @@ pub mod subspace_steering;
 #[cfg(feature = "subspace_steering")]
 pub use subspace_steering::{
     SubspaceSteeringError, SubspaceSteeringField, apply_subspace_steering,
-    compute_block_commitment,
+    block_energy, compute_block_commitment, walk_manifold,
 };
 
 // Phase-Modulated Subspace Rotation Gate — norm-preserving latent coupling
