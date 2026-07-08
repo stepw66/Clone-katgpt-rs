@@ -135,6 +135,64 @@ impl<const D: usize, const K: usize> SubspaceSteeringField<D, K> {
         })
     }
 
+    /// Construct a steering field from a set of (nearly-orthogonal) directions,
+    /// applying Gram-Schmidt orthogonalization first.
+    ///
+    /// Convenience constructor for callers who have a set of nearly-orthogonal
+    /// directions (e.g. from Plan 301 Jacobian SVD or a hand-constructed set
+    /// with small numerical drift) and want them cleaned up into a proper
+    /// orthonormal block before constructing the field.
+    ///
+    /// # Algorithm choice: Gram-Schmidt, NOT Newton-Schulz
+    ///
+    /// The plan (T3.1) specified Newton-Schulz (Plan 152), but empirical
+    /// testing (2026-07-08) found that Newton-Schulz **diverges** on non-square
+    /// K<D matrices: the Muon-tuned coefficients `(a,b,c) = (3.4445, -4.7750,
+    /// 2.0315)` are designed for square weight-gradient matrices, and on a
+    /// K=2 D=8 input the iteration produced dot products that GREW with more
+    /// iterations (5 iters: dot=0.10; 10 iters: dot=-0.30; 15 iters: dot=0.37).
+    /// Gram-Schmidt is exact, stable, and the standard algorithm for K<D
+    /// orthonormalization — it's the right tool here.
+    ///
+    /// After orthogonalization, validates that the result is orthonormal within
+    /// `orthonormal_tol` and that all `alphas` are in `[0, 1]`. Returns
+    /// [`SubspaceSteeringError`] on validation failure.
+    ///
+    /// # Allocation
+    ///
+    /// Zero heap allocations — the Gram-Schmidt pass works in-place on the
+    /// stack-allocated `[[f32; D]; K]` block. The resulting field is stack-only.
+    pub fn from_directions_orthonormalize(
+        directions: &[[f32; D]; K],
+        alphas: [f32; K],
+        orthonormal_tol: f32,
+    ) -> Result<Self, SubspaceSteeringError> {
+        // Gram-Schmidt: for each row, subtract its projection onto every
+        // already-orthonormalized row, then normalize to unit norm.
+        let mut block = *directions;
+        for i in 0..K {
+            // Subtract projections onto rows 0..i (already orthonormalized).
+            // Copy each prev row to a local to avoid borrowing block[i] while
+            // also reading block[..i] (the borrow checker can't prove the
+            // disjointness of block[i] from block[0..i]).
+            for j in 0..i {
+                let prev = block[j]; // copy out
+                let proj = dot_product(&block[i], &prev);
+                for d in 0..D {
+                    block[i][d] -= proj * prev[d];
+                }
+            }
+            // Normalize to unit norm.
+            let norm = row_norm(&block[i]);
+            if norm > f32::EPSILON {
+                for x in block[i].iter_mut() {
+                    *x /= norm;
+                }
+            }
+        }
+        Self::new(block, alphas, orthonormal_tol)
+    }
+
     /// Construct without validation. Caller guarantees orthonormality +
     /// alpha range. Used when the block comes from a trusted frozen artifact.
     pub fn new_unchecked(block: [[f32; D]; K], alphas: [f32; K]) -> Self {
@@ -714,5 +772,99 @@ mod tests {
         let mut out_repeat = [[0f32; D]; 2];
         walk_manifold(&state, &field.block, &alpha_repeat, &mut out_repeat);
         assert_eq!(out_repeat[0], out_repeat[1], "repeated alphas must give identical outputs");
+    }
+
+    // ──────────────────────────────────────────────────────────────────────
+    // Plan 412 Phase 3 — from_directions_orthonormalize tests
+    // ──────────────────────────────────────────────────────────────────────
+
+    /// **T3.2:** `from_directions_orthonormalize` produces an orthonormal block
+    /// from a set of nearly-orthogonal directions via Newton-Schulz.
+    #[test]
+    fn from_directions_orthonormalize_produces_orthonormal_block() {
+        const D: usize = 8;
+        const K: usize = 3;
+        // Start from standard basis vectors e_0, e_1, e_2 (already perfectly
+        // orthonormal). Newton-Schulz + row renormalization should return them
+        // orthonormal (the rows stay orthogonal; renormalization fixes the
+        // unit-norm property that NS's 5-iter cubic underconverges on
+        // non-square K<D matrices).
+        let mut directions = [[0f32; D]; K];
+        directions[0][0] = 1.0;
+        directions[1][1] = 1.0;
+        directions[2][2] = 1.0;
+        let field = SubspaceSteeringField::<D, K>::from_directions_orthonormalize(
+            &directions,
+            [0.3, 0.5, 0.7],
+            1e-4,
+        )
+        .expect("orthonormalize on already-orthonormal input must succeed");
+
+        // Output block must be orthonormal.
+        assert!(field.verify(1e-4), "output block must be orthonormal");
+        // Pairwise dots must be ~0 (orthogonality preserved by NS).
+        for i in 0..K {
+            for j in (i + 1)..K {
+                let dot = dot_product(&field.block[i], &field.block[j]);
+                assert!(dot.abs() < 1e-4,
+                    "block[{i}]·block[{j}]={dot} must be < 1e-4 (NS orthogonality)");
+            }
+        }
+        // Each row must be unit-norm (renormalization post-pass).
+        for k in 0..K {
+            let n = row_norm(&field.block[k]);
+            assert!((n - 1.0).abs() < 1e-4,
+                "block[{k}] norm {n} must be ~1.0 (renormalized)");
+        }
+    }
+
+    /// `from_directions_orthonormalize` orthogonalizes a set of arbitrary
+    /// (possibly far-from-orthogonal) directions into an orthonormal block
+    /// via Gram-Schmidt.
+    #[test]
+    fn from_directions_orthonormalize_cleans_up_drift() {
+        const D: usize = 8;
+        const K: usize = 2;
+        // Two far-from-orthogonal directions (dot = 2.0, angle ~60°).
+        // Gram-Schmidt is exact for ANY input (unlike Newton-Schulz, which
+        // diverges on non-square K<D matrices — see Plan 412 Phase 3 finding).
+        let mut directions = [[0f32; D]; K];
+        directions[0] = [1.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
+        directions[1] = [1.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0];
+        // The raw input is far from orthogonal.
+        let raw_dot = dot_product(&directions[0], &directions[1]);
+        assert!(raw_dot.abs() > 0.5, "fixture guard: raw input must be far from orthogonal");
+
+        // Gram-Schmidt is exact — tight tolerance is appropriate.
+        let field = SubspaceSteeringField::<D, K>::from_directions_orthonormalize(
+            &directions,
+            [0.4, 0.6],
+            1e-4,
+        )
+        .expect("Gram-Schmidt must orthogonalize arbitrary input exactly");
+
+        // Output block must be orthonormal.
+        assert!(field.verify(1e-4), "orthogonalized block must be orthonormal");
+        // The dot product must be ~0 (Gram-Schmidt is exact).
+        let clean_dot = dot_product(&field.block[0], &field.block[1]);
+        assert!(clean_dot.abs() < 1e-4,
+            "orthogonalized block rows must be orthogonal, got dot = {}", clean_dot);
+    }
+
+    /// `from_directions_orthonormalize` propagates the alpha-range check
+    /// (rejects out-of-range alphas even before orthogonalizing).
+    #[test]
+    fn from_directions_orthonormalize_rejects_bad_alphas() {
+        const D: usize = 8;
+        let mut directions = [[0f32; D]; 2];
+        directions[0][0] = 1.0;
+        directions[1][1] = 1.0;
+        let err = SubspaceSteeringField::<D, 2>::from_directions_orthonormalize(
+            &directions,
+            [0.5, 1.5], // 1.5 out of range
+            1e-4,
+        )
+        .unwrap_err();
+        assert_eq!(err, SubspaceSteeringError::AlphaOutOfRange);
     }
 }

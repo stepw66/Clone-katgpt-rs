@@ -81,12 +81,14 @@ pub struct SubspaceSteeringField<const D: usize, const K: usize> {
 
 **Phase 2 validation (2026-07-08):** 5/5 new tests pass. Total 15/15 (10 Phase 1 + 5 Phase 2). Default + `--all-features` + feature-off all compile clean.
 
-## Phase 3 — Orthonormality Construction Helper
+## Phase 3 — Orthonormality Construction Helper ✅ DONE (2026-07-08)
 
 ### Tasks
 
-- [ ] **T3.1** Implement `SubspaceSteeringField::from_directions_orthonormalize(directions: &[[f32; D]; K], alphas: [f32; K], tol: f32)` — applies `newton_schulz_orthogonalize` (Plan 152, shipped in `katgpt-core`) to the directions, then constructs the field. Convenience constructor for callers who have a set of nearly-orthogonal directions.
-- [ ] **T3.2** Unit test: `from_directions_orthonormalize_produces_orthonormal_block` — feed 3 nearly-orthogonal directions, verify output block is orthonormal within tol.
+- [x] **T3.1** Implement `SubspaceSteeringField::from_directions_orthonormalize(directions, alphas, tol)` — **DONE with algorithm change: Gram-Schmidt, NOT Newton-Schulz.** The plan specified Newton-Schulz (Plan 152), but empirical testing (2026-07-08) found NS **diverges** on non-square K<D matrices: the Muon-tuned coefficients `(3.4445, -4.7750, 2.0315)` are designed for square weight-gradient matrices, and on a K=2 D=8 input the iteration produced dot products that GREW with more iterations (5 iters: dot=0.10; 10 iters: dot=-0.30; 15 iters: dot=0.37). Gram-Schmidt is exact, stable, zero-alloc (in-place on the stack `[[f32; D]; K]` block), and the standard algorithm for K<D orthonormalization — it's the right tool here. The `newton_schulz` feature dependency was removed from `subspace_steering`.
+- [x] **T3.2** Unit test: `from_directions_orthonormalize_produces_orthonormal_block` — feed 3 standard-basis directions, verify output block is orthonormal within tol. **DONE** — plus 2 additional tests (`cleans_up_drift` with far-from-orthogonal input, `rejects_bad_alphas`).
+
+**Phase 3 validation (2026-07-08):** 3/3 new tests pass. Total 18/18 (10 Phase 1 + 5 Phase 2 + 3 Phase 3). Default + `--all-features` + feature-off all compile clean. Zero-alloc construction (Gram-Schmidt is in-place stack-only; NS would have needed a K*D flatten `Vec`).
 
 ## Phase 4 — GOAT Gate Benchmark
 
