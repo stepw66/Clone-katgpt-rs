@@ -585,6 +585,18 @@ pub mod latent_trajectory_geometry;
 #[cfg(feature = "viable_manifold_graph")]
 pub mod viable_manifold_graph;
 
+// Canvas Schema Compiler — declared causal topology for attention masks
+// (Plan 419, Research 398, Valdez *Canvas Engineering* July 2026). The
+// modelless half: a typed CanvasSchema compiler that lowers a declared region
+// layout + directed topology into an AttentionMaskSpec (consumable by
+// AC-Prefix / VortexFlow), a LossWeightMask, and a can_reach / reachability
+// primitive proving exact marginal independence for binary masks (absent
+// edge ⟹ no influence, by construction). Plus a transfer_distance semantic-
+// type compatibility scalar. Pure structure compilation, zero gradient
+// descent. Opt-in until G1–G6 GOAT gates pass.
+#[cfg(feature = "canvas_schema")]
+pub mod canvas;
+
 // Zone Affective Manifold — crowd-scale PCA via power iteration + deflation
 // on the (N, D) crowd-activation covariance (Issue 001). Top-k principal
 // directions ("zone mood axes") + per-NPC projections. Rayon-parallel for
