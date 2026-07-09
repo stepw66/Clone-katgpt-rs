@@ -112,7 +112,7 @@ This is **exactly** the FUNCATTN mechanism (Research 257, Plan 286): `Φ^T Q` (e
 | Cross-resolution spectral transport (the headline FNO capability) | `katgpt-rs/crates/katgpt-core/src/cross_resolution.rs::transport_cross_resolution_into` (Plan 310, **DEFAULT-ON**) | **Strictly stronger** — composes cross-resolution × cross-domain transport in one 4-matrix product |
 | SpectralConv (FNO §3.3) | `katgpt-rs/crates/katgpt-core/src/funcattn.rs` (Plan 286) + `spectralquant/spectral_kv_cache.rs` (Plan 039) | FUNCATTN = SpectralConv with frozen bases |
 | Encoder-decoder inner-product operator (paper §3.6, App A.8) | `funcattn` + `cross_resolution_transport` (same machinery, different vocabulary) | **Exact** — see Research 257 §1.1, 307 §2.2 |
-| Integral operator / GNO (§3.1, §3.4) | `katgpt-rs/crates/katgpt-core/src/dec/operators.rs::exterior_derivative` (Plan 251) | **DEC formulation** — `d` on a cell complex IS a GNO with kernel = incidence matrix |
+| Integral operator / GNO (§3.1, §3.4) | `katgpt-rs/crates/katgpt-dec/src/operators.rs::exterior_derivative` (Plan 251) | **DEC formulation** — `d` on a cell complex IS a GNO with kernel = incidence matrix |
 | Spectral differentiation `F{∂^m f} = (ik)^m f̂` (App A.6) | `katgpt-rs/crates/katgpt-core/src/spectral/differentiation.rs` (Plan 325, **DEFAULT-ON**) + DEC `exterior_derivative` | **Shipped** as the specialized periodic-1D case where DEC is overkill |
 | Non-periodic boundary handling (Fourier continuation) | `katgpt-rs/crates/katgpt-core/src/spectral/continuation.rs` (Plan 323) | **Shipped** — the gap Research 307 §3 identified, now closed |
 | Tucker / HOSVD weight factorization (TFNO §6.1) | `katgpt-rs/crates/katgpt-core/src/linalg/tucker.rs` (Plan 326) | **Shipped** |
@@ -135,7 +135,7 @@ Re-cast the recipe against each Super-GOAT factory module:
 - **`cgsp_runtime/`**: spectral-band curiosity (which Fourier band is the NPC exploring?) — niche, not wired.
 - **LatCal fixed-point commitment** (`riir-chain/src/encoding/`): `LatCalSpectralFixed` already commits Fourier `(freq, amp, phase)` as i64 × 10⁶ — FNO coefficients cross the sync boundary as raw fixed-point scalars. **Shipped.**
 - **`NeuronShard` `style_weights[64]`** (`riir-neuron-db/src/shard.rs`): TFNO Tucker factorization of the 8×8 reshaped weight matrix — **shipped as Plan 326** (`linalg/tucker.rs`).
-- **DEC Stokes-calculus** (`katgpt-rs/crates/katgpt-core/src/dec/`): the paper's integral operators are DEC `exterior_derivative`/`codifferential` on a periodic grid; spectral differentiation is `d` in Fourier vocabulary. **Shipped as Plans 251, 325.**
+- **DEC Stokes-calculus** (`katgpt-rs/crates/katgpt-dec/src/`): the paper's integral operators are DEC `exterior_derivative`/`codifferential` on a periodic grid; spectral differentiation is `d` in Fourier vocabulary. **Shipped as Plans 251, 325.**
 
 No Super-GOAT reframing emerges — every axis reduces to a shipped primitive.
 
