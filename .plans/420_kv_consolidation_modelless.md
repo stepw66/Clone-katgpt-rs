@@ -4,7 +4,7 @@
 **Research:** [katgpt-rs/.research/401_Bottlenecked_Transformer_KV_Cache_Consolidation.md](../.research/401_Bottlenecked_Transformer_KV_Cache_Consolidation.md)
 **Source paper:** [arXiv:2505.16950](https://arxiv.org/abs/2505.16950) — Bottlenecked Transformers (Oomerjee et al., 2025/2026)
 **Target:** `katgpt-rs/crates/katgpt-core/src/kv_consolidation/` (new module) + Cargo feature `kv_consolidation`
-**Status:** Phase 1 COMPLETE — quality gain REFUTED by §3.6 PoC (2026-07-09). Phases 2–4 SHELVED (depend on a trained model, → riir-train follow-up).
+**Status:** Phase 1 COMPLETE — quality gain REFUTED by §3.6 PoC (2026-07-09). Phases 2–4 PERMANENTLY SHELVED — riir-train Plan 313 confirmed the refutation on a TRAINED model (31% accuracy, 0.00pp gain). The paper's quality benefit is inseparable from its TRAINED Cache Processor; the modelless mean-shift does not capture it.
 
 ---
 
@@ -14,7 +14,7 @@ Ship a modelless KV cache consolidation primitive that periodically rewrites KV 
 
 The primitive is justified by Information Bottleneck theory (Research 401 §1.2): autoregressive training makes the KV cache minimally compressive of input (high I(X;Z)); periodic consolidation reduces I(X;Z) while preserving predictive information I(Z;Y), improving generalization.
 
-**The GOAT gate is PoC-gated per §3.6:** architectural coverage is confirmed, but quality parity with the paper's trained Cache Processor must be proven on a controlled reasoning task before promotion to default.
+**The GOAT gate is PoC-gated per §3.6:** architectural coverage is confirmed, but quality parity with the paper's trained Cache Processor has been REFUTED on both untrained (Phase 1) and trained (Plan 313) models. The primitive is permanently Gain (architectural only) — no feature flag will ship.
 
 **KV cache stack slot:** consolidation (new slot — distinct from compression/selection/quantization). No demote-loser interaction (different operation class).
 
