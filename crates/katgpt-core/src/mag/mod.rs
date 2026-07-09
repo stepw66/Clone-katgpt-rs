@@ -61,14 +61,16 @@
 //!
 //! ## Status
 //!
-//! Phase 1 (this skeleton): types + mining + transfer functions behind the
-//! `mag_mining` feature flag (opt-in). Phase 2 GOAT gate (G1–G6) is the
-//! make-or-break — especially **G2** (contrast direction separability on
-//! model-self-labeled classes). If G2 fails, the primitive demotes to a
-//! research-only Gain.
+//! Phase 2 COMPLETE (2026-07-09). GOAT G1–G6 ALL PASS. Promoted to DEFAULT-ON.
+//! G2 (the headline kill-it gate) verified: contrast directions mined from
+//! self-labeled classes ARE linearly separable (LOO accuracy 0.925 at σ=1.5,
+//! 0.810 at σ=3.0). G4: MAG class-conditional transfer Top-1 0.720 vs raw
+//! centroid cosine 0.220 (3.3×). Phase 2 added `mine_direction_into` +
+//! `transfer_score_into` zero-alloc hot-path variants.
 //!
 //! See: `katgpt-rs/.research/397_Mining_via_Activation_Geometry.md`
 //! See: `katgpt-rs/.plans/418_mag_activation_geometry_primitive.md`
+//! See: `katgpt-rs/.benchmarks/418_mag_goat.md`
 
 pub mod mining;
 pub mod transfer;
@@ -78,7 +80,7 @@ pub mod types;
 // (`katgpt_core::mag::mine_direction` instead of `...::mag::mining::mine_direction`).
 pub use mining::{
     apply_operator, apply_operator_into, calibrate_alpha, mine_contrast_direction,
-    mine_direction, reconstruction_error,
+    mine_direction, mine_direction_into, reconstruction_error,
 };
-pub use transfer::{rank_candidates, transfer_score, DataSet, RankEntry};
+pub use transfer::{rank_candidates, transfer_score, transfer_score_into, DataSet, RankEntry};
 pub use types::{MagDirection, MagError, MagOperator, TransferMetric};

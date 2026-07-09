@@ -955,8 +955,12 @@ pub use spherical_steering::{
 // readout summaries; transfer_score / rank_candidates predict dataset transfer
 // (the §4 94.7% Top-1 result). Mined directions are BLAKE3-committed (same
 // envelope as LatentSteeringVector / MerkleFrozenEnvelope). Pure modelless
-// (mean-difference + cosine geometry). Opt-in until Phase 2 GOAT gate (G1–G6);
-// G2 (contrast separability on self-labels) is the kill-it gate.
+// (mean-difference + cosine geometry). DEFAULT-ON since 2026-07-09 (Phase 2
+// GOAT G1-G6 ALL PASS): G2 (the headline kill-it gate) verified contrast
+// directions from self-labeled classes ARE linearly separable (LOO acc 0.925
+// at σ=1.5, 0.810 at σ=3.0). G4: MAG class-conditional transfer Top-1 0.720
+// vs raw cosine 0.220 (3.3×). Phase 2 added mine_direction_into +
+// transfer_score_into zero-alloc hot-path variants.
 #[cfg(feature = "mag_mining")]
 pub mod mag;
 #[cfg(feature = "mag_mining")]

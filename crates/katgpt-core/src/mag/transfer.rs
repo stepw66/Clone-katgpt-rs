@@ -137,6 +137,85 @@ pub fn transfer_score<S: AsRef<[f32]>>(
     }
 }
 
+// ── Zero-alloc hot-path variant ────────────────────────────────────
+
+/// Zero-alloc variant of [`transfer_score`] for centroid-based metrics.
+///
+/// Uses `scratch` (length `≥ 2·d`) for centroid computation, avoiding heap
+/// allocation on the hot path. Supports the four centroid-based metrics
+/// ([`CentroidCosine`](TransferMetric::CentroidCosine),
+/// [`Euclidean`](TransferMetric::Euclidean),
+/// [`Correlation`](TransferMetric::Correlation), and the two
+/// `ClassConditionalCosine*` variants). The distribution-based metrics
+/// ([`RbfMmd`](TransferMetric::RbfMmd),
+/// [`Wasserstein1d`](TransferMetric::Wasserstein1d),
+/// [`CkaLinear`](TransferMetric::CkaLinear)) fall back to the allocating
+/// [`transfer_score`] — they are cold-path diagnostics.
+///
+/// Returns [`MagError::DimMismatch`] if `scratch.len() < 2 * d`.
+pub fn transfer_score_into<S: AsRef<[f32]>>(
+    candidate: &DataSet<'_, S>,
+    target: &DataSet<'_, S>,
+    metric: TransferMetric,
+    scratch: &mut [f32],
+) -> Result<f32, MagError> {
+    let d = check_dim(candidate.activations)?;
+    let d2 = check_dim(target.activations)?;
+    if d != d2 {
+        return Err(MagError::DimMismatch);
+    }
+    if candidate.labels.len() != candidate.activations.len()
+        || target.labels.len() != target.activations.len()
+    {
+        return Err(MagError::DimMismatch);
+    }
+    if scratch.len() < 2 * d {
+        return Err(MagError::DimMismatch);
+    }
+
+    match metric {
+        TransferMetric::CentroidCosine => {
+            let (sc, st) = scratch.split_at_mut(d);
+            centroid_into(candidate.activations, d, sc);
+            centroid_into(target.activations, d, st);
+            Ok(cosine(sc, st))
+        }
+        TransferMetric::Euclidean => {
+            let (sc, st) = scratch.split_at_mut(d);
+            centroid_into(candidate.activations, d, sc);
+            centroid_into(target.activations, d, st);
+            let mut dist_sq = 0.0;
+            for j in 0..d {
+                let diff = sc[j] - st[j];
+                dist_sq += diff * diff;
+            }
+            Ok(-dist_sq.sqrt())
+        }
+        TransferMetric::Correlation => {
+            let (sc, st) = scratch.split_at_mut(d);
+            centroid_into(candidate.activations, d, sc);
+            centroid_into(target.activations, d, st);
+            Ok(pearson(sc, st))
+        }
+        TransferMetric::ClassConditionalCosineMalicious => {
+            let (sc, st) = scratch.split_at_mut(d);
+            class_centroid_into(candidate.activations, candidate.labels, false, d, sc)?;
+            class_centroid_into(target.activations, target.labels, false, d, st)?;
+            Ok(cosine(sc, st))
+        }
+        TransferMetric::ClassConditionalCosineBenign => {
+            let (sc, st) = scratch.split_at_mut(d);
+            class_centroid_into(candidate.activations, candidate.labels, true, d, sc)?;
+            class_centroid_into(target.activations, target.labels, true, d, st)?;
+            Ok(cosine(sc, st))
+        }
+        // Distribution-based metrics fall back to the allocating path.
+        TransferMetric::RbfMmd | TransferMetric::Wasserstein1d | TransferMetric::CkaLinear => {
+            transfer_score(candidate, target, metric)
+        }
+    }
+}
+
 // ── Multi-candidate ranking ────────────────────────────────────────
 
 /// A ranked candidate entry from [`rank_candidates`].
@@ -260,6 +339,49 @@ fn class_centroid<S: AsRef<[f32]>>(
         *x *= inv_n;
     }
     Ok(out)
+}
+
+/// Compute the centroid (per-dimension mean) into a pre-allocated buffer
+/// `out[0..d]`. Zero-alloc hot-path helper.
+fn centroid_into<S: AsRef<[f32]>>(samples: &[S], d: usize, out: &mut [f32]) {
+    out[..d].fill(0.0);
+    let inv_n = 1.0 / samples.len() as f32;
+    for s in samples {
+        let s = s.as_ref();
+        for (acc, &v) in out[..d].iter_mut().zip(s) {
+            *acc += v * inv_n;
+        }
+    }
+}
+
+/// Compute the class-conditional centroid into a pre-allocated buffer
+/// `out[0..d]`. Zero-alloc hot-path helper.
+fn class_centroid_into<S: AsRef<[f32]>>(
+    samples: &[S],
+    labels: &[bool],
+    target_class: bool,
+    d: usize,
+    out: &mut [f32],
+) -> Result<(), MagError> {
+    out[..d].fill(0.0);
+    let mut count = 0;
+    for (s, &label) in samples.iter().zip(labels) {
+        if label == target_class {
+            let s = s.as_ref();
+            for (acc, &v) in out[..d].iter_mut().zip(s) {
+                *acc += v;
+            }
+            count += 1;
+        }
+    }
+    if count == 0 {
+        return Err(MagError::EmptyClass);
+    }
+    let inv_n = 1.0 / count as f32;
+    for x in out[..d].iter_mut() {
+        *x *= inv_n;
+    }
+    Ok(())
 }
 
 /// Pearson correlation between two equal-length vectors.

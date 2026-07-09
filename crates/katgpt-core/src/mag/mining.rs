@@ -106,6 +106,56 @@ pub fn mine_contrast_direction<S: AsRef<[f32]>>(
     mine_direction(negative, positive)
 }
 
+/// Zero-alloc hot-path variant of [`mine_direction`].
+///
+/// Writes the unit-normalized mean-shift direction into `out[0..d]`. Returns the
+/// pre-normalization norm. Does **not** compute the BLAKE3 commitment or create a
+/// [`MagDirection`] — for hot paths that reuse a scratch buffer and only need the
+/// direction vector. Use [`mine_direction`] when you need the full committed
+/// artifact.
+///
+/// # Errors
+///
+/// Same as [`mine_direction`]. Additionally returns [`MagError::DimMismatch`] if
+/// `out.len() < d`.
+pub fn mine_direction_into<S: AsRef<[f32]>>(
+    with_prefix: &[S],
+    without_prefix: &[S],
+    out: &mut [f32],
+) -> Result<f32, MagError> {
+    let d = check_dim(with_prefix)?;
+    let d2 = check_dim(without_prefix)?;
+    if d != d2 {
+        return Err(MagError::DimMismatch);
+    }
+    if out.len() < d {
+        return Err(MagError::DimMismatch);
+    }
+    let out = &mut out[..d];
+
+    out.fill(0.0);
+    let inv_n_with = 1.0 / with_prefix.len() as f32;
+    for s in with_prefix {
+        let s = s.as_ref();
+        for (acc, &v) in out.iter_mut().zip(s) {
+            *acc += v * inv_n_with;
+        }
+    }
+    let inv_n_without = 1.0 / without_prefix.len() as f32;
+    for s in without_prefix {
+        let s = s.as_ref();
+        for (acc, &v) in out.iter_mut().zip(s) {
+            *acc -= v * inv_n_without;
+        }
+    }
+
+    let pre_norm = normalize_in_place(out);
+    if pre_norm == 0.0 {
+        return Err(MagError::ZeroNorm);
+    }
+    Ok(pre_norm)
+}
+
 /// Build the final [`MagDirection`] from a raw (un-normalized) direction buffer:
 /// normalize, BLAKE3-commit, and wrap.
 fn finalize_direction(mut diff: Vec<f32>) -> Result<MagDirection, MagError> {
