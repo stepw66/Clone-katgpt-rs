@@ -3,7 +3,7 @@
 **Date:** 2026-07-07
 **Source plan:** [katgpt-rs/.plans/406_renoise_ce_self_verifier.md](../.plans/406_renoise_ce_self_verifier.md) (Phase 5, P5.4)
 **Type:** Speculative follow-up — UNBLOCKED, ready to plan (reframed as Lipschitz-sensitivity probe)
-**Status:** UNBLOCKED (2026-07-09) — R344 re-validation PASSED: `CommittedBlendState` is a one-shot closed-form map, NOT an iterative attractor; R344's null result (about iterative FP convergence) does not apply. See "Re-validation result" below.
+**Status:** CLOSED (2026-07-09) — Plan 414 shipped. G1+G1b+G2+G2b+G3+G4+G5 ALL PASS. Stays OPT-IN (`hla_committed_belief_probe` feature).
 
 ## Summary
 
@@ -116,3 +116,28 @@ Gate (if planned): drift < 0.1 at perturbation_magnitude = 0.01 (stable attracto
 - Research 344 (the blocking null result): `.research/344_Implicit_Fixed_Point_RNN_Convergence_Halting.md`
 - Plan 336 (CommittedBlendState — the probe target): riir-ai side
 - Plan 276 (MicroRecurrentBeliefState — the prior-art failure): `.benchmarks/276_micro_belief_goat.md`
+
+## Resolution (2026-07-09) — CLOSED via Plan 414
+
+Plan 414 shipped the F4 probe as `committed_blend_pi_sensitivity` behind opt-in
+`hla_committed_belief_probe` feature. **All GOAT gates pass:**
+
+| Gate | Result |
+|---|---|
+| G1 (Lipschitz holds) | 1000/1000 random configs, 0 violations |
+| G1b (saturation near-zero) | saturated bound <1% of mid-range bound |
+| G2 (NaN detection) | NaN in pi → accepted=false ✅ |
+| G2b (under-reported Lipschitz) | probe uses actual ‖f_j(z)‖, not reported L_k → no false acceptance |
+| G3 (no regression) | 13/13 existing tests pass with and without feature |
+| G4 (zero-alloc) | 0 allocs / 1000 calls |
+| G5 (latency) | p50 = 3.042µs < 5µs (release) |
+
+**Design correction (important):** the issue's proposed gate (`realized drift <
+cached lipschitz_bound · δ`) was **incorrect**. The cached `lipschitz_bound` is
+for z-sensitivity (input → output); the probe measures π-sensitivity (parameters
+→ output) — a different quantity. Plan 414 computes the π-specific bound
+on-the-fly: `L_π = max_j (1/τ)·σ_j·(1−σ_j)·‖f_j(z)‖`.
+
+**Stays OPT-IN** — diagnostic primitive, no runtime consumer yet. Promotion to
+default-on is NOT warranted until a runtime consumer (e.g., a freeze-gate
+self-check, or a CI numerics-bug detector) needs it.

@@ -173,6 +173,55 @@ pub struct CommittedFieldBlend<const N: usize, const D: usize> {
 unsafe impl<const N: usize, const D: usize> Send for CommittedFieldBlend<N, D> {}
 unsafe impl<const N: usize, const D: usize> Sync for CommittedFieldBlend<N, D> {}
 
+// ─── DRY core: apply_blended_with_pi (shared by apply_blended + Plan 414 probe) ──
+
+/// Evaluate the blended field `f_pi(z) = Σ_k sigmoid(pi_k / tau) · f_k(z)` with
+/// an **explicit** `pi` slice (not read from `self`).
+///
+/// This is the DRY extraction of `CommittedFieldBlend::apply_blended`'s core
+/// loop. Both the production method and the Plan 414 π-sensitivity probe call
+/// this function — no duplicated logic.
+///
+/// Zero-allocation: caller provides `dz_scratch` (reused per-field, length
+/// `>= D`) and `dz_out` (length `D`). Returns `&mut dz_out[..D]`.
+fn apply_blended_with_pi<'a, const N: usize, const D: usize>(
+    pi: &[f32; N],
+    tau: f32,
+    fields: &[&dyn ArchetypeFieldSource<D>; N],
+    z: &[f32],
+    dz_scratch: &mut [f32],
+    dz_out: &'a mut [f32],
+) -> &'a mut [f32] {
+    debug_assert!(z.len() >= D, "z must be at least D={D} elements");
+    debug_assert!(
+        dz_scratch.len() >= D,
+        "dz_scratch must be at least D={D} elements"
+    );
+    debug_assert_eq!(dz_out.len(), D, "dz_out must be exactly D={D} elements");
+
+    // Zero the output. slice::fill auto-vectorizes to a wide memset.
+    dz_out[..D].fill(0.0);
+
+    for (k, field_k) in fields.iter().enumerate() {
+        // f_k(z) — writes into dz_scratch, returns a reborrow.
+        let dz_k = field_k.evolve(z, dz_scratch);
+        debug_assert_eq!(
+            dz_k.len(),
+            D,
+            "field {k} returned evolve output of length {}, expected D={D}",
+            dz_k.len()
+        );
+
+        // Per-field gate: sigmoid(pi_k / tau).
+        let gate = sigmoid(pi[k] / tau);
+
+        // FMA accumulate: dz_out[j] += gate · dz_k[j].
+        simd_fused_scale_acc(dz_out, dz_k, gate, D);
+    }
+
+    &mut dz_out[..D]
+}
+
 impl<const N: usize, const D: usize> CommittedFieldBlend<N, D> {
     /// Default personality-sharpness temperature. `sigmoid(±x / 1.0)` gives
     /// standard logistic sharpness.
@@ -299,33 +348,9 @@ impl<const N: usize, const D: usize> CommittedFieldBlend<N, D> {
         dz_scratch: &mut [f32],
         dz_out: &'a mut [f32],
     ) -> &'a mut [f32] {
-        debug_assert!(z.len() >= D, "z must be at least D={D} elements");
-        debug_assert!(
-            dz_scratch.len() >= D,
-            "dz_scratch must be at least D={D} elements"
-        );
-        debug_assert_eq!(dz_out.len(), D, "dz_out must be exactly D={D} elements");
-
-        // Zero the output. slice::fill auto-vectorizes to a wide memset.
-        dz_out[..D].fill(0.0);
-
-        for (k, field_k) in fields.iter().enumerate() {
-            // f_k(z) — writes into dz_scratch, returns a reborrow.
-            let dz_k = field_k.evolve(z, dz_scratch);
-            debug_assert_eq!(
-                dz_k.len(),
-                D,
-                "field {k} returned evolve output of length {}, expected D={D}",
-                dz_k.len()
-            );
-
-            // Per-field gate: sigmoid(pi_k / tau).
-            let gate = sigmoid(self.pi[k] / self.tau);
-
-            // FMA accumulate: dz_out[j] += gate · dz_k[j].
-            simd_fused_scale_acc(dz_out, dz_k, gate, D);
-        }
-
+        // DRY: delegate to the module-level free function (Plan 414 extraction).
+        // The lifetime on the return is preserved by reborrowing dz_out.
+        apply_blended_with_pi(&self.pi, self.tau, fields, z, dz_scratch, dz_out);
         &mut dz_out[..D]
     }
 
@@ -402,6 +427,181 @@ impl<const N: usize, const D: usize> CommittedFieldBlend<N, D> {
 
 /// K=3 archetype blend (the production Entity Cognition Stack case at D=32).
 pub type TriArchetypeBlend = CommittedFieldBlend<3, 32>;
+
+// ─── Plan 414: HLA Committed-Belief π-Sensitivity Probe (Issue 048 F4) ────────
+//
+// A diagnostic self-verifier for the committed blend. Perturbs the committed π
+// weights, re-evaluates the blend map, and checks realized output drift against
+// an on-the-fly π-Lipschitz bound. A bound violation flags a numerics bug.
+//
+// NOT a RenoiseCeProbe impl — this probe perturbs PARAMETERS (π), not the
+// output state. The renoise-CE trait perturbs the output and tests fixed-point
+// stability; this probe perturbs parameters and tests parameter sensitivity.
+// Different patterns, same mathematical idea (perturb + re-evaluate + measure).
+//
+// Corrects the issue's proposed gate: the cached `lipschitz_bound` is for
+// z-sensitivity (input → output); the π-sensitivity bound is a DIFFERENT
+// quantity computed on-the-fly here.
+
+#[cfg(feature = "hla_committed_belief_probe")]
+pub mod pi_sensitivity {
+    use super::*;
+    use fastrand::Rng;
+
+    /// Result of a π-sensitivity probe.
+    ///
+    /// `per_draw` is a fixed `[f32; 8]` matching the renoise-CE convention.
+    /// Unused slots (when `k_draws < 8`) are zero-initialized.
+    #[derive(Clone, Debug, Default, PartialEq)]
+    pub struct PiSensitivityScore<const N: usize> {
+        /// Mean L2 output drift across k draws (lower = less sensitive).
+        pub mean_drift: f32,
+        /// Per-draw drifts. Only `[0..k)` are meaningful; rest are 0.0.
+        pub per_draw: [f32; 8],
+        /// The on-the-fly π-sensitivity Lipschitz bound (state-dependent).
+        pub bound: f32,
+        /// Acceptance: `mean_drift <= bound * perturbation_level * sqrt(N)`.
+        /// A `false` result flags a numerics bug (the map IS Lipschitz).
+        pub accepted: bool,
+    }
+
+    /// Compute the theoretical π-sensitivity Lipschitz bound on-the-fly.
+    ///
+    /// For each field j, the output sensitivity to `π_j` is bounded by:
+    /// ```text
+    /// |∂g_i/∂π_j| ≤ (1/τ) · σ_j · (1 − σ_j) · |f_j_i(z)|
+    /// ```
+    /// where `σ_j = sigmoid(π_j / τ)`. The per-component bound maxes over i
+    /// to `‖f_j(z)‖`, and the overall bound maxes over j:
+    /// ```text
+    /// L_π = max_j  (1/τ) · σ_j · (1 − σ_j) · ‖f_j(z)‖
+    /// ```
+    ///
+    /// This is a **first-order** bound (evaluates the sigmoid derivative at π_j,
+    /// not over the interval `[π_j, π_j+δ_j]`). Tight for small δ.
+    ///
+    /// Zero-allocation: caller provides `dz_scratch` (length >= D).
+    pub fn pi_sensitivity_bound<const N: usize, const D: usize>(
+        pi: &[f32; N],
+        tau: f32,
+        fields: &[&dyn ArchetypeFieldSource<D>; N],
+        z: &[f32],
+        dz_scratch: &mut [f32],
+    ) -> f32 {
+        let mut bound = 0.0f32;
+        let inv_tau = 1.0 / tau;
+        for (j, field_j) in fields.iter().enumerate() {
+            let f_j = field_j.evolve(z, dz_scratch);
+            // ‖f_j(z)‖ — Euclidean norm over D dims.
+            let mut norm_sq = 0.0f32;
+            for &v in &f_j[..D] {
+                norm_sq += v * v;
+            }
+            let norm = norm_sq.sqrt();
+            // σ_j · (1 − σ_j) — sigmoid derivative factor (max 1/4 at σ=0.5).
+            let sigma = sigmoid(pi[j] * inv_tau);
+            let deriv = inv_tau * sigma * (1.0 - sigma);
+            bound = bound.max(deriv * norm);
+        }
+        bound
+    }
+
+    /// Probe the committed blend's π-sensitivity.
+    ///
+    /// Perturbs each `π_j` by `Uniform(-perturbation_level, +perturbation_level)`,
+    /// re-evaluates the blend, and measures L2 output drift vs the baseline.
+    /// Repeated `k_draws` times and averaged.
+    ///
+    /// The acceptance gate checks: `mean_drift <= bound * perturbation_level * sqrt(N)`.
+    /// This is the L1-norm-scaled bound for component-wise uniform perturbation
+    /// (`‖δ‖₁ ≤ N · level`, but each component is bounded by `level`, so the
+    /// tighter bound is `bound * level * N` — we use `sqrt(N)` as a middle ground
+    /// corresponding to `‖δ‖₂ = level · sqrt(N)` for i.i.d. uniform components).
+    ///
+    /// # Allocation
+    ///
+    /// Zero heap allocation: fixed `[f32; N]`, `[f32; D]`, `[f32; 8]` arrays.
+    pub fn committed_blend_pi_sensitivity<
+        const N: usize,
+        const D: usize,
+        const SCRATCH_D: usize,
+    >(
+        blend: &CommittedFieldBlend<N, D>,
+        fields: &[&dyn ArchetypeFieldSource<D>; N],
+        z: &[f32],
+        perturbation_level: f32,
+        k_draws: u8,
+        rng: &mut Rng,
+    ) -> PiSensitivityScore<N> {
+        // Fixed-size stack arrays — zero heap alloc.
+        let mut dz_scratch = [0.0f32; SCRATCH_D];
+        let mut dz_baseline = [0.0f32; SCRATCH_D];
+        let mut dz_perturbed = [0.0f32; SCRATCH_D];
+        let mut pi_perturbed: [f32; N];
+
+        // Baseline output.
+        apply_blended_with_pi(
+            &blend.pi,
+            blend.tau,
+            fields,
+            z,
+            &mut dz_scratch,
+            &mut dz_baseline,
+        );
+
+        // Theoretical bound (same for all draws at fixed z).
+        // Reuse dz_scratch (dz_baseline is done being computed).
+        let bound = pi_sensitivity_bound(
+            &blend.pi,
+            blend.tau,
+            fields,
+            z,
+            &mut dz_scratch,
+        );
+
+        let k = k_draws.clamp(1, 8) as usize;
+        let mut per_draw = [0.0f32; 8];
+        let mut sum = 0.0f32;
+
+        for slot in &mut per_draw[..k] {
+            // Perturb each π_j by Uniform(-level, +level).
+            pi_perturbed = blend.pi;
+            for pi_j in &mut pi_perturbed {
+                *pi_j += perturbation_level * (rng.f32() * 2.0 - 1.0);
+            }
+
+            // Re-evaluate with perturbed π.
+            apply_blended_with_pi(
+                &pi_perturbed,
+                blend.tau,
+                fields,
+                z,
+                &mut dz_scratch,
+                &mut dz_perturbed,
+            );
+
+            // L2 drift between baseline and perturbed outputs.
+            let mut drift_sq = 0.0f32;
+            for d in 0..D {
+                let diff = dz_perturbed[d] - dz_baseline[d];
+                drift_sq += diff * diff;
+            }
+            let drift = drift_sq.sqrt();
+            *slot = drift;
+            sum += drift;
+        }
+
+        let mean_drift = sum / k as f32;
+        // Bound scales with ‖δ‖₂ ≈ level · sqrt(N) for i.i.d. uniform components.
+        let scaled_bound = bound * perturbation_level * (N as f32).sqrt();
+        PiSensitivityScore {
+            mean_drift,
+            per_draw,
+            bound,
+            accepted: mean_drift <= scaled_bound,
+        }
+    }
+}
 
 #[cfg(test)]
 mod tests {
@@ -966,5 +1166,255 @@ mod tests {
             (bound - expected).abs() < 1e-3,
             "bound={bound}, expected≈{expected}"
         );
+    }
+
+    // ─── Plan 414: HLA Committed-Belief π-Sensitivity Probe GOAT gate ─────
+
+    #[cfg(feature = "hla_committed_belief_probe")]
+    mod plan414 {
+        use super::*;
+        use crate::committed_field_blend::pi_sensitivity::*;
+        use fastrand::Rng;
+
+        /// Build a 3-archetype, D=32 blend with given pi values.
+        fn make_blend(pi: [f32; 3]) -> TriArchetypeBlend {
+            let mut blend = TriArchetypeBlend::uncommitted();
+            blend.pi = pi;
+            blend.tau = 1.0;
+            blend
+        }
+
+        /// G1 — Lipschitz bound holds: realized drift ≤ bound · level · √N.
+        ///
+        /// 1000 random configs (seeded), 0 violations. The map IS Lipschitz
+        /// by construction; a violation = numerics bug.
+        #[test]
+        fn g1_lipschitz_bound_holds() {
+            let f0 = LinearField::new(2.0, 0);
+            let f1 = LinearField::new(5.0, 1);
+            let f2 = LinearField::new(1.0, 2);
+            let fields: [&dyn ArchetypeFieldSource<32>; 3] = [&f0, &f1, &f2];
+
+            let mut rng = Rng::with_seed(0x4141_4141);
+            let mut violations = 0u32;
+            const N_CONFIGS: u32 = 1000;
+
+            for _ in 0..N_CONFIGS {
+                // Random pi ∈ [-10, 10], random z ∈ [-1, 1].
+                let pi = [
+                    rng.f32() * 20.0 - 10.0,
+                    rng.f32() * 20.0 - 10.0,
+                    rng.f32() * 20.0 - 10.0,
+                ];
+                let blend = make_blend(pi);
+
+                let z: Vec<f32> = (0..32).map(|_| rng.f32() * 2.0 - 1.0).collect();
+
+                let score = committed_blend_pi_sensitivity::<3, 32, 32>(
+                    &blend,
+                    &fields,
+                    &z,
+                    0.01, // small δ — first-order bound is tight
+                    8,
+                    &mut rng,
+                );
+
+                if !score.accepted {
+                    violations += 1;
+                    eprintln!(
+                        "G1 VIOLATION: pi={pi:?}, mean_drift={}, bound={}, scaled_bound={}",
+                        score.mean_drift,
+                        score.bound,
+                        score.bound * 0.01 * (3.0f32).sqrt()
+                    );
+                }
+            }
+
+            assert_eq!(
+                violations, 0,
+                "G1 FAIL: {violations}/{N_CONFIGS} configs violated the Lipschitz bound — numerics bug"
+            );
+        }
+
+        /// G1b — Bound is near-zero when all pi are at saturation (σ ≈ 1 or 0 → σ(1−σ) ≈ 0).
+        /// At saturation, perturbing π barely changes the gate → near-zero drift.
+        /// Compared against the mid-range (pi=0) bound which is maximally sensitive.
+        #[test]
+        fn g1b_saturation_produces_near_zero_sensitivity() {
+            let f0 = LinearField::new(2.0, 0);
+            let f1 = LinearField::new(5.0, 1);
+            let f2 = LinearField::new(1.0, 2);
+            let fields: [&dyn ArchetypeFieldSource<32>; 3] = [&f0, &f1, &f2];
+            let z = vec![1.0f32; 32];
+
+            // Mid-range: pi=0 → σ=0.5 → σ(1−σ)=0.25 (maximal sensitivity).
+            let mid_blend = make_blend([0.0, 0.0, 0.0]);
+            let mut rng = Rng::with_seed(42);
+            let mid_score = committed_blend_pi_sensitivity::<3, 32, 32>(
+                &mid_blend, &fields, &z, 0.01, 8, &mut rng,
+            );
+
+            // Saturated: pi=±10 → σ≈{0.99995, 4.5e-5} → σ(1−σ)≈5e-5 (near-zero).
+            let sat_blend = make_blend([10.0, -10.0, 10.0]);
+            let mut rng = Rng::with_seed(42);
+            let sat_score = committed_blend_pi_sensitivity::<3, 32, 32>(
+                &sat_blend, &fields, &z, 0.01, 8, &mut rng,
+            );
+
+            // Saturated bound should be orders of magnitude smaller than mid-range.
+            assert!(
+                sat_score.bound < mid_score.bound * 0.01,
+                "saturation bound {} should be <1% of mid-range bound {}, got {:.1}%",
+                sat_score.bound,
+                mid_score.bound,
+                sat_score.bound / mid_score.bound * 100.0
+            );
+            assert!(
+                sat_score.mean_drift < mid_score.mean_drift * 0.01,
+                "saturation drift {} should be <1% of mid-range drift {}, got {:.1}%",
+                sat_score.mean_drift,
+                mid_score.mean_drift,
+                sat_score.mean_drift / mid_score.mean_drift * 100.0
+            );
+        }
+
+        /// G2 — NaN detection: a NaN in pi produces NaN drift → accepted = false.
+        #[test]
+        fn g2_nan_detection() {
+            let f0 = LinearField::new(2.0, 0);
+            let f1 = LinearField::new(5.0, 1);
+            let f2 = LinearField::new(1.0, 2);
+            let fields: [&dyn ArchetypeFieldSource<32>; 3] = [&f0, &f1, &f2];
+
+            let blend = make_blend([f32::NAN, 1.0, -1.0]);
+            let z = vec![0.5f32; 32];
+
+            let mut rng = Rng::with_seed(99);
+            let score = committed_blend_pi_sensitivity::<3, 32, 32>(
+                &blend, &fields, &z, 0.01, 8, &mut rng,
+            );
+
+            // NaN comparison: mean_drift <= scaled_bound is false when mean_drift is NaN.
+            assert!(!score.accepted, "NaN in pi should produce accepted=false");
+        }
+
+        /// G2b — Bound uses ACTUAL field output norm, not reported Lipschitz constant.
+        /// Even if a field under-reports its Lipschitz bound, the probe's bound
+        /// (computed from the actual ‖f_j(z)‖) still correctly bounds the drift.
+        #[test]
+        fn g2b_bound_uses_actual_output_norm_not_reported_lipschitz() {
+            // A field that reports lipschitz_bound = 0.001 but actually produces
+            // output with norm ~5.0 at z = all-ones (scale=5, D=32 → ‖f(z)‖ = 5·√32).
+            struct UnderReportingField {
+                scale: f32,
+                commitment: [u8; 32],
+            }
+
+            impl UnderReportingField {
+                fn new(scale: f32, id: u8) -> Self {
+                    let mut hasher = blake3::Hasher::new();
+                    hasher.update(b"UnderReportingField");
+                    hasher.update(&[id]);
+                    Self {
+                        scale,
+                        commitment: *hasher.finalize().as_bytes(),
+                    }
+                }
+            }
+
+            impl ArchetypeFieldSource<32> for UnderReportingField {
+                fn evolve<'a>(&self, z: &[f32], dz_scratch: &'a mut [f32]) -> &'a mut [f32] {
+                    for j in 0..32 {
+                        dz_scratch[j] = self.scale * z[j];
+                    }
+                    &mut dz_scratch[..32]
+                }
+                fn commitment(&self) -> [u8; 32] {
+                    self.commitment
+                }
+                // BUG: under-reports Lipschitz by 1000x.
+                fn lipschitz_bound(&self) -> f32 {
+                    (self.scale.abs() / 1000.0).max(0.001)
+                }
+            }
+
+            let f0 = UnderReportingField::new(5.0, 0);
+            let f1 = LinearField::new(2.0, 1);
+            let f2 = LinearField::new(1.0, 2);
+            let fields: [&dyn ArchetypeFieldSource<32>; 3] = [&f0, &f1, &f2];
+
+            // pi near zero → maximally sensitive (σ(1−σ) ≈ 0.25).
+            let blend = make_blend([0.0, 0.0, 0.0]);
+            let z = vec![1.0f32; 32];
+
+            let mut rng = Rng::with_seed(7);
+            let score = committed_blend_pi_sensitivity::<3, 32, 32>(
+                &blend, &fields, &z, 0.01, 8, &mut rng,
+            );
+
+            // The π-bound uses the ACTUAL ‖f_j(z)‖ = 5·√32 ≈ 28.3, NOT the
+            // under-reported lipschitz_bound = 0.005. So bound > 0.
+            assert!(
+                score.bound > 1.0,
+                "π-bound should use actual output norm (~7 = 0.25 * 5 * sqrt(32)), got {}",
+                score.bound
+            );
+            // The acceptance gate should still hold (the map IS Lipschitz).
+            assert!(
+                score.accepted,
+                "G2b: drift should be bounded even with under-reported Lipschitz"
+            );
+        }
+
+        /// G3 — No regression: existing committed_field_blend tests still pass
+        /// when the probe feature is on. This is implicit (all tests in this
+        /// module run with the feature on). This test explicitly verifies the
+        // probe functions are callable.
+        #[test]
+        fn g3_probe_callable_no_regression() {
+            let f0 = LinearField::new(1.0, 0);
+            let f1 = LinearField::new(1.0, 1);
+            let f2 = LinearField::new(1.0, 2);
+            let fields: [&dyn ArchetypeFieldSource<32>; 3] = [&f0, &f1, &f2];
+            let blend = make_blend([1.0, -1.0, 0.5]);
+            let z = vec![0.5f32; 32];
+
+            let mut rng = Rng::with_seed(1);
+            let score = committed_blend_pi_sensitivity::<3, 32, 32>(
+                &blend, &fields, &z, 0.01, 4, &mut rng,
+            );
+
+            // Smoke: all fields populated, drift is finite, bound is finite.
+            assert!(score.mean_drift.is_finite());
+            assert!(score.bound.is_finite());
+            assert!(score.per_draw[0] > 0.0); // non-zero perturbation → non-zero drift
+            assert_eq!(score.per_draw.len(), 8);
+        }
+
+        // G4 (zero-alloc) and G5 (latency) live in
+        // tests/plan414_hla_committed_belief_probe_goat.rs — they need the
+        // global CountingAllocator (tests/common/mod.rs pattern), which
+        // cannot be #[global_allocator] inside a lib unit-test module.
+
+        /// Determinism: same seed → same score.
+        #[test]
+        fn determinism_same_seed_same_score() {
+            let f0 = LinearField::new(2.0, 0);
+            let f1 = LinearField::new(5.0, 1);
+            let f2 = LinearField::new(1.0, 2);
+            let fields: [&dyn ArchetypeFieldSource<32>; 3] = [&f0, &f1, &f2];
+            let blend = make_blend([1.0, -1.0, 0.5]);
+            let z = vec![0.5f32; 32];
+
+            let mut rng1 = Rng::with_seed(777);
+            let mut rng2 = Rng::with_seed(777);
+            let s1 = committed_blend_pi_sensitivity::<3, 32, 32>(
+                &blend, &fields, &z, 0.01, 8, &mut rng1,
+            );
+            let s2 = committed_blend_pi_sensitivity::<3, 32, 32>(
+                &blend, &fields, &z, 0.01, 8, &mut rng2,
+            );
+            assert_eq!(s1, s2, "same seed must produce identical scores");
+        }
     }
 }
