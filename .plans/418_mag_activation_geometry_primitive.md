@@ -23,39 +23,46 @@ The primitive is generic over the host's readout function, transform, and verdic
 
 ### Tasks
 
-- [ ] **T1.1** Create `crates/katgpt-core/src/mag/` module with `mod.rs` + `types.rs` + `mining.rs` + `transfer.rs`.
-- [ ] **T1.2** Add `mag_mining` feature to `crates/katgpt-core/Cargo.toml` (opt-in, depends on `blake3` for commitment).
-- [ ] **T1.3** Define core types in `types.rs`:
+- [x] **T1.1** Create `crates/katgpt-core/src/mag/` module with `mod.rs` + `types.rs` + `mining.rs` + `transfer.rs`.
+- [x] **T1.2** Add `mag_mining` feature to `crates/katgpt-core/Cargo.toml` (opt-in; `blake3` is already non-optional — no `dep:` prefix needed, same as `latent_field_steering`).
+- [x] **T1.3** Define core types in `types.rs`:
   - `MagDirection` — `{ direction: Box<[f32]>, recon_error: f32, cosine: f32, blake3: [u8; 32] }`
   - `MagOperator` — `#[repr(u8)]` enum: `Direct`, `Prefixed`, `Answered`, `InputDelta`, `QuestionDelta`, `Interaction`, `Verdict`, `FewShot`
   - `TransferMetric` — `#[repr(u8)]` enum: `CentroidCosine`, `Euclidean`, `Correlation`, `RbfMmd`, `Wasserstein1d`, `CkaLinear`, `ClassConditionalCosineMalicious`, `ClassConditionalCosineBenign`
-- [ ] **T1.4** Implement `mine_direction` in `mining.rs`:
+  - Plus: `MagError` enum (DimMismatch/Empty/ZeroNorm/EmptyClass), `DataSet<'a, S>` view, math helpers (norm/normalize/dot/cosine), BLAKE3 commitment, `check_dim` validator.
+- [x] **T1.4** Implement `mine_direction` in `mining.rs`:
   - Input: `with_prefix: &[impl AsRef<[f32]>]`, `without_prefix: &[impl AsRef<[f32]>]`
-  - Compute `v_Q = mean(with) − mean(without)`, unit-normalize
-  - Compute BLAKE3 of the raw direction bytes
-  - Return `MagDirection` (recon_error + cosine computed by separate calls)
-- [ ] **T1.5** Implement `mine_contrast_direction` in `mining.rs`:
+  - Compute `v_Q = mean(with) − mean(without)`, unit-normalize (handles unequal sample counts via per-set denominators)
+  - Compute BLAKE3 of the normalized direction bytes
+  - Return `MagDirection` (recon_error + cosine set to NaN; populated by separate `reconstruction_error` call + `with_diagnostics` builder)
+- [x] **T1.5** Implement `mine_contrast_direction` in `mining.rs`:
   - Input: `positive: &[impl AsRef<[f32]>]`, `negative: &[impl AsRef<[f32]>]` (partitioned by host-supplied `y_M`)
-  - Compute `u_Q = mean(negative) − mean(positive)`, unit-normalize
+  - Compute `u_Q = mean(negative) − mean(positive)`, unit-normalize (delegates to `mine_direction(negative, positive)` — DRY)
   - Return `MagDirection`
-- [ ] **T1.6** Implement `reconstruction_error` in `mining.rs`:
+- [x] **T1.6** Implement `reconstruction_error` in `mining.rs`:
   - Input: `with_prefix`, `without_prefix`, `direction: &[f32]`, `alpha: f32`
-  - `m̂(p) = m(p) + α · direction`; `ϵ_Q = E[‖m(Q‖p) − m̂(p)‖²] / E[‖m(Q‖p) − m(p)‖²]`
-  - Also compute cosine of `(m̂(p) − m(p))` vs `(m(Q‖p) − m(p))`
-- [ ] **T1.7** Implement `calibrate_alpha` in `mining.rs`:
-  - `α(τ) = τ · ‖A_prefix‖ / ‖d‖` — strength as fraction of prefix activation norm
-- [ ] **T1.8** Implement operator application helper `apply_operator`:
-  - Given `MagOperator`, `A_p: &[f32]`, `A_Q: &[f32]`, `A_Qp: &[f32]`, `A_Qpy: &[f32]`, `A_y: &[f32]`, `A_empty: &[f32]`, `A_EQp: &[f32]` → returns the operator's vector summary
-  - This lets hosts compute any of the 8 operator activations from cached readouts
-- [ ] **T1.9** Implement `transfer_score` in `transfer.rs`:
-  - Input: `candidate: &[impl AsRef<[f32]>]`, `target: &[impl AsRef<[f32]>]`, `candidate_labels: &[bool]`, `target_labels: &[bool]`, `metric: TransferMetric`
-  - Compute the geometric score (centroid cosine, Euclidean, CKA, class-conditional cosine, etc.)
+  - `m̂(p) = m(p) + α · direction`; `ϵ_Q = E[‖Δ(p) − α·direction‖²] / E[‖Δ(p)‖²]` where `Δ(p) = m(Q‖p) − m(p)`
+  - Also compute mean cosine of `(α·direction)` vs `(Δ(p))` per-sample
+  - Returns `(recon_error, cosine)` tuple
+- [x] **T1.7** Implement `calibrate_alpha` in `mining.rs`:
+  - `α(τ) = τ · ‖mean(with_prefix)‖ / ‖direction‖` — strength as fraction of prefix activation norm
+- [x] **T1.8** Implement operator application helper `apply_operator` / `apply_operator_into`:
+  - `apply_operator_into` (zero-alloc): given `MagOperator` + 7 readout slices (`A_p`, `A_Q`, `A_Qp`, `A_Qpy`, `A_y`, `A_empty`, `A_EQp`) → writes operator's vector summary into `&mut [f32]`
+  - `apply_operator` (allocating convenience wrapper)
+  - All 8 operators implemented; unused readouts accept `&[]`
+- [x] **T1.9** Implement `transfer_score` in `transfer.rs`:
+  - Input: `candidate: &DataSet`, `target: &DataSet`, `metric: TransferMetric` (DataSet wraps `&[impl AsRef<[f32]>]` + `&[bool]` labels)
+  - All 8 metrics implemented: CentroidCosine, Euclidean, Correlation, RbfMmd, Wasserstein1d, CkaLinear, ClassConditionalCosineMalicious/Benign
   - For class-conditional: partition by labels, compute per-class centroids, cosine between corresponding classes
-- [ ] **T1.10** Implement `rank_candidates` in `transfer.rs`:
-  - Input: base pool, target, candidate pool, operator+metric combos
-  - Returns candidates ranked by aggregate transfer score (mean percentile rank per the paper's §4 protocol)
-- [ ] **T1.11** Wire `mag` module into `crates/katgpt-core/src/lib.rs` behind `mag_mining` feature. Re-export public API.
-- [ ] **T1.12** `cargo check -p katgpt-core --features mag_mining` passes.
+  - CKA uses feature-space (d×d Gram) formulation so candidate/target may have different sample counts
+- [x] **T1.10** Implement `rank_candidates` in `transfer.rs`:
+  - Input: `candidates: &[DataSet]`, `target: &DataSet`, `metrics: &[TransferMetric]`
+  - Returns `Vec<RankEntry>` sorted by mean percentile rank (the paper's §4 protocol)
+- [x] **T1.11** Wire `mag` module into `crates/katgpt-core/src/lib.rs` behind `mag_mining` feature. Re-export public API.
+  - NOTE: `apply_operator_into` is NOT re-exported at crate root (collides with `analytic_lattice::apply_operator_into` when both features are on); accessible via `katgpt_core::mag::apply_operator_into`.
+- [x] **T1.12** `cargo check -p katgpt-core --features mag_mining` passes. Also verified: `--no-default-features --features mag_mining` clean, `--all-features` clean, 35 unit tests + 3 doctests pass.
+
+**Phase 1 Result:** 35 unit tests + 3 doctests pass. Build clean on `--features mag_mining`, `--no-default-features --features mag_mining`, and `--all-features`. No external deps (blake3 already non-optional). Ready for Phase 2 GOAT gate.
 
 ---
 

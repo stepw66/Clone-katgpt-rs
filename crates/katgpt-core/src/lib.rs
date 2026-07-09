@@ -944,6 +944,31 @@ pub use spherical_steering::{
     SlerpError, SlerpScratch, slerp_steering_into, spherical_steering_into, vmf_confidence_gate,
 };
 
+// MAG — Mining via Activation Geometry (Plan 418, Research 397, arXiv:2607.04222
+// LeVi/David/Fomin ICML 2026 FAGEN). Unsupervised direction mining + modelless
+// transfer prediction. The missing acquisition step for the direction-vector
+// ecosystem: today every direction is designer-authored (Plan 309) or
+// supervised-extracted (Plan 162). MAG mines them unsupervised from the host's
+// own verdict y_M. mine_direction / mine_contrast_direction extract unit-norm
+// feature directions; reconstruction_error gives the ϵ_Q linearity diagnostic;
+// calibrate_alpha normalizes injection strength; apply_operator computes the 8
+// readout summaries; transfer_score / rank_candidates predict dataset transfer
+// (the §4 94.7% Top-1 result). Mined directions are BLAKE3-committed (same
+// envelope as LatentSteeringVector / MerkleFrozenEnvelope). Pure modelless
+// (mean-difference + cosine geometry). Opt-in until Phase 2 GOAT gate (G1–G6);
+// G2 (contrast separability on self-labels) is the kill-it gate.
+#[cfg(feature = "mag_mining")]
+pub mod mag;
+#[cfg(feature = "mag_mining")]
+pub use mag::{
+    DataSet, MagDirection, MagError, MagOperator, RankEntry, TransferMetric, apply_operator,
+    calibrate_alpha, mine_contrast_direction, mine_direction, rank_candidates,
+    reconstruction_error, transfer_score,
+};
+// NOTE: `apply_operator_into` is NOT re-exported at crate root — it collides with
+// `analytic_lattice::apply_operator_into` when both features are on. Access it
+// via `katgpt_core::mag::apply_operator_into`.
+
 // ChunkedContentStore — Lore-distilled chunked content-addressed Merkle store (Plan 272, Research 262).
 // Open primitive: chunks → BLAKE3 → dedup via papaya → binary Merkle root. No game/chain IP.
 // Consumed by riir-ai Plan 319 (Executable Asset Vessel + Quorum Gitflow).

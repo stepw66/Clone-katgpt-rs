@@ -319,6 +319,8 @@ channel_simd_align = []  # Channel SIMD Alignment — cache-line-padded weight s
 # E0599 (`RvThresholds` not found, `rv_tier_boost` not found).
 rv_gated_routing = []  # RV-Gated Compute Routing — AcceptanceVarianceTracker integration + TriggerGate::rv_tier_boost (Plan 202). Opt-in here; root forwards.
 
+mag_mining = []  # MAG — Mining via Activation Geometry (Plan 418, Research 397, arXiv:2607.04222 LeVi/David/Fomin ICML 2026 FAGEN). Unsupervised direction mining + modelless transfer prediction. mine_direction / mine_contrast_direction extract unit-norm feature directions from prefix-induced activation shifts using the model's own verdict y_M as the label (no human labels, no gradient descent). reconstruction_error computes the linearity diagnostic ϵ_Q. calibrate_alpha makes injection strength substrate-invariant. apply_operator computes the 8 MAG readout summaries. transfer_score / rank_candidates predict which candidate dataset/experience best improves a target capability modellessly (the paper's §4 94.7% Top-1 result). The missing acquisition step for the direction-vector ecosystem: Latent Field Steering (P309) injects, EmotionDirections (P162) supervised-extracts, MAG mines unsupervised. blake3 is already non-optional (no dep: prefix needed). Pure modelless (mean-difference + cosine geometry + BLAKE3 commit). Opt-in until the Phase 2 GOAT gate (G1–G6) passes — G2 (contrast direction separability on model-self-labeled classes) is the headline kill-it gate.
+
 # Plan 371 Phase 5 — Mean-Field Regime Classifier GOAT gate (G2/G4/G5).
 # G1 (defend-wrong PoC) ships separately in riir-poc/benches/.
 [[bench]]
