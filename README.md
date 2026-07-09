@@ -98,14 +98,15 @@ Additional core traits in `katgpt-core/src/traits.rs`: `DominoPruner`, `Completi
 
 ### Crate Dependency DAG
 
-The workspace has **26 in-tree crates** (plus the root) organized in four
+The workspace has **27 in-tree crates** (plus the root) organized in four
 layers: shared leaves, `katgpt-core` (traits + cognitive kernels), domain
 stacks, and the root crate (`katgpt-rs`) which is the feature-aggregation
 surface that wires every domain crate into the transformer runtime via
 `ForwardContext`. See `.proposals/003_src_consolidation_master.md` for the
-full Phase 0–11 consolidation history; Plans 378–404 completed the Phase 12
-substrate-extraction sweep (only training code + benchmark tooling remain
-permanently root-resident).
+full Phase 0–12 consolidation history. Phase 12 (Plans 378–404) completed
+the substrate-extraction sweep; Issue 121 (2026-07-09) collapsed the last
+6 shim folders into inline `pub mod` blocks. Only training code + benchmark
+tooling + `ForwardContext` glue remain permanently root-resident.
 
 ```mermaid
 graph TD
@@ -116,6 +117,7 @@ graph TD
         dec["katgpt-dec<br/>(DEC operators)"]
         validator["katgpt-validator<br/>(partial parser, syn pruner)"]
         percepta["katgpt-percepta<br/>(transformer-VM)"]
+        proofcert["katgpt-proof-cert<br/>(GOAT proof certificates)"]
         deprecated["katgpt-deprecated<br/>(exiled losers)"]
     end
     subgraph Core["Core layer"]
@@ -139,6 +141,7 @@ graph TD
         sparse["katgpt-sparse<br/>(SOPTV task vector, SPLAT)"]
         claim["katgpt-claim<br/>(claim rubric, CLR)"]
         ruliology["katgpt-ruliology<br/>(Wolfram ruliology)"]
+        backend["katgpt-backend<br/>(CPU/ANE/GPU inference backends)"]
     end
     root["katgpt-rs (root)<br/>(runtime, feature surface)"]
 
@@ -169,6 +172,9 @@ graph TD
     claim --> core
     ruliology --> core
     ruliology --> pruners
+    backend --> forward
+    backend --> transformer
+    backend --> types
     validator --> core
     validator -.dev.-> tokenizer
     percepta --> core
@@ -187,6 +193,8 @@ graph TD
     root --> sparse
     root --> claim
     root --> ruliology
+    root --> backend
+    root -.optional.-> proofcert
     root --> validator
     root --> tokenizer
     root --> percepta
@@ -203,14 +211,20 @@ graph TD
   `funcattn`) live in core and are NOT in `katgpt-attn` — they can't move up
   without inverting the DAG.
 - HLA substrate lives in `katgpt-hla` (leaf); `katgpt-core` re-exports it as
-  `katgpt_core::hla`. The root's `src/hla/forward.rs` is pure composition glue.
+  `katgpt_core::hla`. The root's `pub mod hla { ... }` in `lib.rs` is pure
+  composition glue (Issue 121 collapsed the `src/hla/` folder into an inline
+  module).
 - Phase 11 (Plans 378–382, 2026-07-04) added 5 new domain crates
   (`katgpt-band`, `katgpt-validator`, `katgpt-sparse`, `katgpt-claim`,
-  `katgpt-ruliology`) plus root shims preserving every historical
-  `katgpt_rs::*` path. Phase 12 (Plans 383–404) finished the substrate sweep:
-  only training code + benchmark tooling remain permanently root-resident.
+  `katgpt-ruliology`) plus `katgpt-backend` (Issue 413, 2026-07-08) and
+  root shims preserving every historical `katgpt_rs::*` path. Phase 12
+  (Plans 383–404) finished the substrate sweep; Issue 121 (2026-07-09)
+  collapsed the last 6 shim folders into inline `pub mod` blocks. Only
+  training code + benchmark tooling + `ForwardContext` glue remain
+  permanently root-resident.
 - Back-compat invariant: every move keeps `pub use katgpt_X as Y` in `lib.rs`
-  so existing `katgpt_rs::*` paths resolve.
+  (or inline `pub mod X { pub use katgpt_X::*; ... }` post-Issue-121) so
+  existing `katgpt_rs::*` paths resolve.
 
 ## 🔄 E2E Inference Flow — Default GOAT Stack
 
@@ -2311,11 +2325,12 @@ Default: **Hybrid OCT+PQ** (OCTOPUS triplet encoding + PlanarQuant 2D Givens rot
 
 ```sh
 cargo build --release                              # Build with optimizations
-cargo run --release                                # Run benchmark + generate plot
-cargo run --release --all-features                 # Run everything
-cargo test --quiet --workspace --all-features       # Run all tests (295 test files)
+cargo check --all-features                         # Check every feature combo compiles
+cargo test --quiet --workspace --all-features       # Run all tests (301 test files)
 cargo run --example sudoku_01_9x9 --features sudoku # Sudoku solver
+cargo run --example bomber_01_arena --features bomber # Bomberman HL arena proof
 cargo clippy --all-targets --all-features --quiet   # Lint
+# No default binary target (src/main.rs removed in Phase 12) — use --example.
 ```
 
 ### Feature Flags
@@ -2537,18 +2552,19 @@ katgpt-core = { path = "../katgpt-rs/crates/katgpt-core" }
 ## 📁 Project Structure
 
 ```
-crates/  (26 in-tree crates — see Proposal 003 for the full Phase 0–12 history)
+crates/  (27 in-tree crates — see Proposal 003 for the full Phase 0–12 history)
   katgpt-types/        Leaf: Config, Rng, SIMD kernels, shared enums (DashAttnConfig, ...)
   katgpt-hla/          Leaf: HLA substrate (kernel + types) — O(1) inference cache
   katgpt-tokenizer/    Leaf: BPE tokenizer + ConvexTok LP vocabulary optimizer
   katgpt-dec/          Leaf: Discrete Exterior Calculus operators
   katgpt-percepta/     Leaf: Percepta transformer-VM (2D convex hull attention + WASM)
   katgpt-validator/    Leaf: PartialParser + SynPruner — two-tier syntax pruner (Phase 11)
+  katgpt-proof-cert/   Leaf: Hierarchical GOAT proof certificates (Plan 145, Phase 12 extraction)
   katgpt-deprecated/   Leaf: exiled losers (Phase 3a) — feedback, unit_distance, alien_sampler
 
   katgpt-core/         Core: traits, attention primitives, cognitive kernels (consumed by all)
     types.rs            Decoupled structs (Config, Rng, LoraAdapter, DomainLatent, ShardEmbedding, DataGate, ...)
-    traits.rs           Core trait definitions (18 traits + helper structs)
+    traits.rs           Core trait definitions (19 traits + helper structs)
     simd.rs             SIMD kernel implementations (NEON/AVX2) — incl. `simd_sigmoid` (Issues 024/025 M1)
     sigmoid (root)      Always-on `pub fn sigmoid` (hoisted from band_conditioner, Phase 0)
     attention.rs        Tiled online-softmax flash attention
@@ -2560,7 +2576,7 @@ crates/  (26 in-tree crates — see Proposal 003 for the full Phase 0–12 histo
     cgsp/               Curiosity-Guided Self-Play triad (Solver/Conjecturer/Guide)
     cce/                CCE moderator (Phase 10) · salience/ (Phase 10) · trigger_gate.rs (Phase 10)
     closure/            closure mining (Phase 7 re-route) · cumprodsum.rs / ssd_block.rs (Phase 10)
-    ...                 77 modules total — see `crates/katgpt-core/src/lib.rs`
+    ...                 108 modules total — see `crates/katgpt-core/src/lib.rs`
   katgpt-micro-belief/  BeliefKernel trait + Attractor/Leaky family + BoMSampler
   katgpt-personality/   PersonalityWeightedComposition (Plan 297)
   katgpt-sense/         Sense Composition modules (Plan 221)
@@ -2580,27 +2596,35 @@ crates/  (26 in-tree crates — see Proposal 003 for the full Phase 0–12 histo
   katgpt-sparse/        SOPTV task vector + SPLAT specialist projection — Plan 264/265 (Phase 11)
   katgpt-claim/         Claim-Level Reliability pair: claim_rubric + clr — Plan 307/284 (Phase 11)
   katgpt-ruliology/     Wolfram ruliology — exhaustive simple-program enumeration — Plan 188 (Phase 11)
+  katgpt-backend/      Device inference backends (CPU/ANE/GPU) — InferenceBackend trait (Issue 413)
 
 src/                    Root crate — feature-aggregation surface + transformer runtime
-  lib.rs               Module declarations + back-compat re-exports for all domain crates
-  transformer.rs       ForwardContext (linchpin) + forward/generate dispatch
-  types.rs             Re-export shim (katgpt_core::types)
-  forward.rs           Thin forward glue re-exporting katgpt-forward surface
-  gdn2/{forward,mod}.rs      GDN2 forward glue (kernel+types moved to katgpt-attn)
-  dash_attn/                 Forward glue + VortexFlow cluster (clean core moved to katgpt-attn)
-  hla/{forward,mod}.rs       HLA forward glue (substrate in katgpt-hla)
+  lib.rs               Module declarations + inline `pub mod` re-exports for absorbed crates (Issue 121)
+  transformer.rs       ForwardContext (linchpin) + forward/generate dispatch (5610 lines)
+  sp_kv_forward_mod.rs  SP-KV forward pass glue (971 lines)
+  inference_router.rs   Backend dispatch + embedding/keyword/expert routing (926 lines)
+  inference_router/     Router compute-target + TVP + tests
+  dllm.rs              Diffusion-LLM forward cycle (3078 lines)
+  attn_match_adaptive_cot.rs  Adaptive CoT attention matching (811 lines)
+  types.rs             Re-export shim (katgpt_core::types) + katgpt-rs-specific items
+  plot.rs              Benchmark SVG plot output (plotters)
+  tf_loop.rs           Transformer forward loop helpers
+  dash_attn_tests.rs   DashAttention integration tests (Issue 121 flat-file)
   speculative/               Speculative decoding + thinking controller
   pruners/                   Bandit/arena runtime glue
+  sleep/                     Sleep-time consolidation runtime
   benchmark/                 Root-resident benchmark runner (Phase 12 deferral — transformer-bound)
-  ...                        Backend dispatch, KV forward, retained modules
-examples/                210+ examples (see examples/README.md)
-tests/                   295 integration test & benchmark files
-benches/                 Criterion benchmarks
+examples/                214 examples (see examples/README.md)
+tests/                   301 integration test & benchmark files
+benches/                 38 Criterion benchmarks
 ```
 
-> **Phase 12 pending:** the proposal end-state is `src/` containing only
-> `lib.rs` + `transformer.rs` + retained forward-glue. `main.rs` is slated
-> for deletion (redundant with `examples/`).
+> **Phase 12 complete:** `src/main.rs` was deleted (redundant with `examples/`).
+> What remains is permanently root-resident — `ForwardContext` glue,
+> training code, and benchmark tooling that can't extract without inverting
+> the dependency DAG. Issue 121 collapsed the last 6 shim folders into inline
+> `pub mod` blocks; Issue 122 relocated `data_probe_sink_classify` tests to
+> `katgpt-core`.
 
 ## 📖 Documentation Index
 
