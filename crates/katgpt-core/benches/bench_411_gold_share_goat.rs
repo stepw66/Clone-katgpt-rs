@@ -73,8 +73,8 @@ fn build_table1_inputs(
 
     // Gold mask: first n_gold keys are gold.
     let mut gold_mask = vec![false; n_kv];
-    for t in 0..n_gold {
-        gold_mask[t] = true;
+    for g in gold_mask.iter_mut().take(n_gold) {
+        *g = true;
     }
 
     // Compute unscaled output norm (using head 0 as representative — all heads

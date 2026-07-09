@@ -109,12 +109,12 @@ fn thickened_hopf_link_d(n_per_circle: usize, thickness: f32, d: usize) -> (Vec<
         // Small normal perturbation (preserves topology).
         let nx = (i as f32 * 7.13).sin() * thickness;
         let ny = (i as f32 * 5.31).cos() * thickness;
-        x[i * d + 0] = t.cos() + nx;
+        x[i * d] = t.cos() + nx;
         x[i * d + 1] = t.sin() + ny;
         x[i * d + 2] = 0.0 + (i as f32 * 3.7).sin() * thickness * 0.5;
 
         let s = (i as f32 / n_per_circle as f32) * 2.0 * std::f32::consts::PI;
-        y[i * d + 0] = 1.0 + s.cos() + (i as f32 * 4.1).sin() * thickness;
+        y[i * d] = 1.0 + s.cos() + (i as f32 * 4.1).sin() * thickness;
         y[i * d + 1] = 0.0 + (i as f32 * 6.7).cos() * thickness;
         y[i * d + 2] = s.sin() + (i as f32 * 2.9).sin() * thickness * 0.5;
     }
@@ -128,10 +128,10 @@ fn unlinked_circles_d(n_per_circle: usize, d: usize) -> (Vec<f32>, Vec<f32>) {
     let mut y = vec![0.0_f32; n_per_circle * d];
     for i in 0..n_per_circle {
         let t = (i as f32 / n_per_circle as f32) * 2.0 * std::f32::consts::PI;
-        x[i * d + 0] = t.cos();
+        x[i * d] = t.cos();
         x[i * d + 1] = t.sin();
         x[i * d + 2] = 0.0;
-        y[i * d + 0] = t.cos();
+        y[i * d] = t.cos();
         y[i * d + 1] = t.sin();
         y[i * d + 2] = 10.0;
     }
@@ -302,7 +302,7 @@ fn gate_g2_detector_cold_path() -> DetectorResult {
         let _ = black_box(v);
         samples_ms.push(elapsed);
     }
-    samples_ms.sort_by(|a, b| a.partial_cmp(&b).unwrap());
+    samples_ms.sort_by(|a, b| a.partial_cmp(b).unwrap());
     let median_ms = samples_ms[samples_ms.len() / 2];
     let pass_audit = median_ms <= DETECTOR_AUDIT_BUDGET_MS;
     println!(
@@ -366,8 +366,8 @@ fn bench_fold(d: usize, variant: FoldVariant) -> FoldResult {
     // Deterministic input — vary slightly each iter to defeat const-folding,
     // but keep it cheap (no alloc in the timing loop).
     let mut state = vec![0.0_f32; d];
-    for i in 0..d {
-        state[i] = (i as f32) * 0.01 - 0.3;
+    for (i, s) in state.iter_mut().enumerate() {
+        *s = (i as f32) * 0.01 - 0.3;
     }
     let center = vec![0.0_f32; d];
     let alpha = 10.0_f32;
@@ -404,7 +404,7 @@ fn bench_fold(d: usize, variant: FoldVariant) -> FoldResult {
         }
         samples_ns.push(t0.elapsed().as_nanos() as f64);
     }
-    samples_ns.sort_by(|a, b| a.partial_cmp(&b).unwrap());
+    samples_ns.sort_by(|a, b| a.partial_cmp(b).unwrap());
     // Trim 10% off each end (outliers from scheduling jitter), take the mean
     // of the middle 80%. Median alone is fine too, but trimmed-mean is more
     // stable on macOS where dyld/trustd can spike single samples.

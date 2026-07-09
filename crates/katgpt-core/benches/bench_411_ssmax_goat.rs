@@ -41,11 +41,13 @@ counting_allocator!();
 /// - N = 1k:    α_gold ≈ 1 / (1 + 999 · 1000^{−2})    = 1 / (1 + 0.001)   ≈ 0.999
 /// - N = 10k:   α_gold ≈ 1 / (1 + 9999 · 10000^{−2})  = 1 / (1 + 0.0001)  ≈ 0.9999
 /// - N = 100k:  α_gold ≈ 1 / (1 + 99999 · 100000^{−2}) = 1 / (1 + 1e-5)   ≈ 0.99999
+///
 /// So with Δ=2, s=1, softmax already preserves gold well. To see dilution,
 /// we need a SMALLER Δ. With Δ = 0.5, s = 1:
 /// - N = 1k:    α_gold ≈ 1 / (1 + 999 · 1000^{−0.5})    = 1 / (1 + 31.6)  ≈ 0.031
 /// - N = 10k:   α_gold ≈ 1 / (1 + 9999 · 10000^{−0.5})  = 1 / (1 + 99.99) ≈ 0.0099
 /// - N = 100k:  α_gold ≈ 1 / (1 + 99999 · 100000^{−0.5}) = 1 / (1 + 316)  ≈ 0.00316
+///
 /// Here dilution is severe — the gold mass collapses as N grows. SSMax with
 /// s_L · log(N) rescaling gives effective exponent s_L · log(N) · Δ. With
 /// s_L = 1, log(1000) ≈ 6.9, so exponent = 6.9 · 0.5 = 3.45 → α_gold ≈ 1.
@@ -249,13 +251,13 @@ fn main() {
         let max = logits.iter().copied().fold(f32::NEG_INFINITY, f32::max);
         let mut denom = 0.0_f32;
         let mut exps = vec![0.0_f32; n];
-        for j in 0..n {
-            exps[j] = (logits[j] - max).exp();
-            denom += exps[j];
+        for (e, &l) in exps.iter_mut().zip(logits.iter()) {
+            *e = (l - max).exp();
+            denom += *e;
         }
         let mut base_output = vec![0.0_f32; d_model];
-        for j in 0..n {
-            let alpha = exps[j] / denom;
+        for (j, &e) in exps.iter().enumerate() {
+            let alpha = e / denom;
             let dim = j % d_model;
             base_output[dim] += alpha;
         }
@@ -277,13 +279,13 @@ fn main() {
             .fold(f32::NEG_INFINITY, f32::max);
         let mut denom_s = 0.0_f32;
         let mut exps_s = vec![0.0_f32; n];
-        for j in 0..n {
-            exps_s[j] = (ssmax_logits[j] - max_s).exp();
-            denom_s += exps_s[j];
+        for (e, &l) in exps_s.iter_mut().zip(ssmax_logits.iter()) {
+            *e = (l - max_s).exp();
+            denom_s += *e;
         }
         let mut ssmax_output = vec![0.0_f32; d_model];
-        for j in 0..n {
-            let alpha = exps_s[j] / denom_s;
+        for (j, &e) in exps_s.iter().enumerate() {
+            let alpha = e / denom_s;
             let dim = j % d_model;
             ssmax_output[dim] += alpha;
         }

@@ -35,10 +35,10 @@
 //!
 //! # Cold-path + audit-cadence contract (Issue 050, resolved 2026-07-07)
 //!
-//! The detector is O(n²) brute-force k-NN + O(k·n) cycle-basis extraction
-//! + O(β_X · β_Y · L² · N_sub²) Gauss integral. The dominant term is the
-//! Gauss pair loop: `β` (cycle rank ≈ E − V + C) grows ~linearly with `n`
-//! for `k = 8`, so the pair count is quadratic-ish in `n`.
+//! The detector is O(n²) brute-force k-NN, plus O(k·n) cycle-basis
+//! extraction, plus O(β_X · β_Y · L² · N_sub²) Gauss integral. The dominant
+//! term is the Gauss pair loop: `β` (cycle rank ≈ E − V + C) grows
+//! ~linearly with `n` for `k = 8`, so the pair count is quadratic-ish in `n`.
 //!
 //! ## Measured scale
 //!
@@ -350,6 +350,9 @@ fn pca_project_joint_into_3d(
 
 /// Deterministic 3×d projection matrix with DFT-like rows (rows are
 /// orthogonal by construction). Determinism is required for G5.
+// Fixed-size 3×3 / 3×d matrix math below indexes by row/col/axis directly —
+// clearer than iterator zips for this kind of small linear-algebra code.
+#[allow(clippy::needless_range_loop)]
 fn projection_matrix_3xd(d: usize) -> [[f32; 64]; 3] {
     // Fixed seeds for 3 deterministic pseudo-random rows in R^d.
     // We use the first d entries of three fixed Hadamard-like rows; for
@@ -381,6 +384,7 @@ fn projection_matrix_3xd(d: usize) -> [[f32; 64]; 3] {
 }
 
 #[inline]
+#[allow(clippy::needless_range_loop)]
 fn project_row_into(row: &[f32], proj: &[[f32; 64]; 3], out: &mut [f32; 3]) {
     let d_eff = row.len().min(64);
     for k in 0..3 {
@@ -393,6 +397,7 @@ fn project_row_into(row: &[f32], proj: &[[f32; 64]; 3], out: &mut [f32; 3]) {
 }
 
 #[inline]
+#[allow(clippy::needless_range_loop)]
 fn mean_and_variance_3d(x: &[[f32; 3]], y: &[[f32; 3]]) -> ([f32; 3], [f32; 3]) {
     let n = (x.len() + y.len()) as f32;
     let mut mean = [0.0_f32; 3];
@@ -419,6 +424,7 @@ fn mean_and_variance_3d(x: &[[f32; 3]], y: &[[f32; 3]]) -> ([f32; 3], [f32; 3]) 
 }
 
 #[inline]
+#[allow(clippy::needless_range_loop)]
 fn covariance_3d(x: &[[f32; 3]], y: &[[f32; 3]]) -> [[f32; 3]; 3] {
     let n = (x.len() + y.len()) as f32;
     let mut cov = [[0.0_f32; 3]; 3];
@@ -441,6 +447,7 @@ fn covariance_3d(x: &[[f32; 3]], y: &[[f32; 3]]) -> [[f32; 3]; 3] {
 /// Jacobi eigendecomposition of a 3×3 symmetric matrix. Returns
 /// (eigenvectors as columns of a 3×3, eigenvalues sorted descending).
 /// Standard textbook algorithm; converges in a handful of sweeps for 3×3.
+#[allow(clippy::needless_range_loop)]
 fn jacobi_eigendecomp_3x3(mut a: [[f32; 3]; 3]) -> ([[f32; 3]; 3], [f32; 3]) {
     let mut v = [[0.0_f32; 3]; 3];
     for i in 0..3 {
@@ -1145,6 +1152,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::needless_range_loop)]
     fn jacobi_eigendecomp_diagonal_input() {
         // Already-diagonal matrix → eigenvectors = identity, eigenvalues = diag.
         let a = [[2.0_f32, 0.0, 0.0], [0.0, 3.0, 0.0], [0.0, 0.0, 1.0]];

@@ -47,7 +47,6 @@ use crate::conformal::{
     ConformalIntervalCalibrator, DecayUnit, PointForecaster, PredictiveInterval, ResidualMode,
     SeasonalNaiveForecaster, seasonal_naive_floor,
 };
-use core::cmp::Ordering;
 
 /// Capacity for the floor's residual ring buffer per (channel, horizon-bucket).
 /// Matches Plan 340's recommended default. The floor has 1 channel × 1 bucket,

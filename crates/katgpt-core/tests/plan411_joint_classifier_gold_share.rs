@@ -15,6 +15,7 @@ use katgpt_core::data_probe::{
 };
 
 /// Run gold_share_flat with scratch allocated internally.
+#[allow(clippy::too_many_arguments)]
 fn gold_share_flat_alloc(
     attn_weights: &[f32],
     values: &[f32],

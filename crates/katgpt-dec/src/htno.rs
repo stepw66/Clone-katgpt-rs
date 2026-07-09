@@ -237,8 +237,8 @@ pub fn htno_v_cycle_into(
     debug_assert_eq!(scratch.restricted.n_cells(), n_coarse);
     debug_assert_eq!(scratch.restricted.dim, dim);
     let rmap = restriction.as_slice();
-    for c in 0..n_coarse {
-        let f = rmap[c] as usize;
+    for (c, &f) in rmap.iter().enumerate().take(n_coarse) {
+        let f = f as usize;
         let src = f * dim;
         let dst = c * dim;
         scratch.restricted.data[dst..dst + dim].copy_from_slice(&field.data[src..src + dim]);
@@ -258,8 +258,8 @@ pub fn htno_v_cycle_into(
     //    get zero (the V-cycle correction is defined on the representative
     //    subspace; the caller adds it to the fine field if desired).
     output.data.fill(0.0);
-    for c in 0..n_coarse {
-        let f = rmap[c] as usize;
+    for (c, &f) in rmap.iter().enumerate().take(n_coarse) {
+        let f = f as usize;
         let src = c * dim;
         let dst = f * dim;
         output.data[dst..dst + dim].copy_from_slice(&scratch.coarse_solved.data[src..src + dim]);
@@ -403,7 +403,6 @@ mod tests {
 
         // RHS: R₁(d₀(K)(v)) — for each coarse edge, find the matching fine edge
         // (between the representative fine vertices) and gather its d₀ value.
-        let fine_d0 = exterior_derivative(&fine, &fine_field); // rank-1
         let fine_b1 = fine.boundary_entries(0);
         // Build fine edge → d₀ value lookup. d₀ on edge e = Σ sign·input.
         let mut fine_edge_d0: std::collections::HashMap<usize, f32> = std::collections::HashMap::new();

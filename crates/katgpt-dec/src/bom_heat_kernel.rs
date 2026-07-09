@@ -49,7 +49,6 @@
 
 use crate::heat_kernel::{DecEigendecomposition, K_MAX, heat_kernel_trajectory_linear_into};
 use crate::types::CochainField;
-use core::cmp::Ordering;
 
 // =============================================================================
 // Near-harmonic direction selection

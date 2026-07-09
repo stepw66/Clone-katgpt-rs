@@ -214,6 +214,7 @@ fn g3_apply_zero_alloc_after_warmup() {
 /// verify the size is exactly as expected for D=8, K={1,2,4}, then run a
 /// latency smoke (full criterion bench is `benches/subspace_steering_bench.rs`).
 #[test]
+#[allow(clippy::identity_op)] // K=1 kept literal to mirror the K*D*4 + K*4 + 32 formula.
 fn g4_structural_size_and_latency_smoke() {
     // D=8, K=1: 1*8*4 + 1*4 + 32 = 68 bytes.
     assert_eq!(

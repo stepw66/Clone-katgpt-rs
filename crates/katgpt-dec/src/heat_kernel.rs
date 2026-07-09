@@ -531,13 +531,13 @@ pub fn heat_kernel_trajectory_krylov_into(
     // Precompute `motor_d - 1.0` per channel once (the cell loop below used to
     // re-fetch `motor_vec.get(d).copied().unwrap_or(0.0)` for every cell).
     let mut motor_shift = vec![0.0f32; dim];
-    for d in 0..dim {
+    for (d, shift) in motor_shift.iter_mut().enumerate() {
         let motor_d = if d < motor_dim {
             motor_vec.get(d).copied().unwrap_or(0.0)
         } else {
             0.0
         };
-        motor_shift[d] = motor_d - 1.0;
+        *shift = motor_d - 1.0;
     }
 
     let mut v_field = CochainField::zeros(rank, n, dim);
@@ -555,9 +555,9 @@ pub fn heat_kernel_trajectory_krylov_into(
         }
         for cell in 0..n {
             let base = cell * dim;
-            for d in 0..dim {
+            for (d, &shift) in motor_shift.iter().enumerate() {
                 let idx = base + d;
-                out_buf[idx] = lap_field.data[idx] + motor_shift[d] * v[idx];
+                out_buf[idx] = lap_field.data[idx] + shift * v[idx];
             }
         }
     };

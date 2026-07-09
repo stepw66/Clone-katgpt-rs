@@ -55,15 +55,15 @@ fn g4_zero_alloc_after_warmup_both_folds() {
         let center = [0.0_f32; D_HLA];
         // Seed with a non-trivial value so the fold does real work (reflects
         // the negative half-line) rather than being a no-op.
-        for i in 0..D_HLA {
-            state[i] = (i as f32) * 0.1 - 0.4;
+        for (i, s) in state.iter_mut().enumerate() {
+            *s = (i as f32) * 0.1 - 0.4;
         }
 
         // Warmup: settle any lazy allocations (SIMD dispatcher Once, etc.).
         for _ in 0..N_WARMUP {
             // Re-seed each call so the fold isn't idempotent after the first.
-            for i in 0..D_HLA {
-                state[i] = (i as f32) * 0.013 - 0.4;
+            for (i, s) in state.iter_mut().enumerate() {
+                *s = (i as f32) * 0.013 - 0.4;
             }
             fold_projection_into(&mut state, &center);
         }
@@ -76,8 +76,8 @@ fn g4_zero_alloc_after_warmup_both_folds() {
             // Vary the input slightly each call so the compiler can't hoist
             // the fold out of the loop as a constant-fold no-op.
             let tweak = (k as f32) * 1e-6;
-            for i in 0..D_HLA {
-                state[i] = (i as f32) * 0.013 - 0.4 + tweak;
+            for (i, s) in state.iter_mut().enumerate() {
+                *s = (i as f32) * 0.013 - 0.4 + tweak;
             }
             fold_projection_into(&mut state, &center);
             sink += state[0];
@@ -105,13 +105,13 @@ fn g4_zero_alloc_after_warmup_both_folds() {
     {
         let mut state = [0.0_f32; D_SHARD];
         let center = [0.0_f32; D_SHARD];
-        for i in 0..D_SHARD {
-            state[i] = (i as f32) * 0.01 - 0.3;
+        for (i, s) in state.iter_mut().enumerate() {
+            *s = (i as f32) * 0.01 - 0.3;
         }
 
         for _ in 0..N_WARMUP {
-            for i in 0..D_SHARD {
-                state[i] = (i as f32) * 0.011 - 0.3;
+            for (i, s) in state.iter_mut().enumerate() {
+                *s = (i as f32) * 0.011 - 0.3;
             }
             fold_projection_into(&mut state, &center);
         }
@@ -122,8 +122,8 @@ fn g4_zero_alloc_after_warmup_both_folds() {
         let mut sink = 0.0_f32;
         for k in 0..N_CALLS {
             let tweak = (k as f32) * 1e-7;
-            for i in 0..D_SHARD {
-                state[i] = (i as f32) * 0.011 - 0.3 + tweak;
+            for (i, s) in state.iter_mut().enumerate() {
+                *s = (i as f32) * 0.011 - 0.3 + tweak;
             }
             fold_projection_into(&mut state, &center);
             sink += state[0];
@@ -148,13 +148,13 @@ fn g4_zero_alloc_after_warmup_both_folds() {
     {
         let mut state = [0.0_f32; D_HLA];
         let center = [0.0_f32; D_HLA];
-        for i in 0..D_HLA {
-            state[i] = (i as f32) * 0.1 - 0.4;
+        for (i, s) in state.iter_mut().enumerate() {
+            *s = (i as f32) * 0.1 - 0.4;
         }
 
         for _ in 0..N_WARMUP {
-            for i in 0..D_HLA {
-                state[i] = (i as f32) * 0.013 - 0.4;
+            for (i, s) in state.iter_mut().enumerate() {
+                *s = (i as f32) * 0.013 - 0.4;
             }
             fold_gelu_into(&mut state, &center, 10.0);
         }
@@ -165,8 +165,8 @@ fn g4_zero_alloc_after_warmup_both_folds() {
         let mut sink = 0.0_f32;
         for k in 0..N_CALLS {
             let tweak = (k as f32) * 1e-6;
-            for i in 0..D_HLA {
-                state[i] = (i as f32) * 0.013 - 0.4 + tweak;
+            for (i, s) in state.iter_mut().enumerate() {
+                *s = (i as f32) * 0.013 - 0.4 + tweak;
             }
             fold_gelu_into(&mut state, &center, 10.0);
             sink += state[0];
@@ -191,13 +191,13 @@ fn g4_zero_alloc_after_warmup_both_folds() {
     {
         let mut state = [0.0_f32; D_SHARD];
         let center = [0.0_f32; D_SHARD];
-        for i in 0..D_SHARD {
-            state[i] = (i as f32) * 0.01 - 0.3;
+        for (i, s) in state.iter_mut().enumerate() {
+            *s = (i as f32) * 0.01 - 0.3;
         }
 
         for _ in 0..N_WARMUP {
-            for i in 0..D_SHARD {
-                state[i] = (i as f32) * 0.011 - 0.3;
+            for (i, s) in state.iter_mut().enumerate() {
+                *s = (i as f32) * 0.011 - 0.3;
             }
             fold_gelu_into(&mut state, &center, 10.0);
         }
@@ -208,8 +208,8 @@ fn g4_zero_alloc_after_warmup_both_folds() {
         let mut sink = 0.0_f32;
         for k in 0..N_CALLS {
             let tweak = (k as f32) * 1e-7;
-            for i in 0..D_SHARD {
-                state[i] = (i as f32) * 0.011 - 0.3 + tweak;
+            for (i, s) in state.iter_mut().enumerate() {
+                *s = (i as f32) * 0.011 - 0.3 + tweak;
             }
             fold_gelu_into(&mut state, &center, 10.0);
             sink += state[0];
