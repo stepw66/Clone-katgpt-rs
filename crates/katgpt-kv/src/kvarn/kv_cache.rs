@@ -969,7 +969,7 @@ impl katgpt_core::types::QuantizedKVCache for KVarNKVCache {
 // ---------------------------------------------------------------------------
 
 /// Packed bytes per row for given cols and bits.
-fn packed_bytes_per_row(cols: usize, bits: u8) -> usize {
+pub fn packed_bytes_per_row(cols: usize, bits: u8) -> usize {
     (cols * bits as usize).div_ceil(8)
 }
 
@@ -977,7 +977,7 @@ fn packed_bytes_per_row(cols: usize, bits: u8) -> usize {
 ///
 /// For each row: find min/max, compute scale = (max - min) / (levels - 1),
 /// quantize each element to [0, levels-1], pack into bits.
-fn rtn_quantize_rows(
+pub fn rtn_quantize_rows(
     tile: &[f32],
     rows: usize,
     cols: usize,
@@ -1034,7 +1034,7 @@ fn rtn_quantize_rows(
 /// Returns (scales[rows * groups_per_row], zps[rows * groups_per_row], packed data).
 ///
 /// The packed data layout is identical to `rtn_quantize_rows`.
-fn rtn_quantize_rows_grouped(
+pub fn rtn_quantize_rows_grouped(
     tile: &[f32],
     rows: usize,
     cols: usize,
@@ -1092,7 +1092,7 @@ fn rtn_quantize_rows_grouped(
 
 /// Pack a value at given position into a bit-packed row.
 #[inline]
-fn pack_value(row: &mut [u8], pos: usize, value: u32, bits: usize) {
+pub fn pack_value(row: &mut [u8], pos: usize, value: u32, bits: usize) {
     let bit_offset = pos * bits;
     let byte_offset = bit_offset / 8;
     let bit_shift = bit_offset % 8;
@@ -1113,7 +1113,7 @@ fn pack_value(row: &mut [u8], pos: usize, value: u32, bits: usize) {
 
 /// Unpack a value at given position from a bit-packed row.
 #[inline]
-fn unpack_value(row: &[u8], pos: usize, bits: usize) -> u32 {
+pub fn unpack_value(row: &[u8], pos: usize, bits: usize) -> u32 {
     let bit_offset = pos * bits;
     let byte_offset = bit_offset / 8;
     let bit_shift = bit_offset % 8;
@@ -1138,7 +1138,7 @@ fn unpack_value(row: &[u8], pos: usize, bits: usize) -> u32 {
 /// Unpack all values from a bit-packed row into a pre-allocated u32 buffer.
 /// Optimized for power-of-2 bit widths (1, 2, 4, 8).
 #[inline]
-fn unpack_row(row: &[u8], bits: usize, out: &mut [u32]) {
+pub fn unpack_row(row: &[u8], bits: usize, out: &mut [u32]) {
     let n = out.len();
     match bits {
         8 => {
