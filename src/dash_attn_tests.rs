@@ -2,10 +2,10 @@
 //!
 //! Tests the combined workflow: chunk summarization → entmax routing → forward pass.
 
-use super::chunk_summary::{ChunkSummaryCache, ChunkSummaryQuery, summarize_chunk};
-use super::entmax::{entmax_1p5, entmax_gqa_aggregate};
-use super::routing::{compute_routing_bias, score_blocks_entmax};
-use super::{forward_dash_attn_decode, forward_dash_attn_prefill};
+use crate::dash_attn::chunk_summary::{ChunkSummaryCache, ChunkSummaryQuery, summarize_chunk};
+use crate::dash_attn::entmax::{entmax_1p5, entmax_gqa_aggregate};
+use crate::dash_attn::routing::{compute_routing_bias, score_blocks_entmax};
+use crate::dash_attn::{forward_dash_attn_decode, forward_dash_attn_prefill};
 use crate::transformer::{ForwardContext, MultiLayerKVCache, TransformerWeights};
 use crate::types::{Config, DashAttnConfig, Rng};
 

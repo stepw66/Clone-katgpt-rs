@@ -104,10 +104,125 @@ pub use katgpt_core::compaction::{
 // Re-export preserves `katgpt_rs::ssd_block::*` paths.
 #[cfg(feature = "ssd_block")]
 pub use katgpt_core::ssd_block;
+// DashAttention — Adaptive Sparse Hierarchical Attention via α-entmax routing
+// (Plan 106, Research 68). All primitives absorbed into katgpt-attn::dash_attn
+// (Phase 2 clean core + Issue 007 Phase F.4a forward + Phase 12 VortexFlow
+// cluster). Inline module preserves `katgpt_rs::dash_attn::*` paths without a
+// shim folder. Token-level integration tests stay root (need ForwardContext);
+// declared as a flat `#[cfg(test)] mod` at the end of this file.
 #[cfg(feature = "dash_attn")]
-pub mod dash_attn;
+pub mod dash_attn {
+    pub use katgpt_attn::dash_attn::{
+        adaptive_k, block_topk, channel_aware, chunk_summary, entmax, entmax_router, forward,
+        kv_outer_prefill, meta_router, msa_distill, routing, sat_analysis, value_energy, vortex_flow,
+    };
+    pub use katgpt_attn::dash_attn::chunk_summary::{ChunkSummaryCache, ChunkSummaryQuery};
+    pub use katgpt_attn::dash_attn::entmax::{entmax_1p5, entmax_gqa_aggregate, entmax_support};
+    pub use katgpt_attn::dash_attn::forward::{forward_dash_attn_decode, forward_dash_attn_prefill};
+    pub use katgpt_attn::dash_attn::routing::{compute_routing_bias, score_blocks_entmax};
+
+    #[cfg(feature = "msa_adaptive_k")]
+    pub use katgpt_attn::dash_attn::adaptive_k::{AdaptiveKConfig, AdaptiveKRouter};
+    #[cfg(feature = "msa_per_group")]
+    pub use katgpt_attn::dash_attn::block_topk::PerGroupTopKRouter;
+    #[cfg(feature = "vortex_flow")]
+    pub use katgpt_attn::dash_attn::block_topk::{BlockTopKCache, BlockTopKRouter};
+    #[cfg(feature = "vortex_flow")]
+    pub use katgpt_attn::dash_attn::channel_aware::{
+        ChannelAwareCache, ChannelAwareRouter, RoutingChannelDiscovery, RoutingChannelMask,
+        simd_dot_f32,
+    };
+    #[cfg(feature = "vortex_flow")]
+    pub use katgpt_attn::dash_attn::entmax_router::{EntmaxCache, EntmaxRouter};
+    #[cfg(feature = "msa_kv_outer")]
+    pub use katgpt_attn::dash_attn::kv_outer_prefill::{KvOuterIndex, KvOuterPrefill};
+    #[cfg(feature = "vortex_flow")]
+    pub use katgpt_attn::dash_attn::meta_router::{
+        DynPolicy, DynRoutingCache, MetaRouter, compute_reward,
+    };
+    #[cfg(feature = "msa_sparse")]
+    pub use katgpt_attn::dash_attn::msa_distill::{
+        MaxPoolBlockScorer, MaxStdDevBlockScorer, MsaBlockCache,
+    };
+    #[cfg(all(feature = "dash_attn", feature = "cache_prune"))]
+    pub use katgpt_attn::dash_attn::sat_analysis::{HeadSparsityInfo, head_sparsity_profile};
+    #[cfg(feature = "vortex_flow")]
+    pub use katgpt_attn::dash_attn::value_energy::{ValueEnergyCache, ValueEnergyRouter};
+    #[cfg(feature = "vortex_flow")]
+    pub use katgpt_attn::dash_attn::vortex_flow::{
+        RoutingDecision, VortexFlow, VortexFlowConfig, VortexFlowExt, VortexRouter, VortexRouterCache,
+        VortexScratch, build_vortex_router,
+    };
+}
+// Data Probe Diagnostics — controlled information-theoretic validation
+// (Plan 141). All substrate absorbed into katgpt_core::data_probe (Plan 404).
+// Inline module preserves `katgpt_rs::data_probe::*` paths without a shim
+// folder. The G1 classifier tests (which use no root glue) live in the flat
+// `data_probe_sink_classify_tests` file declared at the end of this file.
 #[cfg(feature = "data_probe")]
-pub mod data_probe;
+pub mod data_probe {
+    /// Dirichlet-sampled Markov chain generator with entropy rate targeting.
+    pub mod markov {
+        pub use katgpt_core::data_probe::markov::*;
+    }
+    /// NLL computation against a known Markov chain.
+    pub mod nll {
+        pub use katgpt_core::data_probe::nll::*;
+    }
+    /// Three-way regime classification based on typical-set framework.
+    pub mod typical_set {
+        pub use katgpt_core::data_probe::typical_set::*;
+    }
+    /// Dirichlet Energy structural alignment diagnostic.
+    pub mod dirichlet_energy {
+        pub use katgpt_core::data_probe::dirichlet_energy::*;
+    }
+    /// Claim card infrastructure for formal C1–C4 validation.
+    pub mod claim {
+        pub use katgpt_core::data_probe::claim::*;
+    }
+
+    /// Representation geometry diagnostics (Plan 151, Research 113).
+    #[cfg(feature = "sink_aware_attn")]
+    pub mod geometry {
+        pub use katgpt_core::data_probe::geometry::*;
+    }
+
+    /// Sink-Aware Attention classifier — per-head NOP/Broadcast detection
+    /// (Plan 287, Research 258, arxiv 2606.08105). Substrate lives in
+    /// `katgpt_core::data_probe::sink_classify`; re-exported here so
+    /// `katgpt_rs::data_probe::sink_classify::*` paths resolve.
+    #[cfg(feature = "sink_aware_attn")]
+    pub mod sink_classify {
+        pub use katgpt_core::data_probe::{
+            CachedSinkClassification, SinkAwarePolicy, SinkClassifierConfig, SinkDiagnostic, SinkKind,
+            StableRankScratch, apply_dual_policy_gate, apply_dual_policy_gate_cached,
+            apply_dual_policy_gate_cached_flat, apply_dual_policy_gate_flat, classify_all_sinks,
+            classify_all_sinks_flat, classify_sink_at, classify_sink_at_flat,
+            stable_rank_update_into, stable_rank_update_into_flat,
+        };
+    }
+
+    // Flat symbol re-exports. Note: `dirichlet_energy` (the function) is NOT
+    // flat-re-exported here because it would collide with the module name above.
+    pub use katgpt_core::data_probe::{
+        ClaimCard, Intervention, MarkovChain, Regime, RegimeDistribution, ValidityVerdict,
+        average_nll, classify_regime, consecutive_adjacency, functor_adjacency,
+        generate_markov_chain, kv_cache_dirichlet_energy, nll_profile, regime_distribution,
+        sample_sequence,
+    };
+
+    #[cfg(feature = "sink_aware_attn")]
+    pub use katgpt_core::data_probe::{
+        CachedSinkClassification, GeometryReport, LayerSinkSummary, SinkAwarePolicy,
+        SinkClassifierConfig, SinkDiagnostic, SinkKind, StableRankScratch, apply_dual_policy_gate,
+        apply_dual_policy_gate_cached, apply_dual_policy_gate_cached_flat,
+        apply_dual_policy_gate_flat, avg_cosine_similarity, classify_all_sinks,
+        classify_all_sinks_flat, classify_sink_at, classify_sink_at_flat, effective_rank,
+        representation_geometry_report, stable_rank_update_into, stable_rank_update_into_flat,
+        summarize_layer_sinks,
+    };
+}
 // Issue 007 Phase C: `npc_ane_backend` and `npc_brain_router` moved to
 // riir-engine (NPC runtime IP). They depended on `katgpt_core::sense::backend`
 // which moved, and are themselves gameplay-runtime IP per the 5-repo strategy.
@@ -128,16 +243,25 @@ pub use katgpt_band::collider_pruner;
 pub use katgpt_attn::diagonal_gate;
 #[cfg(feature = "compression_drafter")]
 pub use katgpt_core::compression_drafter;
-// Phase 6 absorption (Proposal 003, 2026-07-04): `ilc` moved to katgpt-speculative;
-// `trd` stays root (depends on `crate::fold` — transformer-bound glue). peira
-// already re-exports katgpt-spectral (Phase 4). The distill/mod.rs shim re-exports
-// ilc from katgpt-speculative so `katgpt_rs::distill::ilc::*` paths still resolve.
+// Distillation umbrella — three unrelated paper lineages absorbed into their
+// domain crates (Proposal 003 Phase 4/6, Plan 384). Inline module preserves the
+// historical `katgpt_rs::distill::{peira,ilc,trd}::*` paths without a shim folder.
+//   - peira → katgpt-spectral (spectral alignment metric)
+//   - ilc   → katgpt-speculative (synonym-aware DDTree pruning, Research 136)
+//   - trd   → katgpt-speculative (trajectory-refined draft, Plan 249)
 #[cfg(any(
     feature = "peira_distill",
     feature = "ilc_distill",
     feature = "trd_refined_draft"
 ))]
-pub mod distill;
+pub mod distill {
+    #[cfg(feature = "peira_distill")]
+    pub use katgpt_spectral::peira;
+    #[cfg(feature = "ilc_distill")]
+    pub use katgpt_speculative::distill::ilc;
+    #[cfg(feature = "trd_refined_draft")]
+    pub use katgpt_speculative::distill::trd;
+}
 #[cfg(feature = "dllm")]
 #[allow(clippy::too_many_arguments)]
 #[allow(clippy::too_many_lines)]
@@ -173,10 +297,39 @@ pub use katgpt_core::cce;
 // Phase 12 absorption (Proposal 003, 2026-07-04): module moved to katgpt-pruners.
 // Re-export preserves `katgpt_rs::freq_bandit::*` paths.
 pub use katgpt_pruners::freq_bandit;
+// GDN2 — Gated DeltaNet-2 recurrent attention (Plan 105, Research 70).
+// Substrate (kernel + types + forward composition) absorbed into katgpt-attn
+// (Proposal 003 Phase 2; Issue 007 Phase F.4a). Inline module preserves
+// `katgpt_rs::gdn2::*` paths without a shim folder.
 #[cfg(feature = "gdn2_attention")]
-pub mod gdn2;
+pub mod gdn2 {
+    pub use katgpt_attn::gdn2::{kernel, types};
+    pub use katgpt_attn::gdn2::forward::{forward_gdn2, generate_gdn2_into};
+    pub use katgpt_attn::gdn2::{
+        Gdn2GateConfig, Gdn2HeadState, Gdn2LayerState, MultiLayerGdn2Cache, gdn2_recurrent_step,
+        gdn2_state_readout, gdn2_state_update, l2_normalize, sigmoid,
+    };
+}
+// HLA — Higher-order Linear Attention (Plan 057). Substrate (types + kernels)
+// absorbed into katgpt-core::hla (Plan 008 Step 4); composition layer
+// (forward_hla/forward_ahla/generate_*) absorbed into katgpt-forward
+// (Issue 007 Phase F.4b — katgpt-hla can't depend on katgpt-forward without a
+// cycle via katgpt-core). Inline module preserves `katgpt_rs::hla::*` paths
+// without a shim folder.
 #[cfg(feature = "hla_attention")]
-pub mod hla;
+pub mod hla {
+    pub use katgpt_core::hla::{kernel, types};
+    pub use katgpt_forward::{forward_ahla, forward_hla, generate_ahla_into, generate_hla_into};
+    pub use katgpt_core::hla::{
+        AhlaLayerState, AhlaQHeadState, HlaLayerState, HlaQHeadState, HlaVariant, MultiLayerAhlaCache,
+        MultiLayerHlaCache, MultiLayerParallaxAhlaCache, ParallaxAhlaLayerState,
+        ParallaxAhlaQHeadState,
+    };
+    pub use katgpt_core::hla::{
+        ahla_denom, ahla_layer_step, ahla_step, hla_denom, hla_layer_readout, hla_layer_update,
+        hla_readout, hla_readout_normalized, hla_state_update,
+    };
+}
 // katgpt-quant re-export (Proposal 003 Phase 1, 2026-07-01): quantization codecs
 // moved to crates/katgpt-quant/. Re-exported here so historical `katgpt_rs::*`
 // paths resolve.
@@ -253,8 +406,14 @@ pub use katgpt_proof_cert as proof_cert;
 pub use katgpt_proof_cert::conditional_proof;
 pub mod pruners;
 // DenseMesh — latent node network for modelless inference (Plan 266, Research 234).
+// Substrate absorbed into katgpt-transformer (Phase 9) + katgpt-forward
+// (Plan 385, node_transformer). Inline module preserves the historical
+// `katgpt_rs::dense_mesh::*` paths without a shim folder.
 #[cfg(feature = "dense_mesh")]
-pub mod dense_mesh;
+pub mod dense_mesh {
+    pub use katgpt_transformer::dense_mesh::*;
+    pub use katgpt_forward::TransformerNode;
+}
 #[cfg(feature = "rat_plus_bridge")]
 pub use katgpt_attn::rat_bridge;
 // Phase 8 absorption (Proposal 003, 2026-07-04): module moved to katgpt-attn-match.
@@ -549,3 +708,15 @@ pub use katgpt_deprecated::alien_sampler::{
 // `vessel_minimal` / `vessel_project` examples were removed in the same
 // migration. Historical docs remain in katgpt-rs/.docs, .benchmarks, .plans,
 // .research as the public record of what existed.
+
+// ── Root-resident integration tests (Issue 121) ─────────────────────────
+// These test files consume root transformer glue (ForwardContext,
+// MultiLayerKVCache, TransformerWeights) that can't move to a leaf crate,
+// OR exercise katgpt-core substrate without root glue (data_probe_sink_classify).
+// Kept as flat `src/*.rs` files + `#[cfg(test)] mod` declarations instead of
+// folder shims, per the Proposal 003 endgame consolidation.
+#[cfg(all(feature = "dash_attn", test))]
+mod dash_attn_tests;
+
+#[cfg(all(feature = "sink_aware_attn", test))]
+mod data_probe_sink_classify_tests;

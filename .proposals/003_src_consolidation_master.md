@@ -1,8 +1,9 @@
 # Proposal 003 — Master `src/` consolidation: domain-stack crates + loser crate
 
-Status: **essentially complete** (endgame audit done — Plan 404, 2026-07-06).
-What remains in `src/` is permanently root-resident (transformer-forward
-glue, training infrastructure, tooling). Supersedes Proposal 001 and 002.
+Status: **essentially complete** (endgame audit done — Plan 404, 2026-07-06;
+shim-folder collapse done — Issue 121, 2026-07-09). What remains in `src/` is
+permanently root-resident (transformer-forward glue, training infrastructure,
+tooling). Supersedes Proposal 001 and 002.
 Branch: `develop` (per global rule — no feature branches)
 Owner: unassigned
 Audit basis: full `src/` classification (3 parallel subagent passes + direct

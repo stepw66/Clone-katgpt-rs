@@ -1,39 +1,22 @@
-//! Root-crate re-export of the sink-aware classifier primitive.
+//! Root-crate integration tests for the sink-aware classifier primitive.
 //!
-//! The primitive (types + `classify_sink_at` + `classify_all_sinks` +
-//! `stable_rank_update_into` + `apply_dual_policy_gate`) lives in
-//! [`katgpt_core::data_probe`] (single file under the `sink_aware_attn`
-//! feature in katgpt-core). This module re-exports it at the
-//! `katgpt_rs::data_probe::sink_classify` path so it composes with the
-//! existing [`crate::data_probe::geometry`] diagnostics.
-//!
-//! ## Relationship to the rest of `data_probe`
-//!
-//! The classifier is the **mechanism locator**: it identifies *which* sink
-//! columns in an attention map are Adaptive NOPs vs Broadcasts. The sibling
-//! [`crate::data_probe::geometry::effective_rank`] is the **aggregate
-//! symptom**: it measures how collapsed the resulting hidden states are
-//! across the whole layer. Broadcast sinks reduce `effective_rank` across
-//! tokens (Lemma 4 in Fesser et al.); the classifier tells you *why*.
-//!
-//! Phase 4's `LayerSinkSummary` (in [`crate::data_probe::geometry`]) bridges
-//! the two: per-layer aggregates of the per-sink classifications.
+//! These tests exercise `katgpt_core::data_probe::{classify_sink_at,
+//! classify_all_sinks, stable_rank_update_into, apply_dual_policy_gate}` —
+//! the substrate that lives in katgpt-core under the `sink_aware_attn`
+//! feature. They use no root transformer glue, so they live in a flat test
+//! file (Issue 121) rather than inside a shim module.
 //!
 //! Plan 287, Research 258, arXiv:2606.08105.
 
-pub use katgpt_core::data_probe::{
-    CachedSinkClassification, SinkAwarePolicy, SinkClassifierConfig, SinkDiagnostic, SinkKind,
+#![cfg(all(test, feature = "sink_aware_attn"))]
+
+use katgpt_core::data_probe::{
+    CachedSinkClassification, SinkAwarePolicy, SinkClassifierConfig, SinkKind,
     StableRankScratch, apply_dual_policy_gate, apply_dual_policy_gate_cached,
     apply_dual_policy_gate_cached_flat, apply_dual_policy_gate_flat, classify_all_sinks,
     classify_all_sinks_flat, classify_sink_at, classify_sink_at_flat, stable_rank_update_into,
     stable_rank_update_into_flat,
 };
-
-// ── Tests (Plan 287 Phase 1 T1.5 — G1 classifier correctness) ────
-
-#[cfg(test)]
-mod tests {
-    use super::*;
 
     /// Helper: build an attention column of length `n` with all queries paying
     /// 100% attention to position `pos` (each entry is 1.0 — this is normalized
@@ -271,7 +254,6 @@ mod tests {
     /// calls (assuming the classification is stable).
     #[test]
     fn issue001_cached_matches_per_call_for_broadcast() {
-        use super::*;
         let n = 8;
         let d = 16;
         let v_s: Vec<f32> = (0..d).map(|i| 0.5 + 0.1 * i as f32).collect();
@@ -764,4 +746,3 @@ mod tests {
         assert_eq!(kind_c, SinkKind::Broadcast);
         assert_eq!(cached.calls_since_audit, 2);
     }
-}
