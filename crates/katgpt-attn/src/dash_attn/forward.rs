@@ -41,8 +41,10 @@ use katgpt_core::types::{self, Config, DashAttnConfig};
 use katgpt_forward::ForwardContext;
 use katgpt_transformer::{MultiLayerKVCache, TransformerWeights};
 
-use super::chunk_summary::{ChunkSummaryCache, ChunkSummaryQuery, summarize_chunk_into};
-use super::routing::score_blocks_entmax_into;
+use super::chunk_summary::{
+    ChunkSummaryCache, ChunkSummaryQuery, summarize_chunk_into_with_entropy,
+};
+use super::routing::score_blocks_entmax_with_entropy_into;
 
 // ---------------------------------------------------------------------------
 // Prefill (batch prompt processing)
@@ -73,6 +75,8 @@ pub fn forward_dash_attn_prefill(
     // Pre-allocate scratch buffers for the non-zero-init summarize path
     let mut summarize_out = vec![0.0f32; hd];
     let mut summarize_scores_buf = vec![0.0f32; 1]; // chunk_size=1 at boundaries
+    // Entropy bias scratch for the non-zero-init path (Issue 044).
+    let mut summarize_entropy = 0.0f32;
 
     for (pos, &token) in tokens.iter().enumerate() {
         let tok_off = token * n;
@@ -111,8 +115,11 @@ pub fn forward_dash_attn_prefill(
                         // Reuse per-head Vecs: clear + write in-place avoids realloc
                         let slot = &mut summary_cache.summaries[chunk_idx][h];
                         slot.resize(hd, 0.0);
+                        let entropy_slot =
+                            &mut summary_cache.entropy_biases[chunk_idx][h];
                         if zero_init {
-                            // Inline mean-pool for the common zero-init case (avoids alloc)
+                            // Inline mean-pool for the common zero-init case (avoids alloc).
+                            // chunk_size=1 → entropy = ln(1) = 0.
                             let inv = if k_h.len() == hd && hd > 0 {
                                 1.0 / hd as f32
                             } else {
@@ -122,8 +129,9 @@ pub fn forward_dash_attn_prefill(
                             for v in slot[..hd].iter_mut() {
                                 *v *= inv;
                             }
+                            *entropy_slot = 0.0; // ln(1)
                         } else {
-                            summarize_chunk_into(
+                            summarize_chunk_into_with_entropy(
                                 summary_query,
                                 k_h,
                                 1,
@@ -131,8 +139,10 @@ pub fn forward_dash_attn_prefill(
                                 hd,
                                 &mut summarize_out,
                                 &mut summarize_scores_buf,
+                                &mut summarize_entropy,
                             );
                             slot[..hd].copy_from_slice(&summarize_out[..hd]);
+                            *entropy_slot = summarize_entropy;
                         }
                     }
                 }
@@ -193,6 +203,13 @@ pub fn forward_dash_attn_decode<'a>(
     // Pre-allocate summary references outside the layer loop to avoid
     // per-layer Vec allocation (summaries don't change between layers).
     let mut summary_refs: Vec<&Vec<f32>> = Vec::with_capacity(summary_cache.n_chunks());
+    // Entropy biases for routing (head 0 per chunk), Issue 044.
+    // Built once before the layer loop — same lifetime as summary_refs.
+    let entropy_refs: Vec<f32> = summary_cache
+        .entropy_biases
+        .iter()
+        .map(|chunk| chunk.first().copied().unwrap_or(0.0))
+        .collect();
     // Populate once — summaries are immutable across layers, so we only need
     // to build the reference slice a single time before the loop.
     for chunk in &summary_cache.summaries {
@@ -230,8 +247,13 @@ pub fn forward_dash_attn_decode<'a>(
             let q_head = &ctx.q[..hd];
             // summary_refs is populated once before the layer loop (summaries
             // are immutable across layers) — no per-layer rebuild needed.
-            let _routing =
-                score_blocks_entmax_into(q_head, &summary_refs, dash_config, &mut routing_scratch);
+            let _routing = score_blocks_entmax_with_entropy_into(
+                q_head,
+                &summary_refs,
+                &entropy_refs,
+                dash_config,
+                &mut routing_scratch,
+            );
             // TODO: Use routing.active_indices to select sparse KV blocks
             // Plan 173 Task 6: Wall gate-derived block skip is available via
             // ctx.wall_prefix.min_retention_at_block() when wall_attention is active.

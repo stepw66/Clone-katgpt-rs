@@ -45,7 +45,9 @@ pub mod sat_analysis;
 pub mod value_energy;
 pub mod vortex_flow;
 
-pub use chunk_summary::{ChunkSummaryCache, ChunkSummaryQuery};
+pub use chunk_summary::{
+    ChunkSummaryCache, ChunkSummaryQuery, summarize_chunk_with_entropy,
+};
 pub use entmax::{entmax_1p5, entmax_gqa_aggregate, entmax_support};
 pub use forward::{forward_dash_attn_decode, forward_dash_attn_prefill};
-pub use routing::{compute_routing_bias, score_blocks_entmax};
+pub use routing::{compute_routing_bias, score_blocks_entmax, score_blocks_entmax_with_entropy};

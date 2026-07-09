@@ -308,11 +308,20 @@ queries exist.
 
 ## 4. What to implement (modelless, katgpt-rs)
 
-**Issue `.issues/044`** tracks: add `entropy_bias: f32` output to
-`summarize_chunk_into` (one extra reduction over the already-computed softmax
-weights), and add it to the chunk routing score in `routing.rs`. Feature-gated
-under `dash_attn` (already opt-in). Backward-compatible: at zero-init the bias
-is constant and does not change rankings.
+**Issue `.issues/044` — DONE (2026-07-09).** All six tasks (T1-T6) landed:
+`summarize_chunk_into_with_entropy` computes `b'_c = -Σ p_t log p_t` as one
+reduction over the already-resident softmax weights (zero alloc);
+`score_blocks_entmax_with_entropy_into` adds `b'_c` to each chunk logit
+before α-entmax; `ChunkSummaryCache` now stores per-chunk-per-head entropy
+alongside summary keys; `forward.rs` prefill stores entropy, decode threads
+it into routing. **Issue file removed** (per AGENTS.md noise rule); the
+behavioral contract is captured by the tests in `chunk_summary.rs`
+(`test_entropy_bias_*`) and `routing.rs`
+(`test_score_blocks_with_*_entropy_*`).
+
+Backward-compatible: at zero-init the bias is constant (`ln(chunk_size)`)
+and the entmax ranking is bit-identical. `goat_106_dash_attn` GOAT-proof
+re-passes unchanged.
 
 The entropy computation reuses `scores_buf` after `softmax_inplace`:
 

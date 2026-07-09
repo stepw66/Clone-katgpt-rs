@@ -35,6 +35,26 @@ pub fn score_blocks_entmax(
     score_blocks_entmax_into(query, summaries, config, &mut scratch)
 }
 
+/// Like [`score_blocks_entmax`] but adds the HiLS Prop 3.1 entropy bias
+/// `b'_c` to each chunk logit before entmax (Issue 044 / Research 399).
+///
+/// `entropy_biases[i]` is added to the raw dot-product logit of chunk `i`.
+/// At zero-init `head_cls` every chunk has the same `b'_c = ln(chunk_size)`,
+/// so the bias is a constant additive shift → entmax ranking unchanged
+/// (the "dormant at zero-init" guarantee).
+///
+/// Pass an empty slice (`&[]`) to disable the entropy correction.
+pub fn score_blocks_entmax_with_entropy(
+    query: &[f32],
+    summaries: &[impl AsRef<[f32]>],
+    entropy_biases: &[f32],
+    config: &DashAttnConfig,
+) -> RoutingResult {
+    let n = summaries.len();
+    let mut scratch = RoutingScratch::new(n, query.len());
+    score_blocks_entmax_with_entropy_into(query, summaries, entropy_biases, config, &mut scratch)
+}
+
 /// Pre-allocated scratch buffers for entmax routing.
 pub struct RoutingScratch {
     /// Logits buffer: [n_chunks].
@@ -67,15 +87,37 @@ impl RoutingScratch {
 
 /// Zero-alloc variant of [`score_blocks_entmax`].
 ///
-/// Reuses scratch buffers across calls.
+/// Reuses scratch buffers across calls. Equivalent to calling
+/// [`score_blocks_entmax_with_entropy_into`] with an empty entropy slice.
 pub fn score_blocks_entmax_into(
     query: &[f32],
     summaries: &[impl AsRef<[f32]>],
     config: &DashAttnConfig,
     scratch: &mut RoutingScratch,
 ) -> RoutingResult {
+    score_blocks_entmax_with_entropy_into(query, summaries, &[], config, scratch)
+}
+
+/// Zero-alloc variant that adds the HiLS Prop 3.1 entropy bias `b'_c` to each
+/// chunk logit before α-entmax (Issue 044 / Research 399).
+///
+/// The chunk score becomes `ŝ_{i,c} = q^T k'_c / √d * γ + b'_c`, which is the
+/// first-order Taylor rectification of the LogSumExp chunk mass. Pass an
+/// empty `entropy_biases` slice to disable the correction (then this is
+/// identical to [`score_blocks_entmax_into`]).
+///
+/// At zero-init `head_cls`, all chunks share `b'_c = ln(chunk_size)`, so the
+/// bias is a constant additive shift and the entmax ranking is unchanged.
+pub fn score_blocks_entmax_with_entropy_into(
+    query: &[f32],
+    summaries: &[impl AsRef<[f32]>],
+    entropy_biases: &[f32],
+    config: &DashAttnConfig,
+    scratch: &mut RoutingScratch,
+) -> RoutingResult {
     let hd = query.len();
     let n = summaries.len();
+    let has_entropy = !entropy_biases.is_empty();
 
     // Grow buffers if needed
     if scratch.logits.len() < n {
@@ -86,12 +128,19 @@ pub fn score_blocks_entmax_into(
     }
     scratch.sorted.clear();
 
-    // Compute chunk logits: z = q · k̄ / √d * γ
+    // Compute chunk logits: z = q · k̄ / √d * γ (+ b'_c if available).
+    // The entropy bias `b'_c` (HiLS Prop 3.1) interpolates between the
+    // mean-logit regime and the true LogSumExp mass; it is a per-chunk
+    // additive term computed once at prefill (Issue 044).
     let scale = 1.0 / (hd as f32).sqrt() * config.scaling_factor;
     for (i, s) in summaries.iter().enumerate() {
         let s_ref = s.as_ref();
         let dot = simd_dot_f32(query, s_ref, hd);
-        scratch.logits[i] = dot * scale;
+        let mut logit = dot * scale;
+        if has_entropy && i < entropy_biases.len() {
+            logit += entropy_biases[i];
+        }
+        scratch.logits[i] = logit;
     }
 
     // α-entmax routing into scratch buffers
@@ -514,5 +563,82 @@ mod tests {
         assert!(!result.active_indices.is_empty());
         // Block 1 should have 0 probability
         assert_eq!(result.probs[1], 0.0);
+    }
+
+    // ── Issue 044: entropy bias routing tests ──────────────────────────
+
+    /// With an empty entropy slice, the entropy-aware variant must be
+    /// bit-identical to the plain variant (the backward-compat guarantee).
+    #[test]
+    fn test_score_blocks_with_entropy_empty_matches_plain() {
+        let config = default_config();
+        let query = vec![1.0, 0.0];
+        let summaries = vec![vec![1.0, 0.0], vec![0.5, 0.5], vec![0.0, 1.0]];
+        let mut s1 = RoutingScratch::new(3, 2);
+        let mut s2 = RoutingScratch::new(3, 2);
+        let plain = score_blocks_entmax_into(&query, &summaries, &config, &mut s1);
+        let with_e = score_blocks_entmax_with_entropy_into(&query, &summaries, &[], &config, &mut s2);
+        assert_eq!(plain.active_indices, with_e.active_indices);
+        assert_eq!(plain.bias, with_e.bias);
+        assert_eq!(plain.probs, with_e.probs);
+    }
+
+    /// A constant (uniform) entropy bias across all chunks is just an additive
+    /// shift to all logits — the entmax ranking must be unchanged.
+    /// This is the "dormant at zero-init" guarantee at the routing level.
+    #[test]
+    fn test_score_blocks_with_constant_entropy_unchanged_ranking() {
+        let config = default_config();
+        let query = vec![1.0, 0.0];
+        let summaries = vec![vec![1.0, 0.0], vec![0.5, 0.5], vec![0.0, 1.0]];
+        let mut s1 = RoutingScratch::new(3, 2);
+        let mut s2 = RoutingScratch::new(3, 2);
+        let plain = score_blocks_entmax_into(&query, &summaries, &config, &mut s1);
+        // ln(64) — a constant shift mimicking zero-init chunk_size=64.
+        let constant_entropy = vec![64.0f32.ln(); 3];
+        let shifted = score_blocks_entmax_with_entropy_into(
+            &query,
+            &summaries,
+            &constant_entropy,
+            &config,
+            &mut s2,
+        );
+        assert_eq!(plain.active_indices, shifted.active_indices);
+        // Probs are invariant under a constant additive logit shift.
+        for (i, (&p, &s)) in plain.probs.iter().zip(shifted.probs.iter()).enumerate() {
+            assert!((p - s).abs() < 1e-5, "chunk {i}: plain={p}, shifted={s}");
+        }
+    }
+
+    /// A non-uniform entropy bias must change the routing distribution.
+    /// Chunk with higher entropy (more spread attention mass) gets boosted,
+    /// so its routing probability increases relative to the plain path.
+    #[test]
+    fn test_score_blocks_with_nonuniform_entropy_changes_routing() {
+        let config = default_config();
+        // Two summaries that are identical → plain routing is uniform.
+        let query = vec![1.0, 0.0];
+        let summaries = vec![vec![0.5, 0.0], vec![0.5, 0.0]];
+        let mut s1 = RoutingScratch::new(2, 2);
+        let plain = score_blocks_entmax_into(&query, &summaries, &config, &mut s1);
+        // Sanity: identical summaries → near-uniform plain probs.
+        assert!((plain.probs[0] - plain.probs[1]).abs() < 1e-5);
+
+        // Boost chunk 1 with a large entropy bias → it must take more mass.
+        let mut s2 = RoutingScratch::new(2, 2);
+        let entropy = vec![0.0, 5.0]; // chunk 1 gets +5 logit boost
+        let boosted = score_blocks_entmax_with_entropy_into(
+            &query,
+            &summaries,
+            &entropy,
+            &config,
+            &mut s2,
+        );
+        assert!(
+            boosted.probs[1] > boosted.probs[0],
+            "boosted chunk should dominate: p0={}, p1={}",
+            boosted.probs[0],
+            boosted.probs[1]
+        );
     }
 }
