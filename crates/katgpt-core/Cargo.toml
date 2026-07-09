@@ -1202,3 +1202,15 @@ required-features = ["mcts_state_action_cache"]
 name = "bench_415_within_class_erank_goat"
 harness = false
 required-features = ["sink_aware_attn"]
+
+# Plan 417 — Cross-Resolution SIMD Encode GOAT gate. Defend-wrong perf bench:
+# pre-417 strided gather-dot (baseline loser) vs post-417 transposed-basis
+# simd_matmul_rows (candidate winner) on project_to_spectral_into. G1
+# bit-identical (transpose is exact), G2 ≥ 1.5× at d_src ∈ {64,256} k ∈ {8,16},
+# G4 zero-alloc. cross_resolution_transport is DEFAULT-ON but listed here so
+# the bench compiles cleanly under --no-default-features too.
+# std::time::Instant + CountingAllocator + harness = false (mirrors bench_377).
+[[bench]]
+name = "bench_417_cross_resolution_simd_encode_goat"
+harness = false
+required-features = ["cross_resolution_transport"]

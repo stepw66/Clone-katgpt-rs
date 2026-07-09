@@ -38,6 +38,18 @@
 //! This is exactly the freeze/thaw pattern: the bases are frozen, the transport
 //! is inference-time.
 //!
+//! ## SIMD encode (Plan 417)
+//!
+//! Both halves of the transport — encode (`project_to_spectral_into`) and
+//! decode (`reconstruct_from_spectral_into`) — use contiguous-SIMD primitives
+//! (`simd::simd_matmul_rows` and `simd::simd_dot_f32` respectively). The encode
+//! caches a transposed basis `phi_src_t: (k, d_src)` row-major in
+//! [`CrossResolutionBases::new`] (cold path) so each output `spectral[j]` is a
+//! straight `simd_dot_f32(row j, src_state)` instead of a strided gather-dot.
+//! GOAT-validated 11-15× faster than the pre-417 strided path at production
+//! scales (`d_src ∈ {64, 256}`, `k ∈ {8, 16}`); see
+//! `benches/bench_417_cross_resolution_simd_encode_goat.rs`.
+//!
 //! ## Zero-alloc hot path
 //!
 //! All intermediate buffers live in [`CrossResScratch`], pre-allocated once and
@@ -76,6 +88,18 @@ pub enum CrossResolutionError {
 /// The `commitment` field is `BLAKE3(phi_src_le || psi_dst_le || d_src_le ||
 /// d_dst_le || k_le)` so a basis pair can be tracked as a content-addressed
 /// artifact (mirrors the `MerkleFrozenEnvelope` pattern in riir-neuron-db).
+///
+/// **Transposed encode cache (`phi_src_t`, Plan 417).** The public `phi_src`
+/// is `(d_src, k)` row-major, which makes every column strided — defeating
+/// SIMD on the encode dot `spectral = Φ_src^T · src_state`. To make the encode
+/// contiguous-SIMD, we cache the transpose `phi_src_t ∈ R^{k × d_src}` row-major
+/// (each basis vector contiguous) at construction (cold path) and use
+/// [`simd::simd_matmul_rows`] on the hot path. This is a *derived* cache:
+/// it is NOT part of the BLAKE3 commitment (the commitment still hashes only
+/// `phi_src`), NOT part of any serde snapshot, and NOT exposed publicly.
+/// It is recomputed from `phi_src` at construction. The decode half
+/// ([`reconstruct_from_spectral_into`]) was already contiguous-SIMD and is
+/// unchanged.
 #[derive(Debug, Clone)]
 pub struct CrossResolutionBases {
     /// Flattened `d_src × k`, row-major. Source-tier basis `Φ_src`.
@@ -90,6 +114,12 @@ pub struct CrossResolutionBases {
     pub k: usize,
     /// `BLAKE3(phi_src_le || psi_dst_le || d_src_le || d_dst_le || k_le)`.
     pub commitment: [u8; 32],
+    /// Transposed source basis `(k, d_src)` row-major — derived cache for the
+    /// contiguous-SIMD encode path (Plan 417). Each row `j` is basis vector
+    /// `Φ_src[:, j]` laid out contiguously, so `spectral[j] = dot(row j,
+    /// src_state)` is a single `simd::simd_dot_f32`. NOT committed, NOT
+    /// serialized — rebuilt from `phi_src` in [`Self::new`].
+    phi_src_t: Vec<f32>,
 }
 
 impl CrossResolutionBases {
@@ -116,6 +146,11 @@ impl CrossResolutionBases {
             return Err(CrossResolutionError::RankDeficient);
         }
         let commitment = compute_commitment(&phi_src, &psi_dst, d_src, d_dst, k);
+        // Build the transposed encode cache (Plan 417). phi_src is (d_src, k)
+        // row-major; phi_src_t is (k, d_src) row-major so each basis vector
+        // (column of phi_src) becomes a contiguous row. Cold path — runs once
+        // per basis construction, never on the encode hot path.
+        let phi_src_t = transpose_phi_src(&phi_src, d_src, k);
         Ok(Self {
             phi_src,
             psi_dst,
@@ -123,6 +158,7 @@ impl CrossResolutionBases {
             d_dst,
             k,
             commitment,
+            phi_src_t,
         })
     }
 
@@ -139,6 +175,25 @@ impl CrossResolutionBases {
         orthonormal_check(&self.phi_src, self.d_src, self.k, tol)
             && orthonormal_check(&self.psi_dst, self.d_dst, self.k, tol)
     }
+}
+
+/// Transpose `(d_src, k)` row-major → `(k, d_src)` row-major.
+///
+/// Element `phi_src[r * k + j]` (row `r`, col `j`) becomes
+/// `phi_src_t[j * d_src + r]` (row `j`, col `r`). Cold path — called once per
+/// [`CrossResolutionBases::new`]. Pure index arithmetic, no SIMD: this is O(k·d_src)
+/// work performed once, amortized over millions of encode calls.
+#[inline]
+fn transpose_phi_src(phi_src: &[f32], d_src: usize, k: usize) -> Vec<f32> {
+    debug_assert_eq!(phi_src.len(), d_src * k);
+    let mut t = vec![0.0f32; k * d_src];
+    for j in 0..k {
+        let row = &mut t[j * d_src..(j + 1) * d_src];
+        for r in 0..d_src {
+            row[r] = phi_src[r * k + j];
+        }
+    }
+    t
 }
 
 /// Compute `BLAKE3(phi_src_le || psi_dst_le || d_src_le || d_dst_le || k_le)`.
@@ -237,8 +292,15 @@ impl CrossResScratch {
 ///
 /// Zero-alloc — caller provides the `spectral` buffer (typically
 /// `scratch.spectral`).
+///
+/// **Hot path (Plan 417):** uses the cached transposed basis `phi_src_t` and
+/// [`simd::simd_matmul_rows`] for `k` contiguous SIMD dots. Each row `j` of
+/// `phi_src_t` is basis vector `Φ_src[:, j]` laid out contiguously, so the
+/// inner dot is a straight `simd::simd_dot_f32(row, src_state, d_src)` — no
+/// strided gather, no auto-unroll reliance. The pre-417 strided-gather path
+/// is preserved as `project_to_spectral_strided_into` in the bench file for
+/// the GOAT comparison.
 #[inline]
-#[allow(clippy::needless_range_loop)] // spectral transport kernel: indices participate in stride arithmetic (r*k+j)
 pub fn project_to_spectral_into(
     src_state: &[f32],
     bases: &CrossResolutionBases,
@@ -246,23 +308,9 @@ pub fn project_to_spectral_into(
 ) {
     debug_assert_eq!(src_state.len(), bases.d_src, "src_state must be (d_src,)");
     debug_assert_eq!(spectral.len(), bases.k, "spectral must be (k,)");
-    let d_src = bases.d_src;
-    let k = bases.k;
-    // For each output column j, dot column j of Φ_src with src_state.
-    // Column j of a row-major (d_src × k) matrix is the strided slice
-    // [j, j+k, j+2k, ...]. For k ≤ 64 (L1-resident), a contiguous-source dot
-    // over the strided column beats gather; we restructure as:
-    //   spectral[j] = Σ_r phi_src[r*k + j] * src_state[r]
-    // which is what `simd_dot_f32` would do if we materialized the strided
-    // column. For small k, the gather is unavoidable; LLVM auto-unrolls the
-    // short inner loop well.
-    for j in 0..k {
-        let mut acc = 0.0f32;
-        for r in 0..d_src {
-            acc += bases.phi_src[r * k + j] * src_state[r];
-        }
-        spectral[j] = acc;
-    }
+    // spectral = phi_src_t · src_state, where phi_src_t is (k, d_src) row-major.
+    // simd_matmul_rows writes output[r] = dot(weight row r, input) for r in 0..rows.
+    simd::simd_matmul_rows(spectral, &bases.phi_src_t, src_state, bases.k, bases.d_src);
 }
 
 /// Reconstruct destination latent state from k-dim spectral coefficients.
