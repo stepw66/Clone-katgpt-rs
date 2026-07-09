@@ -49,7 +49,17 @@ use super::EngramTable;
 /// [`EngramTableId::verify`] recomputes the Merkle root from a live table
 /// and compares. A `false` result indicates tampering or corruption.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[repr(transparent)]
 pub struct EngramTableId(pub [u8; 32]);
+
+// SAFETY: `EngramTableId` is `#[repr(transparent)]` over `[u8; 32]`, which is
+// itself `Pod`. Enables `bytemuck::cast_slice::<EngramTableId, u8>` for bulk
+// (de)serialization on the chain-commit side (`riir-chain/src/engram_commit.rs`),
+// mirroring `KarcShard` / `ArchetypeBlendShard`. Manual impl (not derive)
+// matches the dominant katgpt-core convention (`compaction/audit.rs`,
+// `factorized_action/types.rs`).
+unsafe impl bytemuck::Pod for EngramTableId {}
+unsafe impl bytemuck::Zeroable for EngramTableId {}
 
 impl EngramTableId {
     /// Compute the table's identity from its current contents.
