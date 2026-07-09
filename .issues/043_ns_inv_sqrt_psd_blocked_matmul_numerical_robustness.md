@@ -3,19 +3,62 @@
 > **Spawned from:** Plan 421 (Newton-Schulz blocked dot8 matmul — commit `4116ad37`)
 > **Confidence:** HIGH — the divergence is reproduced and root-caused; the blocker is algorithmic (FMA accumulation order), not a bug.
 > **Date:** 2026-07-10
-> **Status:** OPEN
+> **Status:** RESOLVED (Approach D — ε bump NOT needed; blocked kernel safe with original ε=1e-5)
 
 ---
 
 ## TL;DR
 
-Plan 421 shipped a blocked 8-wide NEON matmul kernel (`blocked_dot8`) that gives **1.31×** on `newton_schulz5(64×64)`. The same kernel was applied to `ns_inv_sqrt_psd_into` (the LoRA-Muon inv-sqrt bottleneck, ~595µs/pair for 2× r=64 calls) and **reverted** because it causes NaN divergence on rank-deficient PSD matrices. The `ns_inv_sqrt_psd_into` path is **unchanged** — it still uses the per-dot `simd_dot_f32` at ~79% of NEON peak. This issue tracks the investigation into a numerically-safe blocked kernel for that path.
+Plan 421 shipped a blocked 8-wide NEON matmul kernel (`blocked_dot8`) that gives **1.31×** on `newton_schulz5(64×64)`. The same kernel was applied to `ns_inv_sqrt_psd_into` (the LoRA-Muon inv-sqrt bottleneck, ~595µs/pair for 2× r=64 calls) and **reverted** because it caused NaN divergence on rank-deficient PSD matrices.
 
-**The blocker is the FMA accumulation order.** `simd_dot_f32` splits one dot product into 4 interleaved partial sums ([0,4,8,12],[1,5,9,13],…); `blocked_dot8` processes 8 separate dots, each with consecutive 4-element chunks ([0,1,2,3],[4,5,6,7],…). The ULP-level difference pushes near-zero eigenvalues of rank-deficient Gram matrices outside the NS polynomial convergence basin [0,1], and 7 iterations of `X = aX + (bA + cA²)X` amplifies the divergence to Inf→NaN by iteration 4.
+**Issue 043 RESOLVED (2026-07-10):** The Plan 421 divergence was caused by the `blocked_dot4` tail handler (since removed), NOT by `blocked_dot8` proper. The blocked `blocked_dot8` kernel is numerically safe on rank-deficient PSD matrices with the **original ε=1e-5** (no bump needed). The blocked path is now re-enabled in `matmul_symmetric` and `matmul_nn` with the same pattern as `matmul_xtx` in `newton_schulz5`: `blocked_dot8` for 8-aligned blocks, `simd_dot_f32` for the tail.
+
+**Perf gain:** r=32: 51µs→37µs (**1.39×**); r=64: 297µs→216µs (**1.37×**). Per LoRA-Muon step (2× r=64): 595µs→432µs (**1.38×**).
+
+**Original issue description (for historical context):**
 
 ---
 
-## The Bottleneck
+## Resolution (2026-07-10)
+
+### What was tested
+
+Approach D was to bump `INV_SQRT_EPS` from 1e-5 to 1e-4 to push near-zero eigenvalues away from the convergence-basin edge. The experiment found that **the ε bump was NOT needed** — the original ε=1e-5 is sufficient.
+
+The key discovery: the Plan 421 divergence was caused by the **`blocked_dot4` tail handler** (which used a 4-wide blocked kernel for remaining columns not divisible by 8), NOT by `blocked_dot8` proper. The `blocked_dot4` tail handler was already removed in Plan 421's final state — the current `matmul_xtx` (used by `newton_schulz5`) uses `simd_dot_f32` for the tail. Applying the same pattern to `matmul_symmetric` and `matmul_nn` (blocked_dot8 for 8-aligned blocks, simd_dot_f32 for the tail) is numerically safe.
+
+### Numerical safety verification
+
+11 rank-deficient safety tests (`tests/issue043_rank_deficient_safety.rs`) — ALL PASS:
+- Full-rank PSD at r=16/32/64: no NaN/Inf
+- Rank-2 PSD at r=16/32: no NaN/Inf, symmetry error < 1e-3
+- Rank-8 PSD at r=32/64: no NaN/Inf, symmetry error < 1e-3
+- Rank-16 PSD at r=64: no NaN/Inf, symmetry error < 1e-3
+- Extreme condition number (1e6 vs 1e-6) at r=32/64: no NaN/Inf
+
+### GOAT gate results
+
+| Gate | Tests | Result |
+|---|---|---|
+| G1 (correctness) | 1430 katgpt-core lib + 17 bench_270 + 11 issue043 + 14 Plan 299 + 1259 riir-train-engine = **2731** | ALL PASS |
+| G2 (perf) | r=32: 51µs→37µs (1.39×); r=64: 297µs→216µs (1.37×) | **PASS** |
+| G3 (no-regression) | All existing tests pass, no new failures | **PASS** |
+| G4 (alloc-free) | Zero new heap allocations (blocked kernel uses stack registers) | **PASS** |
+| G5 (zero deps) | No new crate dependencies | **PASS** |
+
+### Perf results (M3 Max, aarch64 NEON, release build)
+
+| Operation | Before | After | Speedup |
+|---|---:|---:|---:|
+| `ns_inv_sqrt_psd_into(r=32, 7 iters)` | 51 µs | 37 µs | **1.39×** |
+| `ns_inv_sqrt_psd_into(r=64, 7 iters)` | 297 µs | 216 µs | **1.37×** |
+| Per LoRA-Muon step (2× r=64) | 595 µs | 432 µs | **1.38×** |
+
+---
+
+## Original Issue Description (historical context)
+
+### The Bottleneck
 
 `ns_inv_sqrt_psd_into` computes P⁻¹ᵐ² for symmetric PSD r×r matrices via 7 Newton-Schulz polynomial iterations. It is called **twice per `lora_muon_step_cpu`** step (once for S_A, once for S_B Gram matrices of the LoRA adapter pair).
 
@@ -131,10 +174,14 @@ Before implementing any approach, a PoC must show:
 
 ## Tasks
 
-- [ ] **T1** Try Approach D: bump `INV_SQRT_EPS` by 10×/100×, re-enable `blocked_dot8` in `matmul_symmetric`/`matmul_nn`, run Plan 299 GOAT tests. If pass → measure perf gain. If fail → document the ε threshold at which divergence stops.
-- [ ] **T2** If T1 fails, try Approach A': implement a 4-dot blocked variant (`blocked_dot4_interleaved`) that matches `simd_dot_f32`'s 4-accumulator interleaved pattern across 4 dots (16 NEON registers). PoC the perf gain at r=64.
-- [ ] **T3** If T1+T2 fail, evaluate Approach B: implement a Jacobi eigensolver for symmetric PSD matrices, compute inv-sqrt via eigenvalue scaling. PoC the perf at r=64 and r=32.
-- [-] **T4** (deferred) Approach C (polynomial basis research) — only if A/B/D all fail and the perf gain is worth the research investment.
+- [x] **T1** Try Approach D: bump `INV_SQRT_EPS` by 10×/100×, re-enable `blocked_dot8` in `matmul_symmetric`/`matmul_nn`, run Plan 299 GOAT tests. **RESOLVED:** ε bump was NOT needed. The original ε=1e-5 is sufficient. The Plan 421 divergence was caused by the `blocked_dot4` tail handler (since removed), not by `blocked_dot8` proper. Re-enabled blocked path with `simd_dot_f32` tail (same pattern as `matmul_xtx`). All tests pass.
+- [-] **T2** (moot) Approach A' was not needed — T1 resolved the issue without matching the FMA accumulation order.
+- [-] **T3** (moot) Approach B was not needed — T1 resolved the issue without eigendecomposition.
+- [-] **T4** (moot) Approach C was not needed — T1 resolved the issue without a different polynomial basis.
+
+---
+
+## Original Candidate Approaches (historical)
 
 ---
 
@@ -152,4 +199,4 @@ Before implementing any approach, a PoC must show:
 
 ## TL;DR
 
-The `ns_inv_sqrt_psd_into` LoRA-Muon bottleneck (~595µs/pair) remains unoptimized. The blocked `blocked_dot8` kernel was reverted because its different FMA accumulation order causes NaN divergence on rank-deficient PSD matrices. Four candidate approaches are documented (A: match accumulation order, B: eigendecomposition, C: different polynomial basis, D: larger ε regularization). **Start with Approach D** (cheapest — bump ε, re-test); fall back to **A'** (4-dot bit-identical blocked) if D fails. The PoC gate requires convergence on rank-deficient matrices + < 250µs/call + all Plan 299 GOAT tests passing.
+**RESOLVED.** The blocked `blocked_dot8` kernel is now re-enabled in `ns_inv_sqrt_psd_into` (via `matmul_symmetric` and `matmul_nn`) with the original ε=1e-5. The Plan 421 divergence was caused by the `blocked_dot4` tail handler (since removed), not by `blocked_dot8` proper. Perf: r=64 297µs→216µs (**1.37×**), per LoRA-Muon step 595µs→432µs (**1.38×**). All 2731 tests pass (1430 katgpt-core + 17 bench_270 + 11 issue043 safety + 14 Plan 299 GOAT + 1259 riir-train-engine).

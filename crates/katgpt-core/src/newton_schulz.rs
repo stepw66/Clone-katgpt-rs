@@ -359,6 +359,16 @@ const INV_SQRT_COEFFS: [(f32, f32, f32); 7] = [
 ];
 
 const INV_SQRT_GAMMA: f32 = 1.001;
+/// Regularization added to the diagonal of the normalized PSD matrix before
+/// the NS iteration. Pushes zero/near-zero eigenvalues away from the
+/// convergence-basin edge [0,1].
+///
+/// Issue 043 (Approach D resolved): the original 1e-5 is sufficient for the
+/// blocked `blocked_dot8` kernel. The Plan 421 divergence was caused by the
+/// `blocked_dot4` tail handler (since removed), not by `blocked_dot8` proper.
+/// The blocked path in `matmul_symmetric`/`matmul_nn` uses `blocked_dot8` for
+/// 8-aligned blocks and `simd_dot_f32` for the tail — the same pattern as
+/// `matmul_xtx` in `newton_schulz5`, which has always been numerically safe.
 const INV_SQRT_EPS: f32 = 1e-5;
 
 /// Pre-allocated scratch for PSD inverse square root.
@@ -546,21 +556,73 @@ pub fn ns_inv_sqrt_psd_into(
 /// Compute C = A · Aᵀ for a symmetric `r × r` matrix A (so C = A²).
 /// Exploits symmetry: only computes the upper triangle + mirrors to lower.
 ///
-/// Uses `simd_dot_f32` for each element pair. The blocked kernel is NOT used
-/// here because `ns_inv_sqrt_psd_into` can operate on rank-deficient PSD
-/// matrices where the FMA accumulation order affects numerical stability —
-/// the NS polynomial iteration can diverge if the squared matrix's tiny
-/// eigenvalues are rounded differently.
+/// Uses `blocked_dot8` for the upper triangle when `16 ≤ r ≤ 256` (L1-resident
+/// working set), falling back to per-dot `simd_dot_f32` otherwise. The blocked
+/// path is numerically safe: `blocked_dot8` is used for 8-aligned blocks and
+/// `simd_dot_f32` for the tail — the same pattern as `matmul_xtx` in
+/// `newton_schulz5` (Issue 043 Approach D resolved, 2026-07-10).
 #[inline]
 fn matmul_symmetric(a: &[f32], r: usize, c: &mut [f32]) {
+    let use_blocked = r >= 16 && r <= 256;
     for i in 0..r {
         let a_row_i = &a[i * r..(i + 1) * r];
+        // Diagonal — always uses simd_dot_f32 (single dot, no blocking benefit)
         c[i * r + i] = crate::simd::simd_dot_f32(a_row_i, a_row_i, r);
-        for j in (i + 1)..r {
-            let a_row_j = &a[j * r..(j + 1) * r];
-            let v = crate::simd::simd_dot_f32(a_row_i, a_row_j, r);
-            c[i * r + j] = v;
-            c[j * r + i] = v;
+
+        if use_blocked {
+            // Upper triangle + mirror, blocked 8 at a time
+            let j_start = i + 1;
+            let j_count = r.saturating_sub(j_start);
+            let j_blocks = j_count / 8;
+
+            for jb in 0..j_blocks {
+                let j = j_start + jb * 8;
+                let rj_rows: [&[f32]; 8] = [
+                    &a[j * r..(j + 1) * r],
+                    &a[(j + 1) * r..(j + 2) * r],
+                    &a[(j + 2) * r..(j + 3) * r],
+                    &a[(j + 3) * r..(j + 4) * r],
+                    &a[(j + 4) * r..(j + 5) * r],
+                    &a[(j + 5) * r..(j + 6) * r],
+                    &a[(j + 6) * r..(j + 7) * r],
+                    &a[(j + 7) * r..(j + 8) * r],
+                ];
+
+                let (s0, s1, s2, s3, s4, s5, s6, s7) = blocked_dot8(a_row_i, &rj_rows, r);
+                c[i * r + j] = s0;
+                c[i * r + j + 1] = s1;
+                c[i * r + j + 2] = s2;
+                c[i * r + j + 3] = s3;
+                c[i * r + j + 4] = s4;
+                c[i * r + j + 5] = s5;
+                c[i * r + j + 6] = s6;
+                c[i * r + j + 7] = s7;
+                c[j * r + i] = s0;
+                c[(j + 1) * r + i] = s1;
+                c[(j + 2) * r + i] = s2;
+                c[(j + 3) * r + i] = s3;
+                c[(j + 4) * r + i] = s4;
+                c[(j + 5) * r + i] = s5;
+                c[(j + 6) * r + i] = s6;
+                c[(j + 7) * r + i] = s7;
+            }
+
+            // Remaining columns (scalar tail — blocked_dot4 not used to avoid
+            // FMA accumulation order differences on ill-conditioned inputs)
+            for j in (j_start + j_blocks * 8)..r {
+                let a_row_j = &a[j * r..(j + 1) * r];
+                let v = crate::simd::simd_dot_f32(a_row_i, a_row_j, r);
+                c[i * r + j] = v;
+                c[j * r + i] = v;
+            }
+        } else {
+            // Upper triangle + mirror (scalar fallback for large r)
+            for j in (i + 1)..r {
+                let a_row_j = &a[j * r..(j + 1) * r];
+                let v = crate::simd::simd_dot_f32(a_row_i, a_row_j, r);
+                c[i * r + j] = v;
+                c[j * r + i] = v;
+            }
         }
     }
 }
@@ -570,18 +632,23 @@ fn matmul_symmetric(a: &[f32], r: usize, c: &mut [f32]) {
 /// hit the SIMD dot kernel; the naive column-walk through B thrashes the cache
 /// on anything that doesn't fit in L1.
 ///
-/// Uses `simd_dot_f32` for each element. The blocked kernel is NOT used here
-/// because `ns_inv_sqrt_psd_into` can operate on rank-deficient PSD matrices
-/// where the FMA accumulation order affects numerical stability.
+/// Uses `matmul_at_bt_blocked` (8-wide blocked NEON kernel) when `16 ≤ r ≤ 256`,
+/// falling back to per-dot `simd_dot_f32` otherwise. Numerically safe — same
+/// blocked pattern as `matmul_xtx` in `newton_schulz5` (Issue 043 Approach D
+/// resolved, 2026-07-10).
 #[inline]
 fn matmul_nn(a: &[f32], b: &[f32], r: usize, c: &mut [f32], bt_buf: &mut [f32]) {
     transpose(b, r, r, bt_buf);
-    for i in 0..r {
-        let a_row_i = &a[i * r..(i + 1) * r];
-        let c_row_i = &mut c[i * r..(i + 1) * r];
-        for j in 0..r {
-            // bt_buf row j == B column j, stored contiguously.
-            c_row_i[j] = crate::simd::simd_dot_f32(a_row_i, &bt_buf[j * r..(j + 1) * r], r);
+    if r >= 16 && r <= 256 {
+        matmul_at_bt_blocked(a, bt_buf, r, r, r, c);
+    } else {
+        for i in 0..r {
+            let a_row_i = &a[i * r..(i + 1) * r];
+            let c_row_i = &mut c[i * r..(i + 1) * r];
+            for j in 0..r {
+                // bt_buf row j == B column j, stored contiguously.
+                c_row_i[j] = crate::simd::simd_dot_f32(a_row_i, &bt_buf[j * r..(j + 1) * r], r);
+            }
         }
     }
 }
