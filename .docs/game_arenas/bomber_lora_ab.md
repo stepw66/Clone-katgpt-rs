@@ -9,8 +9,9 @@ training example.
 > `katgpt-rs/output/lora_ab/` which is gitignored (`.gitignore` line 4:
 > `output/`). They are environment-specific training outputs. This document
 > captures their expected shape so future runs don't silently grab the wrong
-> artifact (see
-> [Issue 018](../../../riir-ai/.issues/018_ab_tournament_synergy_regression.md)).
+> artifact. (The artifact-confusion lesson was tracked in riir-ai Issue 018,
+> now ✅ RESOLVED — a modelless artifact guard was added; the issue file was
+> removed per the 'rm done issue' rule.)
 
 ## Files
 
@@ -78,8 +79,9 @@ Each training run produces its own `lora_final.bin`. The two files in
 `output/lora_ab/` are the **specific** artifacts used by Plan 045's 1000-round
 tournament that produced the documented synergy results (+31, +271, +490).
 Using a different `lora_final.bin` (e.g. `riir-ai/output/lora_final.bin`, which
-is rank=2, 16-dim not rank=4, 32-dim) silently regresses the A/B result — see
-[Issue 018](../../../riir-ai/.issues/018_ab_tournament_synergy_regression.md).
+is rank=2, 16-dim not rank=4, 32-dim) silently regresses the A/B result — this
+is the artifact-confusion regression that was tracked in riir-ai Issue 018
+(now ✅ RESOLVED with a modelless artifact guard).
 
 ## Consumption
 
@@ -127,7 +129,7 @@ cargo test --features bomber-wasm --lib lora
 ## See also
 
 - [Plan 045 — Bomber Tech Isolation A/B](../../../riir-ai/.plans/045_bomber_tech_isolation_ab.md)
-- [Issue 018 — A/B Tournament Synergy Regression](../../../riir-ai/.issues/018_ab_tournament_synergy_regression.md) — the artifact-confusion lesson
-- [Issue 016 — WASM Validator Safety Mismatch](../../../riir-ai/.issues/016_wasm_validator_safety_mismatch.md) — paired WASM artifact
+- ~~Issue 018 — A/B Tournament Synergy Regression~~ (✅ RESOLVED in riir-ai: modelless artifact guard added; issue file removed per 'rm done issue' rule) — the artifact-confusion lesson is captured above
+- ~~Issue 016 — WASM Validator Safety Mismatch~~ (✅ RESOLVED in riir-ai: 3 bugs fixed; issue file removed per 'rm done issue' rule) — paired WASM artifact context
 - `riir-train/crates/riir-train-engine/src/cpu_lora_train.rs` — `LossWeighting` enum
 - `riir-train/crates/riir-train-gpu/examples/train_bomber_cpu.rs` — regeneration command

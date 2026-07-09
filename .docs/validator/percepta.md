@@ -4,7 +4,7 @@
 > Distilled ~9K lines Python+C++ into idiomatic Rust. Apache-2.0 → MIT.
 > See main README for position in the production stack.
 
-A Rust port of [Percepta's transformer-vm](https://github.com/Percepta-Core/transformer-vm) — a transformer that executes arbitrary C programs by compiling a WebAssembly interpreter into weights, with O(log N) decoding via 2D geometric attention. **The reference is Apache-2.0** — we distilled ~9K lines of Python+C++ into idiomatic Rust: one language, one binary, zero GC. See [Plan 064](.plans/064_percepta_full_riir.md) for the master plan.
+A Rust port of [Percepta's transformer-vm](https://github.com/Percepta-Core/transformer-vm) — a transformer that executes arbitrary C programs by compiling a WebAssembly interpreter into weights, with O(log N) decoding via 2D geometric attention. **The reference is Apache-2.0** — we distilled ~9K lines of Python+C++ into idiomatic Rust: one language, one binary, zero GC. See [Plan 064](../../.plans/064_percepta_full_riir.md) for the master plan.
 
 ### Core Mechanism: Parabolic Key Encoding
 

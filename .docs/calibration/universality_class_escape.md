@@ -21,5 +21,5 @@ Liu & Gore's complementary claim — **coefficients, not exponents, are where pe
 - [Research 315 — full distillation](../../.research/315_Neural_Scaling_Universality_Exponents_Fixed_Coefficients_Actionable.md)
 - [Research 295 — AC-GPT Arbitrary Conditionals (deferred this grounding)](../../.research/295_AC_GPT_Arbitrary_Conditionals_Prefix.md)
 - [Research 222 — Spectral Scaling Laws (empirical predecessor)](../../.research/222_Spectral_Scaling_Laws_Muon_Adaptive_Inference.md)
-- [CUCG G6 canary — runtime demonstration](../benches/cucg_goat.rs)
+- [CUCG G6 canary — runtime demonstration](../../benches/cucg_goat.rs)
 - [bench_313 comment — LM head exception explained](../../crates/katgpt-core/benches/bench_313_ac_prefix_goat.rs)

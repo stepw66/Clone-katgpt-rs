@@ -272,7 +272,7 @@ The P3 vs P4 comparison is the key proof: both use the same model and validator,
 | Bomb (fresh) | `💣` | Bomb (low fuse) | `🧨` |
 | Blast | `💥` | PowerUp | `🔥💥👟` |
 
-See [Plan 033](/.plans/033_bomberman_arena.md) for full implementation details.
+See [Plan 033](../../.plans/033_bomberman_arena.md) for full implementation details.
 
 ---
 
