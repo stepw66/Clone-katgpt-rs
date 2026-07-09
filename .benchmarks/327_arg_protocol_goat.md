@@ -50,13 +50,28 @@ Measured via `bench_327_arg_protocol_goat` (release, 10,000 iters after 1,000 wa
 | Gate | Primitive | Target | Steady-state | Margin |
 |------|-----------|--------|--------------|--------|
 | G2a | `PolicyEnvelope::evaluate` | ≤ 50ns | ~0.4ns | 125× under |
-| G2b | `TaxonomyValidator::validate_label_set` (264-node taxonomy, \|candidates\|=8) | ≤ 200ns | ~170ns | 1.2× under |
+| G2b | `TaxonomyValidator::validate_label_set` (264-node taxonomy, \|candidates\|=8) | ≤ 200ns | **~95ns** | **2.1× under** |
 
 **Note on variance:** early bench runs showed 530–830ns for G2b due to system
 load from a concurrent background process. Once the system settled, G2b
 consistently measured 160–180ns (4 consecutive runs: 176, 171, 165, 160ns).
 The true steady-state performance is well under the 200ns target. The
 higher readings are measurement artifacts, not code defects.
+
+**Perf re-run (2026-07-09, `validate_label_set` 2× speedup):** the G2b
+hot path was re-optimized to (1) resolve each candidate's taxonomy node
+exactly once via a stack-allocated `accepted_nodes` cache parallel to
+`scratch.accepted` (was: up to 3 binary searches per candidate across the
+three passes), and (2) reject via an in-place `LabelSet::remove` (single
+`copy_within` shift) instead of rebuilding the whole `LabelSet` per
+rejection (the old `remove_from_set` helper was O(n²) — O(n) copy with an
+O(n) `contains` inside each `insert`). Steady-state dropped from ~170ns to
+**~95ns** (3 consecutive runs: 94.1, 94.7, 98.1ns), and the load-induced
+variance window collapsed because the dominant cost is no longer the
+repeated binary searches. Gate now has 2.1× headroom (was 1.2×). All 11
+`taxonomy` unit tests + 1 new `label_set_remove_in_place` test pass;
+`validate_label_set` semantics are bit-identical (existing rejection tests
+unchanged).
 
 The offline-loop primitives (`OfflineCandidateScorer`, `InfoRegistry`) are
 NOT perf-gated — they run in the offline evolution loop, not the per-request
