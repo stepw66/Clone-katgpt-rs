@@ -190,7 +190,7 @@ pub fn forward_dash_attn_decode<'a>(
     pos: usize,
     config: &Config,
     dash_config: &DashAttnConfig,
-    _summary_query: &ChunkSummaryQuery,
+    summary_query: &ChunkSummaryQuery,
     summary_cache: &ChunkSummaryCache,
 ) -> &'a mut [f32] {
     let n = config.n_embd;
@@ -204,12 +204,23 @@ pub fn forward_dash_attn_decode<'a>(
     // per-layer Vec allocation (summaries don't change between layers).
     let mut summary_refs: Vec<&Vec<f32>> = Vec::with_capacity(summary_cache.n_chunks());
     // Entropy biases for routing (head 0 per chunk), Issue 044.
-    // Built once before the layer loop — same lifetime as summary_refs.
-    let entropy_refs: Vec<f32> = summary_cache
-        .entropy_biases
-        .iter()
-        .map(|chunk| chunk.first().copied().unwrap_or(0.0))
-        .collect();
+    // At zero-init the softmax is uniform → b'_c = ln(chunk_size), constant
+    // across chunks → no ranking change. We detect this with the cached O(1)
+    // `is_zero_init()` check and skip the allocation entirely by passing the
+    // empty-slice no-op path. The entropy view is only built (one Vec alloc)
+    // when head_cls is non-trivial — i.e. when riir-train provides learned
+    // landmark queries. This keeps the dormant default path allocation-free.
+    let entropy_refs_buf: Vec<f32>;
+    let entropy_refs: &[f32] = if summary_query.is_zero_init() {
+        &[]
+    } else {
+        entropy_refs_buf = summary_cache
+            .entropy_biases
+            .iter()
+            .map(|chunk| chunk.first().copied().unwrap_or(0.0))
+            .collect();
+        &entropy_refs_buf
+    };
     // Populate once — summaries are immutable across layers, so we only need
     // to build the reference slice a single time before the loop.
     for chunk in &summary_cache.summaries {
