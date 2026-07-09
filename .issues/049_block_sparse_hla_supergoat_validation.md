@@ -2,7 +2,7 @@
 
 **Date:** 2026-07-08
 **Origin:** Research 393 §3 (Block-Sparse Featurizers distillation)
-**Status:** Q1=YES + Q2=YES (PoC PASSED 2026-07-09) + Q4=YES; **Q3=NO (bounded)** — M1 ceiling failure on the real-sim validation (Proposal 001 T4, 2026-07-09). **CLOSED — validated, NOT Super-GOAT.** Plan 412 ships DEFAULT-ON on its own GOAT merits. **Related:** Research 393, Plan 412 (shipped, DEFAULT-ON — the open primitive), Plan 301 (subspace_phase_gate), Proposal 001 (`riir-ai/proposals/001_block_sparse_hla_q3_real_game_validation.md`)
+**Status:** Q1=YES + Q2=YES (PoC PASSED 2026-07-09) + Q4=YES; **Q3=NO (bounded)** — M1 ceiling failure + M2/M3 **measured** failures on the real-sim validation (Proposal 001 T4–T6, 2026-07-09). **CLOSED — validated, NOT Super-GOAT.** Plan 412 ships DEFAULT-ON on its own GOAT merits. **Related:** Research 393, Plan 412 (shipped, DEFAULT-ON — the open primitive), Plan 301 (subspace_phase_gate), Proposal 001 (`riir-ai/proposals/001_block_sparse_hla_q3_real_game_validation.md`)
 
 ## Context
 
@@ -46,8 +46,10 @@ Per the research workflow's "no candidate escape hatch" rule, the verdict was **
 M1 decision rule fired its negative branch: on real civ-sim traces, the block-sparse read
 adds no separability the existing flat-5 production projection doesn't already have (all
 competitors hit AUC=1.0 ceiling on S1-vs-S2; `AUC(C2)−AUC(C0)=0.0 < 0.15`). The confounded
-(S3) regime was degenerate. Architectural analysis confirms the behavior selectors M2/M3
-would measure are emotion-blind. Per acceptance "when any of Q1–Q4 is NO" → closed as
+(S3) regime was degenerate. T5 (M2) + T6 (M3) were subsequently **measured** (not just
+predicted) and also failed decisively: M2 found C2=1 cluster (threshold ≥3), M3 found
+0% displacement variation (threshold ≥30%). The Q3=NO verdict now rests on three
+independent measured failures. Per acceptance "when any of Q1–Q4 is NO" → closed as
 "validated — not Super-GOAT".
 
 **Original (now-resolved) question:** Candidate selling point: *"Our NPCs have multidimensional
@@ -190,22 +192,43 @@ block-2 via Plan 412, C3 oracle). T4 ran the pre-registered M1 classification.
   the corrected non-degenerate task confirms the block adds nothing even when
   the test is fair.
 
-**T5 (M2 designer steerability) + T6 (M3 downstream observability) were deferred**
-as moot: the pre-registered decision rule makes M1 failure → Q3 = NO (the M2/M3-
-dependent rows all require M1 to PASS first). Architectural corroboration: the
-observable behaviors M2/M3 measure are emotion-blind at the decisive layers —
-`CivAction` selection (`leo_act.rs` reads Q-values + physical positions; grep for
-`fear|hunger|emotion|curiosity|lambda` returns ZERO hits in that file) and flee
-physics (`compute_force`, predator-position-driven). The one emotion→behavior
-path that exists (emotion scalars → `motivation.rs` stat_vec idx 7 →
-`MotivationState`) is indirect and does not reach `leo_act`'s action selector.
-Block steering changes internal projections but cannot produce distinct
-*observable* NPC behaviors — designer-*visible*, not designer-*valuable*.
+**T5 (M2 designer steerability) + T6 (M3 downstream observability) — MEASURED.**
+Originally deferred as moot (M1 failure → Q3=NO per the pre-registered sequential gate).
+Promoted from deferred to done because (a) the repo rule "Dont defer benchmark task"
+explicitly forbids deferring benchmarks, (b) M1 was uninformative-at-ceiling rather than
+cleanly negative — the verdict rested on architectural *prediction* not measurement, and
+(c) M2 sidesteps the M1 ceiling by construction (matched flat-fear = 0.7, not the flawed
+S1/S2 predator-present-vs-absent scenarios). T5/T6 were run as actual measurements
+(2026-07-09, same session) and **confirm the architectural prediction decisively**:
 
-**This is the honest "designer-visible not designer-valuable" outcome the
-proposal's decision rule explicitly allowed** (the M3-fail row), reached via the
-M1 ceiling rather than M3. Running T5/T6 would confirm it but cannot overturn a
-Q3=NO from M1 failure per the pre-registered contract.
+**M2 (designer steerability) — MEASURED FAIL.** At matched flat-fear = 0.7, 3 hunger
+postures × alpha grid (25 for 2-DOF competitors, 5 for C1). DBSCAN eps=0.05, min_pts=5.
+| Competitor | Samples | Clusters | MaxFréchet | Fréchet σ |
+|---|---|---|---|---|
+| C0 floor-6 | 75 | **1** | 0.000000 | 0.000000 |
+| C1 flat-5 | 15 | **1** | 0.000000 | 0.000000 |
+| C2 block-2 | 75 | **1** | 0.000000 | 0.000000 |
+| C3 oracle | 75 | **1** | 0.000000 | 0.000000 |
+Both pre-registered thresholds FAIL: cluster `C2 ≥ 3` scored `C2 = 1`; Fréchet
+`max(C2) > 2σ(C1)` scored `0.0 > 0.0` (false). C2 ties C0 and C1 — the block adds zero
+behavioral clusters. **Root cause (mechanism, measured):** `SubspaceSteeringField::apply`
+does `state[j] += Σ_k α_k · block[k][j]`; the committed predator axis `[-1,0,0,0,0,0]`
+modifies `fear_fx` only, the starvation axis `[0,0,1,0,0,0]` modifies `hunger` only —
+neither touches `fear_fy` (dim 1). At matched flat-fear, `fear_fy = 0` and `fear_fx < 0`,
+so `atan2(0, negative) = π` always; the block structure cannot produce angular variation
+through alpha-steering.
+
+**M3 (downstream observability) — MEASURED FAIL.** All 75 steered C2 postures were fed
+into the REAL civ `compute_force` simulation (50 ticks each). **All 75 trajectories are
+bit-identical** (verified tick-by-tick via `f32::to_bits()`). Displacement variation =
+0.0% (threshold ≥30% → FAIL). **Root cause (mechanism, measured):** `compute_force` takes
+positions as input and produces `fear_fx` as output; alpha-steering modifies the output,
+not the input — the sim recomputes `fear_fx` from predator position each tick, overwriting
+any perturbation. The steered emotion state cannot feed back into the trajectory.
+
+**Verdict strengthened.** The Q3=NO conclusion now rests on **three independent measured
+failures** (M1 ceiling + M2 cluster/Fréchet + M3 displacement), not on a single
+uninformative M1 plus architectural prediction.
 
 **What this does NOT invalidate:**
 - **Q2 stands** — block-sparse HLA CAN represent a decoupled fear-subtype that
@@ -225,14 +248,17 @@ Q3=NO from M1 failure per the pre-registered contract.
 scenario harness is redesigned to construct S1-vs-S2 at *matched flat-fear* (so
 flat-5 cannot trivially separate), AND (b) a behavior consumer is wired to read
 the block (a fear-type → flee/forage router in `leo_act` or the motivation→action
-path). Both are implementation tasks (a new plan) that presuppose the capability
-this validation was meant to justify — so they are out of scope for this issue.
+path), AND (c) the block basis is redesigned to include a `fear_fy` component so
+alpha-steering can produce flee-angle variation (M2 measured the committed T1
+predator axis `[-1,0,0,0,0,0]` is purely x-axis → flee-angle trapped at π). All
+three are implementation tasks (a new plan) that presuppose the capability this
+validation was meant to justify — so they are out of scope for this issue.
 
 ## Progress tracker
 
 - [x] **Q1** — No prior art? **YES** (novel, 2026-07-09)
 - [x] **Q2** — New class of behavior? **YES** (PoC PASSED 2026-07-09; defend-wrong caveats documented)
-- [x] **Q3** — Product selling point? **NO (bounded)** (M1 ceiling failure on real-sim validation, 2026-07-09)
+- [x] **Q3** — Product selling point? **NO (bounded)** (M1 ceiling + M2/M3 measured failures on real-sim validation, 2026-07-09)
 - [x] **Q4** — Force multiplier? **Likely YES** (≥8 cousin plans — 412 × 301 × 297 × 320 × 319 × HLA kernel × KarcShard × 251)
 
 **Q1–Q4 NOT all YES → per acceptance, the Super-GOAT guide is NOT created and the issue is
