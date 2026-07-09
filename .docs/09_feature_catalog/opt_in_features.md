@@ -12,7 +12,7 @@ Block-parallel decoding via iterative denoising — a third decode strategy alon
 - **`D2fPipeline`**: multi-block sequential decode with KV cache commit across blocks
 - **`DecodeStrategy::DiscreteDiffusion`**: config-driven auto-switch heuristic (AR → Speculative → D2F)
 
-📖 See [`.docs/03_speculative_decoding.md`](03_speculative_decoding.md) for D2F API details and [`.research/034_D2F_Discrete_Diffusion_Forcing.md`](../.research/034_D2F_Discrete_Diffusion_Forcing.md) for experimental results.
+📖 See [`.docs/02_inference/speculative_decoding.md`](../02_inference/speculative_decoding.md) for D2F API details and [`.research/034_D2F_Discrete_Diffusion_Forcing.md`](../.research/034_D2F_Discrete_Diffusion_Forcing.md) for experimental results.
 
 ### Tri-Mode: D2F+AR Self-Speculation (Plan 089)
 

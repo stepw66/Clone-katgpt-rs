@@ -422,6 +422,6 @@ pub mod segment_match;
 - **SpecHop paper:** arXiv:2605.21965
 - **Speculative Actions (predecessor):** arXiv:2510.04371
 - **Speculative Decoding (Leviathan et al.):** arXiv:2302.01318
-- **Token-level DDTree:** `.docs/03_speculative_decoding.md`
+- **Token-level DDTree:** `speculative_decoding.md`
 - **SR²AM Configurator:** Plan 112, Research 076
 - **Plan 131:** `.plans/131_spechop_continuous_spec_pipeline.md`

@@ -198,7 +198,7 @@ G7 is the CI guard `cargo test --workspace --all-features` clean. The scoped eng
 - **Implementation:** `crates/katgpt-core/src/engram/{mod,hash,table,kernel,conv,tokenizer,hotswap,cache,commitment,forward,tests}.rs`
 - **GOAT gate:** `tests/bench_299_engram_goat.rs`
 - **Demo:** `examples/engram_demo.rs`
-- **Docs:** [`.docs/27_engram_conditional_memory.md`](../.docs/27_engram_conditional_memory.md)
+- **Docs:** [`.docs/03_memory/engram.md`](../.docs/03_memory/engram.md)
 
 ## TL;DR of the TL;DR
 

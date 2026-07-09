@@ -49,6 +49,6 @@ Raven replaces the standard KV cache with a fixed-slot architecture. This change
 
 ## Related
 
-- [`.docs/08_lucebox_techniques.md`](08_lucebox_techniques.md) — Original Raven documentation
+- [`.docs/05_adaptation/lucebox_techniques.md`](../05_adaptation/lucebox_techniques.md) — Original Raven documentation
 - GDN2 (`src/gdn2/`) — Another O(1) alternative via recurrent fast-weight state
 - LT2 Looped (`lt2_looped`) — Weight-shared T-pass hybrid SDPA+AHLA

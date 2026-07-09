@@ -93,7 +93,7 @@ G3: Overhead (<100ns target):            0.0 ns   ✅ PASS
 
 ## What the gate catches that existing criteria miss
 
-The HLA reconstruction loop has 4 early-stop criteria (see `.docs/26_micro_belief.md`):
+The HLA reconstruction loop has 4 early-stop criteria (see `.docs/03_memory/micro_belief.md`):
 
 | # | Criterion | Asks | This trace |
 |---|-----------|------|------------|
