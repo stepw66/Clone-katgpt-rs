@@ -66,7 +66,7 @@ traffic and per-call overhead by 4×.
 
 - [x] T1: Implement `blocked_dot8` — 8-wide blocked dot product with NEON/scalar paths
 - [x] T2: Implement `matmul_at_bt_blocked` — blocked r×r matmul processing 8 cols per A-row load
-- [-] T3: Replace `matmul_nn` and `matmul_symmetric` in `ns_inv_sqrt_psd_into` — **REVERTED**: the blocked FMA accumulation order causes the NS inv-sqrt polynomial iteration to diverge on rank-deficient PSD matrices (zero eigenvalues). The different rounding pushes tiny eigenvalues outside the convergence basin. `matmul_nn` and `matmul_symmetric` stay on the original `simd_dot_f32` path.
+- [x] T3: Replace `matmul_nn` and `matmul_symmetric` in `ns_inv_sqrt_psd_into` — **RE-ENABLED (Issue 043, commit `beb7a7db`)**: the original revert was caused by the `blocked_dot4` tail handler (a 4-wide blocked kernel for remaining columns not divisible by 8), NOT by `blocked_dot8` proper. Re-enabled with `simd_dot_f32` for the tail (same pattern as `matmul_xtx` in `newton_schulz5`). All 11 rank-deficient safety tests pass; perf r=64 297µs→216µs (1.37×).
 - [x] T4: Replace `matmul_xtx`, A², and `matmul_ax` in `newton_schulz_n_square_into_raw` with blocked versions (for m ≤ 256 where input is normalized to ||X||_F = 1 — numerically safe)
 - [x] T5: Run unit tests (13 NS tests + 1417 total) — all pass
 - [x] T6: Benchmark before/after — GOAT gate results below
@@ -77,31 +77,40 @@ traffic and per-call overhead by 4×.
 ## GOAT Gate
 
 - **G1 (correctness):** 13 katgpt-core NS tests + 1417 total katgpt-core tests + 1259 riir-train unit tests + 14 Plan 299 GOAT tests — ALL PASS
-- **G2 (perf):** `newton_schulz5_into(64×64)` 144µs → 110µs = **1.31×**; `newton_schulz5_into(256×256)` 9722µs → 8817µs = **1.10×**. `ns_inv_sqrt_psd_into` unchanged (reverted for numerical safety).
+- **G2 (perf):** `newton_schulz5_into(64×64)` 144µs → 110µs = **1.31×**; `newton_schulz5_into(256×256)` 9722µs → 8817µs = **1.10×**. `ns_inv_sqrt_psd_into` r=32: 51µs→37µs (1.39×); r=64: 297µs→216µs (1.37×) — re-enabled in Issue 043 (commit `beb7a7db`), per LoRA-Muon step (2× r=64): 595µs→432µs (1.38×).
 - **G3 (no-regression):** `newton_schulz5_into(768×768)` 253ms → 263ms = **0.96× (within noise)** — large-matrix path uses scalar fallback.
 - **G4 (alloc-free):** zero new heap allocations (reuses existing scratch buffers)
 - **G5 (zero deps):** no new crate dependencies
 
-## Numerical Safety Lesson
+## Numerical Safety Lesson (corrected by Issue 043, commit `beb7a7db`)
 
-The blocked `blocked_dot8` NEON kernel uses 8 independent accumulators (one per
-dot product) with 4-element FMA chunks. The original `simd_dot_f32` uses 4
-accumulators per single dot with 16-element chunks. The different accumulation
-order produces ULP-level differences that are normally harmless.
+**Original theory (now disproven):** the blocked `blocked_dot8` NEON kernel's
+different FMA accumulation order (8 accumulators × 4-element chunks) vs
+`simd_dot_f32` (4 accumulators × 16-element interleaved) was thought to cause
+NS inv-sqrt divergence on rank-deficient PSD matrices.
 
-**However**, `ns_inv_sqrt_psd_into` operates on PSD matrices that can be
-rank-deficient (Gram matrices of low-rank LoRA adapters). The NS polynomial
-iteration (7 iterations of `X = aX + (bA + cA²)X`) amplifies rounding errors in
-the near-zero eigenvalues. The different FMA accumulation order in the blocked
-kernel can push these tiny eigenvalues outside the convergence basin [0, 1],
-causing the iteration to diverge to Inf → NaN.
+**Actual root cause:** the divergence was caused by the **`blocked_dot4` tail
+handler** — a 4-wide blocked kernel used for remaining columns not divisible by
+8. The `blocked_dot4` tail handler was already removed from `matmul_xtx` in
+Plan 421's final state (replaced with `simd_dot_f32`), but was never re-tested
+for `matmul_symmetric`/`matmul_nn`. When the same `simd_dot_f32`-tail pattern
+was applied to those functions in Issue 043, the blocked path became
+numerically safe on all rank-deficient cases tested (rank-2/8/16 at r=16/32/64,
+extreme condition numbers).
 
-The `newton_schulz_n_square_into_raw` path is safe because it normalizes the
-input to ||X||_F = 1 before iteration, bounding all singular values to [0, 1].
+**Corrected rule:** the `blocked_dot8` kernel proper is numerically safe for
+NS inv-sqrt on rank-deficient PSD matrices, provided the tail (remaining
+columns not divisible by 8) uses `simd_dot_f32` rather than a narrower blocked
+variant. The original `INV_SQRT_EPS = 1e-5` is sufficient — no ε bump needed.
 
-**Rule:** blocked matmul kernels with different FMA accumulation orders must
-NOT be used in numerical iterations that operate on un-normalized, potentially
-rank-deficient matrices.
+The `newton_schulz_n_square_into_raw` path was always safe because it
+normalizes the input to ||X||_F = 1 before iteration, bounding all singular
+values to [0, 1].
+
+**See:** `.issues/043_ns_inv_sqrt_psd_blocked_matmul_numerical_robustness.md`
+(resolved-and-removed) for the full investigation, and
+`tests/issue043_rank_deficient_safety.rs` for the 11 rank-deficient safety
+tests that guard this path.
 
 ## Non-Goals
 
