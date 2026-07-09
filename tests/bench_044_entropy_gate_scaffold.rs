@@ -333,8 +333,8 @@ fn goat_044_entropy_bias_improves_topk_vs_full_attention() {
         }
     }
     let total = (n_chunks * chunk_size) as f32;
-    for d in 0..hd {
-        centroid[d] /= total;
+    for c in &mut centroid {
+        *c /= total;
     }
 
     // ── Build ChunkSummaryQuery with the centroid ──
