@@ -246,7 +246,7 @@ fn g4_alloc_free_hot_path() -> (GateResult, usize, usize) {
 
     let hot = reaches_allocs + horizon_allocs;
     let result = if hot == 0 {
-        GateResult::pass("G4", format!("hot path 0 allocs/1000 reaches + 0/1000 horizon (compile_schema allocates at load, not gated)"))
+        GateResult::pass("G4", "hot path 0 allocs/1000 reaches + 0/1000 horizon (compile_schema allocates at load, not gated)".to_string())
     } else {
         GateResult::fail("G4", format!("hot path allocated {hot} bytes (reaches={reaches_allocs}, horizon={horizon_allocs}); must be 0"))
     };

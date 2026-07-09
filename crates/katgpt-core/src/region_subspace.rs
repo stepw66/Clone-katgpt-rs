@@ -261,15 +261,15 @@ impl<const D: usize, const K: usize, const R: usize> RegionSubspaceField<D, K, R
     #[must_use]
     pub fn membership_gates(&self, state: &[f32; D], tau: f32) -> [f32; K] {
         let mut out = [0f32; K];
-        for k in 0..K {
+        for (k, out_k) in out.iter_mut().enumerate() {
             let mut mahal = 0.0;
-            for d in 0..D {
-                let diff = state[d] - self.centroids[k][d];
+            for (d, &s) in state.iter().enumerate() {
+                let diff = s - self.centroids[k][d];
                 mahal += self.psi_inv[d] * diff * diff;
             }
             // a_k(x) = log π_k − 0.5 · Mahalanobis(x, μ_k, Ψ^{-1})
             let a_k = self.log_pi[k] - 0.5 * mahal;
-            out[k] = sigmoid(a_k - tau);
+            *out_k = sigmoid(a_k - tau);
         }
         out
     }
@@ -290,12 +290,12 @@ impl<const D: usize, const K: usize, const R: usize> RegionSubspaceField<D, K, R
         debug_assert!(k < K, "region index {k} >= K={K}");
         let mut out = [0f32; R];
         // ẑ_k[r] = Σ_d Z_k[r][d] · (x[d] − μ_k[d])
-        for r in 0..R {
+        for (r, out_r) in out.iter_mut().enumerate() {
             let mut acc = 0.0;
-            for d in 0..D {
-                acc += self.projectors[k][r][d] * (state[d] - self.centroids[k][d]);
+            for (d, &s) in state.iter().enumerate() {
+                acc += self.projectors[k][r][d] * (s - self.centroids[k][d]);
             }
-            out[r] = acc;
+            *out_r = acc;
         }
         out
     }
@@ -314,8 +314,8 @@ impl<const D: usize, const K: usize, const R: usize> RegionSubspaceField<D, K, R
     pub fn steer_centroid(&self, state: &mut [f32; D], k: usize, alpha: f32) {
         debug_assert!(k < K, "region index {k} >= K={K}");
         let one_minus_a = 1.0 - alpha;
-        for d in 0..D {
-            state[d] = one_minus_a * state[d] + alpha * self.centroids[k][d];
+        for (d, s) in state.iter_mut().enumerate() {
+            *s = one_minus_a * *s + alpha * self.centroids[k][d];
         }
     }
 
@@ -338,8 +338,7 @@ impl<const D: usize, const K: usize, const R: usize> RegionSubspaceField<D, K, R
     pub fn steer_local(&self, state: &mut [f32; D], k: usize, offset: &[f32; R]) {
         debug_assert!(k < K, "region index {k} >= K={K}");
         // state[j] += Σ_r offset[r] * loadings[k][r][j]
-        for r in 0..R {
-            let v_r = offset[r];
+        for (r, &v_r) in offset.iter().enumerate() {
             let axis = &self.loadings[k][r];
             for j in 0..D {
                 state[j] += v_r * axis[j];
@@ -360,8 +359,8 @@ impl<const D: usize, const K: usize, const R: usize> RegionSubspaceField<D, K, R
     pub fn decompose(&self, state: &[f32; D], tau: f32) -> RegionDecomposition<K, R> {
         let gates = self.membership_gates(state, tau);
         let mut local_coords = [[0f32; R]; K];
-        for k in 0..K {
-            local_coords[k] = self.local_coordinates(state, k);
+        for (k, lc) in local_coords.iter_mut().enumerate() {
+            *lc = self.local_coordinates(state, k);
         }
         RegionDecomposition {
             gates,
@@ -412,8 +411,8 @@ pub fn reconstruct<const D: usize, const K: usize, const R: usize>(
         }
         total_weight += g;
         // Add g_k · μ_k
-        for d in 0..D {
-            out[d] += g * field.centroids[k][d];
+        for (d, out_d) in out.iter_mut().enumerate() {
+            *out_d += g * field.centroids[k][d];
         }
         // Add g_k · (W_k · ẑ_k)
         for r in 0..R {
@@ -527,16 +526,16 @@ fn invert_rxr<const R: usize>(m: &[[f32; R]; R]) -> [[f32; R]; R] {
     // the identity that becomes the inverse.
     let mut src = *m;
     let mut inv = [[0f32; R]; R];
-    for i in 0..R {
-        inv[i][i] = 1.0;
+    for (i, row) in inv.iter_mut().enumerate() {
+        row[i] = 1.0;
     }
     // Forward elimination with partial pivoting.
     for col in 0..R {
         // Find pivot row (max abs in this column, at or below `col`).
         let mut pivot_row = col;
         let mut max_abs = src[col][col].abs();
-        for row in (col + 1)..R {
-            let abs_val = src[row][col].abs();
+        for (row, row_arr) in src.iter().enumerate().skip(col + 1) {
+            let abs_val = row_arr[col].abs();
             if abs_val > max_abs {
                 max_abs = abs_val;
                 pivot_row = row;
@@ -615,8 +614,8 @@ mod tests {
     fn identity_loadings<const D: usize, const R: usize>() -> [[f32; D]; R] {
         debug_assert!(R <= D);
         let mut block = [[0f32; D]; R];
-        for r in 0..R {
-            block[r][r] = 1.0;
+        for (r, row) in block.iter_mut().enumerate() {
+            row[r] = 1.0;
         }
         block
     }
@@ -1054,8 +1053,8 @@ mod tests {
         );
         let state = [5f32; 4]; // at centroid
         let coords = field.local_coordinates(&state, 0);
-        for r in 0..2 {
-            assert!(coords[r].abs() < 1e-5, "coord[{r}]={} should be ~0", coords[r]);
+        for (r, coord) in coords.iter().enumerate() {
+            assert!(coord.abs() < 1e-5, "coord[{r}]={coord} should be ~0");
         }
     }
 }

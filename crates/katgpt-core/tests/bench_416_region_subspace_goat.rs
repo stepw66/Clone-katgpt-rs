@@ -31,8 +31,8 @@ use katgpt_core::subspace_steering::SubspaceSteeringField;
 /// Build an R×D identity-ish loadings block: axis r has a 1.0 at index r.
 fn identity_loadings<const D: usize, const R: usize>() -> [[f32; D]; R] {
     let mut block = [[0f32; D]; R];
-    for r in 0..R {
-        block[r][r] = 1.0;
+    for (r, row) in block.iter_mut().enumerate() {
+        row[r] = 1.0;
     }
     block
 }
@@ -116,8 +116,8 @@ fn g2_two_mode_steering_distinct() {
 
     // K=4 regions with distinct centroids.
     let mut centroids = [[0f32; D]; K];
-    for k in 0..K {
-        centroids[k][0] = (k as f32) * 10.0; // centroids along dim 0: 0, 10, 20, 30
+    for (k, centroid) in centroids.iter_mut().enumerate() {
+        centroid[0] = (k as f32) * 10.0; // centroids along dim 0: 0, 10, 20, 30
     }
     // Each region has identity loadings (same subspace for all — tests centroid distinction).
     let loadings = [identity_loadings::<D, R>(); K];
@@ -129,9 +129,9 @@ fn g2_two_mode_steering_distinct() {
     // G2a: centroid steering toward different regions produces distinct outputs.
     let base = [0f32; D];
     let mut steered_states = [[0f32; D]; K];
-    for k in 0..K {
-        steered_states[k] = base;
-        field.steer_centroid(&mut steered_states[k], k, 0.5);
+    for (k, state) in steered_states.iter_mut().enumerate() {
+        *state = base;
+        field.steer_centroid(state, k, 0.5);
     }
     // Each steered state should differ from every other.
     let mut centroid_distinct = 0usize;
@@ -171,9 +171,9 @@ fn g2_two_mode_steering_distinct() {
     );
     let offset = [1f32, 1f32];
     let mut local_states = [[0f32; D]; K];
-    for k in 0..K {
-        local_states[k] = base;
-        diff_field.steer_local(&mut local_states[k], k, &offset);
+    for (k, state) in local_states.iter_mut().enumerate() {
+        *state = base;
+        diff_field.steer_local(state, k, &offset);
     }
     let mut local_distinct = 0usize;
     let mut local_pairs = 0usize;

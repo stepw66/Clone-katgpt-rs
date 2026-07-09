@@ -108,12 +108,12 @@ fn g5_latency_under_5us_p50() {
     const N_SAMPLES: usize = 1000;
     let mut latencies_ns = [0u64; N_SAMPLES];
 
-    for i in 0..N_SAMPLES {
+    for latency in latencies_ns.iter_mut() {
         let start = Instant::now();
         let _ = committed_blend_pi_sensitivity::<3, 32, 32>(
             &blend, &fields, &z, 0.01, 8, &mut rng,
         );
-        latencies_ns[i] = start.elapsed().as_nanos() as u64;
+        *latency = start.elapsed().as_nanos() as u64;
     }
 
     latencies_ns.sort_unstable();

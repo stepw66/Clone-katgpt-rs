@@ -74,7 +74,7 @@ const G2_PRODUCTION_DIMS: &[(usize, usize)] = &[(64, 8), (64, 16), (256, 8), (25
 /// Pre-Plan-417 strided gather-dot encode: `spectral[j] = Σ_r phi_src[r*k + j]
 /// * src_state[r]`. Each `j` walks a stride-`k` column of `phi_src`, defeating
 /// SIMD gather. Kept verbatim (including the `needless_range_loop` rationale)
-/// as the GOAT-baseline loser.
+///   as the GOAT-baseline loser.
 #[inline]
 #[allow(clippy::needless_range_loop)] // verbatim pre-417 kernel: indices participate in stride arithmetic (r*k+j)
 fn project_to_spectral_strided_into(
@@ -140,6 +140,9 @@ fn random_orthonormal(dim: usize, k: usize, seed: u64) -> Vec<f32> {
 
 // ── main ──────────────────────────────────────────────────────────────────
 
+/// Per-sweep-point result: `((d_src, k), baseline_ns, candidate_ns, speedup, g2_pass)`.
+type SweepResult = ((usize, usize), f64, f64, f64, bool);
+
 fn main() {
     println!("══════════════════════════════════════════════════════════════════");
     println!("  Plan 417 — Cross-Resolution SIMD Encode GOAT gate");
@@ -152,8 +155,8 @@ fn main() {
     let mut any_prod_g2_pass = false; // PASS if ANY production point clears 1.5×
                                       // (we accept partial wins — the small-d_src
                                       // point may wash; we care about d_src ≥ 64).
-    let mut production_results: Vec<((usize, usize), f64, f64, f64, bool)> = Vec::new();
-    let mut all_results: Vec<((usize, usize), f64, f64, f64, bool)> = Vec::new();
+    let mut production_results: Vec<SweepResult> = Vec::new();
+    let mut all_results: Vec<SweepResult> = Vec::new();
 
     for &(d_src, k) in SWEEP {
         // Build bases + a random src_state.

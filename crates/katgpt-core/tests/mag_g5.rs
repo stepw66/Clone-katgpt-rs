@@ -51,14 +51,14 @@ fn g5_zero_alloc_hot_path() {
     let mut acts = vec![[0.0_f32; D]; 40];
     let labels = {
         let mut l = vec![false; 40];
-        for k in 0..20 {
-            l[k] = true;
+        for x in l.iter_mut().take(20) {
+            *x = true;
         }
         l
     };
     for i in 0..40 {
-        for j in 0..D {
-            acts[i][j] = gaussian(&mut rng) + if labels[i] { 1.0 } else { -1.0 };
+        for val in &mut acts[i] {
+            *val = gaussian(&mut rng) + if labels[i] { 1.0 } else { -1.0 };
         }
     }
     let candidate = DataSet::new(&acts, &labels);

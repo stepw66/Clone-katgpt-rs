@@ -71,14 +71,14 @@ fn main() {
     let mut acts = vec![[0.0_f32; D]; n_transfer];
     let labels = {
         let mut l = vec![false; n_transfer];
-        for k in 0..n_transfer / 2 {
-            l[k] = true;
+        for x in l.iter_mut().take(n_transfer / 2) {
+            *x = true;
         }
         l
     };
     for i in 0..n_transfer {
-        for j in 0..D {
-            acts[i][j] = gaussian(&mut rng) + if labels[i] { 1.0 } else { -1.0 };
+        for val in &mut acts[i] {
+            *val = gaussian(&mut rng) + if labels[i] { 1.0 } else { -1.0 };
         }
     }
     let ds = DataSet::new(&acts, &labels);

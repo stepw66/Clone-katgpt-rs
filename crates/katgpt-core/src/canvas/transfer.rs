@@ -62,7 +62,7 @@ pub(crate) fn cosine_distance(a: &[f32], b: &[f32]) -> f32 {
     if cos.is_nan() {
         return 1.0;
     }
-    let cos = if cos > 1.0 { 1.0 } else if cos < -1.0 { -1.0 } else { cos };
+    let cos = cos.clamp(-1.0, 1.0);
     (1.0 - cos) as f32
 }
 

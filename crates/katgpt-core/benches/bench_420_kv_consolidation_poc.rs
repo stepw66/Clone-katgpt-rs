@@ -511,7 +511,6 @@ struct EvalResult {
     nll: f32,
     digit_mass: f32,
     consolidation_count: u32,
-    n_answer_digits: usize,
 }
 
 fn argmax(logits: &[f32]) -> usize {
@@ -618,7 +617,6 @@ fn evaluate(
         nll,
         digit_mass,
         consolidation_count,
-        n_answer_digits: problem.answer.len(),
     }
 }
 

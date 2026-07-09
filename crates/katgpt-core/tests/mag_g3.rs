@@ -27,8 +27,8 @@ fn g3_linear_shift_recon_error_near_zero() {
     // Unit-norm shift direction.
     let mut v = [0.0_f32; D];
     let inv_sqrt_d = 1.0 / (D as f32).sqrt();
-    for j in 0..D {
-        v[j] = inv_sqrt_d;
+    for x in v.iter_mut() {
+        *x = inv_sqrt_d;
     }
     let shift_scale = 2.0;
     let alpha = shift_scale; // alpha·direction = shift_scale · v = the actual shift
@@ -71,9 +71,9 @@ fn g3_zero_shift_recon_error_is_one() {
 
     let n = 100;
     let mut data = vec![[0.0_f32; D]; n];
-    for i in 0..n {
-        for j in 0..D {
-            data[i][j] = gaussian(&mut rng);
+    for row in data.iter_mut() {
+        for val in row.iter_mut() {
+            *val = gaussian(&mut rng);
         }
     }
     // with == without (zero shift).
@@ -96,8 +96,8 @@ fn g3_overshoot_recon_error_gt_one() {
     // Unit-norm shift direction.
     let mut v = [0.0_f32; D];
     let inv_sqrt_d = 1.0 / (D as f32).sqrt();
-    for j in 0..D {
-        v[j] = inv_sqrt_d;
+    for x in v.iter_mut() {
+        *x = inv_sqrt_d;
     }
     let shift_scale = 1.0;
     // Overshoot: actual shift = v, predicted = alpha · v = 3v.
@@ -131,8 +131,8 @@ fn g3_mine_then_recon_roundtrip() {
 
     let mut v = [0.0_f32; D];
     let inv_sqrt_d = 1.0 / (D as f32).sqrt();
-    for j in 0..D {
-        v[j] = inv_sqrt_d;
+    for x in v.iter_mut() {
+        *x = inv_sqrt_d;
     }
     let shift_scale = 2.0;
 

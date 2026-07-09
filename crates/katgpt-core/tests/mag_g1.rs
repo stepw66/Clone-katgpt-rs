@@ -34,8 +34,8 @@ fn g1_mine_direction_recovers_known_shift() {
     // Known unit-norm shift direction: all dims equal.
     let mut v = [0.0_f32; D];
     let inv_sqrt_d = 1.0 / (D as f32).sqrt();
-    for j in 0..D {
-        v[j] = inv_sqrt_d;
+    for x in v.iter_mut() {
+        *x = inv_sqrt_d;
     }
     let shift_scale = 2.0;
 
@@ -55,8 +55,8 @@ fn g1_mine_direction_recovers_known_shift() {
 
     // Cosine of recovered direction vs true direction.
     let mut dot = 0.0;
-    for j in 0..D {
-        dot += dir.as_slice()[j] * v[j];
+    for (j, vj) in v.iter().enumerate() {
+        dot += dir.as_slice()[j] * vj;
     }
     // Both are unit-norm, so cosine = dot.
     let cos = dot; // dir is unit-norm, v is unit-norm
@@ -100,8 +100,8 @@ fn g1_mine_contrast_recovers_known_class_direction() {
         e
     };
     let mut dot = 0.0;
-    for j in 0..D {
-        dot += dir.as_slice()[j] * expected[j];
+    for (j, e) in expected.iter().enumerate() {
+        dot += dir.as_slice()[j] * e;
     }
     assert!(
         dot >= 0.95,

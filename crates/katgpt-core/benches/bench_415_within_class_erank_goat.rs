@@ -21,10 +21,10 @@ fn main() {
     for c in 0..n_classes {
         let centroid: Vec<f32> = (0..dim).map(|_| (c as f32) * 100.0).collect();
         for _ in 0..per_class {
-            for j in 0..dim {
+            for &mu in centroid.iter() {
                 // CLT gaussian noise.
                 let noise: f32 = (0..12).map(|_| rng.f32()).sum::<f32>() - 6.0;
-                flat.push(centroid[j] + noise);
+                flat.push(mu + noise);
             }
             labels.push(c);
         }

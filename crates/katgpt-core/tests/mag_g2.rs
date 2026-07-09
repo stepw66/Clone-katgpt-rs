@@ -153,8 +153,8 @@ fn run_g2(sigma: f32, seed: u64) -> (f32, f32) {
         .iter()
         .map(|s| {
             let mut z = 0.0;
-            for j in 0..D {
-                z += s[j] * dir.as_slice()[j];
+            for (j, sj) in s.iter().enumerate() {
+                z += sj * dir.as_slice()[j];
             }
             z
         })
