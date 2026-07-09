@@ -48,37 +48,95 @@ fn transpose(src: &[f32], rows: usize, cols: usize, dst: &mut [f32]) {
 }
 
 /// Compute `A = X * X^T` for an `m × n` matrix X, producing an `m × m` result.
-/// Uses SIMD dot products and exploits symmetry (upper triangle + mirror).
+/// Uses the blocked 4-column kernel for small n (L1-resident) and falls back
+/// to per-dot `simd_dot_f32` for large n. Exploits symmetry (upper triangle + mirror).
 #[inline]
 fn matmul_xtx(x: &[f32], m: usize, n: usize, a: &mut [f32]) {
+    let use_blocked = n >= 16 && n <= 256;
     for i in 0..m {
         let row_i = &x[i * n..(i + 1) * n];
         // Diagonal
         a[i * m + i] = crate::simd::simd_dot_f32(row_i, row_i, n);
-        // Upper triangle + mirror
-        for j in (i + 1)..m {
-            let row_j = &x[j * n..(j + 1) * n];
-            let dot = crate::simd::simd_dot_f32(row_i, row_j, n);
-            a[i * m + j] = dot;
-            a[j * m + i] = dot;
+        if use_blocked {
+            // Upper triangle + mirror, blocked 8 at a time
+            let j_start = i + 1;
+            let j_count = m.saturating_sub(j_start);
+            let j_blocks = j_count / 8;
+
+            for jb in 0..j_blocks {
+                let j = j_start + jb * 8;
+                let rj_rows: [&[f32]; 8] = [
+                    &x[j * n..(j + 1) * n],
+                    &x[(j + 1) * n..(j + 2) * n],
+                    &x[(j + 2) * n..(j + 3) * n],
+                    &x[(j + 3) * n..(j + 4) * n],
+                    &x[(j + 4) * n..(j + 5) * n],
+                    &x[(j + 5) * n..(j + 6) * n],
+                    &x[(j + 6) * n..(j + 7) * n],
+                    &x[(j + 7) * n..(j + 8) * n],
+                ];
+
+                let (s0, s1, s2, s3, s4, s5, s6, s7) = blocked_dot8(row_i, &rj_rows, n);
+                a[i * m + j] = s0;
+                a[i * m + j + 1] = s1;
+                a[i * m + j + 2] = s2;
+                a[i * m + j + 3] = s3;
+                a[i * m + j + 4] = s4;
+                a[i * m + j + 5] = s5;
+                a[i * m + j + 6] = s6;
+                a[i * m + j + 7] = s7;
+                a[j * m + i] = s0;
+                a[(j + 1) * m + i] = s1;
+                a[(j + 2) * m + i] = s2;
+                a[(j + 3) * m + i] = s3;
+                a[(j + 4) * m + i] = s4;
+                a[(j + 5) * m + i] = s5;
+                a[(j + 6) * m + i] = s6;
+                a[(j + 7) * m + i] = s7;
+            }
+
+            // Remaining columns (scalar tail — blocked_dot4 not used to avoid
+            // FMA accumulation order differences on ill-conditioned inputs)
+            for j in (j_start + j_blocks * 8)..m {
+                let row_j = &x[j * n..(j + 1) * n];
+                let dot = crate::simd::simd_dot_f32(row_i, row_j, n);
+                a[i * m + j] = dot;
+                a[j * m + i] = dot;
+            }
+        } else {
+            // Upper triangle + mirror (scalar fallback for large n)
+            for j in (i + 1)..m {
+                let row_j = &x[j * n..(j + 1) * n];
+                let dot = crate::simd::simd_dot_f32(row_i, row_j, n);
+                a[i * m + j] = dot;
+                a[j * m + i] = dot;
+            }
         }
     }
 }
 
 /// Compute `R = A * X` where A is `m × m` and X is `m × n`, result is `m × n`.
-/// Transposes X for contiguous inner-loop access, then uses SIMD dot products.
+/// Transposes X for contiguous inner-loop access, then uses the blocked matmul
+/// kernel to process 8 output columns per A-row load (small m only).
 /// Caller provides `xt_buf` (`m * n` elements) to avoid per-call allocation.
 #[inline]
 fn matmul_ax(a: &[f32], x: &[f32], m: usize, n: usize, r: &mut [f32], xt_buf: &mut [f32]) {
     // Transpose X: columns become contiguous rows in xt (n × m).
     transpose(x, m, n, xt_buf);
 
-    // r[i,j] = dot(a_row_i, xt_col_j) = dot(&a[i*m..], &xt[j*m..], m)
-    for i in 0..m {
-        let a_row = &a[i * m..(i + 1) * m];
-        let r_row = &mut r[i * n..(i + 1) * n];
-        for j in 0..n {
-            r_row[j] = crate::simd::simd_dot_f32(a_row, &xt_buf[j * m..(j + 1) * m], m);
+    // Use blocked kernel for small m (L1-resident). The input X is normalized
+    // to ||X||_F = 1 by the caller (newton_schulz_n_square_into_raw), so all
+    // eigenvalues are in [0, 1] — the blocked FMA order is numerically safe.
+    if m <= 256 && m >= 16 {
+        matmul_at_bt_blocked(a, xt_buf, m, n, m, r);
+    } else {
+        // r[i,j] = dot(a_row_i, xt_col_j) = dot(&a[i*m..], &xt[j*m..], m)
+        for i in 0..m {
+            let a_row = &a[i * m..(i + 1) * m];
+            let r_row = &mut r[i * n..(i + 1) * n];
+            for j in 0..n {
+                r_row[j] = crate::simd::simd_dot_f32(a_row, &xt_buf[j * m..(j + 1) * m], m);
+            }
         }
     }
 }
@@ -485,6 +543,14 @@ pub fn ns_inv_sqrt_psd_into(
     out[..rr].copy_from_slice(x_mat);
 }
 
+/// Compute C = A · Aᵀ for a symmetric `r × r` matrix A (so C = A²).
+/// Exploits symmetry: only computes the upper triangle + mirrors to lower.
+///
+/// Uses `simd_dot_f32` for each element pair. The blocked kernel is NOT used
+/// here because `ns_inv_sqrt_psd_into` can operate on rank-deficient PSD
+/// matrices where the FMA accumulation order affects numerical stability —
+/// the NS polynomial iteration can diverge if the squared matrix's tiny
+/// eigenvalues are rounded differently.
 #[inline]
 fn matmul_symmetric(a: &[f32], r: usize, c: &mut [f32]) {
     for i in 0..r {
@@ -503,6 +569,10 @@ fn matmul_symmetric(a: &[f32], r: usize, c: &mut [f32]) {
 /// so the inner dot product reads both operands row-major (contiguous) and can
 /// hit the SIMD dot kernel; the naive column-walk through B thrashes the cache
 /// on anything that doesn't fit in L1.
+///
+/// Uses `simd_dot_f32` for each element. The blocked kernel is NOT used here
+/// because `ns_inv_sqrt_psd_into` can operate on rank-deficient PSD matrices
+/// where the FMA accumulation order affects numerical stability.
 #[inline]
 fn matmul_nn(a: &[f32], b: &[f32], r: usize, c: &mut [f32], bt_buf: &mut [f32]) {
     transpose(b, r, r, bt_buf);
@@ -514,6 +584,165 @@ fn matmul_nn(a: &[f32], b: &[f32], r: usize, c: &mut [f32], bt_buf: &mut [f32]) 
             c_row_i[j] = crate::simd::simd_dot_f32(a_row_i, &bt_buf[j * r..(j + 1) * r], r);
         }
     }
+}
+
+/// Blocked matmul kernel: C = A · Bᵀ where A is `m×k`, Bᵀ is `k×n` (row j of
+/// Bᵀ = column j of B). Processes 8 output columns per A-row load.
+///
+/// Uses NEON on aarch64, and a 4-accumulator scalar fallback elsewhere.
+/// The block size of 8 provides better amortization of the A-row load and
+/// horizontal reduction overhead than a block size of 4.
+#[inline]
+fn matmul_at_bt_blocked(a: &[f32], bt: &[f32], m: usize, n: usize, k: usize, c: &mut [f32]) {
+    const BLOCK: usize = 8;
+    let j_blocks = n / BLOCK;
+
+    for i in 0..m {
+        let a_row = &a[i * k..(i + 1) * k];
+        let c_row = &mut c[i * n..(i + 1) * n];
+
+        // Process BLOCK output columns at a time.
+        for jb in 0..j_blocks {
+            let j = jb * BLOCK;
+            // Gather BLOCK Bᵀ rows (each length k).
+            let bt_rows: [&[f32]; BLOCK] = [
+                &bt[j * k..(j + 1) * k],
+                &bt[(j + 1) * k..(j + 2) * k],
+                &bt[(j + 2) * k..(j + 3) * k],
+                &bt[(j + 3) * k..(j + 4) * k],
+                &bt[(j + 4) * k..(j + 5) * k],
+                &bt[(j + 5) * k..(j + 6) * k],
+                &bt[(j + 6) * k..(j + 7) * k],
+                &bt[(j + 7) * k..(j + 8) * k],
+            ];
+
+            let (s0, s1, s2, s3, s4, s5, s6, s7) = blocked_dot8(a_row, &bt_rows, k);
+            c_row[j] = s0;
+            c_row[j + 1] = s1;
+            c_row[j + 2] = s2;
+            c_row[j + 3] = s3;
+            c_row[j + 4] = s4;
+            c_row[j + 5] = s5;
+            c_row[j + 6] = s6;
+            c_row[j + 7] = s7;
+        }
+
+        // Handle remaining columns (n not divisible by BLOCK).
+        for j in (j_blocks * BLOCK)..n {
+            c_row[j] = crate::simd::simd_dot_f32(a_row, &bt[j * k..(j + 1) * k], k);
+        }
+    }
+}
+
+/// Compute 8 dot products sharing the same `a` operand.
+/// Returns `(dot(a,b0), dot(a,b1), ..., dot(a,b7))`.
+///
+/// This is the 8-wide extension of `blocked_dot4`, processing 8 output values
+/// per A-row load. On NEON, uses 8 accumulator registers (well within the 32
+/// NEON register file) to hide FMA pipeline latency.
+#[inline(always)]
+fn blocked_dot8(a: &[f32], bs: &[&[f32]; 8], len: usize) -> (f32, f32, f32, f32, f32, f32, f32, f32) {
+    #[cfg(target_arch = "aarch64")]
+    {
+        unsafe { blocked_dot8_neon(a, bs, len) }
+    }
+    #[cfg(not(target_arch = "aarch64"))]
+    {
+        blocked_dot8_scalar(a, bs, len)
+    }
+}
+
+/// NEON implementation of `blocked_dot8`: 8 dot products sharing operand `a`.
+///
+/// Uses 8 NEON accumulators (one per dot), processing 4 elements per FMA.
+/// The 8 independent accumulators fully hide the ~4-cycle FMA pipeline latency
+/// (8 FMAs per 4-cycle window = 2 FMA/cycle throughput). Register usage:
+/// 8 acc + 1 a_temp + 1 b_temp = 10 live regs (within 32).
+#[cfg(target_arch = "aarch64")]
+#[inline]
+unsafe fn blocked_dot8_neon(
+    a: &[f32],
+    bs: &[&[f32]; 8],
+    len: usize,
+) -> (f32, f32, f32, f32, f32, f32, f32, f32) {
+    use core::arch::aarch64::{vaddvq_f32, vdupq_n_f32, vfmaq_f32, vld1q_f32};
+
+    // 8 accumulators as individual variables (not array) to help the compiler
+    // keep them in NEON registers rather than spilling to the stack.
+    let mut acc0 = unsafe { vdupq_n_f32(0.0) };
+    let mut acc1 = unsafe { vdupq_n_f32(0.0) };
+    let mut acc2 = unsafe { vdupq_n_f32(0.0) };
+    let mut acc3 = unsafe { vdupq_n_f32(0.0) };
+    let mut acc4 = unsafe { vdupq_n_f32(0.0) };
+    let mut acc5 = unsafe { vdupq_n_f32(0.0) };
+    let mut acc6 = unsafe { vdupq_n_f32(0.0) };
+    let mut acc7 = unsafe { vdupq_n_f32(0.0) };
+
+    let mut i = 0;
+    let chunks = len / 4;
+    for _ in 0..chunks {
+        let av = unsafe { vld1q_f32(a.as_ptr().add(i)) };
+        acc0 = unsafe { vfmaq_f32(acc0, av, vld1q_f32(bs[0].as_ptr().add(i))) };
+        acc1 = unsafe { vfmaq_f32(acc1, av, vld1q_f32(bs[1].as_ptr().add(i))) };
+        acc2 = unsafe { vfmaq_f32(acc2, av, vld1q_f32(bs[2].as_ptr().add(i))) };
+        acc3 = unsafe { vfmaq_f32(acc3, av, vld1q_f32(bs[3].as_ptr().add(i))) };
+        acc4 = unsafe { vfmaq_f32(acc4, av, vld1q_f32(bs[4].as_ptr().add(i))) };
+        acc5 = unsafe { vfmaq_f32(acc5, av, vld1q_f32(bs[5].as_ptr().add(i))) };
+        acc6 = unsafe { vfmaq_f32(acc6, av, vld1q_f32(bs[6].as_ptr().add(i))) };
+        acc7 = unsafe { vfmaq_f32(acc7, av, vld1q_f32(bs[7].as_ptr().add(i))) };
+        i += 4;
+    }
+
+    let s0 = unsafe { vaddvq_f32(acc0) };
+    let s1 = unsafe { vaddvq_f32(acc1) };
+    let s2 = unsafe { vaddvq_f32(acc2) };
+    let s3 = unsafe { vaddvq_f32(acc3) };
+    let s4 = unsafe { vaddvq_f32(acc4) };
+    let s5 = unsafe { vaddvq_f32(acc5) };
+    let s6 = unsafe { vaddvq_f32(acc6) };
+    let s7 = unsafe { vaddvq_f32(acc7) };
+
+    // Handle remaining elements (len not divisible by 4).
+    let mut s0 = s0;
+    let mut s1 = s1;
+    let mut s2 = s2;
+    let mut s3 = s3;
+    let mut s4 = s4;
+    let mut s5 = s5;
+    let mut s6 = s6;
+    let mut s7 = s7;
+    while i < len {
+        let av = unsafe { *a.get_unchecked(i) };
+        s0 += av * unsafe { *bs[0].get_unchecked(i) };
+        s1 += av * unsafe { *bs[1].get_unchecked(i) };
+        s2 += av * unsafe { *bs[2].get_unchecked(i) };
+        s3 += av * unsafe { *bs[3].get_unchecked(i) };
+        s4 += av * unsafe { *bs[4].get_unchecked(i) };
+        s5 += av * unsafe { *bs[5].get_unchecked(i) };
+        s6 += av * unsafe { *bs[6].get_unchecked(i) };
+        s7 += av * unsafe { *bs[7].get_unchecked(i) };
+        i += 1;
+    }
+
+    (s0, s1, s2, s3, s4, s5, s6, s7)
+}
+
+/// Scalar fallback for `blocked_dot8` (non-NEON targets).
+#[cfg(not(target_arch = "aarch64"))]
+#[inline]
+fn blocked_dot8_scalar(
+    a: &[f32],
+    bs: &[&[f32]; 8],
+    len: usize,
+) -> (f32, f32, f32, f32, f32, f32, f32, f32) {
+    let mut s = [0.0f32; 8];
+    for i in 0..len {
+        let av = a[i];
+        for j in 0..8 {
+            s[j] = av.mul_add(bs[j][i], s[j]);
+        }
+    }
+    (s[0], s[1], s[2], s[3], s[4], s[5], s[6], s[7])
 }
 
 /// Newton-Schulz N-iteration with pre-allocated scratch buffers (zero-alloc after first call).
@@ -648,18 +877,78 @@ fn newton_schulz_n_square_into_raw(
         // B = B·A + C·A², where A is symmetric (from X·Xᵀ), so A² is symmetric.
         // Exploit symmetry: compute upper triangle + mirror instead of full matmul.
         // No transpose needed since A is symmetric (A^T = A).
+        // Uses blocked_dot8 to process 8 j-values per a_row_i load (small m only).
+        let use_blocked_a2 = m >= 16 && m <= 256;
         for i in 0..m {
             let a_row_i = &a_mat[i * m..(i + 1) * m];
             // Diagonal
             let a2_ii = crate::simd::simd_dot_f32(a_row_i, a_row_i, m);
             b_mat[i * m + i] = B * a_row_i[i] + C * a2_ii;
-            // Upper triangle + mirror
-            for j in (i + 1)..m {
-                let a_col_j = &a_mat[j * m..(j + 1) * m];
-                let a2_ij = crate::simd::simd_dot_f32(a_row_i, a_col_j, m);
-                let val = B * a_row_i[j] + C * a2_ij;
-                b_mat[i * m + j] = val;
-                b_mat[j * m + i] = val;
+            if use_blocked_a2 {
+                // Upper triangle + mirror, blocked 8 at a time
+                let j_start = i + 1;
+                let j_count = m.saturating_sub(j_start);
+                let j_blocks = j_count / 8;
+
+                for jb in 0..j_blocks {
+                    let j = j_start + jb * 8;
+                    let aj_rows: [&[f32]; 8] = [
+                        &a_mat[j * m..(j + 1) * m],
+                        &a_mat[(j + 1) * m..(j + 2) * m],
+                        &a_mat[(j + 2) * m..(j + 3) * m],
+                        &a_mat[(j + 3) * m..(j + 4) * m],
+                        &a_mat[(j + 4) * m..(j + 5) * m],
+                        &a_mat[(j + 5) * m..(j + 6) * m],
+                        &a_mat[(j + 6) * m..(j + 7) * m],
+                        &a_mat[(j + 7) * m..(j + 8) * m],
+                    ];
+
+                    let (a2_0, a2_1, a2_2, a2_3, a2_4, a2_5, a2_6, a2_7) =
+                        blocked_dot8(a_row_i, &aj_rows, m);
+                    let v0 = B * a_row_i[j] + C * a2_0;
+                    let v1 = B * a_row_i[j + 1] + C * a2_1;
+                    let v2 = B * a_row_i[j + 2] + C * a2_2;
+                    let v3 = B * a_row_i[j + 3] + C * a2_3;
+                    let v4 = B * a_row_i[j + 4] + C * a2_4;
+                    let v5 = B * a_row_i[j + 5] + C * a2_5;
+                    let v6 = B * a_row_i[j + 6] + C * a2_6;
+                    let v7 = B * a_row_i[j + 7] + C * a2_7;
+                    b_mat[i * m + j] = v0;
+                    b_mat[i * m + j + 1] = v1;
+                    b_mat[i * m + j + 2] = v2;
+                    b_mat[i * m + j + 3] = v3;
+                    b_mat[i * m + j + 4] = v4;
+                    b_mat[i * m + j + 5] = v5;
+                    b_mat[i * m + j + 6] = v6;
+                    b_mat[i * m + j + 7] = v7;
+                    b_mat[j * m + i] = v0;
+                    b_mat[(j + 1) * m + i] = v1;
+                    b_mat[(j + 2) * m + i] = v2;
+                    b_mat[(j + 3) * m + i] = v3;
+                    b_mat[(j + 4) * m + i] = v4;
+                    b_mat[(j + 5) * m + i] = v5;
+                    b_mat[(j + 6) * m + i] = v6;
+                    b_mat[(j + 7) * m + i] = v7;
+                }
+
+                // Remaining columns (scalar tail — blocked_dot4 not used to avoid
+                // FMA accumulation order differences on ill-conditioned inputs)
+                for j in (j_start + j_blocks * 8)..m {
+                    let a_col_j = &a_mat[j * m..(j + 1) * m];
+                    let a2_ij = crate::simd::simd_dot_f32(a_row_i, a_col_j, m);
+                    let val = B * a_row_i[j] + C * a2_ij;
+                    b_mat[i * m + j] = val;
+                    b_mat[j * m + i] = val;
+                }
+            } else {
+                // Scalar fallback for large m
+                for j in (i + 1)..m {
+                    let a_col_j = &a_mat[j * m..(j + 1) * m];
+                    let a2_ij = crate::simd::simd_dot_f32(a_row_i, a_col_j, m);
+                    let val = B * a_row_i[j] + C * a2_ij;
+                    b_mat[i * m + j] = val;
+                    b_mat[j * m + i] = val;
+                }
             }
         }
         matmul_ax(b_mat, x, m, n, bx, xt_buf);
