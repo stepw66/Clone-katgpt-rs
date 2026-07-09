@@ -242,6 +242,28 @@ high-confidence consolidation → freeze-eligible) vs "many equally-weighted
 events" (high entropy → diffuse → not yet settleable). This is a fusion idea,
 novelty TBD — needs Q1-Q4 check before any verdict, and a PoC before any claim.
 
+**Novelty gate Q1-Q4 (performed 2026-07-09): FAIL at Q2 — not modelless-
+constructible on the current pipeline.**
+
+- **Q1 (novel combination?):** YES — entropy-as-consolidation-gate is not in
+  the paper or any existing code.
+- **Q2 (modelless constructible?):** **NO.** `average_embeddings()` in
+  `riir-neuron-db/src/consolidation/mod.rs` does a **uniform average**
+  (`weight_j = 1/N` for all wake events). There is no attention-like weight
+  distribution to compute entropy from — the entropy of a uniform
+  distribution is always `ln(N)`, a trivial constant for a given N.
+  Producing a meaningful entropy requires either (a) a learned query vector
+  (riir-train dependency, like HiLS's `head_cls`) or (b) a new deterministic
+  weighting scheme (recency-weighted, magnitude-weighted — novel mechanism
+  design, not a drop-in).
+- **Q3 (beats existing gate?):** MOOT — can't construct it modellessly.
+- **Q4 (measurable win?):** MOOT — same reason.
+
+**Verdict: closed, not pursued.** The fusion idea requires architectural
+changes (non-uniform consolidation weights) before the entropy is meaningful.
+Re-open only if the consolidation pipeline gains a learned or deterministic
+weighting scheme. No riir-neuron-db note created.
+
 ---
 
 ## 3. Verdict
@@ -302,7 +324,7 @@ queries exist.
 | HoPE positional encoding | **→ riir-train** | Training-time positional strategy. |
 | M-query adjacent packing kernel | (not routed) | GPU Tensor-Core-specific; our stack is CPU/SIMD + ANE. The "adjacent queries overlap" observation is noted for any future batched sparse-attn design. |
 | Hierarchical softmax factorization | (noted, not routed) | Pure algebra whose purpose is gradient flow; dormant for modelless inference. |
-| Consolidation-concentration fusion idea | (noted in §2.5) | Speculative; needs Q1-Q4 + PoC before any riir-neuron-db note. |
+| Consolidation-concentration fusion idea | **CLOSED** (novelty gate FAIL Q2) | The consolidation pipeline uses uniform averaging (`weight_j = 1/N`), so entropy is trivially `ln(N)`. Not modelless-constructible without a learned query or new weighting scheme. See §2.5 for the full Q1-Q4 gate. |
 
 ---
 
