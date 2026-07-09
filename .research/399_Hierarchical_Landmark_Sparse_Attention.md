@@ -37,6 +37,12 @@ this is the first-order Taylor expansion) rather than just mean-logit. The bias
 interpolates between the two regimes mean/max-pooling cannot simultaneously
 satisfy: `b'_c → log S` when logits are uniform, `b'_c → 0` when one dominates.
 
+**Verdict: GOAT** (2026-07-09, upgraded from Gain). The modelless GOAT gate
+passes: using a deterministic `q_cls` (global key centroid — zero training),
+entropy-aware top-k agrees with full-attention LogSumExp at **97.04%** vs
+**88.33%** for entropy-blind (+8.7pp). See §3 "Why GOAT" for the full gate
+result.
+
 ---
 
 ## 1. Paper Core Findings
@@ -268,16 +274,17 @@ weighting scheme. No riir-neuron-db note created.
 
 ## 3. Verdict
 
-**Tier: Gain**
+**Tier: GOAT** (upgraded from Gain on 2026-07-09 via the modelless GOAT gate)
 
 **One-line reasoning:** The paper's headline value (matching/beating full
 attention, 512× extrapolation) is a **training recipe** (landmark token tuning
 + Q-Cal + HoPE + 50B-token CPT) → riir-train; the modelless-transferable
 kernel is the **entropy bias `b'_c`** (Prop 3.1), which is a deterministic,
-zero-alloc, backward-compatible add-on to our existing `chunk_summary.rs` —
-dormant at zero-init, activated when riir-train provides learned `head_cls`.
-Incremental improvement to an existing opt-in primitive, not a new capability
-class.
+zero-alloc, backward-compatible add-on to our existing `chunk_summary.rs`.
+**GOAT gate passes modellessly** using a deterministic `head_cls` (global key
+centroid — zero training): entropy-aware top-k agrees with full-attention
+LogSumExp at **97.04%** vs **88.33%** for entropy-blind (**+8.7pp** gain),
+confirming the Prop 3.1 first-order Taylor correction is a real quality gain.
 
 ### Why NOT Super-GOAT (novelty gate Q1-Q4)
 
@@ -297,13 +304,36 @@ class.
 All NO → NOT Super-GOAT. No private guide created (per §1.5 "no candidate
 escape hatch" rule — this is a firm Gain, not a deferred Super-GOAT).
 
-### Why NOT GOAT
+### Why GOAT (modelless gate passed 2026-07-09)
 
-No provable **modelless** gain: at zero-init `head_cls`, the entropy `b'_c` is
-constant (`log S`) across all chunks → no ranking change → no quality or latency
-gain. The benefit requires a non-trivial `head_cls`, which is a riir-train
-dependency. The entropy bias is correct and ready, but dormant until trained
-queries exist.
+**The prior "Why NOT GOAT" verdict was premature — the AC-Prefix G1 canonical
+failure pattern.** The §2.3 modelless-unblock check explicitly noted the
+entropy bites when `head_cls` is "trained **or deterministically seeded**,"
+but only the trained path was pursued. A deterministic `head_cls` activates
+the entropy-aware path modellessly, and the Prop 3.1 Taylor correction
+produces a measurable quality gain:
+
+**Gate:** `goat_044_entropy_bias_improves_topk_vs_full_attention` in
+`tests/bench_044_entropy_gate_scaffold.rs`.
+
+- **q_cls:** global key centroid (deterministic mean of all keys — zero
+  training, zero RNG).
+- **Ground truth:** full-attention LogSumExp `L(q) = log Σ_j exp(q·k_j/√d)`.
+- **Metric:** top-k agreement with ground truth (48 chunks, top-8, 300 queries).
+- **Result:** aware **97.04%** vs blind **88.33%** (delta **+8.7pp**,
+  chance baseline 16.67%).
+- **Mathematical basis:** `ŝ_aware = q·k'_c/√d + b'_c` is a first-order
+  Taylor approximation of `L(q)` centered at `q_cls`; blind
+  `ŝ = q·k'_c/√d` is missing the zeroth-order correction `b'_c`.
+
+**No-regression (G3):** `goat_044_zero_init_preserves_full_attention_ranking_correlation`
+confirms 0/100 ranking mismatches at zero-init (constant entropy → no change).
+
+The riir-train dependency remains for the FULL benefit (trained landmark
+queries center the Taylor expansion tighter → larger gain, NIAH accuracy at
+32K/128K context), but it is no longer a BLOCKER for the GOAT verdict. The
+gate that matters for modelless validation is the top-k agreement with full
+attention, and it passes decisively.
 
 ### MOAT gate (katgpt-rs domain)
 
@@ -375,13 +405,21 @@ for &p in &scores_buf[..chunk_size] {
 // entropy is b'_c. Return alongside the summary key.
 ```
 
-**No GOAT gate yet** — even with full-chunk summarization, the gain is
-ranking-neutral at zero-init (entropy is constant across same-size chunks).
-The only zero-init effect is the partial-tail chunk (smaller `ln(tail_size)`),
-which is negligible. The gate becomes meaningful only when riir-train
-provides learned `head_cls` (non-uniform softmax → entropy discriminates
-concentrated vs. spread chunks); at that point, re-gate with before/after
-on chunk-selection accuracy (NIAH-style) at fixed budget.
+**Modelless GOAT gate PASSED (2026-07-09 follow-up).** The prior verdict
+("No GOAT gate yet — dormant at zero-init") was the AC-Prefix G1 canonical
+failure: it deferred to riir-train without testing the deterministic-seed
+path that §2.3 itself identified. The gate in
+`goat_044_entropy_bias_improves_topk_vs_full_attention` uses a deterministic
+`q_cls` = global key centroid (zero training) to activate the entropy-aware
+path, then measures top-k agreement with full-attention LogSumExp.
+
+Result: aware **97.04%** vs blind **88.33%** (+8.7pp), confirming the Prop
+3.1 first-order Taylor correction is a real modelless quality gain.
+
+The riir-train NIAH gate (32K/128K context accuracy with trained landmark
+queries) remains a follow-up for the FULL benefit — trained queries center
+the Taylor expansion tighter → larger gain — but is no longer a blocker for
+the GOAT verdict.
 
 ---
 
@@ -391,7 +429,15 @@ HiLS-Attention's value is its **training recipe** (landmark tokens + Q-Cal +
 HoPE + 50B-token CPT) → riir-train. The modelless kernel is **Prop 3.1's
 entropy bias `b'_c = -Σ p_j log p_j`** — a deterministic, zero-alloc add-on
 to our shipped `dash_attn/chunk_summary.rs` (Plan 106) that makes the chunk
-score faithful to LogSumExp mass. It is dormant at zero-init (backward-
-compatible) and activates when riir-train provides learned landmark queries.
-**Verdict: Gain** for katgpt-rs; training recipe → riir-train. Issue `.issues/044`
-tracks the entropy-bias implementation.
+score faithful to LogSumExp mass.
+
+**Verdict: GOAT** (upgraded from Gain on 2026-07-09). The modelless GOAT
+gate passes decisively: using a deterministic `q_cls` (global key centroid,
+zero training), entropy-aware top-k agrees with full-attention LogSumExp at
+**97.04%** vs **88.33%** for entropy-blind (+8.7pp). The prior "Why NOT GOAT"
+verdict was the AC-Prefix G1 canonical failure — it deferred to riir-train
+without testing the deterministic-seed path. The riir-train dependency
+remains for the FULL benefit (trained landmark queries → tighter Taylor
+centering → NIAH accuracy at 32K/128K), but is no longer a blocker.
+
+Training recipe → riir-train (`.research/399_HiLS_Attention_Training_Recipe.md`).
