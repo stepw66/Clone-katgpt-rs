@@ -158,7 +158,7 @@ block-2 via Plan 412, C3 oracle). T4 ran the pre-registered M1 classification.
 | Task | C0 floor-6 | C1 flat-5 | C2 block-2 | C3 oracle | Verdict |
 |---|---|---|---|---|---|
 | S1-vs-S2 AUC | 1.0000 | **1.0000** | 1.0000 | 1.0000 | ceiling — all tied |
-| S3 contrib AUC | 0.5000 | 0.5000 | 0.5000 | 0.5000 | degenerate (chance) |
+| S3 contrib AUC | **0.9987** | 0.7800 | **0.9987** | **0.9987** | non-degenerate (z-score) — block ties flat-6 |
 
 - **Pre-registered threshold `AUC(C2)−AUC(C0) ≥ 0.15` → FAIL (delta = 0.0000).**
 - **Flat-6 suffices (C0 AUC = 1.0 ≥ 0.85) → YES**, and stronger: **C1 flat-5
@@ -169,11 +169,26 @@ block-2 via Plan 412, C3 oracle). T4 ran the pre-registered M1 classification.
   vs predator-ABSENT (S2, fear_fx = 0), which is trivially separable by ANY
   representation. The hard case the block was designed for — predator-fear vs
   starvation-fear at *matched* flat-fear — is not what these scenarios produce.
-- **S3 (confounded) was degenerate:** `pos_test = 0` — the prey flees the
-  predator within a few ticks, so predator-fear and starvation-fear are
-  temporally separated (predator early, starvation late), never co-active. The
-  sim does not sustain a confounded regime, so contribution separation is
-  untestable on these traces (oracle also at 0.5 → fixture cannot test it).
+- **S3 (confounded) contribution separation — non-degenerate after label fix,
+  block STILL ties the trivial fix.** The raw `|fear_fx| > hunger` label is
+  degenerate (predator force ~0.005–0.33 vs hunger ~0.3–1.0 → only 1/6000 S3
+  frames satisfy it; the prey escapes the predator within ~15 ticks so
+  predator-fear is transient while hunger accumulates). The committed T4 code
+  (commit `eecb6425`) uses a **scale-comparable z-score label** instead: each
+  contribution axis is z-scored within the S3 population and a frame is
+  "predator-elevated" iff `z(|fear_fx|) > z(hunger)` (~45% positive,
+  non-degenerate). Result: **C1 flat-5 = 0.7800** (single fear scalar cannot
+  see the hunger axis at all — the flat-5 collapse), but **C0 floor-6 = C2
+  block-2 = C3 oracle = 0.9987**. **C2 block advantage over C0 = 0.0000** —
+  the block ties the trivial fix (add a hunger scalar) even on the
+  properly-constructed contribution-separation task. Predator and starvation
+  signals already live on orthogonal raw dims (`fear_fx` vs `hunger`) in this
+  sim, so the block-sparse confound thesis has nothing to separate by
+  construction.
+- **This *strengthens* the NOT-Super-GOAT finding.** The earlier `pos_test = 0`
+  degenerate read (commit `65991228`, now superseded) was a label artifact —
+  the corrected non-degenerate task confirms the block adds nothing even when
+  the test is fair.
 
 **T5 (M2 designer steerability) + T6 (M3 downstream observability) were deferred**
 as moot: the pre-registered decision rule makes M1 failure → Q3 = NO (the M2/M3-
