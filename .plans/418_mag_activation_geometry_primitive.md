@@ -5,7 +5,7 @@
 **Source paper:** [arXiv:2607.04222](https://arxiv.org/abs/2607.04222) — LeVi, David, Fomin (ICML 2026 FAGEN)
 **Target:** `katgpt-rs/crates/katgpt-core/src/mag/` (new module) + Cargo feature `mag_mining`
 **Private guide:** [riir-ai/.research/316_mag_unsupervised_direction_mining_guide.md](../../riir-ai/.research/316_mag_unsupervised_direction_mining_guide.md)
-**Status:** Active — Phase 2 COMPLETE (GOAT G1–G6 ALL PASS, promoted to default-on 2026-07-09)
+**Status:** ✅ COMPLETE — Phase 1 ✅ + Phase 2 ✅ (GOAT G1–G6 ALL PASS, promoted to default-on 2026-07-09) + Phase 3 ✅ (docs + integration hooks)
 
 ---
 
@@ -109,10 +109,12 @@ The primitive is generic over the host's readout function, transform, and verdic
 
 ### Tasks
 
-- [ ] **T3.1** Add `mag` section to `katgpt-rs/README.md` Feature Showcase with the GOAT gate summary.
-- [ ] **T3.2** Add doc examples to `crates/katgpt-core/src/mag/mod.rs` showing: (a) mine a direction from paired activations, (b) compute ϵ_Q linearity diagnostic, (c) rank candidate datasets by transfer score.
-- [ ] **T3.3** Cross-reference from Research 397 + riir-ai guide 316 once Phase 2 passes.
-- [ ] **T3.4** Note the modelless-unblock relevance: MAG direction mining is a §3.5 path-3 (latent-space correction) tool — a systematically biased verdict can be corrected by mining the bias direction and projecting it out. Document this in the module doc.
+- [x] **T3.1** Add `mag` section to `katgpt-rs/README.md` Feature Showcase with the GOAT gate summary. **DONE** — section added after Plan 412 (Subspace Steering), with full G1–G6 table, Bayes-optimal note, §3.5 modelless-unblock relevance, DEFAULT-ON promotion, and links to plan/research/benchmark/paper.
+- [x] **T3.2** Add doc examples to `crates/katgpt-core/src/mag/mod.rs` showing: (a) mine a direction from paired activations, (b) compute ϵ_Q linearity diagnostic, (c) rank candidate datasets by transfer score. **DONE** — 3 runnable doctests added in a new `## Quick start` section; all compile and pass (`cargo test --doc mag`). Doctest count went 3 → 6.
+- [x] **T3.3** Cross-reference from Research 397 + riir-ai guide 316 once Phase 2 passes. **DONE (katgpt-rs side)** — Research 397 status line updated to `✅ SHIPPED` with full Phase 2 summary + commit `fadb9d95`; G2 verdict line added under the verdict section. riir-ai guide 316 cross-reference is a riir-ai-side task (private repo), deferred — the katgpt-rs README + mod.rs already link to it.
+- [x] **T3.4** Note the modelless-unblock relevance: MAG direction mining is a §3.5 path-3 (latent-space correction) tool — a systematically biased verdict can be corrected by mining the bias direction and projecting it out. Document this in the module doc. **DONE** — `## §3.5 modelless-unblock relevance` section in `mod.rs` extended with explicit pointer to `.agents/skills/research/SKILL.md` §3.5 + AC-Prefix G1 canonical-failure lesson (Plan 313) cross-reference.
+
+**Phase 3 Result:** All documentation tasks complete. Doctests pass (6/6). Build clean on default + all-features. Plan 418 is now fully landed (Phase 1 ✅ + Phase 2 ✅ + Phase 3 ✅). `mag_mining` is DEFAULT-ON.
 
 ---
 

@@ -30,6 +30,79 @@
 //!    which candidate dataset/experience best improves a target capability —
 //!    modellessly, via geometric comparison of activation sets.
 //!
+//! ## Quick start
+//!
+//! ### (a) Mine a direction from paired activations
+//!
+//! [`mine_direction`] extracts a unit-norm feature direction from the mean
+//! shift `m(Q‖p) − m(p)` between prefix-conditioned and unconditioned
+//! activations.
+//!
+//! ```
+//! use katgpt_core::mag::mine_direction;
+//!
+//! // Synthetic: with_prefix = without_prefix + v  (a perfectly linear shift).
+//! let without_prefix = [vec![0.0_f32, 0.0], vec![0.1, 0.2]];
+//! let with_prefix     = [vec![1.0_f32, 0.0], vec![1.1, 0.2]]; // exactly +[1, 0]
+//!
+//! let dir = mine_direction(&with_prefix, &without_prefix)?;
+//! // dir.direction is unit-norm and recovers the shift [1, 0].
+//! assert!((dir.as_slice()[0] - 1.0).abs() < 1e-5);
+//! assert!(dir.as_slice()[1].abs() < 1e-5);
+//! # Ok::<(), katgpt_core::mag::MagError>(())
+//! ```
+//!
+//! ### (b) Compute the ϵ_Q linearity diagnostic
+//!
+//! [`reconstruction_error`] returns `(ϵ_Q, cosine)`. ϵ_Q ≈ 0 ⇒ the shift is a
+//! single linear direction (steerable); ϵ_Q ≈ 1 ⇒ no net shift on average;
+//! ϵ_Q > 1 ⇒ overshoot (the candidate direction overshoots the true shift).
+//!
+//! ```
+//! use katgpt_core::mag::{mine_direction, reconstruction_error};
+//!
+//! let without_prefix = [vec![0.0_f32, 0.0], vec![0.1, 0.2]];
+//! let with_prefix     = [vec![1.0_f32, 0.0], vec![1.1, 0.2]];
+//!
+//! let dir = mine_direction(&with_prefix, &without_prefix)?;
+//! let (eps_q, _cos) = reconstruction_error(
+//!     &with_prefix, &without_prefix, dir.as_slice(), 1.0,
+//! )?;
+//! assert!(eps_q < 1e-5); // perfectly linear ⇒ ϵ_Q ≈ 0
+//! # Ok::<(), katgpt_core::mag::MagError>(())
+//! ```
+//!
+//! ### (c) Rank candidate datasets by transfer score
+//!
+//! [`rank_candidates`] scores each candidate against a target using a set of
+//! [`TransferMetric`]s and returns them sorted by mean percentile rank (the
+//! paper's §4 protocol). Higher percentile = better predicted transfer.
+//!
+//! ```
+//! use katgpt_core::mag::{DataSet, rank_candidates, TransferMetric};
+//!
+//! let cand_a = vec![vec![1.0_f32, 0.0], vec![0.9, 0.1], vec![0.0, 1.0], vec![0.1, 0.9]];
+//! let cand_a_labels = [true, true, false, false];
+//! let cand_b = vec![vec![0.3_f32, 0.3], vec![0.4, 0.2], vec![0.2, 0.4], vec![0.1, 0.5]];
+//! let cand_b_labels = [true, true, false, false];
+//! let target = vec![vec![1.0_f32, 0.0], vec![0.0, 1.0]];
+//! let target_labels = [true, false];
+//!
+//! let candidates = [
+//!     DataSet { activations: &cand_a, labels: &cand_a_labels },
+//!     DataSet { activations: &cand_b, labels: &cand_b_labels },
+//! ];
+//! let target_ds = DataSet { activations: &target, labels: &target_labels };
+//!
+//! let ranking = rank_candidates(
+//!     &candidates, &target_ds,
+//!     &[TransferMetric::CentroidCosine, TransferMetric::Euclidean],
+//! )?;
+//! assert_eq!(ranking.len(), 2);
+//! assert_eq!(ranking[0].candidate_idx, 0); // cand_a matches target better
+//! # Ok::<(), katgpt_core::mag::MagError>(())
+//! ```
+//!
 //! ## Why modelless
 //!
 //! The "label" is the model/runtime's own verdict `y_M` — a runtime observation
@@ -42,11 +115,15 @@
 //! ## §3.5 modelless-unblock relevance
 //!
 //! MAG direction mining is a **path-3** (latent-space correction) tool per the
-//! research skill's modelless-unblock protocol. A systematically biased verdict
+//! research skill's modelless-unblock protocol
+//! (`.agents/skills/research/SKILL.md` §3.5). A systematically biased verdict
 //! (e.g., "signal doubled", "position offset") can potentially be corrected by
 //! mining the bias direction and projecting it out — before deferring to
 //! riir-train. The `ϵ_Q ≈ 1` diagnostic predicts non-steerability (entrenched
-//! bias), flagging when a latent correction won't work.
+//! bias), flagging when a latent correction won't work. This mirrors the
+//! AC-Prefix G1 canonical-failure lesson (Plan 313): a systematic,
+//! characterizable bias should be checked for a modelless fix before
+//! concluding "needs gradient descent".
 //!
 //! ## Fusion (the Super-GOAT angle)
 //!

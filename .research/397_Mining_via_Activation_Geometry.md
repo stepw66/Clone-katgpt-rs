@@ -2,7 +2,7 @@
 
 > **Source:** [Unsupervised Features Mining via Activation Geometry](https://arxiv.org/abs/2607.04222) — LeVi, David, Fomin (Zenity / Technion), ICML 2026 FAGEN Workshop, Jul 2026
 > **Date:** 2026-07-09
-> **Status:** Active — Super-GOAT; primitive + plan + private guide created this session
+> **Status:** ✅ SHIPPED — Plan 418 Phase 2 COMPLETE (2026-07-09). GOAT G1–G6 ALL PASS, `mag_mining` promoted to DEFAULT-ON. G2 (the headline kill-it gate) verified: contrast directions from self-labeled classes ARE linearly separable (LOO acc 0.925 @σ=1.5, 0.810 @σ=3.0). G4 (transfer) 0.720 Top-1 vs raw cosine 0.220 (3.3×). Phase 3 (docs + integration hooks) complete. See `.plans/418_mag_activation_geometry_primitive.md` + `.benchmarks/418_mag_goat.md`.
 > **Related Research:** 144 (Functional Emotions — supervised cousin), 276 (PersonalityWeightedComposition — direction consumer), 290 (Latent Field Steering — injection cousin), 302 (FAME/CommittedFieldBlend — archetype-direction consumer), 357 (Neural Procedural Memory Activation Steering), 388 (Jacobian Lens — SVD readout cousin), 393 (Block-Sparse Featurizer), 196 (KG Latent Octree — supervised direction extraction)
 > **Related Plans:** 162 (EmotionDirections — supervised), 297 (PersonalityWeightedComposition), 309 (Latent Field Steering), 321 (CommittedFieldBlend), 405 (Spherical Steering), 412 (Subspace Steering), 418 (this primitive — open MAG)
 > **Cross-ref (riir-ai):** Research 316 — *MAG Unsupervised Direction Mining Game Runtime Guide* (private Super-GOAT selling-point doc)
@@ -150,6 +150,8 @@ Consolidation picks which wake-events to freeze into a shard. MAG transfer predi
 **Selling point:** NPCs discover their own reasoning directions from runtime verdicts and predict which experiences transfer best — closing the acquisition gap in the direction-vector ecosystem. No labeled data, no training.
 
 **Not Super-GOAT if:** G2 (contrast direction separates model-self-labeled classes at ≥threshold accuracy on a controlled toy) fails — if model-self-labels produce non-separable directions, the unsupervised acquisition is no better than random and demotes to Gain (research-only).
+
+**G2 verdict (2026-07-09): PASSED** — LOO accuracy 0.925 at σ=1.5 (gate ≥0.75), 0.810 at σ=3.0 (gate ≥0.60). Super-GOAT tier **confirmed**. The headline kill-it gate held with comfortable margins; `mag_mining` promoted to default-on (commit `fadb9d95`).
 
 ### MOAT gate (per domain, §1.6)
 

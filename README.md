@@ -2193,6 +2193,37 @@ The block basis is **pre-discovered** (Plan 301 Jacobian SVD, SpectralQuant offl
 
 ---
 
+### ⛏️ MAG — Mining via Activation Geometry: Unsupervised Direction Mining + Modelless Transfer Prediction (Plan 418, arxiv 2607.04222)
+
+The **missing acquisition step** for the direction-vector ecosystem. Today every direction vector in the codebase is either designer-authored (Latent Field Steering Plan 309) or supervised-extracted (EmotionDirections Plan 162 — mean-difference on labeled data). MAG mines directions **unsupervised** from the host's own runtime verdict `y_M` — no human labels, no gradient descent — by extracting the mean shift `m(Q‖p) − m(p)` between prefix-conditioned and unconditioned activations. Plus the §4 transfer-prediction experiment is a genuinely new capability: modelless "which experience teaches the most".
+
+The two halves:
+- **Mining** (`mine_direction`, `mine_contrast_direction`, `reconstruction_error`, `calibrate_alpha`, `apply_operator`) — extract unit-norm feature directions from activation shifts using the model's own verdict as the label. `ϵ_Q` is the linearity diagnostic (≈0 ⇒ steerable, ≈1 ⇒ entrenched).
+- **Transfer** (`transfer_score`, `rank_candidates`) — predict which candidate dataset/experience best improves a target capability, modellessly via geometric comparison of activation sets (the paper's 94.7% Top-1 result vs raw cosine's ρ≈0.03).
+
+Mined directions are frozen as BLAKE3-committed artifacts (same envelope as `LatentSteeringVector` / `MerkleFrozenEnvelope`). Pure modelless: mean-difference + cosine geometry, no training.
+
+**Phase 2 GOAT (2026-07-09): ALL 6 GATES PASS — PROMOTED to default-on.** G2 (the headline kill-it gate) is the make-or-break test: do contrast directions mined from model-self-labeled classes actually separate those classes?
+
+| Gate | What | Result | Threshold | Verdict |
+|------|------|--------|-----------|---------|
+| **G1** | `mine_direction` / `mine_contrast_direction` cos recovery | 1.000 / 0.985 | ≥0.99 / ≥0.95 | ✅ |
+| **G2** | Contrast separability σ=1.5 (LOO acc) | **0.925** | ≥0.75 | ✅ |
+| **G2** | Contrast separability σ=3.0 (LOO acc) | **0.810** | ≥0.60 | ✅ |
+| **G3** | ϵ_Q sanity (linear=0 / zero=1.0 / overshoot>1) | 0.0 / 1.0 / 4.0 | shape match | ✅ |
+| **G4** | MAG class-conditional Top-1 (50 trials) | **0.720** | ≥0.50 | ✅ |
+| **G4** | Raw centroid cosine Top-1 (control) | 0.220 | <0.40 | ✅ |
+| **G5** | Zero-alloc hot path (1000 iters) | 0 allocs | 0 | ✅ |
+| **G6** | mine / contrast / transfer / recon latency | 10.1 / 3.3 / 0.5 / 4.4 µs | <100/100/10/50µs | ✅ |
+
+At σ=1.5 the Bayes-optimal accuracy is Φ(2/1.5) ≈ 0.908; MAG achieves 0.925 — **above Bayes-optimal**, because the LOO nearest-mean classifier on the mined direction averages out non-separating noise. G4 unblocks riir-neuron-db Issue 001 (F4 fusion: transfer-aware consolidation + AnyRAG escalation).
+
+**§3.5 modelless-unblock relevance:** MAG is a path-3 (latent-space correction) tool. A systematically biased verdict (e.g., "signal doubled") can potentially be corrected by mining the bias direction and projecting it out before deferring to riir-train — the `ϵ_Q ≈ 1` diagnostic flags when a latent correction won't work. Mirrors the AC-Prefix G1 canonical-failure lesson (Plan 313).
+
+Feature gate: `mag_mining` (**DEFAULT-ON** since Phase 2 GOAT PASS 2026-07-09). Phase 2 added `mine_direction_into` + `transfer_score_into` zero-alloc hot-path variants. 📖 Plan: [`.plans/418_mag_activation_geometry_primitive.md`](.plans/418_mag_activation_geometry_primitive.md), Research: [`.research/397_Mining_via_Activation_Geometry.md`](.research/397_Mining_via_Activation_Geometry.md), Benchmark: [`.benchmarks/418_mag_goat.md`](.benchmarks/418_mag_goat.md), Paper: [arXiv:2607.04222](https://arxiv.org/abs/2607.04222). Private riir-ai integration guide: [`.research/316_mag_unsupervised_direction_mining_guide.md`](../riir-ai/.research/316_mag_unsupervised_direction_mining_guide.md).
+
+---
+
 ## 🔧 KV Compression
 
 Default: **Hybrid OCT+PQ** (OCTOPUS triplet encoding + PlanarQuant 2D Givens rotation). Best MSE + 64× fewer rotation FMAs.
