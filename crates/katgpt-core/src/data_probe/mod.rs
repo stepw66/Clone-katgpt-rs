@@ -104,8 +104,9 @@ pub use typical_set::{Regime, RegimeDistribution, classify_regime, regime_distri
 
 #[cfg(feature = "sink_aware_attn")]
 pub use geometry::{
-    GeometryReport, LayerSinkSummary, avg_cosine_similarity, effective_rank,
-    representation_geometry_report, summarize_layer_sinks,
+    GeometryReport, LayerSinkSummary, WithinClassGeometryReport, avg_cosine_similarity,
+    effective_rank, representation_geometry_report, summarize_layer_sinks,
+    within_class_effective_rank, within_class_effective_rank_owned, within_class_geometry_report,
 };
 
 #[cfg(feature = "sink_aware_attn")]

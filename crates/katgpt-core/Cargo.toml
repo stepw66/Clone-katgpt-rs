@@ -1191,3 +1191,13 @@ required-features = ["mcts_state_action_cache"]
 name = "bench_390_mcts_state_action_cache_goat"
 harness = false
 required-features = ["mcts_state_action_cache"]
+
+# Plan 415 — Within-Class Effective Rank GOAT G4 latency bench. Compares
+# within_class_effective_rank against the shipped effective_rank at dim=64,
+# n=256, C=4 — both should be dominated by the O(dim³) Jacobi eigensolver; the
+# within-class O(n·d) class-mean pass should be negligible. Gate: ratio < 3.0x.
+# std::time::Instant + harness = false (mirrors bench_377 / bench_410).
+[[bench]]
+name = "bench_415_within_class_erank_goat"
+harness = false
+required-features = ["sink_aware_attn"]

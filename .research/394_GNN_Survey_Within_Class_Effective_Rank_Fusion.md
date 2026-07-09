@@ -173,9 +173,13 @@ Q2 fails → **GOAT, not Super-GOAT.** No private guide required.
 
 ---
 
-## 4. Plan sketch (Fusion A → katgpt-rs)
+## 4. Plan 415 (executed 2026-07-09) — Fusion A → katgpt-rs
 
-Open primitive, target `crates/katgpt-core/src/data_probe/geometry.rs` (alongside the existing `effective_rank`).
+**Status:** COMPLETE — all gates PASS. Plan file: `katgpt-rs/.plans/415_within_class_effective_rank.md`.
+
+**Correction from the original sketch below:** `data_probe/geometry.rs` is gated `sink_aware_attn` (NOT default-on — the original sketch was wrong). The primitive inherits that gate, ships opt-in alongside its sibling `effective_rank`, and requires no Cargo.toml change. No promotion is attempted (the parent Plan 287 G2/G3 gate that would promote `sink_aware_attn` is still pending).
+
+**Original sketch (preserved for reference):**
 
 ```markdown
 # Plan NNN: Within-Class Effective Rank — Class-Conditioned Collapse Diagnostic
