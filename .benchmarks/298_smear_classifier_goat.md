@@ -126,7 +126,7 @@ The classifier is ready for integration. Downstream consumers (riir-ai Cognitive
   - `crates/katgpt-core/src/faithfulness/probe.rs` (Phase 2 — `SmearSource` trait + `InterventionOutcome` + `FaithfulnessProfileFull` + `with_smear_classifier` + `probe_intervention_full` + `faithfulness_profile_full`)
 - **Tests:** `tests/bench_298_smear_classifier_goat.rs` (G2)
 - **Bench:** `benches/smear_classifier_bench.rs` (G3)
-- **API docs:** [`.docs/04_calibration/faithfulness_probe.md`](../.docs/04_calibration/faithfulness_probe.md)
+- **API docs:** [`.docs/calibration/faithfulness_probe.md`](../.docs/calibration/faithfulness_probe.md)
 
 ## TL;DR
 

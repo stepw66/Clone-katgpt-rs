@@ -116,5 +116,5 @@ The three arms cover the full planning spectrum:
 ## Related
 
 - Plan 112: `.plans/112_sr2am_configurator.md`
-- Bandit infrastructure: `.docs/06_game_arenas/heuristic_learning.md`
+- Bandit infrastructure: `.docs/game_arenas/heuristic_learning.md`
 - δ-Mem: `.benchmarks/033_lt2_looped_goat.md`

@@ -12,7 +12,9 @@ arenas. The open sibling of the private `riir-ai` runtime.
 
 ## Convention
 
-- **Folders are numbered** (`01_orientation/` … `10_audits/`) for sort order.
+- **Folders have NO number prefix** (`orientation/`, `inference/`, … `audits/`) —
+  they sort alphabetically; the reading order is conveyed by this README's
+  doc-group section below, not the folder names. This matches `riir-ai/.docs/`.
 - **Files inside have NO number prefix** — add a new doc by dropping `slug.md`
   in the right group folder and adding one line to the relevant group README.
 - **Numbers in `.plans/` and `.docs/` live in independent namespaces** — they
@@ -25,61 +27,61 @@ arenas. The open sibling of the private `riir-ai` runtime.
 
 | Folder | What it covers |
 |---|---|
-| [`01_orientation/`](01_orientation/) | Workspace overview + capability list, full core-architecture reference, paper → feature comparison matrix |
+| [`orientation/`](orientation/) | Workspace overview + capability list, full core-architecture reference, paper → feature comparison matrix |
 
 ### Inference — the speculative decoding + search engine
 
 | Folder | What it covers |
 |---|---|
-| [`02_inference/`](02_inference/) | Speculative decoding (DDTree + DFlash + Leviathan verification), SpecHop continuous multi-hop, KV cache compression alternatives, MTP threshold guide, Progressive MCGS graph search |
+| [`inference/`](inference/) | Speculative decoding (DDTree + DFlash + Leviathan verification), SpecHop continuous multi-hop, KV cache compression alternatives, MTP threshold guide, Progressive MCGS graph search |
 
 ### Memory — modelless memory primitives
 
 | Folder | What it covers |
 |---|---|
-| [`03_memory/`](03_memory/) | Raven RSM O(1) routing slot memory, Product Key Memory O(√N) retrieval, Engram hash-addressed conditional memory, MicroRecurrentBeliefState attractor/leaky kernel, NPC Sense Composition, Sleep consolidation at eviction |
+| [`memory/`](memory/) | Raven RSM O(1) routing slot memory, Product Key Memory O(√N) retrieval, Engram hash-addressed conditional memory, MicroRecurrentBeliefState attractor/leaky kernel, NPC Sense Composition, Sleep consolidation at eviction |
 
 ### Calibration — probes, gates, and confidence calibration
 
 | Folder | What it covers |
 |---|---|
-| [`04_calibration/`](04_calibration/) | CCE moderator, CausalHeadImportance scale-normalized fusion, FaithfulnessProbe causal-intervention diagnostic, Salience Tri-Gate per-tick emit gate, sigmoid-not-softmax universality-class escape |
+| [`calibration/`](calibration/) | CCE moderator, CausalHeadImportance scale-normalized fusion, FaithfulnessProbe causal-intervention diagnostic, Salience Tri-Gate per-tick emit gate, sigmoid-not-softmax universality-class escape |
 
 ### Adaptation — modelless adaptation & distillation
 
 | Folder | What it covers |
 |---|---|
-| [`05_adaptation/`](05_adaptation/) | Model adaptation technique survey (LoRA / merge / spectral-quant KV), Lucebox-hub advanced techniques, PEIRA modelless distillation |
+| [`adaptation/`](adaptation/) | Model adaptation technique survey (LoRA / merge / spectral-quant KV), Lucebox-hub advanced techniques, PEIRA modelless distillation |
 
 ### Game Arenas — heuristic-learning proof-of-concept engines
 
 | Folder | What it covers |
 |---|---|
-| [`06_game_arenas/`](06_game_arenas/) | The HL thesis arenas: Sudoku, Bomberman, Monopoly FSM, FFT Tactics, Go; HL infrastructure + arena detail, open-ended problem-evolution arena, Bomber LoRA A/B artifacts |
+| [`game_arenas/`](game_arenas/) | The HL thesis arenas: Sudoku, Bomberman, Monopoly FSM, FFT Tactics, Go; HL infrastructure + arena detail, open-ended problem-evolution arena, Bomber LoRA A/B artifacts |
 
 ### Validator — constraint validation + transformer-VM
 
 | Folder | What it covers |
 |---|---|
-| [`07_validator/`](07_validator/) | Deterministic constraint validator (Sudoku/Rust-AST pruning), Percepta transformer-VM in Rust |
+| [`validator/`](validator/) | Deterministic constraint validator (Sudoku/Rust-AST pruning), Percepta transformer-VM in Rust |
 
 ### Performance — perf engineering
 
 | Folder | What it covers |
 |---|---|
-| [`08_performance/`](08_performance/) | Throughput tables, SIMD kernels, benchmarks |
+| [`performance/`](performance/) | Throughput tables, SIMD kernels, benchmarks |
 
 ### Feature Catalog — the full opt-in / negative-results ledger
 
 | Folder | What it covers |
 |---|---|
-| [`09_feature_catalog/`](09_feature_catalog/) | Opt-in & gated features (full feature-flag reference), negative results & replaced features |
+| [`feature_catalog/`](feature_catalog/) | Opt-in & gated features (full feature-flag reference), negative results & replaced features |
 
 ### Audits — one-off consolidation / rubric audits
 
 | Folder | What it covers |
 |---|---|
-| [`10_audits/`](10_audits/) | Phase 0.5 loser-sweep audit (Proposal 003), claim-rubric audit vs `Claim` fixtures, cross-repo consolidation audit (riir-ai/riir-chain/riir-neuron-db) |
+| [`audits/`](audits/) | Phase 0.5 loser-sweep audit (Proposal 003), claim-rubric audit vs `Claim` fixtures, cross-repo consolidation audit (riir-ai/riir-chain/riir-neuron-db) |
 
 ## Sibling repos (private runtimes consume these primitives)
 
@@ -99,13 +101,13 @@ A `.docs/` file must do at least one of:
 
 If none → it belongs in `.research/` (academic distillation), `.plans/`
 (execution tracking), `.issues/` (open work), or `.benchmarks/` (gate results)
-— not `.docs/`. One-off audits live in `10_audits/` rather than the repo root.
+— not `.docs/`. One-off audits live in `audits/` rather than the repo root.
 
 ## Historical note (2026-07-09 reindex)
 
 This `.docs/` was reindexed from a flat `NN_slug.md` scheme (39 files at the
 repo root, with collisions like `191_open_ended_*` doc vs Plan 191) to the
-current numbered-folder / unnumbered-file scheme mirroring `riir-ai/.docs/`.
+current unnumbered-folder / unnumbered-file scheme mirroring `riir-ai/.docs/`.
 All root `README.md` links, internal `.docs/` cross-references, and
 `.benchmarks/` path-bearing links were updated in the same pass. See git
 history (`docs:` commit) for the full migration.
