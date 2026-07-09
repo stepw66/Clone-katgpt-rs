@@ -116,10 +116,14 @@ pub mod dash_attn {
         adaptive_k, block_topk, channel_aware, chunk_summary, entmax, entmax_router, forward,
         kv_outer_prefill, meta_router, msa_distill, routing, sat_analysis, value_energy, vortex_flow,
     };
-    pub use katgpt_attn::dash_attn::chunk_summary::{ChunkSummaryCache, ChunkSummaryQuery};
+    pub use katgpt_attn::dash_attn::chunk_summary::{
+        ChunkSummaryCache, ChunkSummaryQuery, summarize_chunk_with_entropy,
+    };
     pub use katgpt_attn::dash_attn::entmax::{entmax_1p5, entmax_gqa_aggregate, entmax_support};
     pub use katgpt_attn::dash_attn::forward::{forward_dash_attn_decode, forward_dash_attn_prefill};
-    pub use katgpt_attn::dash_attn::routing::{compute_routing_bias, score_blocks_entmax};
+    pub use katgpt_attn::dash_attn::routing::{
+        compute_routing_bias, score_blocks_entmax, score_blocks_entmax_with_entropy,
+    };
 
     #[cfg(feature = "msa_adaptive_k")]
     pub use katgpt_attn::dash_attn::adaptive_k::{AdaptiveKConfig, AdaptiveKRouter};
