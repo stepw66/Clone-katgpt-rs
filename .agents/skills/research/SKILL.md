@@ -373,7 +373,7 @@ The global verdict tiers (Super-GOAT / GOAT / Gain / Pass) measure *how strong* 
 **If your plan will consume, wire, or fuse with a katgpt-rs primitive into riir-*** — run the `goat-audit` skill before opening the plan. The audit answers two questions that prevent duplicate work:
 
 1. **Is the primitive already wired into riir-\*?** (stall detection — default-on in katgpt-rs for ≥7 days with zero riir-\* consumer = candidate gap, OR already wired = no plan needed)
-2. **Is riir-\* shipping a local duplicate of the substrate?** (DRY violation — the Issue 019 class: `riir-engine/src/kvarn_quality.rs` defines its own `KvCacheQualityReport` instead of consuming `katgpt-kv`)
+2. **Is riir-\* shipping a local duplicate of the substrate?** (DRY violation — the Issue 019 class: `riir-engine/src/transformer/mod.rs` defined its own `KVCache`/`KVSnapshot`/`PAGE_SIZE` instead of consuming `katgpt-transformer` — the dep was declared but unused. Plan 406 de-forked these.)
 
 **When to run goat-audit:**
 - The plan's target repo is riir-ai / riir-chain / riir-neuron-db AND the plan consumes a katgpt-rs feature/struct/function.
@@ -385,7 +385,7 @@ The global verdict tiers (Super-GOAT / GOAT / Gain / Pass) measure *how strong* 
 - The plan is a bug fix with no cross-repo angle.
 - The plan is training-only (→ riir-train).
 
-Invoke via the `skill` tool with name `goat-audit`. The skill's three-layer grep (feature-name + struct/function-name + consumer-vs-duplicate) catches both false negatives (Issue 003's `salience_tri_gate` miss) and false positives (Issue 019's `kvarn` duplicate flagged as wired).
+Invoke via the `skill` tool with name `goat-audit`. The skill's three-layer grep (feature-name + struct/function-name + consumer-vs-duplicate) catches both false negatives (Issue 003's `salience_tri_gate` miss) and false positives (Issue 019's `KVCache` local-shadow duplicate flagged as wired).
 
 ### 2. If gain (or GOAT), plan it
 
