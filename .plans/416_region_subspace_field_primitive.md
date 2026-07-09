@@ -20,7 +20,7 @@ At the degenerate limit (`K=1, μ_1=0, W_1=I_R`), the local-coordinate steering 
 
 ## Why this is a GOAT, not a Super-GOAT
 
-Research 396 §5 settles this: the within-region subspace case ships (Plan 412), the region-centroid case ships (Plan 409 / R389 CHaRS), the per-entity blend ships (Plan 321 / R302 FAME). The region-conditioned factor-analyzer (K regions × per-region centroid × per-region subspace × per-input routing) is genuinely unshipped — Q1 YES. But the operation class ("blend K region-conditioned subspace offsets by membership gates") is a refinement + unification of Plan 412 and Plan 409, not a new mechanism class — Q2 PARTIAL. Consistent with R389 (GOAT) and R393 (GOAT) precedent. A Super-GOAT fusion candidate (Region-Structured HLA) extends Issue 049.
+Research 396 §5 settles this: the within-region subspace case ships (Plan 412), the region-centroid case ships (Plan 409 / R389 CHaRS), the per-entity blend ships (Plan 321 / R302 FAME). The region-conditioned factor-analyzer (K regions × per-region centroid × per-region subspace × per-input routing) is genuinely unshipped — Q1 YES. But the operation class ("blend K region-conditioned subspace offsets by membership gates") is a refinement + unification of Plan 412 and Plan 409, not a new mechanism class — Q2 PARTIAL. Consistent with R389 (GOAT) and R393 (GOAT) precedent. A Super-GOAT fusion candidate (Region-Structured HLA) was considered but is **bounded by Issue 049's negative Q3 result** (closed 2026-07-09 — see `riir-ai/.proposals/010_block_sparse_hla_q3_real_game_validation.md`); MFA's construction recipe does not escape the architectural failures (orthogonal raw dims, emotion-blind selectors).
 
 ## Design
 
@@ -187,7 +187,7 @@ Run with: `cargo test -p katgpt-core --features region_subspace_steering --test 
 | `Phase-Modulated Coupling` (Plan 322) | 2D (single pair) | — | cos/sin rotation in `(a,b)` plane | DEFAULT-ON |
 | `Spherical Steering` (Plan 405) | 1D target | — | Slerp toward target direction | DEFAULT-ON |
 | `SubspaceSteeringField` (Plan 412) | k-dim | 1 (global) | `s + Σ α_j·u_j`, manifold walk | DEFAULT-ON |
-| **`RegionSubspaceField` (Plan 416)** | **R-dim per region** | **K** | **region-conditioned centroid + local subspace, two-mode steering** | **opt-in (pending GOAT)** |
+| **`RegionSubspaceField` (Plan 416)** | **R-dim per region** | **K** | **region-conditioned centroid + local subspace, two-mode steering** | **DEFAULT-ON** |
 
 All five coexist — each occupies a distinct steering niche. Plan 416 does NOT demote any sibling; it adds the region-conditioned local-geometry capability.
 
@@ -199,5 +199,5 @@ All five coexist — each occupies a distinct steering niche. Plan 416 does NOT 
 - **Cluster-aware steering cousin:** `katgpt-rs/.plans/409_jlens_concept_readout_prefilter_poc.md` (CHaRS routing) + Research 389
 - **Per-entity MoE cousin:** `katgpt-rs/.plans/321_sampling_invariant_per_entity_moe_primitive.md` + Research 302
 - **1D steering baseline:** `katgpt-rs/.plans/309_latent_field_steering_primitive.md`
-- **Super-GOAT fusion tracker:** `katgpt-rs/.issues/049_block_sparse_hla_supergoat_validation.md` (extended by Research 396 — Region-Structured HLA candidate now has the MFA construction recipe)
+- **Super-GOAT fusion tracker:** `katgpt-rs/.issues/049_block_sparse_hla_supergoat_validation.md` was **CLOSED 2026-07-09 (deleted per reduce-noise rule)** with negative Q3 result (NOT Super-GOAT). The Region-Structured HLA candidate is bounded by the same architectural failures; MFA's construction recipe does not escape them. See `riir-ai/.proposals/010_block_sparse_hla_q3_real_game_validation.md` for the full validation record.
 - **MFA origin:** Ghahramani & Hinton (1996), "The EM Algorithm for Mixtures of Factor Analyzers"

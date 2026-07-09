@@ -183,7 +183,7 @@ The closest cousins across all five repos, and what fusing each with MFA's regio
 
 3. **× Plan 321 (`CommittedFieldBlend`) → Per-Entity Region-Conditioned Personality.** CommittedFieldBlend blends K archetype operator fields with per-entity FIXED weights π. MFA adds region structure: each archetype field could be a region-conditioned factor analyzer, and the NPC's personality determines *which regions it tends to occupy* (region priors). The committed π becomes region-membership priors, not just field weights.
 
-4. **× HLA kernel (`evolve_hla`) → Region-Structured HLA (Super-GOAT candidate, extends Issue 049).** R393's "Block-Sparse HLA" candidate (Issue 049) speculated about interpreting HLA's 8-dim state as a union of concept subspaces. MFA gives the concrete recipe: fit K factor analyzers on HLA trajectories, decompose each NPC's HLA state into (region assignment + local coordinates). Each NPC's emotional state lives in one of K regions (e.g., "calm," "combat," "social," "fleeing"), each with its own local subspace. Steering "make this NPC afraid" = centroid interpolation toward the fear region; steering "afraid in a specific way" = local subspace offset within the fear region. **This makes Issue 049's speculative candidate concrete — but the Q1–Q4 validation still needs real game data, so it remains a tracked candidate, not a committed Super-GOAT.**
+4. **× HLA kernel (`evolve_hla`) → Region-Structured HLA (Super-GOAT candidate, BOUNDED by Issue 049's negative Q3 result).** R393's "Block-Sparse HLA" candidate (tracked in Issue 049, now CLOSED) speculated about interpreting HLA's 8-dim state as a union of concept subspaces. MFA gives a concrete construction recipe (K-means + per-region PCA on HLA trajectories), but **the candidate is bounded by the same architectural failures that closed Issue 049 as NOT Super-GOAT** (2026-07-09, Proposal 010): the real civ sim's predator/starvation signals already live on orthogonal raw dims (`fear_fx` vs `hunger`) so a region/block decomposition has nothing to separate, and the behavior selectors (`leo_act`) are emotion-blind (recompute `fear_fx` from position each tick, overwriting any steered state). **MFA's construction recipe does not escape these architectural constraints** — a different construction of the same region-structured read produces the same null result on real game data. Re-elevation (per Proposal 010 §8) requires redesigning the sim harness AND wiring a behavior consumer AND redesigning the block basis to include a `fear_fy` component — all implementation tasks that presuppose the capability this fusion was meant to justify. Tracked here for completeness; NOT pursued.
 
 5. **× `latent_functor/` (`riir-engine`) → Region-Conditioned Functors.** Each functor application projects onto scalar coherence. MFA reframing: the functor's behavior depends on which region the source/target states occupy. `reestimation.rs`'s coherence threshold could become a **region-membership-aware** threshold — re-estimate when the state moves to a region the current functor wasn't fit for.
 
@@ -193,7 +193,7 @@ The closest cousins across all five repos, and what fusing each with MFA's regio
 
 8. **× DEC `hodge_decompose` (Plan 251) → Region = Cell, Subspace = Local Cochain.** A DEC cell complex over the activation manifold: each cell IS a region, and the local cochain structure within each cell IS the factor-analyzer subspace. `hodge_decompose` splits the flow into exact/harmonic/coexact — a 3-region decomposition. MFA generalizes this to K regions with learned boundaries. **Curse-of-dimensionality caveat:** boundary-vs-volume wins only for d ≤ 3; HLA (d=8) and shards (d=64) do NOT benefit from boundary-only computation. The DEC mapping is conceptual, not for perf.
 
-**Strongest fusion candidates:** #1 (Region-Conditioned Subspace Steering — the open primitive, Plan 416) and #4 (Region-Structured HLA — the Super-GOAT candidate extending Issue 049). #1 is the katgpt-rs GOAT; #4 is a tracked candidate needing real-game validation.
+**Strongest fusion candidates:** #1 (Region-Conditioned Subspace Steering — the open primitive, Plan 416) and #4 (Region-Structured HLA — the Super-GOAT candidate, now BOUNDED by Issue 049's negative Q3 result). #1 is the katgpt-rs GOAT (shipped, DEFAULT-ON); #4 is closed as not-Super-GOAT pending sim-harness redesign.
 
 ### 2.5 Latent-space reframing (mandatory per fusion protocol §1)
 
@@ -258,14 +258,13 @@ If a future plan claims the modelless K-means+PCA constructor matches the GD-tra
 
 **Not all-4-YES → not Super-GOAT.** The open primitive (region-conditioned subspace field) is a clean GOAT: provable generalization that unifies Plan 412 (within-region) × Plan 409 (between-region), subsumes Plan 412 at `K=1, μ=0, W=I`, enables two-mode steering (centroid + local) at `K≥2`. The GOAT gate (Plan 416) proves: (G1) degenerate `K=1` parity with Plan 412; (G2) `K≥2` two-mode steering produces distinct region/local effects; (G3) zero-alloc; (G4) latency within budget; (G5) BLAKE3 commitment determinism.
 
-### Super-GOAT fusion candidate (NOT claimed — extends Issue 049)
+### Super-GOAT fusion candidate (NOT claimed — bounded by Issue 049's negative Q3 result)
 
-The **Region-Structured HLA** fusion (#4 above) — fitting K factor analyzers on HLA trajectories, decomposing each NPC's emotional state into region assignment + local coordinates — is a Super-GOAT *candidate* that **makes Issue 049's "Block-Sparse HLA" speculative candidate concrete** (MFA gives the recipe: K-means + per-region PCA on HLA trajectories). But the novelty gate (Q1–Q4) is **not yet confident enough to commit**:
-- Q1 is uncertain: does the existing HLA 5-scalar projection already implicitly capture region structure?
-- Q2 is uncertain: is "region-structured emotional posture" a new capability or a re-interpretation?
-- Q3 needs real game data to validate the selling point.
+The **Region-Structured HLA** fusion (#4 above) — fitting K factor analyzers on HLA trajectories, decomposing each NPC's emotional state into region assignment + local coordinates — was a Super-GOAT *candidate*. MFA gives a concrete construction recipe (K-means + per-region PCA on HLA trajectories) that *would have* made Issue 049's speculative Block-Sparse HLA candidate concrete. **However, Issue 049 was closed on 2026-07-09 (the same day as this note) with a NEGATIVE Q3 result** (`riir-ai/.proposals/010_block_sparse_hla_q3_real_game_validation.md`): three independent measured failures (M1 ceiling + M2 cluster/Fréchet + M3 displacement) confirmed the block/region-structured read adds nothing on real game data. The failure is **architectural, not construction-recipe-specific**:
+- The real civ sim's predator/starvation signals already live on orthogonal raw dims (`fear_fx` vs `hunger`) — a region decomposition has nothing to separate that a free scalar doesn't.
+- The behavior selectors (`leo_act`) are emotion-blind — `compute_force` recomputes `fear_fx` from position each tick, overwriting any steered state.
 
-Per the workflow's "no candidate escape hatch" rule, this is **not** written as "Super-GOAT candidate" in the verdict. Issue 049 (already tracking Block-Sparse HLA) is extended with the MFA-recipe concrete construction; no new guide created until Q1–Q4 pass.
+**MFA's construction recipe does not escape these constraints.** A different construction of the same region-structured read produces the same null result. Per the workflow's "no candidate escape hatch" rule, this is **not** written as "Super-GOAT candidate" in the verdict. No guide is created. Re-elevation (per Proposal 010 §8) requires redesigning the sim harness AND wiring a behavior consumer AND redesigning the block basis — all implementation tasks that presuppose the capability this validation was meant to justify.
 
 ### One-line reasoning
 
@@ -274,14 +273,14 @@ MFA's training (GD fit) is riir-train; its modelless transferable primitive is t
 ### Routing
 
 - **`katgpt-rs/.plans/416_region_subspace_field_primitive.md`** — open primitive. `RegionSubspaceField<D, K, R>` + `membership_gates` + `local_coordinates` + `steer_centroid` + `steer_local` + `decompose`. Feature flag `region_subspace_steering`. GOAT gate G1–G5.
-- **`katgpt-rs/.issues/049_block_sparse_hla_supergoat_validation.md`** — extended: the MFA-recipe (K-means + per-region PCA on HLA trajectories) makes the Block-Sparse HLA candidate concrete. No new issue; the existing Issue 049 now references this research note as the construction recipe.
+- **`katgpt-rs/.issues/049_block_sparse_hla_supergoat_validation.md`** — **CLOSED 2026-07-09 (deleted per reduce-noise rule)**. The Block-Sparse HLA Super-GOAT claim was validated and rejected (Q3=NO, three independent measured failures — see `riir-ai/.proposals/010_block_sparse_hla_q3_real_game_validation.md`). The Region-Structured HLA fusion (#4) is bounded by the same architectural failures; MFA's construction recipe does not escape them. No new issue; no guide created.
 - **No private guide (riir-ai / riir-chain / riir-neuron-db) at this verdict tier.** GOAT does not trigger the mandatory-guide rule (§1.5).
 - **No riir-train deferral for the consumption primitive.** The MFA training itself (GD fit) is riir-train; the modelless K-means+PCA constructor is a modelless baseline.
 
 ### MOAT gate per domain (§1.6)
 
 - **`katgpt-rs` (public engine):** in-scope. Paper-derived fundamental primitive (region-conditioned factor-analyzer field for local-geometry decomposition and steering). Ships behind feature flag `region_subspace_steering`; GOAT gate decides promote-to-default vs demote. **Per-stack ledger:** this primitive occupies the "steering" slot alongside Plan 309 (1D), Plan 322 (2D phase-rotation), Plan 405 (Slerp), and Plan 412 (k-dim single block). Region-conditioned is the strict superset of Plan 412 — if the GOAT gate shows it subsumes Plan 412's use cases at acceptable overhead, Plan 412 stays as the K=1 degenerate case; both coexist (single-block for simple steering, region-conditioned for local-geometry steering).
-- **`riir-ai` (private runtime):** the Region-Structured HLA fusion (#4) is pillar-adjacent (touches P2 neuron-db substrate, self-learn NPCs) — track via Issue 049. If it promotes to Super-GOAT, the private guide lands in `riir-ai/.research/`.
+- **`riir-ai` (private runtime):** the Region-Structured HLA fusion (#4) is **bounded by Issue 049's negative Q3 result** (closed 2026-07-09 — see `riir-ai/.proposals/010_block_sparse_hla_q3_real_game_validation.md`). The architectural failures (orthogonal raw dims, emotion-blind behavior selectors) are not escaped by MFA's construction recipe. NOT a live candidate; no guide created.
 - **`riir-neuron-db` (private shards):** `RegionSubspaceShard` subtype is a neutral-Gain addition to the shard family (extends the freeze-envelope family with K-centroid + K-loadings layout). Not pillar-level on its own.
 - **`riir-chain` (private chain):** LatCal commitment of MFA parameters (#7) is speculative P3.
 - **`riir-train`:** the MFA training (GD/EM fit on activations) is a training-method note. The deterministic K-means+PCA constructor is modelless and stays in katgpt-rs.
@@ -296,7 +295,7 @@ MFA's training (GD fit) is riir-train; its modelless transferable primitive is t
 | Latent-to-latent preferred | ✅ All operations are on latent state (HLA 8-dim, shard style_weights). Sigmoid gates (not softmax) for region membership. |
 | Freeze/thaw over fine-tuning | ✅ The MFA artifact is frozen + BLAKE3-committed + atomic-swappable. |
 | Self-learn welcome | ✅ Region memberships can drift at runtime (an NPC moves between emotional regions); the field itself stays frozen, the membership profile updates. |
-| 5-repo discipline | ✅ Open primitive in katgpt-rs; private fusion (Region-Structured HLA) tracked in riir-ai via Issue 049; shard subtype in riir-neuron-db. |
+| 5-repo discipline | ✅ Open primitive in katgpt-rs; private fusion (Region-Structured HLA) BOUNDED by Issue 049's negative Q3 result (not a live candidate); shard subtype in riir-neuron-db. |
 | SOLID, DRY | ✅ Reuses Plan 412's subspace steering math for the local-offset operation; reuses Plan 409's centroid concept. New code is the region-conditioning + membership gates + two-mode dispatch. |
 | Tests/examples | ✅ GOAT gate: G1 degenerate K=1 parity with Plan 412; G2 two-mode steering distinct effects; G3 zero-alloc; G4 latency; G5 commitment determinism. |
 | CPU/GPU/ANE auto-route | ✅ At D=8 (HLA), K=8, R=2: ~200 FLOPs per membership gate, ~130 FLOPs per local-coordinate — plasma-tier (sub-µs), stays on SIMD. |
@@ -332,4 +331,4 @@ MFA's training (GD fit) is riir-train; its modelless transferable primitive is t
 
 ## TL;DR (one-line)
 
-MFA's region-conditioned factor-analyzer (K regions, each with centroid + local subspace) is the modelless unification of Plan 412 (within-region subspace) × Plan 409 (region centroids) — a clean GOAT open primitive consumed via per-region sigmoid membership gates + two-mode steering (centroid interpolation + local offset), with the Super-GOAT fusion (Region-Structured HLA) extending Issue 049.
+MFA's region-conditioned factor-analyzer (K regions, each with centroid + local subspace) is the modelless unification of Plan 412 (within-region subspace) × Plan 409 (region centroids) — a clean GOAT open primitive consumed via per-region sigmoid membership gates + two-mode steering (centroid interpolation + local offset). The Super-GOAT fusion (Region-Structured HLA) is **bounded by Issue 049's negative Q3 result** (closed 2026-07-09): the architectural failures (orthogonal raw dims, emotion-blind selectors) are not escaped by MFA's construction recipe.

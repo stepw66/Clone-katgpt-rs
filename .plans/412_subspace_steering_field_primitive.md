@@ -18,7 +18,7 @@ The block basis comes from **pre-discovered** sources (Plan 301 Jacobian SVD, Sp
 
 ## Why this is a GOAT, not a Super-GOAT
 
-Research 393 §3 settles this: the 1D case fully ships (Plan 309/162/297/320), the stable-rank diagnostic ships (Plan 287), so Q1 (no prior art) is only PARTIAL — the *k-dim subspace* case is missing but the *1D* and *diagnostic* cases are covered. Q2 (new class) is PARTIAL — manifold walking is a generalization, not a new mechanism class. Not all-4-YES → GOAT. A Super-GOAT fusion candidate (Block-Sparse HLA) is tracked separately in Issue 049.
+Research 393 §3 settles this: the 1D case fully ships (Plan 309/162/297/320), the stable-rank diagnostic ships (Plan 287), so Q1 (no prior art) is only PARTIAL — the *k-dim subspace* case is missing but the *1D* and *diagnostic* cases are covered. Q2 (new class) is PARTIAL — manifold walking is a generalization, not a new mechanism class. Not all-4-YES → GOAT. A Super-GOAT fusion candidate (Block-Sparse HLA) was tracked in Issue 049 — **CLOSED 2026-07-09 with negative Q3 result (NOT Super-GOAT)**; see `riir-ai/.proposals/010_block_sparse_hla_q3_real_game_validation.md`.
 
 ## Design
 

@@ -127,7 +127,7 @@ The closest cousins across all five repos, and what fusing each with BSF's block
 
 ## 3. Verdict
 
-### Tier: **GOAT** (open primitive) — with a **Super-GOAT fusion candidate tracked in Issue 049**
+### Tier: **GOAT** (open primitive) — with a **Super-GOAT fusion candidate tracked in Issue 049 (CLOSED 2026-07-09, NOT Super-GOAT)**
 
 | Question | Answer | Notes |
 |---|---|---|
@@ -138,7 +138,9 @@ The closest cousins across all five repos, and what fusing each with BSF's block
 
 **Not all-4-YES → not Super-GOAT.** The open primitive (subspace steering field) is a clean GOAT: provable generalization of 1D to k-dim, subsumes Plan 309 at `k=1`, enables manifold walking at `k≥2`. The GOAT gate (Plan 412) proves: (G1) `k=1` is bit-identical to Plan 309; (G2) `k≥2` preserves behavior rank while enabling within-region walks; (G3) zero-alloc; (G4) latency within budget.
 
-### Super-GOAT fusion candidate (NOT claimed — tracked in Issue 049)
+### Super-GOAT fusion candidate (NOT claimed — tracked in Issue 049, CLOSED 2026-07-09)
+
+> **Update 2026-07-09:** Issue 049 was **CLOSED with a negative Q3 result** — the Block-Sparse HLA claim was validated as NOT Super-GOAT (three independent measured failures). The issue file was deleted per the reduce-noise rule. See `riir-ai/.proposals/010_block_sparse_hla_q3_real_game_validation.md` for the full validation record. The text below is preserved as the original candidate framing.
 
 The **Block-Sparse HLA** fusion (#6 above) — reframing HLA's 8-dim state as a union of concept subspaces with block-sparsity prior — is a Super-GOAT *candidate* if it produces a new capability class ("NPCs whose emotional posture is a sparse set of active concept-blocks, each multidimensional, steerable within-region"). But the novelty gate (Q1–Q4) is **not yet confident enough to commit**:
 - Q1 is uncertain: does the existing HLA 8-dim treatment already implicitly capture this? The 5-scalar projection is 1D-per-axis, but the 3 reserved dims might already be a latent block structure.
@@ -244,4 +246,4 @@ Before any riir-train deferral, the three modelless unblock paths for "where do 
 
 ## TL;DR
 
-Goodfire's Block-Sparse Featurizers decompose activations into multidimensional concept subspaces (blocks) via block-sparsity, finding that vision concepts are 2–4 dimensional manifolds (stable rank ≤ 4). The BSF *training* is riir-train territory; the modelless transferable primitive is the **subspace steering field** — a k-dim orthonormal block `{u_1..u_k}` + per-axis strengths `{α_j}` that generalizes our 1D `LatentSteeringVector` (Plan 309) to enable manifold walking (steer within a concept region, not along one line). At `k=1` it's bit-identical to Plan 309; at `k≥2` it unlocks within-region steering. The stable-rank diagnostic already ships (Plan 287, identical Roy-Vetterli metric). **Verdict: GOAT** — open primitive in katgpt-rs (Plan 412), strict generalization of 1D steering, subsumes Plan 309 at `k=1`. A Super-GOAT fusion candidate (Block-Sparse HLA — reframe HLA's 8-dim state as a union of concept subspaces) is tracked in Issue 049 pending Q1–Q4 validation; no guide created until it passes.
+Goodfire's Block-Sparse Featurizers decompose activations into multidimensional concept subspaces (blocks) via block-sparsity, finding that vision concepts are 2–4 dimensional manifolds (stable rank ≤ 4). The BSF *training* is riir-train territory; the modelless transferable primitive is the **subspace steering field** — a k-dim orthonormal block `{u_1..u_k}` + per-axis strengths `{α_j}` that generalizes our 1D `LatentSteeringVector` (Plan 309) to enable manifold walking (steer within a concept region, not along one line). At `k=1` it's bit-identical to Plan 309; at `k≥2` it unlocks within-region steering. The stable-rank diagnostic already ships (Plan 287, identical Roy-Vetterli metric). **Verdict: GOAT** — open primitive in katgpt-rs (Plan 412), strict generalization of 1D steering, subsumes Plan 309 at `k=1`. A Super-GOAT fusion candidate (Block-Sparse HLA — reframe HLA's 8-dim state as a union of concept subspaces) was tracked in Issue 049 **but CLOSED 2026-07-09 with negative Q3 result (NOT Super-GOAT)** — see `riir-ai/.proposals/010_block_sparse_hla_q3_real_game_validation.md`.
