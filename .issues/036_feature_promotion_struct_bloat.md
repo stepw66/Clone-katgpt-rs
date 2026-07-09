@@ -83,9 +83,18 @@ This is P2 because:
 3. The `Box<Extensions>` refactor touches every constructor and every field
    access — higher risk than the Bench 372 fixes.
 
-## Verification attempt (2026-07-04)
+## Verification attempt (2026-07-04; re-checked 2026-07-09)
 
-Attempted to re-benchmark to get current numbers. **Blocked** — the workspace build is currently broken by a sibling agent's in-progress speculative-crate refactor (cyclic dependency: `katgpt-pruners` → `katgpt-speculative` → `katgpt-pruners`). This is sibling WIP, not related to Issue 036; the sibling agent will resolve the cycle.
+Attempted to re-benchmark to get current numbers. **Blocked at the time** — the workspace build was broken by a sibling agent's in-progress speculative-crate refactor (cyclic dependency: `katgpt-pruners` → `katgpt-speculative` → `katgpt-pruners`).
+
+**Update (2026-07-09): that blocker is RESOLVED.** The cycle was broken by Plan 388
+Phase 3, which moved the `katgpt-pruners` reference in `katgpt-speculative` under
+`[dev-dependencies]` (`crates/katgpt-speculative/Cargo.toml:296-303`) — dev-deps
+do not propagate to dependents, so there is no real lib cycle. Verified by grep:
+the only `katgpt-pruners` reference in `katgpt-speculative/Cargo.toml` is the
+dev-dep on line 303. The build is therefore no longer broken *by this issue's
+concerns* (the working tree is currently dirty with unrelated sibling WIP in
+`crates/katgpt-core/src/*.rs` and benches, which is out of scope here).
 
 **Decision: stay deferred.** Even if the build were green, the case for doing this refactor now is weak:
 1. The 502M "peak" (May 29) was partially thermal-inflated — `cooldown()` was a no-op before commit `ef78b555` (2026-06-12), per Bench 372 §"Remaining Gap". The real regression target is lower than 502M.

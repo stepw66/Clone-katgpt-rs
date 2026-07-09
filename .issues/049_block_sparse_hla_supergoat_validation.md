@@ -2,8 +2,7 @@
 
 **Date:** 2026-07-08
 **Origin:** Research 393 §3 (Block-Sparse Featurizers distillation)
-**Status:** Open — Q1–Q4 validation NOT yet done
-**Related:** Research 393, Plan 412 (the open primitive that unblocks this), Plan 301 (subspace_phase_gate)
+**Status:** Q1 ANSWERED = YES (novel, 2026-07-09); Plan 412 blocker RESOLVED (shipped DEFAULT-ON). Q2 defend-wrong PoC is the next step. **Related:** Research 393, Plan 412 (shipped, DEFAULT-ON — the open primitive), Plan 301 (subspace_phase_gate)
 
 ## Context
 
@@ -19,12 +18,19 @@ Per the research workflow's "no candidate escape hatch" rule, the verdict was **
 
 ### Q1 — No prior art?
 
-**Uncertain.** The existing HLA 8-dim treatment (`riir-ai/crates/riir-engine/src/hla/`) projects to 5 scalar affective axes (valence/arousal/desperation/calm/fear) + 3 reserved. Questions:
-- Do the 3 reserved dims already implicitly carry block structure?
-- Is the 5-scalar projection actually 1D-per-emotion, or is there hidden multidim structure in how `evolve_hla` populates them?
-- Does any existing riir-ai code already group HLA axes into blocks?
+**✅ ANSWERED = YES (novel) — 2026-07-09.** See "Q1 verdict" section below.
 
-**To resolve:** `read_file` `riir-ai/crates/riir-engine/src/hla/kernel.rs` + `forward.rs` + `types.rs`. Grep for any block/subspace/grouping structure in the HLA evolution kernel. If the kernel already treats subsets of the 8 dims as coupled, the block structure partially ships and Q1 → NO (not novel enough).
+**⚠️ Correction to the original Q1 instructions:** the issue originally pointed at `riir-engine/src/hla/{kernel,forward,types}.rs` — those are the **wrong HLA**. They implement **Higher-order Linear Attention** (a transformer attention cache: `kernel.rs` maintains rank-1 SK/CQV/mQ/G/h moments). The **emotion HLA** (the 8-dim per-NPC affective state this issue is about) lives in different files. Correct files to read:
+- `riir-ai/crates/riir-engine/src/cgsp_runtime/types.rs` — `NpcEmotionScalars`, `HlaCuriosityDirection`
+- `riir-ai/crates/riir-engine/src/cwm_runtime/hla_projection.rs` — `HlaDirectionTable` (the 1D-per-emotion projection)
+- `riir-ai/crates/riir-engine/src/committed_blend/archetypes.rs` — reserved-dim zeroing
+- `riir-ai/crates/riir-engine/src/cce_runtime/state_space.rs`
+- `riir-ai/crates/riir-engine/src/crowd_attention.rs`
+
+**Original (now-resolved) questions:**
+- Do the 3 reserved dims already implicitly carry block structure? **NO** — they are zeroed padding everywhere.
+- Is the 5-scalar projection actually 1D-per-emotion, or is there hidden multidim structure in how `evolve_hla` populates them? **Genuinely 1D-per-emotion** — `HlaDirectionTable` is a `[5][4]` array, one independent direction vector per emotion channel, zero cross-channel coupling.
+- Does any existing riir-ai code already group HLA axes into blocks? **NO** — grep for `block_sparse|active_block|partition.*subspace|subspace.*partition|emotion.*block` across `riir-engine/src/**/*.rs` returns zero hits in any emotion-HLA file.
 
 ### Q2 — New class of behavior?
 
@@ -46,9 +52,44 @@ Per the research workflow's "no candidate escape hatch" rule, the verdict was **
 
 ## Blockers
 
-- **Plan 412 must ship first.** The Super-GOAT claim depends on consuming subspace steering fields at runtime; without the open primitive, the HLA fusion is theoretical.
-- **Q1 requires reading the HLA kernel** (`riir-ai/crates/riir-engine/src/hla/`) — this is riir-ai private code; the validation happens there.
+- **~~Plan 412 must ship first.~~** ✅ RESOLVED — Plan 412 (`SubspaceSteeringField`) shipped and is **DEFAULT-ON** as of commit `7bff9cc7` (Phase 5 promote). The fusion primitive is available for the Q2 PoC to consume.
+- **Q1 (resolved 2026-07-09):** read the emotion-HLA files listed in the Q1 section above — the original `hla/kernel.rs` pointer was the wrong HLA. Verdict: novel, no prior art.
 - **Q2/Q3 require a PoC** in `riir-ai/crates/riir-poc/` per the §3.6 defend-wrong rule. Architectural coverage ≠ quality parity.
+
+## Q1 verdict (2026-07-09) — YES, novel
+
+The emotion HLA is a **completely flat, independent-axis** representation. No code
+groups HLA axes into blocks, partitions, or coupled subspaces. The block-sparse
+reframing would introduce genuinely new structure.
+
+- **The 8 dims are flat:** first 5 are `NpcEmotionScalars` (`valence, arousal,
+  desperation, calm, fear` — `cgsp_runtime/types.rs:153-165`); last 3 are
+  **zeroed reserved padding** (`committed_blend/archetypes.rs:342-349` `unit_z()`
+  sets `z[0..5] = 1.0`, `z[5..8]` stay `0.0`; `karc_bridge/anticipation.rs:122-125`
+  emits `[0.0, arousal, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]`).
+- **Projection is 1D-per-emotion:** `HlaDirectionTable`
+  (`cwm_runtime/hla_projection.rs:164-171`) is a `[5][4]` array — one independent
+  `[f32; 4]` direction vector per emotion channel; `project_channel` (L274-278)
+  dots belief scalars with one channel's direction → one scalar via sigmoid. No
+  cross-channel coupling.
+- **The only "structure" is a flat orthogonal Hadamard set:** `HlaCuriosityDirection`
+  (`cgsp_runtime/types.rs:40-50, 104-119`) builds 8 mutually-orthogonal directions
+  from a flat Hadamard basis (`h(i,j) = (-1)^popcount(i&j)`). Not grouped into
+  blocks of 4 or 2.
+- **Crowd attention treats HLA as flat** `[n × 8]` (`crowd_attention.rs:67-105`);
+  set-attention is applied *across NPCs*, never across HLA-dimension blocks.
+
+**Next step:** Q2 defend-wrong PoC in `riir-ai/crates/riir-poc/` — can block-sparse
+HLA distinguish e.g. predator-fear from starvation-fear in a way the flat
+5-scalar projection cannot? Plan 412 (`SubspaceSteeringField`) is now available
+for the PoC to consume.
+
+## Progress tracker
+
+- [x] **Q1** — No prior art? **YES** (novel, 2026-07-09)
+- [ ] **Q2** — New class of behavior? (needs defend-wrong PoC) — NEXT
+- [ ] **Q3** — Product selling point? (needs real-game-data PoC)
+- [x] **Q4** — Force multiplier? **Likely YES** (≥8 cousin plans — 412 × 301 × 297 × 320 × 319 × HLA kernel × KarcShard × 251)
 
 ## Acceptance
 
