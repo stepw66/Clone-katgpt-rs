@@ -1,14 +1,13 @@
-//! Root-crate integration tests for the sink-aware classifier primitive.
+//! Integration tests for the sink-aware classifier primitive.
 //!
-//! These tests exercise `katgpt_core::data_probe::{classify_sink_at,
-//! classify_all_sinks, stable_rank_update_into, apply_dual_policy_gate}` —
-//! the substrate that lives in katgpt-core under the `sink_aware_attn`
-//! feature. They use no root transformer glue, so they live in a flat test
-//! file (Issue 121) rather than inside a shim module.
+//! These tests exercise `data_probe::{classify_sink_at, classify_all_sinks,
+//! stable_rank_update_into, apply_dual_policy_gate}` — the substrate under
+//! the `sink_aware_attn` feature. Moved from the root crate (Issue 122) to
+//! co-locate with the substrate.
 //!
 //! Plan 287, Research 258, arXiv:2606.08105.
 
-#![cfg(all(test, feature = "sink_aware_attn"))]
+#![cfg(feature = "sink_aware_attn")]
 
 use katgpt_core::data_probe::{
     CachedSinkClassification, SinkAwarePolicy, SinkClassifierConfig, SinkKind,

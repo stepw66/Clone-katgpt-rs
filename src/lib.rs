@@ -709,14 +709,11 @@ pub use katgpt_deprecated::alien_sampler::{
 // migration. Historical docs remain in katgpt-rs/.docs, .benchmarks, .plans,
 // .research as the public record of what existed.
 
-// ── Root-resident integration tests (Issue 121) ─────────────────────────
-// These test files consume root transformer glue (ForwardContext,
-// MultiLayerKVCache, TransformerWeights) that can't move to a leaf crate,
-// OR exercise katgpt-core substrate without root glue (data_probe_sink_classify).
-// Kept as flat `src/*.rs` files + `#[cfg(test)] mod` declarations instead of
-// folder shims, per the Proposal 003 endgame consolidation.
+// ── Root-resident integration test (Issue 121) ──────────────────────────
+// dash_attn_tests consumes root transformer glue (ForwardContext,
+// MultiLayerKVCache, TransformerWeights) that can't move to a leaf crate.
+// Kept as a flat `src/*.rs` file + `#[cfg(test)] mod` declaration instead of
+// a folder shim, per the Proposal 003 endgame consolidation.
+// (data_probe_sink_classify tests moved to katgpt-core in Issue 122.)
 #[cfg(all(feature = "dash_attn", test))]
 mod dash_attn_tests;
-
-#[cfg(all(feature = "sink_aware_attn", test))]
-mod data_probe_sink_classify_tests;

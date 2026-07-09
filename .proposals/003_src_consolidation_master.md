@@ -1,8 +1,9 @@
 # Proposal 003 — Master `src/` consolidation: domain-stack crates + loser crate
 
 Status: **essentially complete** (endgame audit done — Plan 404, 2026-07-06;
-shim-folder collapse done — Issue 121, 2026-07-09). What remains in `src/` is
-permanently root-resident (transformer-forward glue, training infrastructure,
+shim-folder collapse done — Issue 121, 2026-07-09; data_probe_sink_classify
+tests relocated to katgpt-core — Issue 122, 2026-07-09). What remains in `src/`
+is permanently root-resident (transformer-forward glue, training infrastructure,
 tooling). Supersedes Proposal 001 and 002.
 Branch: `develop` (per global rule — no feature branches)
 Owner: unassigned
