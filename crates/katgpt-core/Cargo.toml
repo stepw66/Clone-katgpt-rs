@@ -1031,6 +1031,16 @@ name = "bench_376_velocity_field_ensemble_poc"
 harness = false
 required-features = ["velocity_field_ensemble"]
 
+# Plan 420 Phase 1 — §3.6 defend-wrong PoC for modelless KV cache consolidation
+# (arXiv:2505.16950 Bottlenecked Transformers). Three competitors head-to-head:
+# baseline, modelless sigmoid-gated value mean-shift, random-rewrite control on
+# few-shot in-context addition in a micro-GPT. Defends OR refutes the quality
+# parity claim. Self-contained — only uses always-available katgpt_core
+# primitives (matmul, sigmoid, rmsnorm, softmax); no feature flag required.
+[[bench]]
+name = "bench_420_kv_consolidation_poc"
+harness = false
+
 # Plan 376 Phase 3 — Velocity-Field Ensemble GOAT gate G3 (zero-alloc) + G4
 # (latency: fit_into ≤ 50µs, eval_into ≤ 200ns, eval_batch_into(1000) ≤ 5ms).
 # Mirrors bench_370's combined alloc + latency pattern. Prints verdict.

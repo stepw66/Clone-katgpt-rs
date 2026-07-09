@@ -15,7 +15,7 @@ A cache-operator ALSC (Auxiliary Latent-Space Computation) method that periodica
 
 **Distilled for katgpt-rs (modelless, inference-time):** The paper's Cache Processor is a TRAINED auxiliary Transformer. The modelless distillation replaces it with a deterministic **sigmoid-gated value mean-shift**: recalled entries' values move toward the recent step's mean value, weighted by attention relevance, gated by sigmoid. The selection mechanism (top-k by attention mass) and the IB theoretical framework transfer directly. The paper itself flags (§7) that surprise/prediction-error gating would be better than newline triggers — which our codebase already ships (δ-Mem surprise gate, SwiR entropy switch), making the modelless version potentially BETTER-triggered than the paper.
 
-**Verdict: GOAT.** Novel KV cache operation class (periodic in-place consolidation for reasoning quality, NOT footprint reduction). Our existing KV work (213 Still Perceiver compaction, 233 Attention Matching selection) is all compression/selection — none rewrites entries in-place. Quality parity with the trained Processor needs a §3.6 defend-wrong PoC before promotion.
+**Verdict: Gain (architectural only).** Novel KV cache operation class (periodic in-place consolidation for reasoning quality, NOT footprint reduction). Our existing KV work (213 Still Perceiver compaction, 233 Attention Matching selection) is all compression/selection — none rewrites entries in-place. **Quality claim REFUTED on untrained models** by §3.6 PoC (Plan 420 Phase 1): consolidation ≈ baseline ≈ random-rewrite — the IB argument requires a trained model. Mechanism verified correct; quality validation is a → riir-train follow-up.
 
 ---
 
@@ -181,17 +181,17 @@ The paper uses a fixed newline trigger. §7 explicitly states: "reconsolidation 
 
 ## 4. Verdict
 
-**Tier: GOAT.**
+**Tier: Gain (architectural only, downgraded from GOAT per §6 PoC Addendum).**
 
 | Criterion | Assessment |
 |-----------|------------|
 | Novel mechanism (no prior art in our corpus) | ✅ — confirmed: all existing KV work (213, 233, 109, 101, 083, 063, 042, 039, 165, 159) is compression/selection/quantization. NONE does periodic in-place consolidation for quality. The `cgsp/dual_pool.rs consolidate()` is for the bandit pool, not KV cache. |
-| Provable gain | ⚠️ — architectural coverage confirmed; **quality parity needs §3.6 defend-wrong PoC** (modelless mean-shift vs no-consolidation vs paper's trained Processor on a controlled reasoning task) |
+| Provable gain | ❌ — quality claim REFUTED on untrained models (§6 PoC Addendum). The modelless mean-shift has no measurable effect on quality when the model has no learned KV cache detail to consolidate. |
 | New class of capability | ✅ — first KV cache operator that improves reasoning quality without reducing footprint (consolidation, not compression) |
 | Modelless | ✅ — selection mechanism transfers directly; trained Processor replaced by deterministic sigmoid-gated value mean-shift (§3.5 path 3: latent-space correction) |
 | Force multiplier | ✅ — connects to reasoning pack (P8), KV cache stack, δ-Mem revival hypothesis, neuron-db consolidation analogy |
 
-**Not Super-GOAT because:** quality parity with the trained Processor is unproven. The modelless mean-shift is a reasonable analog but the paper's gains come from LEARNED representation-specific updates. Per §3.6, architectural coverage ≠ quality parity. The PoC must prove the deterministic version achieves a meaningful fraction of the +6.6pp gain.
+**Downgrade rationale:** the §3.6 PoC (Plan 420 Phase 1) showed that modelless consolidation is inert on untrained models — consolidation ≈ baseline ≈ random-rewrite, zero sensitivity to hyperparameters. The IB argument requires a TRAINED model whose KV cache carries learned extraneous detail. This is NOT a modelless failure (the code is verified correct) — it's a task-appropriateness boundary. The quality validation is a → riir-train follow-up.
 
 **MOAT gate (katgpt-rs):** ✅ in-scope. KV cache primitives are explicitly in katgpt-rs's MOAT scope ("Transformer stack — KV cache"). This is a paper-derived fundamental primitive for the KV cache stack. Public per commercial strategy (the adoption funnel depends on engine-quality KV primitives).
 
@@ -227,6 +227,51 @@ The paper uses a fixed newline trigger. §7 explicitly states: "reconsolidation 
 
 ---
 
+## 6. PoC Addendum (Plan 420 Phase 1, 2026-07-09)
+
+**Outcome: QUALITY CLAIM REFUTED on untrained models.**
+
+The §3.6 PoC ran the modelless sigmoid-gated value mean-shift against a no-consolidation baseline and a random-rewrite control on 200 few-shot addition problems × 3 seeds = 1800 evaluations in a single-layer micro-GPT (d_model=64, 8 heads, random weights).
+
+### Raw numbers
+
+| Competitor | EM_rate | Token_acc | Mean_NLL | DigitMass | N_consol |
+|---|---|---|---|---|---|
+| Baseline | 0.0000 | 0.0275 | 7.8057 | 0.4931 | 0.0 |
+| Modelless consolidation | 0.0000 | 0.0269 | 7.8058 | 0.4931 | 5.0 |
+| Random-rewrite control | 0.0000 | 0.0275 | 7.8053 | 0.4931 | 5.0 |
+
+- **Δ(consolidation − baseline)**: token_acc −0.06pp, NLL +0.0001 — no meaningful difference.
+- **Δ(consolidation − random-rewrite)**: NLL +0.0005 — consolidation is NOT better than random perturbation.
+- **Hyperparameter sweep** (g_max ∈ {0.1, 0.3, 0.5}, k ∈ {16, 32, 64}): zero sensitivity — all configs produce identical token_acc (0.0133) and near-identical NLL (7.8627–7.8630).
+- **Self-test**: consolidation code verified correct (keys unchanged, values modified, reconsolidation works, variance reduced 74.6%, no NaN).
+
+### What was confirmed vs refuted
+
+| Claim type | Result |
+|---|---|
+| **Architectural** (mechanism exists) | ✅ CONFIRMED — consolidation runs, modifies values, preserves keys, reduces variance. |
+| **Latency** (modelless, no GD) | ✅ CONFIRMED — pure deterministic, no training. |
+| **Quality** (matches paper's gains) | ❌ REFUTED on untrained models — no measurable quality change. |
+
+### Why refuted (the mechanism analysis)
+
+The paper's IB argument (Theorems 4.1–4.2) applies specifically to TRAINED models: autoregressive training incentivizes the KV cache to be minimally compressive of input (maximize I(X;Z)), creating "extraneous detail" that consolidation removes. On an UNTRAINED model (random weights), the KV cache has no learned "extraneous detail" — value vectors are random projections of random embeddings. Consolidation (mean-shift toward step mean) changes the values, but this change is not information-preserving or information-reducing in any meaningful sense — it's just a different random-ish distribution that happens to have lower variance.
+
+The random-rewrite control confirms this: a perturbation of the same magnitude but random direction produces identical results. The mean-shift direction (toward the step mean) has no special property on untrained models because the step mean itself is uninformative.
+
+### Revised verdict
+
+**Tier: Gain (architectural only).** The consolidation mechanism is novel, correct, and fills a genuine gap in the KV cache operator taxonomy. But the quality claim is unproven without a trained model. This is a **modelless-correctable candidate that requires riir-train** to validate the quality claim — the primitive can only be promoted to default-on after a trained model's KV cache is shown to benefit from consolidation.
+
+This is NOT a modelless failure — it's a task-appropriateness boundary. The §3.5 modelless protocol doesn't apply here because the primitive's value proposition (remove learned extraneous detail from the KV cache) fundamentally requires a trained model to have that extraneous detail. No deterministic reader-LoRA or freeze-state correction can substitute for the learned representations.
+
+### riir-train follow-up
+
+The PoC bench (`bench_420_kv_consolidation_poc.rs`) is reusable: swap the random `MicroGpt` for a trained checkpoint and re-run. If the trained model shows ≥2pp gain from consolidation vs baseline AND beats random-rewrite, the quality claim is confirmed and the primitive can proceed to Phase 2 (feature flag + GOAT gate). The consolidation code itself is feature-flag-ready (the `consolidate()` function is self-contained, deterministic, and verified correct).
+
+---
+
 ## TL;DR
 
-**Verdict: GOAT (PoC-gated).** The Bottlenecked Transformer introduces a genuinely novel KV cache operation — periodic in-place consolidation/reconsolidation at reasoning step boundaries, justified by Information Bottleneck theory (reduce I(X;Z), preserve I(Z;Y)). This fills a gap: all our existing KV work (213 Still, 233 AM, 109 ShardDrop, etc.) is compression/selection; none rewrites for quality without reducing footprint. The modelless distillation replaces the paper's trained Cache Processor with a deterministic sigmoid-gated value mean-shift, triggered by our existing entropy/surprise infrastructure (better than the paper's newline trigger per its own §7). Quality parity needs a §3.6 defend-wrong PoC (Plan 420 Phase 1) before promotion. Fusion opportunity: δ-Mem's delta-rule (negative result for DDTree) × IB framework × attention-selected reconsolidation may revive δ-Mem for the continuous KV cache setting where small value corrections CAN shift the output distribution. → Plan 420 (`kv_consolidation`).
+**Verdict: Gain (architectural only, downgraded from GOAT per §3.6 PoC Addendum).** The Bottlenecked Transformer introduces a genuinely novel KV cache operation — periodic in-place consolidation/reconsolidation at reasoning step boundaries, justified by Information Bottleneck theory (reduce I(X;Z), preserve I(Z;Y)). This fills a gap: all our existing KV work (213 Still, 233 AM, 109 ShardDrop, etc.) is compression/selection; none rewrites for quality without reducing footprint. The modelless distillation replaces the paper's trained Cache Processor with a deterministic sigmoid-gated value mean-shift, triggered by our existing entropy/surprise infrastructure. **Quality claim REFUTED on untrained models** (Plan 420 Phase 1 PoC: consolidation ≈ baseline ≈ random-rewrite, zero sensitivity to hyperparameters) — the IB argument requires a trained model whose KV cache carries learned extraneous detail. The mechanism is verified correct (self-test: keys preserved, values modified, variance reduced 74.6%); the quality validation is a → riir-train follow-up. Fusion opportunity: δ-Mem's delta-rule × IB framework × attention-selected reconsolidation remains a hypothesis pending the trained-model test. → Plan 420 Phase 1 COMPLETE (refuted), Phases 2–4 SHELVED.

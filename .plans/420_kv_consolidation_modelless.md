@@ -4,7 +4,7 @@
 **Research:** [katgpt-rs/.research/401_Bottlenecked_Transformer_KV_Cache_Consolidation.md](../.research/401_Bottlenecked_Transformer_KV_Cache_Consolidation.md)
 **Source paper:** [arXiv:2505.16950](https://arxiv.org/abs/2505.16950) — Bottlenecked Transformers (Oomerjee et al., 2025/2026)
 **Target:** `katgpt-rs/crates/katgpt-core/src/kv_consolidation/` (new module) + Cargo feature `kv_consolidation`
-**Status:** Active — Phase 1 (PoC) not yet started
+**Status:** Phase 1 COMPLETE — quality gain REFUTED by §3.6 PoC (2026-07-09). Phases 2–4 SHELVED (depend on a trained model, → riir-train follow-up).
 
 ---
 
@@ -22,21 +22,18 @@ The primitive is justified by Information Bottleneck theory (Research 401 §1.2)
 
 ## Phase 1 — §3.6 Defend-Wrong PoC (MANDATORY before any feature flag)
 
-The PoC lives in `katgpt-rs/crates/katgpt-core/benches/kv_consolidation_poc.rs`. It must defend OR refute the quality-parity claim. Use `CARGO_TARGET_DIR=/tmp/kv_consolidation_poc` and clean up when done.
+The PoC lives in `katgpt-rs/crates/katgpt-core/benches/bench_420_kv_consolidation_poc.rs`. It must defend OR refute the quality-parity claim. Use `CARGO_TARGET_DIR=/tmp/kv_consolidation_poc` and clean up when done.
 
 ### Tasks
 
-- [ ] **T1.1** Build a controlled toy reasoning task: multi-step arithmetic in a micro-GPT (single-layer, d_model=64, 8 heads). Generate 200 problems (e.g., "compute ((a + b) * c) - d" for random a,b,c,d ∈ [0,99]). Metric: exact-match accuracy at fixed 256-token budget, greedy decode.
-- [ ] **T1.2** Implement the three competitors behind a local bench-only module (not the feature flag yet):
+- [x] **T1.1** Build a controlled toy reasoning task: few-shot in-context addition in a micro-GPT (single-layer, d_model=64, 8 heads). 200 problems × 5 few-shot examples. Metric: exact-match, token-accuracy, NLL under teacher forcing (greedy decode is degenerate on untrained models — diverges immediately).
+- [x] **T1.2** Implement the three competitors in `bench_420_kv_consolidation_poc.rs` (bench-only, no feature flag):
   1. **Baseline** — vanilla KV cache, no consolidation.
-  2. **Modelless consolidation** — sigmoid-gated value mean-shift at step boundaries (every newline token), layer-decaying gate `g_c^(ℓ) = g_max · sigmoid(−λ · ℓ/L)`, top-k=32 reconsolidation by attention mass, recent step window R=64.
-  3. **Random-rewrite control** — same selection but random value perturbation (same magnitude as consolidation). Tests whether the mean-shift direction matters (not just the perturbation).
-- [ ] **T1.3** Run the PoC: 200 problems × 3 competitors × 3 seeds = 1800 evaluations. Record exact-match accuracy, mean token count to answer, and consolidation invocation count.
-- [ ] **T1.4** Verdict gate:
-  - If modelless consolidation beats baseline by **≥2pp** AND beats random-rewrite control → **GOAT confirmed**, proceed to Phase 2.
-  - If modelless consolidation ≈ baseline (< 1pp difference) → **quality gain refuted**. Record raw numbers in Research 401 §"PoC Addendum". Demote to Gain (architectural only) or shelve. Do NOT proceed to Phase 2.
-  - If modelless consolidation ≈ random-rewrite control → the mean-shift direction doesn't matter; the gain (if any) is from noise injection, not consolidation. Record and reassess.
-- [ ] **T1.5** Sweep key hyperparameters: `g_max ∈ {0.1, 0.3, 0.5}`, `λ ∈ {2.0, 4.0, 8.0}`, `k ∈ {16, 32, 64}`, `R ∈ {32, 64, 96}`. Find the best configuration. Record in bench output.
+  2. **Modelless consolidation** — sigmoid-gated value mean-shift at step boundaries (every newline token), layer-decaying gate `g_c^(ℓ) = g_max · sigmoid(−λ · ℓ/L)` (degenerate: sigmoid(0)=0.5 for single-layer), top-k=32 reconsolidation by attention mass, recent step window R=64.
+  3. **Random-rewrite control** — same selection, same per-dimension magnitude, random sign. Tests whether the mean-shift direction matters.
+- [x] **T1.3** Run the PoC: 200 problems × 3 competitors × 3 seeds = 1800 evaluations. Self-test confirms consolidation code is correct (keys unchanged, values modified, variance reduced 74.6%).
+- [x] **T1.4** Verdict gate: **QUALITY GAIN REFUTED.** Consolidation ≈ baseline (Δtoken_acc = -0.06pp, ΔNLL = +0.0001). Consolidation ≈ random-rewrite (ΔNLL = +0.0005). The modelless mean-shift has no effect on an untrained model — as expected (the IB argument requires a trained model whose KV cache carries learned extraneous detail). Phase 2 NOT proceeding.
+- [x] **T1.5** Sweep key hyperparameters: `g_max ∈ {0.1, 0.3, 0.5}`, `k ∈ {16, 32, 64}`. λ is degenerate for single-layer (sigmoid(0)=0.5 regardless). R fixed at 64 (steps are ~13 tokens, never capped). Result: **zero sensitivity** to any hyperparameter — all configs produce identical token_acc (0.0133) and near-identical NLL (7.8627–7.8630). Confirms consolidation is inert on untrained models.
 
 ---
 
