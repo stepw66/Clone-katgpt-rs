@@ -308,6 +308,7 @@ pub fn calibrate_alpha<S: AsRef<[f32]>>(
 /// at least `d` elements. Returns `Err(MagError::DimMismatch)` on inconsistency
 /// or `Err(MagError::Empty)` if a required readout for the chosen operator is
 /// missing.
+#[allow(clippy::too_many_arguments, reason = "each arg is a distinct activation readout the operator selects between; see doc comment")]
 pub fn apply_operator_into(
     op: MagOperator,
     a_p: &[f32],
@@ -403,6 +404,7 @@ pub fn apply_operator_into(
 
 /// Allocating convenience wrapper for [`apply_operator_into`]. Returns a fresh
 /// `Vec<f32>` of length `d`. Prefer [`apply_operator_into`] on hot paths.
+#[allow(clippy::too_many_arguments, reason = "each arg is a distinct activation readout the operator selects between; see doc comment")]
 pub fn apply_operator(
     op: MagOperator,
     a_p: &[f32],

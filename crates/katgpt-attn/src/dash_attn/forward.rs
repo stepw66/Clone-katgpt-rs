@@ -135,11 +135,10 @@ pub fn forward_dash_attn_prefill(
         // After the layer loop, ctx.k holds the last layer's K for this token.
         // Buffer head h's key into the current chunk slot.
         let chunk_local = pos % chunk_size;
-        for h in 0..config.n_kv_head {
+        for (h, buf) in chunk_keys_buf.iter_mut().enumerate() {
             let src_start = h * hd;
             let dst_start = chunk_local * hd;
-            chunk_keys_buf[h][dst_start..dst_start + hd]
-                .copy_from_slice(&ctx.k[src_start..src_start + hd]);
+            buf[dst_start..dst_start + hd].copy_from_slice(&ctx.k[src_start..src_start + hd]);
         }
 
         // Summarize at chunk completion (full chunk or partial tail).
@@ -149,13 +148,13 @@ pub fn forward_dash_attn_prefill(
             let chunk_idx = pos / chunk_size;
             let actual_size = if is_chunk_end { chunk_size } else { chunk_local + 1 };
             if chunk_idx < summary_cache.n_chunks() {
-                for h in 0..config.n_kv_head {
+                for (h, buf) in chunk_keys_buf.iter().enumerate() {
                     let slot = &mut summary_cache.summaries[chunk_idx][h];
                     slot.resize(hd, 0.0);
                     let entropy_slot = &mut summary_cache.entropy_biases[chunk_idx][h];
                     summarize_chunk_into_with_entropy(
                         summary_query,
-                        &chunk_keys_buf[h][..actual_size * hd],
+                        &buf[..actual_size * hd],
                         actual_size,
                         h,
                         hd,
@@ -259,7 +258,7 @@ pub fn forward_dash_attn_decode<'a>(
             let _routing = score_blocks_entmax_with_entropy_into(
                 q_head,
                 &summary_refs,
-                &entropy_refs,
+                entropy_refs,
                 dash_config,
                 &mut routing_scratch,
             );

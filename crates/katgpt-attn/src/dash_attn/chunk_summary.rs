@@ -274,6 +274,7 @@ pub fn summarize_chunk_into(
 /// At zero-init `head_cls`, the softmax is uniform and `*entropy_out = ln(chunk_size)`
 /// (constant across chunks → no ranking change). For a peaked distribution
 /// (learned query concentrating on one token), `*entropy_out ≈ 0`.
+#[allow(clippy::too_many_arguments, reason = "hot-path summarizer; args are distinct query/chunk/out/scratch buffers")]
 pub fn summarize_chunk_into_with_entropy(
     query: &ChunkSummaryQuery,
     chunk_keys: &[f32],

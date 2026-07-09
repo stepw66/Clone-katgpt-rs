@@ -417,22 +417,22 @@ fn rbf_mmd_sq<S: AsRef<[f32]>>(x: &[S], y: &[S], gamma: f32) -> f32 {
     let mut sum_xx = 0.0;
     for i in 0..m {
         let xi = x[i].as_ref();
-        for j in 0..m {
-            sum_xx += rbf_kernel(xi, x[j].as_ref(), gamma);
+        for xj in x {
+            sum_xx += rbf_kernel(xi, xj.as_ref(), gamma);
         }
     }
     let mut sum_yy = 0.0;
     for i in 0..n {
         let yi = y[i].as_ref();
-        for j in 0..n {
-            sum_yy += rbf_kernel(yi, y[j].as_ref(), gamma);
+        for yj in y {
+            sum_yy += rbf_kernel(yi, yj.as_ref(), gamma);
         }
     }
     let mut sum_xy = 0.0;
-    for i in 0..m {
-        let xi = x[i].as_ref();
-        for j in 0..n {
-            sum_xy += rbf_kernel(xi, y[j].as_ref(), gamma);
+    for xi in x {
+        let xi = xi.as_ref();
+        for yj in y {
+            sum_xy += rbf_kernel(xi, yj.as_ref(), gamma);
         }
     }
 
