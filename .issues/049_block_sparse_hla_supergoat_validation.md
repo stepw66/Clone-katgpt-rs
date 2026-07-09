@@ -2,7 +2,7 @@
 
 **Date:** 2026-07-08
 **Origin:** Research 393 §3 (Block-Sparse Featurizers distillation)
-**Status:** Q1 ANSWERED = YES (novel, 2026-07-09); Plan 412 blocker RESOLVED (shipped DEFAULT-ON). Q2 defend-wrong PoC is the next step. **Related:** Research 393, Plan 412 (shipped, DEFAULT-ON — the open primitive), Plan 301 (subspace_phase_gate)
+**Status:** Q1=YES + Q2=YES (PoC PASSED 2026-07-09) + Q4=YES; Q3 (real-game-data) is the FINAL gate. Plan 412 blocker RESOLVED (shipped DEFAULT-ON). **Related:** Research 393, Plan 412 (shipped, DEFAULT-ON — the open primitive), Plan 301 (subspace_phase_gate)
 
 ## Context
 
@@ -84,11 +84,57 @@ HLA distinguish e.g. predator-fear from starvation-fear in a way the flat
 5-scalar projection cannot? Plan 412 (`SubspaceSteeringField`) is now available
 for the PoC to consume.
 
+## Q2 verdict (2026-07-09) — YES, new capability (PoC PASSED)
+
+The defend-wrong PoC shipped at
+`riir-ai/crates/riir-poc/benches/block_sparse_hla_supergoat_poc.rs` (consumes
+the real Plan 412 `SubspaceSteeringField<D=8,K=2>` + `block_energy` +
+`walk_manifold`). Three competitors (flat-5 production / block-8 / floor), three
+tests. Run: `cargo bench -p riir-poc --bench block_sparse_hla_supergoat_poc`.
+
+**Result table:**
+
+| Test | Flat-5 | Block-8 | Floor | Verdict |
+|---|---|---|---|---|
+| T1 separation parity (subtype in arousal/desperation) | 100% | 100% | — | **flat sufficient** for classification |
+| T2 subtype @ fixed dim4 (subtype in dim5) | 50% | 100% | 50% | **block represents behavior flat CANNOT** |
+| T3 control-surface DOF @ fixed dim4 | 1 posture | 32 postures | — | block exposes within-fear steering |
+
+**Decisive test (T2):** hold `dim4` (flat's only fear knob, read directly per
+`HlaDirectionTable`) bit-constant; vary only `dim5` (a reserved dim production
+never reads — the Q1 finding). Sanity check confirmed `flat_identical=true`:
+the flat-5 vector is provably bit-identical across both behavior classes, so flat
+scores the majority-class rate (50%). Block reads `(dim4, dim5)` via Plan 412
+`block_energy` → 100%. T3 shows flat produces 1 distinct fear-posture at fixed
+dim4 vs block's 32, plus a block-only intensity-preserving rotation (norm drift
+5.96e-8, other-channel drift 0).
+
+**Q2 = YES.** Block-sparse HLA produces a behavior (a decoupled fear-subtype
+steerable at fixed flat-fear) that the flat 5-scalar projection provably cannot
+represent.
+
+**Honest defend-wrong caveats (the PoC defends OR refutes; these bound the win):**
+1. The gap is specifically the **DECOUPLED-subtype regime** — a designer who
+   wants fear-subtype orthogonal to the 5 production scalars. If subtype is
+   allowed to ride on arousal/desperation, flat suffices (T1 = 100%).
+2. Production already HAS 3 reserved dims `{5,6,7}`; block-sparse is partly the
+   decision to READ them as emotion sub-blocks rather than leave them zeroed.
+   The capability is real but the "novelty" is partly a **read-policy change**
+   layered on Plan 412, not a brand-new math primitive.
+3. Intensity-preserving rotation (T3b) moves `dim4` (flat fear) — it is a
+   block-level op, NOT "invisible to flat". Flat's deficit is having no second
+   axis at all.
+
+These caveats are why Q2 is answered YES but the Super-GOAT guide is NOT yet
+created — Q3 (product selling point validated on real game data) remains open,
+and caveat #2 may bound the Super-GOAT claim to "novel composition of Plan 412 +
+the reserved dims" rather than "novel primitive".
+
 ## Progress tracker
 
 - [x] **Q1** — No prior art? **YES** (novel, 2026-07-09)
-- [ ] **Q2** — New class of behavior? (needs defend-wrong PoC) — NEXT
-- [ ] **Q3** — Product selling point? (needs real-game-data PoC)
+- [x] **Q2** — New class of behavior? **YES** (PoC PASSED 2026-07-09; defend-wrong caveats documented)
+- [ ] **Q3** — Product selling point? (needs real-game-data PoC) — NEXT, the final gate
 - [x] **Q4** — Force multiplier? **Likely YES** (≥8 cousin plans — 412 × 301 × 297 × 320 × 319 × HLA kernel × KarcShard × 251)
 
 ## Acceptance
