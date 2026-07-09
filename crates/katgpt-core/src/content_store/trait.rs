@@ -107,6 +107,22 @@ pub trait ChunkedContentStore: Send + Sync {
     /// Delegates to [`super::merkle::verify_binary_merkle_proof`].
     fn verify_proof(proof: &MerkleProof, leaf_hash: &[u8; 32]) -> bool;
 
+    /// Verify that `bytes` hash to `blob_id` — pure computation, no storage.
+    ///
+    /// Computes the chunk-Merkle root of `bytes` (chunk → BLAKE3 → binary
+    /// Merkle tree → root) and compares it to `blob_id`. This is the
+    /// verification-only counterpart to [`Self::put`]: it does NOT store
+    /// chunks, does NOT insert blob metadata, and does NOT bump stats.
+    ///
+    /// Use this instead of `put(bytes) == *blob_id` when you only need to
+    /// verify (e.g. defense-in-depth checks on store-hit paths where the
+    /// bytes were already retrieved via [`Self::get`]). The default
+    /// implementation falls back to `put` + comparison; stores that can hash
+    /// without storing should override for a cheaper path.
+    fn verify_blob(&self, blob_id: &BlobId, bytes: &[u8]) -> bool {
+        &self.put(bytes) == blob_id
+    }
+
     /// Aggregate stats: chunks stored, blobs indexed, dedup ratio, total bytes.
     fn stats(&self) -> StoreStats;
 }

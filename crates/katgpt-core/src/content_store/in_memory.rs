@@ -20,7 +20,10 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use papaya::HashMap;
 
 use super::chunker::FixedSizeChunker;
-use super::merkle::{build_merkle_levels, build_proof_from_levels, verify_binary_merkle_proof};
+use super::merkle::{
+    build_binary_merkle_root, build_merkle_levels, build_proof_from_levels,
+    verify_binary_merkle_proof,
+};
 use super::r#trait::{ChunkedContentStore, ChunkingStrategy};
 use super::types::{BlobId, MerkleProof, StoreStats};
 
@@ -211,6 +214,25 @@ impl ChunkedContentStore for InMemoryChunkedStore {
             out.extend_from_slice(chunk_bytes);
         }
         Some(out)
+    }
+
+    /// Hash-only verification — chunks and hashes `bytes` to compute the
+    /// Merkle root, then compares to `blob_id`. Skips all storage side
+    /// effects of [`Self::put`]: no papaya chunk-map inserts, no
+    /// `BlobMetadata` allocation, no stats bumps.
+    ///
+    /// Produces the same result as `self.put(bytes) == *blob_id` but without
+    /// the O(n) papaya operations and metadata allocation that `put` performs
+    /// for dedup tracking. The BLAKE3 hashing (the dominant cost) is
+    /// unavoidable — verification requires re-hashing the bytes.
+    fn verify_blob(&self, blob_id: &BlobId, bytes: &[u8]) -> bool {
+        let borrowed_chunks = self.chunker.chunk(bytes);
+        let mut chunk_hashes: Vec<[u8; 32]> = Vec::with_capacity(borrowed_chunks.len());
+        for chunk in &borrowed_chunks {
+            chunk_hashes.push(blake3::hash(chunk).into());
+        }
+        let root = build_binary_merkle_root(&chunk_hashes);
+        root == blob_id.0
     }
 
     // ZERO-ALLOC: no Vec/String/Box/format!/to_vec() in this body. Returns a
@@ -499,5 +521,84 @@ mod tests {
         // 3 chunks
         let stats = store.stats();
         assert_eq!(stats.n_chunks_stored, 3);
+    }
+
+    // ── verify_blob tests ────────────────────────────────────────────────
+
+    #[test]
+    fn test_verify_blob_matches_put() {
+        // verify_blob must agree with put for the same bytes.
+        let store = make_store(8);
+        let bytes: Vec<u8> = (0..64).collect(); // 8 chunks of 8 bytes
+        let id = store.put(&bytes);
+        assert!(
+            store.verify_blob(&id, &bytes),
+            "verify_blob must return true for the correct BlobId"
+        );
+    }
+
+    #[test]
+    fn test_verify_blob_rejects_tampered() {
+        let store = make_store(8);
+        let original = b"original chunk data here!!".to_vec();
+        let id = store.put(&original);
+
+        let mut tampered = original.clone();
+        tampered[12] ^= 0x01;
+        assert!(
+            !store.verify_blob(&id, &tampered),
+            "verify_blob must return false for tampered bytes"
+        );
+    }
+
+    #[test]
+    fn test_verify_blob_empty() {
+        let store = make_store(8);
+        let id = store.put(b"");
+        assert!(
+            store.verify_blob(&id, b""),
+            "verify_blob must handle empty input"
+        );
+    }
+
+    #[test]
+    fn test_verify_blob_single_chunk() {
+        let store = make_store(8);
+        let bytes = b"short"; // < 1 chunk
+        let id = store.put(bytes);
+        assert!(
+            store.verify_blob(&id, bytes),
+            "verify_blob must work for single-chunk blobs"
+        );
+    }
+
+    #[test]
+    fn test_verify_blob_no_storage_side_effect() {
+        // verify_blob must NOT store chunks or bump stats — calling it on a
+        // fresh store with the correct bytes must leave stats at zero.
+        let store = make_store(8);
+        let bytes: Vec<u8> = (0..32).collect(); // 4 chunks
+        let id = store.put(&bytes);
+
+        // snapshot stats after put
+        let stats_before = store.stats();
+        assert_eq!(stats_before.n_chunks_stored, 4);
+        assert_eq!(stats_before.n_blobs_indexed, 1);
+
+        // verify_blob must not change stats
+        assert!(store.verify_blob(&id, &bytes));
+        let stats_after = store.stats();
+        assert_eq!(
+            stats_after.n_chunks_stored, stats_before.n_chunks_stored,
+            "verify_blob must not store chunks"
+        );
+        assert_eq!(
+            stats_after.n_blobs_indexed, stats_before.n_blobs_indexed,
+            "verify_blob must not index blobs"
+        );
+        assert_eq!(
+            stats_after.total_bytes_logical, stats_before.total_bytes_logical,
+            "verify_blob must not bump logical bytes"
+        );
     }
 }
