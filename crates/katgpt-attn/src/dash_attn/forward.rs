@@ -69,14 +69,29 @@ pub fn forward_dash_attn_prefill(
 ) {
     let n = config.n_embd;
     let hd = config.head_dim;
+    let kv_dim = types::kv_dim(config);
+    let chunk_size = dash_config.chunk_size.max(1);
 
-    // Cache once — avoids O(n_kv_head * head_dim) scan per position per head per layer
-    let zero_init = summary_query.is_zero_init();
-    // Pre-allocate scratch buffers for the non-zero-init summarize path
+    // Pre-allocate scratch buffers for chunk summarization (reused per chunk).
     let mut summarize_out = vec![0.0f32; hd];
-    let mut summarize_scores_buf = vec![0.0f32; 1]; // chunk_size=1 at boundaries
-    // Entropy bias scratch for the non-zero-init path (Issue 044).
+    let mut summarize_scores_buf = vec![0.0f32; chunk_size];
     let mut summarize_entropy = 0.0f32;
+
+    // Per-head chunk key buffer: `chunk_keys_buf[h]` holds the last layer's K
+    // for head `h` across all tokens in the current chunk, laid out as
+    // `[chunk_size * head_dim]` (token-major within each head). Populated
+    // incrementally as each token's K is computed; summarized when the chunk
+    // completes (every `chunk_size` tokens, or at sequence end for a partial
+    // tail chunk).
+    //
+    // This upgrades the prefill from single-token summaries (degenerate MVP)
+    // to full-chunk summaries, which (a) fixes a pre-existing mean-pool bug
+    // (the old inline zero-init path divided by head_dim instead of
+    // chunk_size, producing k/hd instead of the correct mean), and (b)
+    // activates the HiLS Prop 3.1 entropy bias (Issue 044) — at zero-init,
+    // b'_c = ln(chunk_size) instead of ln(1) = 0.
+    let mut chunk_keys_buf: Vec<Vec<f32>> =
+        (0..config.n_kv_head).map(|_| vec![0.0f32; chunk_size * hd]).collect();
 
     for (pos, &token) in tokens.iter().enumerate() {
         let tok_off = token * n;
@@ -91,62 +106,8 @@ pub fn forward_dash_attn_prefill(
             types::rmsnorm(&mut ctx.x);
 
             types::matmul(&mut ctx.q, &layer_weights.attn_wq, &ctx.x, n, n);
-            types::matmul(
-                &mut ctx.k,
-                &layer_weights.attn_wk,
-                &ctx.x,
-                types::kv_dim(config),
-                n,
-            );
-            types::matmul(
-                &mut ctx.v,
-                &layer_weights.attn_wv,
-                &ctx.x,
-                types::kv_dim(config),
-                n,
-            );
-
-            // Compute chunk summaries at chunk boundaries
-            if pos % dash_config.chunk_size == 0 {
-                let chunk_idx = pos / dash_config.chunk_size;
-                if chunk_idx < summary_cache.n_chunks() {
-                    for h in 0..config.n_kv_head {
-                        let k_h = &ctx.k[h * hd..(h + 1) * hd];
-                        // Reuse per-head Vecs: clear + write in-place avoids realloc
-                        let slot = &mut summary_cache.summaries[chunk_idx][h];
-                        slot.resize(hd, 0.0);
-                        let entropy_slot =
-                            &mut summary_cache.entropy_biases[chunk_idx][h];
-                        if zero_init {
-                            // Inline mean-pool for the common zero-init case (avoids alloc).
-                            // chunk_size=1 → entropy = ln(1) = 0.
-                            let inv = if k_h.len() == hd && hd > 0 {
-                                1.0 / hd as f32
-                            } else {
-                                1.0
-                            };
-                            slot[..hd].copy_from_slice(k_h);
-                            for v in slot[..hd].iter_mut() {
-                                *v *= inv;
-                            }
-                            *entropy_slot = 0.0; // ln(1)
-                        } else {
-                            summarize_chunk_into_with_entropy(
-                                summary_query,
-                                k_h,
-                                1,
-                                h,
-                                hd,
-                                &mut summarize_out,
-                                &mut summarize_scores_buf,
-                                &mut summarize_entropy,
-                            );
-                            slot[..hd].copy_from_slice(&summarize_out[..hd]);
-                            *entropy_slot = summarize_entropy;
-                        }
-                    }
-                }
-            }
+            types::matmul(&mut ctx.k, &layer_weights.attn_wk, &ctx.x, kv_dim, n);
+            types::matmul(&mut ctx.v, &layer_weights.attn_wv, &ctx.x, kv_dim, n);
 
             types::matmul(&mut ctx.attn_out, &layer_weights.attn_wo, &ctx.q, n, n);
             simd::simd_add_inplace(&mut ctx.x[..n], &ctx.attn_out[..n]);
@@ -169,6 +130,43 @@ pub fn forward_dash_attn_prefill(
                 config.mlp_hidden,
             );
             simd::simd_add_inplace(&mut ctx.x[..n], &ctx.xr2[..n]);
+        }
+
+        // After the layer loop, ctx.k holds the last layer's K for this token.
+        // Buffer head h's key into the current chunk slot.
+        let chunk_local = pos % chunk_size;
+        for h in 0..config.n_kv_head {
+            let src_start = h * hd;
+            let dst_start = chunk_local * hd;
+            chunk_keys_buf[h][dst_start..dst_start + hd]
+                .copy_from_slice(&ctx.k[src_start..src_start + hd]);
+        }
+
+        // Summarize at chunk completion (full chunk or partial tail).
+        let is_chunk_end = chunk_local == chunk_size - 1;
+        let is_seq_end = pos == tokens.len() - 1;
+        if is_chunk_end || is_seq_end {
+            let chunk_idx = pos / chunk_size;
+            let actual_size = if is_chunk_end { chunk_size } else { chunk_local + 1 };
+            if chunk_idx < summary_cache.n_chunks() {
+                for h in 0..config.n_kv_head {
+                    let slot = &mut summary_cache.summaries[chunk_idx][h];
+                    slot.resize(hd, 0.0);
+                    let entropy_slot = &mut summary_cache.entropy_biases[chunk_idx][h];
+                    summarize_chunk_into_with_entropy(
+                        summary_query,
+                        &chunk_keys_buf[h][..actual_size * hd],
+                        actual_size,
+                        h,
+                        hd,
+                        &mut summarize_out,
+                        &mut summarize_scores_buf,
+                        &mut summarize_entropy,
+                    );
+                    slot[..hd].copy_from_slice(&summarize_out[..hd]);
+                    *entropy_slot = summarize_entropy;
+                }
+            }
         }
     }
 }
@@ -455,6 +453,106 @@ mod tests {
             for &v in summary {
                 assert!(v.is_finite(), "chunk summary should be finite, got {v}");
             }
+        }
+    }
+
+    /// Full-chunk summarization upgrade: prefill now buffers K across the entire
+    /// chunk and summarizes at chunk completion, not at the first token.
+    /// This activates the HiLS Prop 3.1 entropy bias (Issue 044).
+    #[test]
+    fn test_prefill_full_chunk_entropy_activation() {
+        let config = Config::micro();
+        let weights = random_weights(&config);
+        let mut ctx = ForwardContext::new(&config);
+        let mut cache = MultiLayerKVCache::new(&config);
+        // Small chunk size so we can fill a complete chunk in the test.
+        let dash_config = DashAttnConfig {
+            chunk_size: 4,
+            ..DashAttnConfig::default()
+        };
+        let summary_query = ChunkSummaryQuery::new(config.n_kv_head, config.head_dim);
+        let mut summary_cache = ChunkSummaryCache::new(config.n_kv_head, config.head_dim);
+
+        // 4 tokens → exactly 1 full chunk (chunk 0 completes at pos 3).
+        let tokens = vec![0, 1, 2, 3];
+        summary_cache.allocate(1);
+
+        forward_dash_attn_prefill(
+            &mut ctx,
+            &weights,
+            &mut cache,
+            &tokens,
+            &config,
+            &dash_config,
+            &summary_query,
+            &mut summary_cache,
+        );
+
+        // At zero-init with chunk_size=4: entropy = ln(4) ≈ 1.386.
+        // This is the KEY upgrade — previously entropy was always ln(1)=0
+        // because prefill only summarized a single boundary token.
+        let expected_entropy = (4.0f32).ln();
+        for h in 0..config.n_kv_head {
+            let entropy = summary_cache.entropy_biases[0][h];
+            assert!(
+                (entropy - expected_entropy).abs() < 1e-5,
+                "head {h}: entropy={entropy}, expected ln(4)={expected_entropy}"
+            );
+            let summary = &summary_cache.summaries[0][h];
+            assert_eq!(summary.len(), config.head_dim);
+            for &v in summary {
+                assert!(v.is_finite(), "chunk summary should be finite, got {v}");
+            }
+        }
+    }
+
+    /// Partial tail chunk: a sequence that doesn't fill the last chunk should
+    /// still summarize the partial chunk with entropy = ln(actual_size).
+    #[test]
+    fn test_prefill_partial_tail_chunk() {
+        let config = Config::micro();
+        let weights = random_weights(&config);
+        let mut ctx = ForwardContext::new(&config);
+        let mut cache = MultiLayerKVCache::new(&config);
+        let dash_config = DashAttnConfig {
+            chunk_size: 4,
+            ..DashAttnConfig::default()
+        };
+        let summary_query = ChunkSummaryQuery::new(config.n_kv_head, config.head_dim);
+        let mut summary_cache = ChunkSummaryCache::new(config.n_kv_head, config.head_dim);
+
+        // 6 tokens → chunk 0 (full, 4 tokens) + chunk 1 (partial, 2 tokens).
+        let tokens = vec![0, 1, 2, 3, 4, 5];
+        summary_cache.allocate(2);
+
+        forward_dash_attn_prefill(
+            &mut ctx,
+            &weights,
+            &mut cache,
+            &tokens,
+            &config,
+            &dash_config,
+            &summary_query,
+            &mut summary_cache,
+        );
+
+        // Chunk 0: full (4 tokens) → entropy = ln(4).
+        let e0 = (4.0f32).ln();
+        // Chunk 1: partial (2 tokens) → entropy = ln(2).
+        let e1 = (2.0f32).ln();
+        for h in 0..config.n_kv_head {
+            assert!(
+                (summary_cache.entropy_biases[0][h] - e0).abs() < 1e-5,
+                "chunk 0 head {h}: entropy={}, expected ln(4)={}",
+                summary_cache.entropy_biases[0][h],
+                e0
+            );
+            assert!(
+                (summary_cache.entropy_biases[1][h] - e1).abs() < 1e-5,
+                "chunk 1 head {h}: entropy={}, expected ln(2)={}",
+                summary_cache.entropy_biases[1][h],
+                e1
+            );
         }
     }
 }

@@ -323,6 +323,22 @@ Backward-compatible: at zero-init the bias is constant (`ln(chunk_size)`)
 and the entmax ranking is bit-identical. `goat_106_dash_attn` GOAT-proof
 re-passes unchanged.
 
+**Prefill upgrade (2026-07-09 follow-up).** The original MVP prefill only
+summarized a single token at each chunk boundary (`n_chunk_tokens=1` →
+entropy = `ln(1) = 0`), which kept the bias dormant regardless of
+`chunk_size`. The prefill now buffers K across the full chunk and
+summarizes at chunk completion, so the entropy is `ln(chunk_size)` at
+zero-init — the bias is **structurally active** (non-zero in the cache),
+though still ranking-neutral at zero-init (constant across same-size
+chunks). This also fixed a pre-existing mean-pool bug in the inline
+zero-init path (`k/hd` instead of `k/chunk_size`).
+
+**Decode optimization (2026-07-09 follow-up).** The decode hot path skips
+the per-token `entropy_refs` allocation when `is_zero_init()` is true — the
+cached O(1) check detects the dormant case and passes `&[]` (the existing
+no-op routing path). Zero allocation in the default path; the entropy view
+is only built when learned `head_cls` arrives from riir-train.
+
 The entropy computation reuses `scores_buf` after `softmax_inplace`:
 
 ```rust
@@ -337,10 +353,13 @@ for &p in &scores_buf[..chunk_size] {
 // entropy is b'_c. Return alongside the summary key.
 ```
 
-**No GOAT gate yet** — the gain is dormant at zero-init. The gate becomes
-meaningful only when riir-train provides learned `head_cls`; at that point,
-re-gate with a before/after on chunk-selection accuracy (NIAH-style) at
-fixed budget.
+**No GOAT gate yet** — even with full-chunk summarization, the gain is
+ranking-neutral at zero-init (entropy is constant across same-size chunks).
+The only zero-init effect is the partial-tail chunk (smaller `ln(tail_size)`),
+which is negligible. The gate becomes meaningful only when riir-train
+provides learned `head_cls` (non-uniform softmax → entropy discriminates
+concentrated vs. spread chunks); at that point, re-gate with before/after
+on chunk-selection accuracy (NIAH-style) at fixed budget.
 
 ---
 
