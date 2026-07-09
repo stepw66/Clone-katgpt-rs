@@ -889,6 +889,26 @@ pub use subspace_steering::{
     block_energy, compute_block_commitment, walk_manifold,
 };
 
+// Region-Conditioned Subspace Field — MFA local-geometry steering (Plan 416,
+// Research 396, arxiv 2602.02464 Shafran et al. "From Directions to Regions").
+// The region-conditioned generalization of Plan 412: K regions, each with a
+// centroid μ_k and a local R-dim factor-analyzer subspace W_k. Two-mode
+// steering: centroid interpolation (move toward a region) + local subspace
+// offset (walk within a region). Per-region sigmoid membership gates (reformulated
+// from the paper's softmax responsibilities per the AGENTS.md sigmoid mandate —
+// more expressive: multi-region membership). Pure modelless consumer of a frozen
+// MFA-like artifact {μ_k, W_k, Ψ, π} (trained offline via riir-train GD, or
+// deterministically constructed via K-means + per-region PCA). At the degenerate
+// limit (K=1, μ=0, W=I) steer_local is bit-identical to Plan 412. Opt-in until
+// G1–G5 GOAT gate passes (G1 K=1 parity is the load-bearing gate).
+#[cfg(feature = "region_subspace_steering")]
+pub mod region_subspace;
+#[cfg(feature = "region_subspace_steering")]
+pub use region_subspace::{
+    RegionDecomposition, RegionSubspaceError, RegionSubspaceField,
+    compute_field_commitment, reconstruct,
+};
+
 // Phase-Modulated Subspace Rotation Gate — norm-preserving latent coupling
 // `cos α ⊙ a + sin α ⊙ b` with phase from a sigmoid projection onto a frozen
 // direction vector (Plan 322, Research 305, arxiv 2605.12700 UFO). The
