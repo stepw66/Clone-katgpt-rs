@@ -284,9 +284,33 @@ pub fn transfer_distance(a: &SemanticType, b: &SemanticType) -> f32 {
 
 → `katgpt-rs/.plans/419_canvas_schema_compiler.md` (open primitive: compiler + reachability + transfer_distance, feature flag `canvas_schema`, opt-in until GOAT gate).
 
-**Fusion PoC follow-up:** → `katgpt-rs/.issues/043_canvas_modelless_behavioral_gain_poc.md` (defend-wrong PoC for the §2.5 fusion: does compiled canvas + reachability improve per-NPC behavior modellessly over un-unified constituents? If YES → re-evaluate for Super-GOAT; if NO → stays GOAT, compiler ships on structural merits).
+**Fusion PoC follow-up:** → `katgpt-rs/.issues/043_canvas_modelless_behavioral_gain_poc.md` (defend-wrong PoC for the §2.5 fusion: does compiled canvas + reachability improve per-NPC behavior modellessly over un-unified constituents? If YES → re-evaluate for Super-GOAT; if NO → stays GOAT, compiler ships on structural merits). **RESOLVED 2026-07-09 — see §7 PoC Addendum below.**
 
 **riir-train follow-up (noted, not blocked):** train a small DiT within a declared NPC-cognitive-stack topology; measure parameter efficiency vs flat baseline at our scale. This is the genuine training dependency for the empirical headline; it lives in riir-train.
+
+---
+
+## 7. PoC Addendum (Issue 043, resolved 2026-07-09)
+
+**Bench:** `riir-ai/crates/riir-poc/benches/canvas_npc_cognitive_stack_modelless.rs`
+**Record:** `riir-ai/.benchmarks/043_canvas_npc_cognitive_stack_modelless.md`
+
+**Result: MODELLESS BEHAVIORAL SIGNAL DETECTED, but stays GOAT.**
+
+The canvas `can_reach` gate produces a measurable behavioral difference in a
+controlled NPC cognitive-stack toy domain:
+- The canvas NPC approaches fake threats (MinD -1.53 vs leaky baseline) — it does
+  NOT false-flee from perceptually-identical-but-harmless entities.
+- True-flee rate maintained (-0.7pp, negligible).
+- Action-affect coherence improved (+0.0978).
+
+But this is a **precision/recall trade-off**, not a new capability class:
+- Better when fakes are truly harmless (more exploration, less wasted fleeing).
+- Riskier if fakes can become real (less cautious).
+
+**Verdict: Research 398 stays GOAT (not Super-GOAT).** The behavioral signal
+supports the canvas compiler's value but does not constitute a new capability
+class. `canvas_schema` stays opt-in pending a production consumer.
 
 ---
 
