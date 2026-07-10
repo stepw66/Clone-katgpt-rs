@@ -30,7 +30,7 @@
 //! [`PtgTracedPruner::finish_episode`]. Between those calls, every
 //! absorb/compress/trace event appends to the same PTG. `finish_episode`
 //! returns the materialized PTG; the caller hands it to a [`MotifMiner`]
-//! (typically via the sleep-cycle hook in [`katgpt_rs::closure_mining`]).
+//! (typically via the sleep-cycle hook in `katgpt_core::mine_motifs_at_sleep_cycle`).
 //!
 //! # Zero cost when disabled
 //!
@@ -78,7 +78,7 @@ pub const PREPARE_PRIMITIVE_ID: u32 = 253;
 /// # Example
 ///
 /// ```ignore
-/// use katgpt_rs::closure_wire::{PtgTracedPruner, COMPRESS_PRIMITIVE_ID};
+/// use katgpt_pruners::closure_wire::{PtgTracedPruner, COMPRESS_PRIMITIVE_ID};
 /// use katgpt_rs::pruners::{AbsorbCompressLayer, CompressConfig};
 /// use katgpt_rs::speculative::types::NoScreeningPruner;
 ///

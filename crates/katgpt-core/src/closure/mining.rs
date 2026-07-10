@@ -72,8 +72,9 @@ pub struct SleepCycleClosureReport {
 ///
 /// **Does not** mutate the miner (mining is `&self`). The caller is
 /// responsible for `miner.observe(ptg)` calls during the wake phase — see
-/// [`katgpt_rs::closure_wire::PtgTracedPruner::finish_episode`] (root-level
-/// wake-phase decorator; lives in the katgpt-rs root crate, not katgpt-core).
+/// [`katgpt_pruners::closure_wire::PtgTracedPruner::finish_episode`] (wake-phase
+/// decorator; lives in katgpt-pruners per Proposal 003 Phase 8, moved from the
+/// katgpt-rs root crate).
 ///
 /// # Arguments
 ///
@@ -86,7 +87,7 @@ pub struct SleepCycleClosureReport {
 /// # Example
 ///
 /// ```ignore
-/// use katgpt_rs::closure_mining::mine_motifs_at_sleep_cycle;
+/// use katgpt_core::mine_motifs_at_sleep_cycle;
 /// use katgpt_core::closure::{MotifAdmitter, MotifMiner};
 ///
 /// let mut miner = MotifMiner::new();

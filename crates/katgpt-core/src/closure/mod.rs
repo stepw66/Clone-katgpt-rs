@@ -62,9 +62,10 @@ pub use trace::{NodeId, PtgRecorder};
 // because katgpt-core already depends on katgpt-sleep for the sleep_time
 // anticipator re-export). katgpt-core is the natural home: the instrument is
 // a thin wrapper around `closure::{MotifMiner, MotifAdmitter, compute_pri,
-// compute_cdg}` which already live here. The root crate re-exports it as
-// `katgpt_rs::closure_mining` for back-compat — external consumers
-// (riir-engine::closure_bridge) keep the historical API path.
+// compute_cdg}` which already live here. Re-exported at the crate root as
+// `katgpt_core::mine_motifs_at_sleep_cycle` (Issue 125, 2026-07-10: the
+// `katgpt_rs::closure_mining` root re-export shim was removed; consumers
+// now import from katgpt-core directly).
 pub use mining::{SleepCycleClosureReport, fold_cdg_at_sleep_cycle, mine_motifs_at_sleep_cycle};
 
 #[cfg(feature = "ptg_functor_edges")]
