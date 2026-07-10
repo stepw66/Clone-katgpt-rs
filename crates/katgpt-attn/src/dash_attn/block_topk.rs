@@ -749,11 +749,14 @@ impl VortexFlow for PerGroupTopKRouter {
         let mut decision = RoutingDecision::with_capacity(total_budget);
         let mut group_indices = Vec::new();
         let mut group_pairs = Vec::new();
+        let mut group_scores = Vec::new();
+        let mut local_indices = Vec::new();
 
         for g in 0..self.n_groups {
             // Collect scores for blocks belonging to this group
             group_indices.clear();
             group_pairs.clear();
+            group_scores.clear();
 
             for i in (0..n_blocks).filter(|&i| i % self.n_groups == g) {
                 group_indices.push((i, scores[i]));
@@ -764,11 +767,11 @@ impl VortexFlow for PerGroupTopKRouter {
                 continue;
             }
 
-            // Extract scores for this group's blocks
-            let group_scores: Vec<f32> = group_indices.iter().map(|&(_, s)| s).collect();
+            // Extract scores for this group's blocks into the reusable buffer
+            group_scores.extend(group_indices.iter().map(|&(_, s)| s));
             let k = per_group_k.min(group_n);
 
-            let mut local_indices = Vec::new();
+            local_indices.clear();
             argtopk_with_scratch(&group_scores, k, &mut local_indices, &mut group_pairs);
 
             // Map local indices back to global block indices
