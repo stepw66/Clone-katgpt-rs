@@ -49,6 +49,7 @@ pub enum StagingError {
 }
 
 impl fmt::Display for StagingError {
+    #[cold]
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::SlotOutOfBounds { slot_idx, n_slots } => write!(

@@ -400,6 +400,7 @@ pub enum ProbeLoadError {
 }
 
 impl std::fmt::Display for ProbeLoadError {
+    #[cold]
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::TooShort { actual, min } => write!(

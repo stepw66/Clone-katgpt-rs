@@ -497,6 +497,7 @@ pub enum ValidationError {
 }
 
 impl std::fmt::Display for ValidationError {
+    #[cold]
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::MissingDim { source, missing } => {

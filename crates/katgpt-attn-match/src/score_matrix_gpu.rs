@@ -45,6 +45,7 @@ pub enum GpuDispatchError {
 }
 
 impl std::fmt::Display for GpuDispatchError {
+    #[cold]
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::NoDevice => write!(f, "no Metal device available"),

@@ -48,6 +48,7 @@ pub enum ChainError {
 }
 
 impl std::fmt::Display for ChainError {
+    #[cold]
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::ChainLengthInvalid { len, max } => {

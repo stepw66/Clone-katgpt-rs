@@ -233,6 +233,7 @@ pub enum ZoneManifoldError {
 }
 
 impl std::fmt::Display for ZoneManifoldError {
+    #[cold]
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::DimMismatch => write!(f, "crowd_hla length != n * d"),

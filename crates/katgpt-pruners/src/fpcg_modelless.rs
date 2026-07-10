@@ -210,6 +210,7 @@ pub enum MeanDifferenceError {
 }
 
 impl std::fmt::Display for MeanDifferenceError {
+    #[cold]
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::NoSamples => write!(f, "modelless probe: no samples provided"),

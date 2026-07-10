@@ -36,6 +36,7 @@ pub enum SpecError {
 }
 
 impl fmt::Display for SpecError {
+    #[cold]
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::CacheMiss { action } => write!(f, "cache miss for action: {action}"),

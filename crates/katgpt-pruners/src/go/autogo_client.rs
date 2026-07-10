@@ -28,6 +28,7 @@ pub enum AutoGoError {
 }
 
 impl std::fmt::Display for AutoGoError {
+    #[cold]
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Http(e) => write!(f, "HTTP request failed: {e}"),

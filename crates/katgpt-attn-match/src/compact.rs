@@ -30,6 +30,7 @@ pub enum CompactError {
 }
 
 impl std::fmt::Display for CompactError {
+    #[cold]
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::InvalidConfig(s) => write!(f, "invalid config: {}", s),

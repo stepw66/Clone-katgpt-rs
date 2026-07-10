@@ -194,6 +194,7 @@ pub enum MagError {
 }
 
 impl std::fmt::Display for MagError {
+    #[cold]
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             MagError::DimMismatch => write!(f, "MAG: sample dimensionality mismatch"),

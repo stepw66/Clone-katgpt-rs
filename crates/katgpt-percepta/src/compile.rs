@@ -78,6 +78,7 @@ pub enum CompileError {
 }
 
 impl fmt::Display for CompileError {
+    #[cold]
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::ClangNotFound(msg) => write!(f, "clang not found: {msg}"),

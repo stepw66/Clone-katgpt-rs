@@ -176,6 +176,7 @@ pub enum ScheduleError {
 }
 
 impl std::fmt::Display for ScheduleError {
+    #[cold]
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Infeasible => write!(f, "MILP infeasible; try more layers"),

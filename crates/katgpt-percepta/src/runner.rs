@@ -59,6 +59,7 @@ pub enum RunnerError {
 }
 
 impl std::fmt::Display for RunnerError {
+    #[cold]
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::ScheduleError(e) => write!(f, "schedule error: {e}"),

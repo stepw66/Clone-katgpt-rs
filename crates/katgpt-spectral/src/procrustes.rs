@@ -200,6 +200,7 @@ pub enum ProcrustesError {
 }
 
 impl std::fmt::Display for ProcrustesError {
+    #[cold]
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             ProcrustesError::ShapeMismatch { expected, got } => write!(

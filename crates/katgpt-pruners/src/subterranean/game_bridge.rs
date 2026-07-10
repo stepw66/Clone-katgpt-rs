@@ -27,6 +27,7 @@ pub enum BridgeError {
 }
 
 impl fmt::Display for BridgeError {
+    #[cold]
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::NoMatchingNode(desc) => write!(f, "No matching node for state: {desc}"),

@@ -736,6 +736,7 @@ pub enum RtdcError {
 }
 
 impl std::fmt::Display for RtdcError {
+    #[cold]
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::InsufficientBoundaries { n, need } => {

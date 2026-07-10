@@ -83,6 +83,7 @@ pub enum AneError {
 }
 
 impl std::fmt::Display for AneError {
+    #[cold]
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::CompileError(msg) => write!(f, "CoreML compile error: {msg}"),

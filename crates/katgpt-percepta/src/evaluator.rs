@@ -46,6 +46,7 @@ pub enum EvalError {
 }
 
 impl std::fmt::Display for EvalError {
+    #[cold]
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::UnknownToken(name) => write!(f, "unknown token: {name}"),

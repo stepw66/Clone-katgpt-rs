@@ -29,6 +29,7 @@ pub enum FailureMode {
 }
 
 impl fmt::Display for FailureMode {
+    #[cold]
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::CoverageLimited => write!(f, "coverage-limited (diversify proposers)"),

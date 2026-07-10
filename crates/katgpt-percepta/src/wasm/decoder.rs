@@ -488,6 +488,7 @@ pub enum DecodeError {
 }
 
 impl fmt::Display for DecodeError {
+    #[cold]
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::UnexpectedEof(ctx) => write!(f, "unexpected EOF while reading {ctx}"),

@@ -25,6 +25,7 @@ pub enum ProfileError {
 }
 
 impl std::fmt::Display for ProfileError {
+    #[cold]
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             ProfileError::InvalidMagic => write!(f, "invalid magic bytes"),
