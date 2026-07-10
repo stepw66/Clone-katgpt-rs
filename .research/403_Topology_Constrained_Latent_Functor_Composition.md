@@ -166,6 +166,28 @@ See: `riir-ai/.benchmarks/428_canvas_functor_poc.md` for raw `FaithfulnessProfil
 
 The PoC used `FaithfulnessProbe` (per R398 §7 lesson — the ad-hoc flee metric was the wrong tool; causal intervention is the right one) and shipped-bridge producers (per Issue 043 lesson — no designer-tuned classifier).
 
+### 3.4 Probe→drift reward fusion — INVESTIGATED, MATHEMATICAL NO-OP (Plan 429)
+
+The orthogonal follow-up (wire `FaithfulnessProbe` as the reward signal for
+`DriftGate::tick`) was investigated in Plan 429 and found to be a mathematical
+no-op **by construction**, before any code was written.
+
+The drift kernel (`katgpt-personality/src/kernel.rs:210`) computes:
+`Δw_i = alpha × (r_observed − r_expected_i) × Σ_j recent_direction_i[j]`.
+The `sum(recent_direction)` term **is already a direction-content gate** —
+dead writes with zero cognitive directions produce `Δw = 0` automatically. The
+FaithfulnessProbe's Empty intervention is structurally uninformative here
+(zeroing directions → zero drift → `empty_delta = 0` always), so the proposed
+faithfulness multiplier is always > 1.0 (amplify only, never dampen).
+
+**Positive interpretation:** the drift kernel is already robust to the
+reward-hacking scenario the fusion was meant to address. The viable alternative
+(action-level probe via the integrity layer `AuditRunner`, Plan 308) probes the
+right thing (NPC action vs memory) and would be a wiring task, not a new
+primitive.
+
+See: `riir-ai/.benchmarks/429_probe_drift_fusion.md` for the full proof.
+
 ---
 
 ## 4. Distilled primitive — what ships
