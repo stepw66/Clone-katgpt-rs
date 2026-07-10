@@ -522,17 +522,20 @@ fn sample_token(
         return (argmax_token, prob);
     }
 
-    // Temperature-scaled sampling.
+    // Temperature-scaled sampling — buffer-free two-pass approach:
+    //   Pass 1: compute sum_exp (no storage)
+    //   Pass 2: re-compute exp + cumulative scan until target hit.
+    // This avoids a `vec![0.0; vocab]` allocation (up to 128KB for vocab=32K)
+    // on every per-position sample call, at the cost of re-computing exp in
+    // the second pass — a favorable trade (32K extra transcendentals vs a
+    // 128KB memset + malloc per call).
     let mut sum_exp = 0.0f32;
-    let mut probs: Vec<f32> = vec![0.0; vocab];
     for t in 0..vocab {
         if t == mask {
             continue;
         }
         let scaled = (logits[t] - max_logit) / temperature;
-        let p = scaled.exp();
-        probs[t] = p;
-        sum_exp += p;
+        sum_exp += scaled.exp();
     }
     if sum_exp <= 0.0 {
         return (argmax_token, 0.0);
@@ -540,17 +543,19 @@ fn sample_token(
     // Normalize + sample.
     let target = rng.uniform() * sum_exp;
     let mut cumulative = 0.0f32;
-    for (t, &prob_t) in probs.iter().enumerate().take(vocab) {
+    for t in 0..vocab {
         if t == mask {
             continue;
         }
+        let scaled = (logits[t] - max_logit) / temperature;
+        let prob_t = scaled.exp();
         cumulative += prob_t;
         if cumulative >= target {
             return (t, prob_t / sum_exp);
         }
     }
     // Fallback (numerical drift): return argmax.
-    let p_max = probs[argmax_token] / sum_exp;
+    let p_max = ((argmax_logit - max_logit) / temperature).exp() / sum_exp;
     (argmax_token, p_max)
 }
 
