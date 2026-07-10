@@ -530,11 +530,11 @@ fn sample_token(
     // the second pass — a favorable trade (32K extra transcendentals vs a
     // 128KB memset + malloc per call).
     let mut sum_exp = 0.0f32;
-    for t in 0..vocab {
+    for (t, &logit) in logits.iter().enumerate().take(vocab) {
         if t == mask {
             continue;
         }
-        let scaled = (logits[t] - max_logit) / temperature;
+        let scaled = (logit - max_logit) / temperature;
         sum_exp += scaled.exp();
     }
     if sum_exp <= 0.0 {
@@ -543,11 +543,11 @@ fn sample_token(
     // Normalize + sample.
     let target = rng.uniform() * sum_exp;
     let mut cumulative = 0.0f32;
-    for t in 0..vocab {
+    for (t, &logit) in logits.iter().enumerate().take(vocab) {
         if t == mask {
             continue;
         }
-        let scaled = (logits[t] - max_logit) / temperature;
+        let scaled = (logit - max_logit) / temperature;
         let prob_t = scaled.exp();
         cumulative += prob_t;
         if cumulative >= target {

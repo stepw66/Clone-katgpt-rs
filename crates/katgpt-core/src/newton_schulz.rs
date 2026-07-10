@@ -52,7 +52,7 @@ fn transpose(src: &[f32], rows: usize, cols: usize, dst: &mut [f32]) {
 /// to per-dot `simd_dot_f32` for large n. Exploits symmetry (upper triangle + mirror).
 #[inline]
 fn matmul_xtx(x: &[f32], m: usize, n: usize, a: &mut [f32]) {
-    let use_blocked = n >= 16 && n <= 256;
+    let use_blocked = (16..=256).contains(&n);
     for i in 0..m {
         let row_i = &x[i * n..(i + 1) * n];
         // Diagonal
@@ -127,7 +127,7 @@ fn matmul_ax(a: &[f32], x: &[f32], m: usize, n: usize, r: &mut [f32], xt_buf: &m
     // Use blocked kernel for small m (L1-resident). The input X is normalized
     // to ||X||_F = 1 by the caller (newton_schulz_n_square_into_raw), so all
     // eigenvalues are in [0, 1] — the blocked FMA order is numerically safe.
-    if m <= 256 && m >= 16 {
+    if (16..=256).contains(&m) {
         matmul_at_bt_blocked(a, xt_buf, m, n, m, r);
     } else {
         // r[i,j] = dot(a_row_i, xt_col_j) = dot(&a[i*m..], &xt[j*m..], m)
@@ -563,7 +563,7 @@ pub fn ns_inv_sqrt_psd_into(
 /// `newton_schulz5` (Issue 043 Approach D resolved, 2026-07-10).
 #[inline]
 fn matmul_symmetric(a: &[f32], r: usize, c: &mut [f32]) {
-    let use_blocked = r >= 16 && r <= 256;
+    let use_blocked = (16..=256).contains(&r);
     for i in 0..r {
         let a_row_i = &a[i * r..(i + 1) * r];
         // Diagonal — always uses simd_dot_f32 (single dot, no blocking benefit)
@@ -639,7 +639,7 @@ fn matmul_symmetric(a: &[f32], r: usize, c: &mut [f32]) {
 #[inline]
 fn matmul_nn(a: &[f32], b: &[f32], r: usize, c: &mut [f32], bt_buf: &mut [f32]) {
     transpose(b, r, r, bt_buf);
-    if r >= 16 && r <= 256 {
+    if (16..=256).contains(&r) {
         matmul_at_bt_blocked(a, bt_buf, r, r, r, c);
     } else {
         for i in 0..r {
@@ -945,7 +945,7 @@ fn newton_schulz_n_square_into_raw(
         // Exploit symmetry: compute upper triangle + mirror instead of full matmul.
         // No transpose needed since A is symmetric (A^T = A).
         // Uses blocked_dot8 to process 8 j-values per a_row_i load (small m only).
-        let use_blocked_a2 = m >= 16 && m <= 256;
+        let use_blocked_a2 = (16..=256).contains(&m);
         for i in 0..m {
             let a_row_i = &a_mat[i * m..(i + 1) * m];
             // Diagonal
