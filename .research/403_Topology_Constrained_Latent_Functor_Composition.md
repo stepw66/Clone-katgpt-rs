@@ -188,6 +188,31 @@ primitive.
 
 See: `riir-ai/.benchmarks/429_probe_drift_fusion.md` for the full proof.
 
+### 3.5 Action-level faithfulness→drift modulation — SHIPPED, G1 PASS (Plan 430)
+
+The viable alternative identified in §3.4 (wire `AuditRunner`'s
+`input_faithful_rate` → scalar multiplier on `DriftGate`'s reward) was
+implemented in Plan 430 and **PASSED the decisive PoC**.
+
+Unlike the drift-kernel-level probe (§3.4, no-op), the action-level rate is a
+**strictly stronger check**: it tests whether the NPC's *behavior* (not the
+drift kernel's directions) depends on injected memory. An NPC with legitimate
+cognitive directions whose actions don't bind to memory is the real
+ dead-injection failure mode — the drift-kernel probe sees "faithful" (nonzero
+Δw), but the action-level rate → 0 → reward dampened.
+
+**G1 result (the decisive PoC):** two NPCs, identical setup. Without
+modulation: divergence = 0.000 (identical drift). With modulation: divergence
+= 0.954 (NPC A drifts, NPC B frozen). Separation ratio = ∞.
+
+The multiplier primitive (`faithfulness_reward_multiplier`), integration
+contract (`FaithfulnessRateSource` trait + `AuditRunnerRateSource`), and PoC
+are shipped behind `action_faithfulness_drift` (opt-in, default-off).
+Production wiring deferred pending Plan 308 production integration (real
+probe scheduling).
+
+See: `riir-ai/.benchmarks/430_action_faithfulness_drift.md` for full results.
+
 ---
 
 ## 4. Distilled primitive — what ships
