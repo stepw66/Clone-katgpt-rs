@@ -550,6 +550,54 @@ where
     }
 }
 
+/// Accumulate the upper triangle of `G = XᵀX` from `n` contiguous feature rows
+/// stored in `features_buf` (each row is `d_h` wide, f32), then symmetrise into
+/// the lower triangle by copy. `gram` must already be zeroed and sized to at
+/// least `d_h * d_h`.
+///
+/// This is the DRY-extracted twin of [`chunked_gram_into`] for the common case
+/// where features live in a single contiguous `&[f32]` buffer (the
+/// `KarcForecaster` trajectory buffer) rather than behind an iterator, and where
+/// the caller wants the un-regularized matrix (it adds `λI` separately). The
+/// upper-triangle-then-copy pattern is preserved bit-for-bit from the original
+/// inline blocks in `fit_direct`, `fit_low_rank`, and
+/// `fit_low_rank_with_frozen_a` — do not "simplify" to a full-matrix fill,
+/// which would change the floating-point operation count and break the
+/// byte-identical-equivalence contract on those paths.
+#[inline]
+fn accumulate_gram_upper_triangle(
+    gram: &mut [f64],
+    features_buf: &[f32],
+    d_h: usize,
+    n: usize,
+) {
+    debug_assert!(gram.len() >= d_h * d_h, "gram buffer too small");
+    for row_idx in 0..n {
+        let row = &features_buf[row_idx * d_h..(row_idx + 1) * d_h];
+        for i in 0..d_h {
+            let ri = row[i] as f64;
+            let mut j = i;
+            while j + 4 <= d_h {
+                gram[i * d_h + j] += ri * row[j] as f64;
+                gram[i * d_h + j + 1] += ri * row[j + 1] as f64;
+                gram[i * d_h + j + 2] += ri * row[j + 2] as f64;
+                gram[i * d_h + j + 3] += ri * row[j + 3] as f64;
+                j += 4;
+            }
+            while j < d_h {
+                gram[i * d_h + j] += ri * row[j] as f64;
+                j += 1;
+            }
+        }
+    }
+    // Symmetrise (we only filled the upper triangle above).
+    for i in 0..d_h {
+        for j in 0..i {
+            gram[i * d_h + j] = gram[j * d_h + i];
+        }
+    }
+}
+
 // ── Scratch ───────────────────────────────────────────────────────────────
 
 /// Pre-allocated scratch for [`KarcForecaster::fit_ridge`]. Allocate once via
@@ -1528,30 +1576,7 @@ impl<B: KarcBasis<M>, const D: usize, const M: usize, const K: usize> KarcForeca
         // Gram = XᵀX (upper triangle), d_h × d_h, f64.
         s.gram.clear();
         s.gram.resize(d_h * d_h, 0.0);
-        for r in 0..n {
-            let row = &self.features_buf[r * d_h..(r + 1) * d_h];
-            for i in 0..d_h {
-                let ri = row[i] as f64;
-                let mut j = i;
-                while j + 4 <= d_h {
-                    s.gram[i * d_h + j] += ri * row[j] as f64;
-                    s.gram[i * d_h + j + 1] += ri * row[j + 1] as f64;
-                    s.gram[i * d_h + j + 2] += ri * row[j + 2] as f64;
-                    s.gram[i * d_h + j + 3] += ri * row[j + 3] as f64;
-                    j += 4;
-                }
-                while j < d_h {
-                    s.gram[i * d_h + j] += ri * row[j] as f64;
-                    j += 1;
-                }
-            }
-        }
-        // Symmetrise.
-        for i in 0..d_h {
-            for j in 0..i {
-                s.gram[i * d_h + j] = s.gram[j * d_h + i];
-            }
-        }
+        accumulate_gram_upper_triangle(&mut s.gram, &self.features_buf, d_h, n);
         // Add λI.
         for i in 0..d_h {
             s.gram[i * d_h + i] += lambda64;
@@ -1755,30 +1780,7 @@ impl<B: KarcBasis<M>, const D: usize, const M: usize, const K: usize> KarcForeca
         s.clear();
         s.gram.clear();
         s.gram.resize(d_h * d_h, 0.0);
-        for row_idx in 0..n {
-            let row = &self.features_buf[row_idx * d_h..(row_idx + 1) * d_h];
-            for i in 0..d_h {
-                let ri = row[i] as f64;
-                let mut j = i;
-                while j + 4 <= d_h {
-                    s.gram[i * d_h + j] += ri * row[j] as f64;
-                    s.gram[i * d_h + j + 1] += ri * row[j + 1] as f64;
-                    s.gram[i * d_h + j + 2] += ri * row[j + 2] as f64;
-                    s.gram[i * d_h + j + 3] += ri * row[j + 3] as f64;
-                    j += 4;
-                }
-                while j < d_h {
-                    s.gram[i * d_h + j] += ri * row[j] as f64;
-                    j += 1;
-                }
-            }
-        }
-        // Symmetrise (we only filled the upper triangle above).
-        for i in 0..d_h {
-            for j in 0..i {
-                s.gram[i * d_h + j] = s.gram[j * d_h + i];
-            }
-        }
+        accumulate_gram_upper_triangle(&mut s.gram, &self.features_buf, d_h, n);
         s.cov.clear();
         s.cov.resize(d_h * D, 0.0);
         for row_idx in 0..n {
@@ -1884,30 +1886,7 @@ impl<B: KarcBasis<M>, const D: usize, const M: usize, const K: usize> KarcForeca
         s.clear();
         s.gram.clear();
         s.gram.resize(d_h * d_h, 0.0);
-        for row_idx in 0..n {
-            let row = &self.features_buf[row_idx * d_h..(row_idx + 1) * d_h];
-            for i in 0..d_h {
-                let ri = row[i] as f64;
-                let mut j = i;
-                while j + 4 <= d_h {
-                    s.gram[i * d_h + j] += ri * row[j] as f64;
-                    s.gram[i * d_h + j + 1] += ri * row[j + 1] as f64;
-                    s.gram[i * d_h + j + 2] += ri * row[j + 2] as f64;
-                    s.gram[i * d_h + j + 3] += ri * row[j + 3] as f64;
-                    j += 4;
-                }
-                while j < d_h {
-                    s.gram[i * d_h + j] += ri * row[j] as f64;
-                    j += 1;
-                }
-            }
-        }
-        // Symmetrise.
-        for i in 0..d_h {
-            for j in 0..i {
-                s.gram[i * d_h + j] = s.gram[j * d_h + i];
-            }
-        }
+        accumulate_gram_upper_triangle(&mut s.gram, &self.features_buf, d_h, n);
         s.cov.clear();
         s.cov.resize(d_h * D, 0.0);
         for row_idx in 0..n {
