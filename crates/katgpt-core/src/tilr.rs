@@ -354,7 +354,7 @@ pub fn tilr_refine_into(
 /// let (out, gamma) = tilr_refine(&state, &direction, &basis, 2, 0.5).unwrap();
 /// assert_eq!(gamma, 0.0);
 /// // No-harm: out == state bit-identically.
-/// assert!(out.iter().zip(state).all(|(a, &b)| a.to_bits() == b.to_bits()));
+/// assert!(out.iter().zip(state.iter()).all(|(a, b)| a.to_bits() == b.to_bits()));
 /// ```
 #[inline]
 pub fn tilr_refine(
