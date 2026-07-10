@@ -1010,33 +1010,33 @@ fn sample_temperatured(
 ) -> (usize, f32) {
     let inv_temp = 1.0 / temperature;
 
-    // Compute relevance-weighted scaled sum
+    // Single-pass exp computation into a reusable buffer.
+    // Avoids recomputing exp() in the second (sampling) pass — exp is ~10-20 cycles.
+    let mut exp_buf: Vec<f32> = Vec::with_capacity(vocab);
     let mut scaled_sum = 0.0f32;
     for t in 0..vocab {
         if t == mask || !pruner.is_valid(depth, t, parent_tokens) {
+            exp_buf.push(0.0); // invalid token — zero weight, index-aligned
             continue;
         }
         let relevance = screener.relevance(depth, t, parent_tokens);
-        scaled_sum += ((logits[t] - max_logit) * inv_temp).exp() * relevance;
+        let e = ((logits[t] - max_logit) * inv_temp).exp() * relevance;
+        exp_buf.push(e);
+        scaled_sum += e;
     }
 
     if scaled_sum == 0.0 {
         return (mask, 0.0);
     }
 
-    // Sample by cumulative distribution
+    // Sample by cumulative distribution (no exp recompute)
     let r = (rng.next() as f64 / u64::MAX as f64) as f32;
-    let inv_scaled = 1.0 / scaled_sum; // multiply instead of divide per token
+    let inv_scaled = 1.0 / scaled_sum;
     let mut cumsum = 0.0f32;
     for t in 0..vocab {
-        if t == mask || !pruner.is_valid(depth, t, parent_tokens) {
-            continue;
-        }
-        let relevance = screener.relevance(depth, t, parent_tokens);
-        let prob = ((logits[t] - max_logit) * inv_temp).exp() * relevance * inv_scaled;
-        cumsum += prob;
+        cumsum += exp_buf[t] * inv_scaled;
         if cumsum >= r {
-            return (t, prob);
+            return (t, exp_buf[t] * inv_scaled);
         }
     }
 

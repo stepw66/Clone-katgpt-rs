@@ -70,14 +70,13 @@ pub fn forward_hla<'a>(
     pos: usize,
     config: &Config,
 ) -> &'a mut [f32] {
+    // Pre-allocated temp buffers (reused across tokens and layers via ForwardContext).
+    // Fill once — hla_layer_update/readout only write to these, they don't read stale data.
     let n = config.n_embd;
     let hd = config.head_dim;
     let kvd = types::kv_dim(config);
-
-    // Pre-allocate temp buffers once (reused across layers)
-    // Size: head_dim floats each — negligible for hd=4..16
-    let mut tmp_k_cqv = vec![0.0f32; hd];
-    let mut tmp_u = vec![0.0f32; hd];
+    ctx.hla_tmp_k_cqv[..hd].fill(0.0);
+    ctx.hla_tmp_u[..hd].fill(0.0);
 
     // 1. Embedding: x = wte[token] + wpe[pos]
     // SIMD-accelerated elementwise add (was an unchecked manual loop).
@@ -114,7 +113,7 @@ pub fn forward_hla<'a>(
             &ctx.v,
             config,
             cache.gamma,
-            &mut tmp_k_cqv,
+            &mut ctx.hla_tmp_k_cqv,
         );
 
         // Readout: o_t = qᵀ(SK·CQV − G) with optional normalization
@@ -126,7 +125,7 @@ pub fn forward_hla<'a>(
             true, // normalize: divide by qᵀ(SK·mQ − h) + ε
             cache.eps,
             &mut ctx.attn_out,
-            &mut tmp_u,
+            &mut ctx.hla_tmp_u,
         );
 
         // ── End HLA ──
@@ -228,8 +227,10 @@ pub fn forward_ahla<'a>(
     let n = config.n_embd;
     let kvd = types::kv_dim(config);
 
-    // Pre-allocate temp buffer once (reused across layers)
-    let mut tmp_r = vec![0.0f32; config.head_dim];
+    // Reuse ForwardContext's HLA scratch buffer (same size, never used
+    // simultaneously with forward_hla which owns hla_tmp_k_cqv).
+    let hd = config.head_dim;
+    ctx.hla_tmp_u[..hd].fill(0.0);
 
     // 1. Embedding: x = wte[token] + wpe[pos]
     // SIMD-accelerated elementwise add (was an unchecked manual loop).
@@ -268,7 +269,7 @@ pub fn forward_ahla<'a>(
             true, // normalize: divide by qᵀ·n + ε
             cache.eps,
             &mut ctx.attn_out,
-            &mut tmp_r,
+            &mut ctx.hla_tmp_u,
         );
 
         // ── End AHLA ──

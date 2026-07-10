@@ -258,6 +258,11 @@ pub fn set_diffusion_decode<F: SetCausalForwardFn>(
     let mut confidence_history = Vec::new();
     let mut all_committed = false;
 
+    // Hoisted out of both loops: gen_steps doesn't change between iterations,
+    // so the full gen-steps buffer (prompt zeros + decode gen_steps) is invariant.
+    let mut full_gen_steps = vec![0u32; prompt_len];
+    full_gen_steps.extend_from_slice(gen_steps);
+
     // Outer loop: iterate through generation steps (reveal positions incrementally).
     for current_step in 0..=max_gen_step {
         if all_committed {
@@ -271,9 +276,7 @@ pub fn set_diffusion_decode<F: SetCausalForwardFn>(
             // Note: gen_steps covers only the decode region — pad with 0 for
             // prompt positions (prompt tokens are always "already revealed",
             // gen-step 0, so they attend to themselves and are attended-to by
-            // everything). We construct the full gen_steps buffer.
-            let mut full_gen_steps = vec![0u32; prompt_len];
-            full_gen_steps.extend_from_slice(gen_steps);
+            // everything). full_gen_steps was hoisted above the loops.
             let logits = forward.forward_set_causal(&tokens, &full_gen_steps);
             forward_passes += 1;
 

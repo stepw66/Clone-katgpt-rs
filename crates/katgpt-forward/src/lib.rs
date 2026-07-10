@@ -141,6 +141,10 @@ pub struct ForwardContext {
     // amortises per-token logits allocation when DenseMesh batches width-many
     // hidden-node forwards into one call.
     pub batch_logits: Vec<f32>,
+    // HLA forward scratch: tiny [head_dim] buffers reused across tokens+layers
+    // to avoid per-forward-call vec! allocation (Plan 377 hot-path audit).
+    pub hla_tmp_k_cqv: Vec<f32>, // [head_dim]
+    pub hla_tmp_u: Vec<f32>,     // [head_dim]
     // ── f32 fields last (4-byte aligned, no padding before) ──────────
     /// Pre-computed attention scale: `1.0 / sqrt(head_dim)`. Constant per config.
     pub attn_scale: f32,
@@ -247,6 +251,8 @@ impl ForwardContext {
             #[cfg(feature = "wall_attention")]
             wall_prefix: WallPrefixState::new(config),
             batch_logits: Vec::new(),
+            hla_tmp_k_cqv: vec![0.0f32; config.head_dim],
+            hla_tmp_u: vec![0.0f32; config.head_dim],
             attn_scale: 1.0 / (config.head_dim as f32).sqrt(),
         }
     }
