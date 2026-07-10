@@ -9,13 +9,20 @@
 
 ## Verdict
 
-**ALL MECHANISM GATES PASS. Primitive stays OPT-IN.** Promotion to default
-requires a real-delta concentration test (Issue 123) — the spectral
+**ALL MECHANISM GATES PASS. Primitive stays OPT-IN.** The spectral
 *concentration assumption* (that real weight deltas live in the base's top-r
-SVD subspace) is **unvalidated** modellessly (we have no real training deltas).
-The GOAT gate here validates the SVD + projection *machinery* is correct, fast
-(cached-index path), and zero-alloc — but cannot validate the concentration
-assumption that makes the primitive *useful*.
+SVD subspace) has been **empirically tested and NOT confirmed at NPC scale**
+(≤64×64). The GOAT gate validates the SVD + projection *machinery* is correct,
+fast (cached-index path), and zero-alloc — but the concentration assumption
+that makes the primitive *useful* does not hold at our scale.
+
+**Issue 123 CLOSED (2026-07-10):** riir-train Issue 374 produced trained LoRA
+deltas via gradient descent on 12 scenarios (d=16/32/64, r=4/8/16, linear +
+nonlinear + pretrained). All scenarios produce `on_manifold_fraction` in
+[0.27, 0.58] — far below the SAR threshold (> 0.8). The linear baseline shows
+the SAME fraction as nonlinear scenarios, confirming the elevated fraction is
+a LoRA training artifact, not the SAR phenomenon. `spectral_rewire` remains
+opt-in as a cold-tier tool; it is NOT promoted to default.
 
 ## Gate Results
 
@@ -69,12 +76,18 @@ For a **random** (Gaussian) delta — not aligned with `W₀`'s subspace:
 **Interpretation:** a generic delta is NOT concentrated in the base's top-r
 subspace (measured ~0.12–0.18, well below the 0.5 concentration threshold). This
 is expected and confirms the primitive's scope: it only *purifies* deltas that
-ARE aligned with the base. Real training deltas (per the SAR paper) ARE
-concentrated — but we have no real deltas to verify this modellessly (Research
-406 §7 honest limitation #2). The measured values exceed the pure-random theory
-(r²/d²) because a random delta has some incidental alignment, but they are far
-below concentration. **Promotion to default is blocked on a real-delta
-concentration test** (Issue 123).
+ARE aligned with the base.
+
+**riir-train Issue 374 (2026-07-10) RESOLVED:** trained LoRA deltas via gradient
+descent on synthetic nonlinear tasks were tested across 12 scenarios
+(d=16/32/64, r=4/8/16). Result: **NO concentration at NPC scale.** All scenarios
+produce `on_manifold_fraction` in [0.27, 0.58]. The linear baseline shows the
+SAME fraction (0.45–0.56) as nonlinear/pretrained scenarios (0.27–0.58), proving
+the elevated fraction is a LoRA training artifact (rank-r overlap with r-dim
+subspace), NOT the nonlinear-specific SAR phenomenon. The SAR concentration
+requires LLM-scale (4096×4096) weight matrices. See
+`riir-train/.issues/374_spectral_concentration_trained_lora_delta.md` for the
+full results table.
 
 ## G5 — Latency
 
@@ -122,9 +135,10 @@ Beyond the GOAT gate, Phase 3 drove two improvements to the primitive:
    hot-loop path (Plan 423 open question #2, resolved). Eliminates the SVD from
    the per-delta hot loop (15–69× speedup). Bit-identical to the SVD path
    (`cached_index_matches_svd_path` test).
-2. **`SVD_MAX_COLS` guard** — `spectral_rewire_into` and
-   `SpectralRewireIndex::new` now panic with a clear message when `d_in > 64`
-   (Issue 124) instead of an opaque out-of-bounds deep in the SVD.
+2. **SVD col cap LIFTED** (Issue 124 RESOLVED) — the one-sided Jacobi SVD
+   argsort buffers moved from fixed `[f32; 64]` / `[usize; 64]` stack arrays to
+   heap-allocated `sigma_buf` / `perm_buf` in `SvdScratch`. Arbitrary `d_in` is
+   now supported. The former `SVD_MAX_COLS` constant has been removed.
 
 ## Open Follow-ups
 
@@ -132,13 +146,12 @@ Beyond the GOAT gate, Phase 3 drove two improvements to the primitive:
   now heap-allocates the argsort buffers (`sigma_buf` / `perm_buf` in
   `SvdScratch`). Arbitrary `d_in` is supported; 128×128 verified in the GOAT
   gate. The `SVD_MAX_COLS` cap in `katgpt-spectral` has been removed.
-- **Issue 123** — real-delta concentration test. The make-or-break for promotion
-  to default. **Modelless diagnostics landed** (commit `4ff129db`): the
-  MEASUREMENT is calibrated (mixed-delta test matches theory within 3%) and the
-  SEPARATION mechanism is validated (two-component recovery < 5% rel err).
-  Full validation (concentration on REAL TRAINED deltas) is blocked on
-  riir-train Issue 374 — no trained weight files exist in any repo, and all
-  modelless delta sources produce untrained deltas (which are NOT concentrated).
+- **Issue 123** — **CLOSED** (2026-07-10). The concentration test has been
+  completed via riir-train Issue 374. Result: NO concentration at NPC scale.
+  All 12 scenarios produce `on_manifold_fraction` in [0.27, 0.58]. The linear
+  baseline shows the same fraction as nonlinear scenarios — the elevated
+  fraction is a LoRA training artifact, not the SAR phenomenon.
+  `spectral_rewire` stays opt-in as a cold-tier tool.
 - **SIMD optimization** (optional) — the 64×64 index path at ~29µs could likely
   hit the original 10µs target with proper SIMD matmuls. Not blocking; file as
   issue if the 64×64 hot-loop case becomes a real workload.
@@ -148,5 +161,7 @@ Beyond the GOAT gate, Phase 3 drove two improvements to the primitive:
 All mechanism gates pass (G1a/G2/G3/G4/G5/G6). The primitive is correct, fast
 (cached-index: 0.41µs NPC-scale, 947µs LoRA-scale), zero-alloc, and
 deterministic. It stays OPT-IN because the spectral concentration assumption
-(G1b) is unvalidated without real training deltas. The SVD 64-col cap (Issue 124)
-blocks 128×128/512×512. The cached-index path is the recommended hot-loop API.
+(G1b) does not hold at NPC scale (≤64×64) — empirically verified via
+riir-train Issue 374 (trained LoRA deltas produce fractions in [0.27, 0.58],
+far below the SAR threshold > 0.8). The SVD 64-col cap (Issue 124) is resolved.
+The cached-index path is the recommended hot-loop API.

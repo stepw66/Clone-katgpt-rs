@@ -3,7 +3,7 @@
 > **Spawned from:** Research 406 (Spectral Rewiring — GOAT) × Research 231 / Plan 264 (SOPTV — GOAT)
 > **Confidence:** MEDIUM — the decomposition is mathematically clean (orthogonal complement), but the Super-GOAT claim depends on both components being independently useful at NPC scale, which is unvalidated.
 > **Date:** 2026-07-10
-> **Status:** OPEN
+> **Status:** CLOSED (2026-07-10) — SAR concentration phenomenon does not transfer to NPC scale (≤64×64). See riir-train Issue 374 empirical results.
 
 ---
 
@@ -107,7 +107,7 @@ The validation cannot proceed until Plan 423 lands AND a real delta source exist
 
 ## Tasks (tracking only — no impl until dependencies land)
 
-- [-] **T1** (deferred) ~~When Plan 423 (`spectral_rewire`) lands and passes its
+- [-] **T1** (deferred → **CLOSED**) ~~When Plan 423 (`spectral_rewire`) lands and passes its
   GOAT gate~~ — **Plan 423 LANDED (2026-07-10), mechanism gates pass.** The
   remaining blocker is concentration on REAL deltas (G1b shows random deltas
   are NOT concentrated at 0.12–0.18). PoC is blocked on a real delta source.
@@ -131,17 +131,39 @@ The validation cannot proceed until Plan 423 lands AND a real delta source exist
   any of the 5 repos (`*.lora` search: empty). All modelless delta sources
   (freeze/thaw, random LoRA, consolidation weight_delta) produce UNTRAINED
   deltas, which are NOT concentrated.
-- [-] **T2** (deferred) When a freeze/thaw delta source exists in riir-neuron-db
+
+  **riir-train Issue 374 RESOLVED (2026-07-10):** trained LoRA deltas produced
+  via gradient descent on synthetic nonlinear tasks (tanh single-layer,
+  pre-train + LoRA fine-tune). 12 scenarios tested across d=16/32/64,
+  r=4/8/16, with isotropic + anisotropic input distributions.
+
+  **Result:** NO concentration at NPC scale. All scenarios produce
+  `on_manifold_fraction` in [0.27, 0.58] — roughly 2× the random floor (r/d =
+  0.25), but far below the SAR paper's concentration threshold (> 0.8).
+  Critically, the **linear baseline shows the SAME fraction (0.45–0.56)** as
+  the nonlinear/pretrained scenarios (0.27–0.58). This means the elevated
+  fraction is a LoRA training artifact (rank-r delta in d-dim space has
+  geometric overlap with any r-dim subspace), NOT the nonlinear-specific
+  concentration phenomenon the SAR paper describes.
+
+  **Conclusion:** the SAR concentration phenomenon requires LLM-scale (4096×4096)
+  weight matrices and does not transfer to NPC-scale (≤64×64) matrices.
+  `spectral_rewire` stays opt-in as a cold-tier tool. Issue 123 is CLOSED.
+- [-] **T2** (deferred → **CLOSED, moot**) When a freeze/thaw delta source exists in riir-neuron-db
   (producing real ΔW = W_frozen − W_base), run the decomposition on real
   personality deltas. Check whether the on-manifold component captures
   "personality rewiring" and the off-manifold captures "drift/noise".
-- [-] **T3** (deferred) When a LoRA overlay path exists in riir-ai (producing
+  **Moot** — without concentration (T1 result), the on-manifold component
+  captures < 60% of the delta's energy, making the decomposition uninformative.
+- [-] **T3** (deferred → **CLOSED, moot**) When a LoRA overlay path exists in riir-ai (producing
   real BA deltas), run the decomposition. Check whether on-manifold = capability
   and off-manifold = task-specific.
-- [-] **T4** (deferred) If T1–T3 show distinctness + independent utility, open
+  **Moot** — same reason as T2.
+- [-] **T4** (deferred → **CLOSED, not needed**) If T1–T3 show distinctness + independent utility, open
   a plan for the unified `decompose_delta` API: takes ΔW, returns
   `(SpectralRewireResult, SparseTaskVector)` — the two-component decomposition
   as a single primitive. This is the Super-GOAT promotion candidate.
+  **Not needed** — T1–T3 are moot. No concentration → no useful decomposition.
 
 ---
 
