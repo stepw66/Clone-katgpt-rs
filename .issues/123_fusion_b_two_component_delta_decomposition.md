@@ -166,6 +166,7 @@ is an empirical question that cannot be answered without a real delta source.
 - **Research 231** (`katgpt-rs/.research/231_*`) — SOPTV, the off-principal finding.
 - **Plan 423** (`katgpt-rs/.plans/423_spectral_rewire_primitive.md`) — the spectral_rewire primitive (dependency).
 - **Plan 264** (`katgpt-rs/.plans/264_sparse_off_principal_task_vector_modelless.md`) — SOPTV, off_principal + SparseTaskVector (already shipped).
+- **riir-train Issue 374** (`riir-train/.issues/374_spectral_concentration_trained_lora_delta.md`) — the training task to produce real LoRA deltas for the definitive concentration test.
 
 ---
 
