@@ -4,7 +4,7 @@
 > **Date:** 2026-07-10
 > **Type:** feature (consumer integration)
 > **Severity:** MEDIUM — concrete consumer value, but no blocking trigger
-> **Status:** OPEN (deferred — TILR primitive ships DEFAULT-ON, this wires it)
+> **Status:** BLOCKED on design reframe (T1 complete — investigation revealed no step-size η exists in the target path)
 
 ## Context
 
@@ -44,18 +44,61 @@ directions are suppressed.
 specific definition. This is a riir-ai design decision, not a katgpt-core
 concern.
 
+## T1 Investigation Findings (2026-07-10)
+
+**Blocker discovered:** `reestimation.rs` at
+`riir-ai/crates/riir-engine/src/latent_functor/reestimation.rs` has **no
+step-size computation**. The re-estimation path is closed-form batch
+extract-and-replace:
+
+```
+f = (1/N) Σ_k (target_k − source_k)   // mean displacement (arithmetic/mod.rs:157)
+FunctorEntry::new(direction, ...)       // wholesale replace (reestimation.rs:1281)
+```
+
+There is no `s' = s + η·d` additive update — the new direction **replaces**
+the old one. TILR's contract (`s' = s + η_base·γ·d_proj`) has no insertion
+point because there is no `s` being incrementally updated and no `η`.
+
+`tau_reest` (`DEFAULT_TAU_REEST = 0.4`, table.rs) is a **coherence
+threshold for the binary re-estimation trigger**, NOT a step size. It
+answers "should we re-estimate?" (binary), not "how big a step?"
+(continuous).
+
+### katgpt-core dependency
+
+`katgpt-core` is already a non-optional dep of riir-engine
+(`Cargo.toml:26`). TILR is directly callable once
+`tilr_invariant_subspace` is forwarded. No `tilr` feature forwarding
+exists yet.
+
+### Reframe options (decision needed before T2)
+
+| Option | Description | Effort |
+|---|---|---|
+| **A** | Use γ to gate the *binary re-estimation decision* (replace `coherence < tau_reest` with `γ > threshold`). Trigger redesign, not step-size gate. Matches Research 408 F2's actual intent. | Medium |
+| **B** | Change reestimation to iterative refinement: `direction_new = direction_old + η·γ·(f_extracted)_proj`. Fundamental redesign of extract-and-replace contract. | **High** — touches every FunctorEntry consumer |
+| **C** | Redirect to Issue 128 (HLA path). Issue 128's HLA scalar blending already has an additive update with a blend coefficient — a natural η to gate. | Low |
+
+**Recommendation:** Option A or C. Option B is over-engineering — the
+extract-and-replace pattern is correct for a ring-buffer batch estimator
+(the new mean displacement IS the best estimate). TILR's γ-gate is
+designed for *additive corrections to a state that should mostly persist*,
+which matches HLA personality blending (Issue 128) far better than batch
+functor re-estimation.
+
 ## Tasks
 
-- [ ] **T1** Locate `reestimation.rs` in riir-engine. Identify the step-size
-      computation path and the update direction source.
-- [ ] **T2** Define what constitutes a "beneficial re-estimation direction"
-      (the contrastive pair for TILR calibration). Document the choice.
-- [ ] **T3** Wire `tilr_refine_into` (or extract just the γ-gate logic) into
-      the re-estimation path behind a feature flag.
-- [ ] **T4** Benchmark: compare fixed-step vs γ-gated re-estimation on a
-      representative workload. Gate: γ-gated must not degrade convergence on
-      aligned directions, and must reduce instability on misaligned directions.
-- [ ] **T5** If the gain is real and modelless → promote to default-on.
+- [x] **T1** Locate `reestimation.rs` in riir-engine.
+      ✅ `latent_functor/reestimation.rs`. No step-size found — see findings above.
+- [-] **T2** Define what constitutes a "beneficial re-estimation direction".
+      BLOCKED on reframe decision (Options A/B/C above).
+- [-] **T3** Wire `tilr_refine_into` into the re-estimation path.
+      BLOCKED on T2.
+- [-] **T4** Benchmark.
+      BLOCKED on T3.
+- [-] **T5** Promote to default if gain is real.
+      BLOCKED on T4.
 
 ## Cross-references
 
