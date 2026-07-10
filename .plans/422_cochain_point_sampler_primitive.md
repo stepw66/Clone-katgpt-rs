@@ -77,11 +77,10 @@ on candidate).
 - [x] **T3.3 (G3)** C⁰ continuity: for the aug encoding, the coordinate field is
   continuous across primitive boundaries. Test: query points straddling a quad
   edge / triangle edge; max discontinuity < 1e-5. — **PASS** (sincos boundary u=±1 → 0 diff; barycentric sort invariance across 6 vertex permutations → 0 diff)
-- [-] **T3.4 (G4)** Zero-alloc steady state: `TrackingAllocator` audit; 0
-  allocations after warmup on the `*_into` paths. — **PASS BY CONSTRUCTION** (all `*_into` paths use caller-provided slices; no Vec allocation in the hot path. Benchmark-based `TrackingAllocator` audit deferred to a future latency benchmark if sub-µs perf ever becomes a GOAT factor.)
-- [-] **T3.5 (G5)** Latency: single `sample_cochain_at_point_quad_into` query on
-  a 64×64 grid < 100 ns (it's a bilinear interp + optional sincos — should be
-  ~tens of ns). Gate at < 200 ns to be safe. — **DEFERRED** (no benchmark harness yet; by inspection the quad path is 4 mul-adds + grid location = ~tens of ns. Add a `bench_422_*` if the sampler becomes a hot-path consumer.)
+- [x] **T3.4 (G4)** Zero-alloc steady state: `CountingAllocator` audit; 0
+  allocations after warmup on the `*_into` paths. — **PASS** (`bench_422_cochain_point_sampler_goat`: 0 allocs on both quad `sample_cochain_at_point_quad_into` and tri `sample_point_tri_into` paths, 100 calls each after warmup. See `.benchmarks/422_cochain_point_sampler_goat.md`.)
+- [x] **T3.5 (G5)** Latency: single `sample_cochain_at_point_quad_into` query on
+  a 64×64 grid < 100 ns. Gate at < 200 ns to be safe. — **PASS** (11.2 ns/call on 64×64 grid, dim=8 — 8.8× under the aspirational < 100 ns target, 17.7× under the < 200 ns gate. Full sincos path (n=4): 82.3 ns; triangle path: 11.0 ns. See `.benchmarks/422_cochain_point_sampler_goat.md`.)
 - [x] **T3.6** Re-export through `katgpt-core` as
   `katgpt_core::dec::{sample_cochain_at_point_quad, ...}`.
 

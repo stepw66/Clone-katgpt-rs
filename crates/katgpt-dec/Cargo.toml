@@ -89,3 +89,8 @@ required-features = ["sheaf_admm"]
 name = "bench_407_phase3_sheaf_admm"
 harness = false
 required-features = ["sheaf_admm"]
+
+[[bench]]
+name = "bench_422_cochain_point_sampler_goat"
+harness = false
+required-features = ["cochain_point_sampler"]
