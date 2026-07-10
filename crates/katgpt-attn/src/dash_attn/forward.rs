@@ -44,7 +44,6 @@ use katgpt_transformer::{MultiLayerKVCache, TransformerWeights};
 use super::chunk_summary::{
     ChunkSummaryCache, ChunkSummaryQuery, summarize_chunk_into_with_entropy,
 };
-use super::routing::score_blocks_entmax_with_entropy_into;
 
 // ---------------------------------------------------------------------------
 // Prefill (batch prompt processing)
@@ -178,6 +177,17 @@ pub fn forward_dash_attn_prefill(
 ///
 /// Reuses cached chunk summaries and scores the current query against them
 /// via entmax routing. Falls through to dense attention for MVP.
+///
+/// # Dead routing elimination (perf)
+///
+/// The per-layer entmax routing call (`score_blocks_entmax_with_entropy_into`)
+/// was computed but its result was bound to `_routing` and never consumed —
+/// the TODO to wire `routing.active_indices` into sparse KV block selection
+/// (Plan 173 Task 6) has not been implemented. The dead call ran n_layer
+/// entmax scoring + sorting operations per decode step, all discarded.
+/// Removed to eliminate dead compute; the `dash_config`, `summary_query`,
+/// and `summary_cache` params are retained (prefixed `_`) for API stability
+/// and future TODO wiring.
 #[allow(clippy::too_many_arguments)]
 pub fn forward_dash_attn_decode<'a>(
     ctx: &'a mut ForwardContext,
@@ -186,9 +196,9 @@ pub fn forward_dash_attn_decode<'a>(
     token: usize,
     pos: usize,
     config: &Config,
-    dash_config: &DashAttnConfig,
-    summary_query: &ChunkSummaryQuery,
-    summary_cache: &ChunkSummaryCache,
+    _dash_config: &DashAttnConfig,
+    _summary_query: &ChunkSummaryQuery,
+    _summary_cache: &ChunkSummaryCache,
 ) -> &'a mut [f32] {
     let n = config.n_embd;
     let tok_off = token * n;
@@ -196,36 +206,6 @@ pub fn forward_dash_attn_decode<'a>(
     ctx.x[..n].fill(0.0);
     simd::simd_add_inplace(&mut ctx.x[..n], &weights.wte[tok_off..tok_off + n]);
     simd::simd_add_inplace(&mut ctx.x[..n], &weights.wpe[pos_off..pos_off + n]);
-
-    // Pre-allocate summary references outside the layer loop to avoid
-    // per-layer Vec allocation (summaries don't change between layers).
-    let mut summary_refs: Vec<&Vec<f32>> = Vec::with_capacity(summary_cache.n_chunks());
-    // Entropy biases for routing (head 0 per chunk), Issue 044.
-    // At zero-init the softmax is uniform → b'_c = ln(chunk_size), constant
-    // across chunks → no ranking change. We detect this with the cached O(1)
-    // `is_zero_init()` check and skip the allocation entirely by passing the
-    // empty-slice no-op path. The entropy view is only built (one Vec alloc)
-    // when head_cls is non-trivial — i.e. when riir-train provides learned
-    // landmark queries. This keeps the dormant default path allocation-free.
-    let entropy_refs_buf: Vec<f32>;
-    let entropy_refs: &[f32] = if summary_query.is_zero_init() {
-        &[]
-    } else {
-        entropy_refs_buf = summary_cache
-            .entropy_biases
-            .iter()
-            .map(|chunk| chunk.first().copied().unwrap_or(0.0))
-            .collect();
-        &entropy_refs_buf
-    };
-    // Populate once — summaries are immutable across layers, so we only need
-    // to build the reference slice a single time before the loop.
-    for chunk in &summary_cache.summaries {
-        summary_refs.push(&chunk[0]);
-    }
-    // Pre-allocate routing scratch outside the layer loop for reuse across layers
-    let mut routing_scratch =
-        super::routing::RoutingScratch::new(summary_cache.n_chunks(), config.head_dim);
 
     for layer_weights in &weights.layers {
         types::rmsnorm(&mut ctx.x);
@@ -248,26 +228,11 @@ pub fn forward_dash_attn_decode<'a>(
             n,
         );
 
-        // Entmax routing: score query against cached chunk summaries
-        if summary_cache.n_chunks() > 0 {
-            let hd = config.head_dim;
-            // Use first query head as representative for routing decision
-            let q_head = &ctx.q[..hd];
-            // summary_refs is populated once before the layer loop (summaries
-            // are immutable across layers) — no per-layer rebuild needed.
-            let _routing = score_blocks_entmax_with_entropy_into(
-                q_head,
-                &summary_refs,
-                entropy_refs,
-                dash_config,
-                &mut routing_scratch,
-            );
-            // TODO: Use routing.active_indices to select sparse KV blocks
-            // Plan 173 Task 6: Wall gate-derived block skip is available via
-            // ctx.wall_prefix.min_retention_at_block() when wall_attention is active.
-            // When Wall + DashAttention are both enabled, blocks where all channels
-            // have decayed below threshold can be pre-filtered before entmax routing.
-        }
+        // NOTE: Entmax routing was previously computed here but the result
+        // (_routing) was never consumed — the sparse KV block selection TODO
+        // (Plan 173 Task 6) is not yet implemented. See function-level doc
+        // comment for the full rationale. Re-add routing here when wiring
+        // routing.active_indices into the attention path.
 
         types::matmul(&mut ctx.attn_out, &layer_weights.attn_wo, &ctx.q, n, n);
         simd::simd_add_inplace(&mut ctx.x[..n], &ctx.attn_out[..n]);
