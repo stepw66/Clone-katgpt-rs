@@ -14,8 +14,8 @@ use std::time::Instant;
 use katgpt_rs::speculative::types::FlashPrefillConfig;
 use katgpt_rs::speculative::{block_select, block_select_grid, compress_prompt_blocks};
 use katgpt_rs::transformer::TransformerWeights;
-use katgpt_rs::turboquant::TurboQuantKVCache;
-use katgpt_rs::turboquant::forward::{
+use katgpt_quant::turboquant::TurboQuantKVCache;
+use katgpt_quant::turboquant::forward::{
     attention_turboquant, cosine_similarity, dequantize_keys_flat, dequantize_values_flat,
 };
 use katgpt_rs::types::{Config, Rng, kv_dim};

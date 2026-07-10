@@ -12,7 +12,7 @@ use katgpt_rs::spectralquant::{
     calibrate_eigenbasis,
 };
 #[cfg(feature = "turboquant")]
-use katgpt_rs::turboquant::{TurboQuantKVCache, TurboQuantKVCacheConfig};
+use katgpt_quant::turboquant::{TurboQuantKVCache, TurboQuantKVCacheConfig};
 use katgpt_rs::types::Rng;
 #[cfg(feature = "turboquant")]
 use katgpt_rs::types::{Config, kv_dim};

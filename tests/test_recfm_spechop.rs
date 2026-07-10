@@ -9,7 +9,7 @@
 
 #![cfg(all(feature = "spechop", feature = "recfm"))]
 
-use katgpt_rs::spechop::{CacheSpeculator, CrossHopConfig, HopSpeculator, observation_velocity};
+use katgpt_speculative::spechop::{CacheSpeculator, CrossHopConfig, HopSpeculator, observation_velocity};
 
 // ── P1: Converging observations have decreasing velocity ─────────────
 

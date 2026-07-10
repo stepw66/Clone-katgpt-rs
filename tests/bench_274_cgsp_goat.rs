@@ -57,7 +57,7 @@
 #![cfg(feature = "cgsp")]
 #![cfg(test)]
 
-use katgpt_rs::cgsp::{
+use katgpt_core::cgsp::{
     BreakevenDifficultyFilter, CgspConfig, CgspLoop, ColinearityBatchGate, ComplexityWeights,
     CuriosityPrioritySnapshot, CycleResult, Direction, EntropyCollapse, HlaProjectionGuide,
     PoolConjecturer, Priority, ScratchBuffers, Target, entropy_nats, sigmoid,
@@ -773,12 +773,12 @@ fn p3_allocation_audit_steady_state() {
         // so we gate this whole block identically.
         #[cfg(debug_assertions)]
         {
-            katgpt_rs::alloc::reset_alloc_stats();
+            katgpt_core::alloc::reset_alloc_stats();
             let window = 1000u32;
             for _ in 0..window {
                 let _ = lp.cycle(&target, &mut scratch);
             }
-            let (count, bytes) = katgpt_rs::alloc::get_alloc_stats();
+            let (count, bytes) = katgpt_core::alloc::get_alloc_stats();
 
             let per_cycle = count as f64 / window as f64;
             let per_cycle_bytes = bytes as f64 / window as f64;

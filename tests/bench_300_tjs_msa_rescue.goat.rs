@@ -37,7 +37,7 @@
 //!
 //! Run: `cargo test --features specialist_projection --test bench_300_tjs_msa_rescue_goat -- --nocapture`
 
-use katgpt_rs::specialist_projection::SpecialistMask;
+use katgpt_sparse::specialist_projection::SpecialistMask;
 
 // ── Config (matches Plan 256 bench scale) ────────────────────────────
 

@@ -69,7 +69,7 @@ mod tracker_tests {
 
 #[cfg(feature = "rv_gated_routing")]
 mod trigger_gate_rv_tests {
-    use katgpt_rs::trigger_gate::{ComputeTier, RvThresholds, TriggerGate, TriggerGateConfig};
+    use katgpt_core::trigger_gate::{ComputeTier, RvThresholds, TriggerGate, TriggerGateConfig};
 
     fn make_gate() -> TriggerGate {
         TriggerGate::new(TriggerGateConfig::default(), true, false)
@@ -226,7 +226,7 @@ mod thinking_rv_tests {
 
 #[cfg(feature = "rv_bandit_pruning")]
 mod bandit_suppression_tests {
-    use katgpt_rs::freq_bandit::{FrequencyBand, FrequencyBandit};
+    use katgpt_pruners::freq_bandit::{FrequencyBand, FrequencyBandit};
 
     #[test]
     fn test_suppress_lowest_variance_arm() {
@@ -398,7 +398,7 @@ mod goat_structural_proof {
 #[cfg(feature = "rv_gated_routing")]
 mod goat_benchmarks {
     use katgpt_rs::pruners::AcceptanceVarianceTracker;
-    use katgpt_rs::trigger_gate::{ComputeTier, RvThresholds, TriggerGate, TriggerGateConfig};
+    use katgpt_core::trigger_gate::{ComputeTier, RvThresholds, TriggerGate, TriggerGateConfig};
     use std::time::Instant;
 
     /// Simulated compute cost: CPU path is fast, GPU path has dispatch overhead.

@@ -29,7 +29,7 @@
 
 use fastrand::Rng;
 use katgpt_core::simd::simd_dot_f32;
-use katgpt_rs::clr::{
+use katgpt_claim::clr::{
     Claim, ClaimVerifier, ClrConfig, ClrScratch, Cluster, DirectionVectorSource, FnClaimExtractor,
     SigmoidProjectionVerifier, Trajectory, brevity_tiebreak, clr_vote,
 };

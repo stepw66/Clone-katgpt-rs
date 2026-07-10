@@ -14,7 +14,7 @@
 //! (7 iterations of a degree-5 polynomial), not by the FMA accumulation order.
 //! The same round-trip error appears with and without the blocked kernel.
 
-use katgpt_rs::newton_schulz::{InvSqrtScratch, ns_inv_sqrt_psd_into};
+use katgpt_core::newton_schulz::{InvSqrtScratch, ns_inv_sqrt_psd_into};
 
 /// Simple LCG for deterministic random data (no external dep).
 fn lcg_next(state: &mut u64) -> f32 {

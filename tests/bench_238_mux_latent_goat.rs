@@ -4,7 +4,7 @@
 //!
 //! G1–G7 gates must all pass before promoting `mux_latent_context` to default.
 
-use katgpt_rs::mux_latent::{
+use katgpt_core::mux_latent::{
     CompressionRatio, CompressionSummary, EvictionPolicy, LatentContextBuffer,
     LatentPrefillAdapter, MuxLatentConfig, MuxLatentEncoder, SpectralLOD, expand_all,
 };

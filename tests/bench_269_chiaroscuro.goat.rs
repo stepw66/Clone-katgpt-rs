@@ -15,7 +15,7 @@
 #[cfg(feature = "chiaroscuro")]
 #[cfg(test)]
 mod tests {
-    use katgpt_rs::chiaroscuro::{
+    use katgpt_attn::chiaroscuro::{
         collapse::CollapseDiscoveryHarness,
         entropy::{sigmoid, spectral_entropy_dct, spectral_entropy_dct_into},
         kv::{ChiaroscuroKvDispatcher, ChiaroscuroKvStrategy, DEFAULT_DCT_TRUNCATED_COEFFS},

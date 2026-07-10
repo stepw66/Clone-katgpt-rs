@@ -24,7 +24,7 @@
 
 #![cfg(feature = "cce_moderator")]
 
-use katgpt_rs::cce::{CceLp, Deviation, DeviationClass, OccupationMeasure, PayoffTensor};
+use katgpt_core::cce::{CceLp, Deviation, DeviationClass, OccupationMeasure, PayoffTensor};
 
 // ---------------------------------------------------------------------------
 // RPS — zero-sum game, CCE = Nash, no Pareto gain.

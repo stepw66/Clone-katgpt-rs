@@ -2,7 +2,7 @@
 //!
 //! Measures: double-buffer swap latency, prefetch throughput, memory overhead.
 
-use katgpt_rs::async_qdq::{AsyncQdqScheduler, DoubleBuffer};
+use katgpt_kv::async_qdq::{AsyncQdqScheduler, DoubleBuffer};
 
 #[test]
 fn test_double_buffer_swap_latency() {

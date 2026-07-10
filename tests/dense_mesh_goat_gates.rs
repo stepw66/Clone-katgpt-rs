@@ -29,9 +29,10 @@
 
 use std::time::{Duration, Instant};
 
-use katgpt_rs::dense_mesh::{
+use katgpt_forward::TransformerNode;
+use katgpt_transformer::dense_mesh::{
     DenseEdge, DenseHidden, DenseNode, EdgeBandit, EdgeBanditArm, IdentityEdge, LayerwiseTopology,
-    LoraEdge, MeshConfig, MeshScratch, Topology, TransformerNode,
+    LoraEdge, MeshConfig, MeshScratch, Topology,
 };
 use katgpt_rs::transformer::{
     ForwardContext, MultiLayerKVCache, TransformerWeights, forward, forward_batched,
@@ -68,11 +69,11 @@ fn median(samples: &[Duration]) -> Duration {
 /// - Layer 1→2: 2 edges (hidden0 → output, hidden1 → output)
 fn make_diamond_topology(
     node: Box<dyn DenseNode>,
-    layer0_edges: Vec<Box<dyn katgpt_rs::dense_mesh::DenseEdge>>,
+    layer0_edges: Vec<Box<dyn katgpt_transformer::dense_mesh::DenseEdge>>,
 ) -> LayerwiseTopology {
     let topology = Topology::diamond(); // [1, 2, 1]
     assert_eq!(layer0_edges.len(), 2, "diamond needs 2 edges from input");
-    let layer1: Vec<Box<dyn katgpt_rs::dense_mesh::DenseEdge>> =
+    let layer1: Vec<Box<dyn katgpt_transformer::dense_mesh::DenseEdge>> =
         vec![Box::new(IdentityEdge::new()), Box::new(IdentityEdge::new())];
     LayerwiseTopology::new(topology, node, vec![layer0_edges, layer1])
         .expect("diamond topology must construct cleanly")
@@ -348,8 +349,8 @@ fn run_gate4_at_scale(config: &Config, config_name: &str, assert_beats_sequentia
     let node = Box::new(TransformerNode::new(config.clone(), node_weights, 0, 0));
 
     // 4 edges from input → hidden layer, 4 edges from hidden → output
-    let mut layer0: Vec<Box<dyn katgpt_rs::dense_mesh::DenseEdge>> = Vec::with_capacity(4);
-    let mut layer1: Vec<Box<dyn katgpt_rs::dense_mesh::DenseEdge>> = Vec::with_capacity(4);
+    let mut layer0: Vec<Box<dyn katgpt_transformer::dense_mesh::DenseEdge>> = Vec::with_capacity(4);
+    let mut layer1: Vec<Box<dyn katgpt_transformer::dense_mesh::DenseEdge>> = Vec::with_capacity(4);
     for _ in 0..4 {
         layer0.push(Box::new(IdentityEdge::new()));
         layer1.push(Box::new(IdentityEdge::new()));

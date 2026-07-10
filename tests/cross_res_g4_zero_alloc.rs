@@ -72,14 +72,14 @@ fn g4_zero_alloc_steady_state() {
         }
         std::hint::black_box(&dst);
 
-        katgpt_rs::alloc::reset_alloc_stats();
+        katgpt_core::alloc::reset_alloc_stats();
         const MEASURED_ITERS: usize = 1000;
         for _ in 0..MEASURED_ITERS {
             transport_cross_resolution_into(&src, &bases, &mut scratch, &mut dst);
         }
         std::hint::black_box(&dst);
 
-        let (count, bytes) = katgpt_rs::alloc::get_alloc_stats();
+        let (count, bytes) = katgpt_core::alloc::get_alloc_stats();
         println!(
             "G4 cross_res: {count} allocations, {bytes} bytes over {MEASURED_ITERS} transports \
              (d_src={D_SRC}, d_dst={D_DST}, k={K})"

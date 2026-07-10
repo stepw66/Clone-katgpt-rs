@@ -14,7 +14,7 @@
 
 #![cfg(feature = "octopus")]
 
-use katgpt_rs::octopus::{
+use katgpt_quant::octopus::{
     OctopusConfig, OctopusKVCache,
     forward::{cosine_similarity, ip_error, per_coord_mse},
 };
@@ -24,7 +24,7 @@ use katgpt_rs::types::Rng;
 use katgpt_rs::types::Config;
 
 #[cfg(feature = "turboquant")]
-use katgpt_rs::turboquant::TurboQuantKVCache;
+use katgpt_quant::turboquant::TurboQuantKVCache;
 
 #[cfg(feature = "spectral_quant")]
 use katgpt_rs::spectralquant::SpectralQuantKVCache;
@@ -765,7 +765,7 @@ fn goat_octopus_vs_spectralquant_maxsim() {
         }
 
         // Compute MaxSim scores
-        let oct_ms = katgpt_rs::octopus::forward::maxsim_score_octopus(
+        let oct_ms = katgpt_quant::octopus::forward::maxsim_score_octopus(
             &queries,
             &mut oct_cache,
             0,

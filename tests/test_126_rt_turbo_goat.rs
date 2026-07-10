@@ -15,7 +15,7 @@
 
 use std::collections::HashSet;
 
-use katgpt_rs::rt_turbo::*;
+use katgpt_speculative::rt_turbo::*;
 use katgpt_rs::types::RtTurboConfig;
 
 // ── Deterministic PRNG (no `rand` dependency) ──────────────────

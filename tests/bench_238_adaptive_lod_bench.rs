@@ -9,12 +9,12 @@
 
 use std::time::Instant;
 
-use katgpt_rs::mux_latent::{
+use katgpt_core::mux_latent::{
     CompressionRatio, MuxLatentConfig, MuxLatentEncoder, SpectralLOD, select_segments_to_expand,
 };
 
 #[cfg(feature = "lclm_adaptive_lod")]
-use katgpt_rs::mux_latent::LatentContextBuffer;
+use katgpt_core::mux_latent::LatentContextBuffer;
 
 // ── Helpers ──────────────────────────────────────────────────────────
 

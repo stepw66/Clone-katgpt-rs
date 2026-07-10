@@ -6,7 +6,7 @@
 //!
 //! Run: `cargo test --features ega_attn --test test_139_ega_examples -- --nocapture`
 
-use katgpt_rs::ega_attn::{EgaGate, compute_energy_gate, sigmoid, z_normalize};
+use katgpt_attn::ega_attn::{EgaGate, compute_energy_gate, sigmoid, z_normalize};
 
 // ═══════════════════════════════════════════════════════════════════
 //  Helpers

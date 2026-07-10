@@ -68,11 +68,11 @@
 #![cfg(feature = "swir_switch_thinking")]
 #![cfg(test)]
 
-use katgpt_rs::swir::{
+use katgpt_transformer::swir::{
     StepAction, SwiRConfig, SwiRController, SwiRStrategyAdapter, ThinkMode, entropy_from_logits,
     in_vocab_convex_hull, mix_thinking_signal, shannon_entropy, soft_embedding,
 };
-use katgpt_rs::thinking_cot::{ControlTokenIds, StepContext, StepDirective, ThinkingStrategy};
+use katgpt_transformer::thinking_cot::{ControlTokenIds, StepContext, StepDirective, ThinkingStrategy};
 use std::time::Instant;
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -411,7 +411,7 @@ fn g7_step_zero_allocation_debug() {
     // Run in debug so the library's TrackingAllocator is installed.
     #[cfg(debug_assertions)]
     {
-        katgpt_rs::alloc::reset_alloc_stats();
+        katgpt_core::alloc::reset_alloc_stats();
         let mut ctrl = SwiRController::new(SwiRConfig {
             w_e_to_l: 4,
             w_l_to_e: 0,
@@ -427,7 +427,7 @@ fn g7_step_zero_allocation_debug() {
         // but be conservative in case the constructor's lazy init triggers).
         let _ = ctrl.step(5.0, 0);
 
-        katgpt_rs::alloc::reset_alloc_stats();
+        katgpt_core::alloc::reset_alloc_stats();
         let mut entropy = 5.0f32;
         for i in 1..1024u32 {
             entropy = if (i % 16) < 8 {
@@ -439,7 +439,7 @@ fn g7_step_zero_allocation_debug() {
             let _ = ctrl.step(entropy, i);
             let _ = ctrl.should_mix_signal();
         }
-        let (count, bytes) = katgpt_rs::alloc::get_alloc_stats();
+        let (count, bytes) = katgpt_core::alloc::get_alloc_stats();
         println!(
             "G7 step() allocations: {count} allocs, {bytes} bytes over 1023 steps \
              (budget: {G7_STEP_ALLOC_SLACK} allocs)"
@@ -484,7 +484,7 @@ fn g7_adapter_on_step_allocations_debug() {
         };
         let _ = adapter.on_step(&mut ctx);
 
-        katgpt_rs::alloc::reset_alloc_stats();
+        katgpt_core::alloc::reset_alloc_stats();
         let n_steps = 64u32;
         let mut soft_steps = 0u32;
         let mut inject_steps = 0u32;
@@ -503,7 +503,7 @@ fn g7_adapter_on_step_allocations_debug() {
                 _ => {}
             }
         }
-        let (count, bytes) = katgpt_rs::alloc::get_alloc_stats();
+        let (count, bytes) = katgpt_core::alloc::get_alloc_stats();
         let per_step = count as f64 / (n_steps - 1) as f64;
         println!(
             "G7 adapter on_step: {count} allocs / {bytes} bytes over {} steps ({per_step:.2} \
@@ -585,10 +585,10 @@ fn g1c_controller_correctness_on_converging_schedule() {
             switches += 1;
         }
         match action {
-            StepAction::InjectControlToken(katgpt_rs::swir::ControlToken::CloseThink) => {
+            StepAction::InjectControlToken(katgpt_transformer::swir::ControlToken::CloseThink) => {
                 close_think_injections += 1;
             }
-            StepAction::InjectControlToken(katgpt_rs::swir::ControlToken::ForceAnswerPrefix) => {
+            StepAction::InjectControlToken(katgpt_transformer::swir::ControlToken::ForceAnswerPrefix) => {
                 force_answer_injections += 1;
             }
             StepAction::Terminate => {
@@ -1145,7 +1145,7 @@ fn g9d_signal_mixing_on_off_decisions_identical() {
 
 #[test]
 fn g1h_accuracy_gate_harness_structure() {
-    use katgpt_rs::swir::bench::*;
+    use katgpt_transformer::swir::bench::*;
 
     let src = SyntheticProblemSource::new(10, 42);
     let mut backend_a = SyntheticDecodeBackend::new(42);
@@ -1202,7 +1202,7 @@ fn g1h_accuracy_gate_harness_structure() {
 
 #[test]
 fn g2h_efficiency_gate_harness_structure() {
-    use katgpt_rs::swir::bench::*;
+    use katgpt_transformer::swir::bench::*;
 
     let src = SyntheticProblemSource::new(5, 42);
     let mut backend_a = SyntheticDecodeBackend::new(42);

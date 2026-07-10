@@ -17,7 +17,7 @@
 
 use std::time::Instant;
 
-use katgpt_rs::spechop::{CrossHopConfig, observation_velocity};
+use katgpt_speculative::spechop::{CrossHopConfig, observation_velocity};
 use katgpt_rs::speculative::{
     CrossScaleConfig, NoScreeningPruner, build_dd_tree_screened, build_dd_tree_screened_recfm,
     extract_best_path,

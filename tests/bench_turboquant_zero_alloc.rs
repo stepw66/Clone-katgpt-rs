@@ -16,7 +16,7 @@ use std::time::Instant;
 use katgpt_rs::transformer::{
     ForwardContext, MultiLayerKVCache, TransformerWeights, forward, forward_turboquant,
 };
-use katgpt_rs::turboquant::TurboQuantKVCache;
+use katgpt_quant::turboquant::TurboQuantKVCache;
 use katgpt_rs::types::{Config, Rng, kv_dim};
 
 /// Generate synthetic KV vector for position `pos`.

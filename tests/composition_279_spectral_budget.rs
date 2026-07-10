@@ -57,11 +57,11 @@
 
 #![cfg(all(feature = "manifold_power_iter_router", feature = "spectral_budget"))]
 
-use katgpt_rs::manifold_power_iter_router::{
+use katgpt_spectral::manifold_power_iter_router::{
     compute_diagnostics, compute_expert_gram_into, manifold_power_iter_router,
 };
-use katgpt_rs::spectral_budget::{LayerType, SpectralBudgetConfig};
-use katgpt_rs::spectral_retract::PowerRetractScratch;
+use katgpt_spectral::spectral_budget::{LayerType, SpectralBudgetConfig};
+use katgpt_spectral::spectral_retract::PowerRetractScratch;
 
 // ── Deterministic PRNG (xorshift64) ───────────────────────────────────────
 

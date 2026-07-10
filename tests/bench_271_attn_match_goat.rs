@@ -34,7 +34,7 @@
 //! because synthetic data doesn't have real attention structure — the
 //! existing in-module tests (Phase 1–3) enforce the strict thresholds.
 
-use katgpt_rs::attn_match::{
+use katgpt_attn_match::{
     beta_fitter::{BetaFitConfig, fit_beta_nnls},
     compact::compact,
     key_selection::{omp::mass_coverage, select_highest_attn_keys, select_omp_keys},
@@ -87,7 +87,7 @@ fn synth_queries(n: usize, d: usize, seed: u64) -> Vec<f32> {
 // timing-based sanity check.
 
 #[cfg(debug_assertions)]
-use katgpt_rs::alloc::{get_alloc_stats, reset_alloc_stats};
+use katgpt_core::alloc::{get_alloc_stats, reset_alloc_stats};
 
 // ============================================================================
 // G1: β recovery on synthetic

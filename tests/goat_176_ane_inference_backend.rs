@@ -6,7 +6,7 @@
 //! - BackendKind enum works
 //! - CPU backend produces same results as direct transformer::forward
 
-use katgpt_rs::inference_backend::{BackendKind, CpuBackend, InferenceBackend, auto_backend};
+use katgpt_backend::{BackendKind, CpuBackend, InferenceBackend, auto_backend};
 use katgpt_rs::transformer::{self, ForwardContext, MultiLayerKVCache, TransformerWeights};
 use katgpt_rs::types::{Config, Rng, sample_token_into, softmax_scaled};
 

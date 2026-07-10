@@ -60,7 +60,7 @@ fn make_trajectories() -> Vec<Vec<f32>> {
 #[cfg(debug_assertions)]
 #[test]
 fn g5_zero_alloc_hot_path() {
-    use katgpt_rs::alloc::{get_alloc_stats, reset_alloc_stats};
+    use katgpt_core::alloc::{get_alloc_stats, reset_alloc_stats};
 
     let trajectories = make_trajectories();
     let traj_refs: Vec<&[f32]> = trajectories.iter().map(|v| v.as_slice()).collect();

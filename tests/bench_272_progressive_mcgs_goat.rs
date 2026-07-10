@@ -45,7 +45,7 @@
 #![cfg(feature = "progressive_mcgs")]
 #![cfg(test)]
 
-use katgpt_rs::progressive_mcgs::{
+use katgpt_speculative::progressive_mcgs::{
     BranchId, NodeId, ProgressiveMcgsConfig, ProgressiveMcgsSearch, Reward, SearchDomain,
     StepResult, graph::ProgressiveMcgs, scheduler::EntropyGatedScheduler, scheduler::RngLite,
 };
@@ -660,7 +660,7 @@ fn g5_allocation_audit_step_hot_path() {
         }
 
         // Reset and measure.
-        katgpt_rs::alloc::reset_alloc_stats();
+        katgpt_core::alloc::reset_alloc_stats();
         let n_measure = 500u32;
         let mut steps_taken = 0u32;
         for _ in 0..n_measure {
@@ -668,7 +668,7 @@ fn g5_allocation_audit_step_hot_path() {
                 steps_taken += 1;
             }
         }
-        let (alloc_count, alloc_bytes) = katgpt_rs::alloc::get_alloc_stats();
+        let (alloc_count, alloc_bytes) = katgpt_core::alloc::get_alloc_stats();
         let per_call_allocs = alloc_count as f64 / steps_taken as f64;
         let per_call_bytes = alloc_bytes as f64 / steps_taken as f64;
 

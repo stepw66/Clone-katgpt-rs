@@ -86,7 +86,7 @@ fn g5_zero_alloc_steady_state() {
             .expect("warmup forward should succeed");
         }
 
-        katgpt_rs::alloc::reset_alloc_stats();
+        katgpt_core::alloc::reset_alloc_stats();
         const MEASURED_ITERS: usize = 100;
         for _ in 0..MEASURED_ITERS {
             funcattn_forward(
@@ -105,7 +105,7 @@ fn g5_zero_alloc_steady_state() {
         // Sink output so the optimizer cannot elide the call.
         std::hint::black_box(&out);
 
-        let (count, bytes) = katgpt_rs::alloc::get_alloc_stats();
+        let (count, bytes) = katgpt_core::alloc::get_alloc_stats();
         println!(
             "G5 FUNCATTN: {count} allocations, {bytes} bytes over {MEASURED_ITERS} forward calls \
              (d={d}, k={k}, n={n})"

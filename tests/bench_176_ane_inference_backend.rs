@@ -10,7 +10,7 @@
 
 use std::time::Instant;
 
-use katgpt_rs::inference_backend::{BackendKind, CpuBackend, InferenceBackend, auto_backend};
+use katgpt_backend::{BackendKind, CpuBackend, InferenceBackend, auto_backend};
 use katgpt_rs::transformer::{ForwardContext, MultiLayerKVCache, TransformerWeights};
 use katgpt_rs::types::{Config, Rng, sample_token_into, softmax_scaled};
 

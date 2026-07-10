@@ -7,7 +7,7 @@
 //!
 //! Run: `cargo test --features ega_attn --test test_139_ega_attn -- --nocapture`
 
-use katgpt_rs::ega_attn::{EgaGate, compute_energy_gate};
+use katgpt_attn::ega_attn::{EgaGate, compute_energy_gate};
 
 // ── Helpers ───────────────────────────────────────────────────
 

@@ -4,7 +4,7 @@
 //! Run with: `cargo bench --bench issue043_ns_inv_sqrt_perf --features newton_schulz`
 //! Or: `cargo test --bench issue043_ns_inv_sqrt_perf --features newton_schulz -- --nocapture --ignored`
 
-use katgpt_rs::newton_schulz::{InvSqrtScratch, ns_inv_sqrt_psd_into};
+use katgpt_core::newton_schulz::{InvSqrtScratch, ns_inv_sqrt_psd_into};
 use std::hint::black_box;
 use std::time::Instant;
 

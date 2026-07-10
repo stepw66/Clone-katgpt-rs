@@ -2,7 +2,7 @@
 //!
 //! Measures: SIMD throughput (ops/sec), padding overhead, cache-line alignment.
 
-use katgpt_rs::channel_simd::AlignedWeightMatrix;
+use katgpt_core::channel_simd::AlignedWeightMatrix;
 
 #[test]
 fn test_matvec_throughput() {

@@ -21,10 +21,10 @@
 
 #![cfg(feature = "manifold_power_iter_router")]
 
-use katgpt_rs::manifold_power_iter_router::{
+use katgpt_spectral::manifold_power_iter_router::{
     compute_diagnostics, compute_expert_gram_into, gate_sigmoid_topk, manifold_power_iter_router,
 };
-use katgpt_rs::spectral_retract::PowerRetractScratch as ScratchShared;
+use katgpt_spectral::spectral_retract::PowerRetractScratch as ScratchShared;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
@@ -372,7 +372,7 @@ fn g05_determinism_sync_safe() {
 
 #[test]
 fn g06_dry_non_regression_gauge_rebalance() {
-    use katgpt_rs::gauge_invariant::{GaugeRebalanceScratch, gauge_rebalance};
+    use katgpt_spectral::gauge_invariant::{GaugeRebalanceScratch, gauge_rebalance};
 
     // Mirror t01: A·B^T preserved after rebalance.
     let m = 16;

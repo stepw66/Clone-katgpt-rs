@@ -17,7 +17,7 @@
 #![cfg(feature = "osc_kv")]
 
 use katgpt_core::Rng;
-use katgpt_rs::osc_kv::{OscKVCache, OscKVConfig};
+use katgpt_kv::osc_kv::{OscKVCache, OscKVConfig};
 #[cfg(feature = "spectral_quant")]
 use katgpt_rs::spectralquant::{SpectralQuantKVCache, SpectralQuantKVCacheConfig};
 use std::time::Instant;

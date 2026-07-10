@@ -6,7 +6,7 @@ use std::f32::consts::TAU;
 use std::time::Instant;
 
 use katgpt_rs::benchmark::cosine_similarity;
-use katgpt_rs::spec_reconciliation::{
+use katgpt_speculative::spec_reconciliation::{
     DefaultManifoldGenerator, ManifoldGenerator, ReconciliationConfig, ReconciliationPruner,
     ReconciliationVerdict, SpecReconciler, TrajectoryPoint, gaussian_sample,
 };

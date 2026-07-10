@@ -14,7 +14,7 @@
 
 #![cfg(feature = "orthogonal_procrustes")]
 
-use katgpt_rs::procrustes::{ProcrustesConfig, ProcrustesScratch, orthogonal_procrustes};
+use katgpt_spectral::procrustes::{ProcrustesConfig, ProcrustesScratch, orthogonal_procrustes};
 
 /// Deterministic xorshift32 PRNG.
 fn seeded_anchors(seed: u32, n: usize, d: usize) -> Vec<f32> {

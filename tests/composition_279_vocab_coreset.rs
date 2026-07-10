@@ -49,10 +49,10 @@
 
 #![cfg(all(feature = "manifold_power_iter_router", feature = "vocab_coreset"))]
 
-use katgpt_rs::manifold_power_iter_router::{
+use katgpt_spectral::manifold_power_iter_router::{
     compute_expert_gram_into, gate_sigmoid_topk, manifold_power_iter_router,
 };
-use katgpt_rs::spectral_retract::PowerRetractScratch;
+use katgpt_spectral::spectral_retract::PowerRetractScratch;
 use katgpt_rs::speculative::vocab_coreset::vocab_coreset;
 
 // ── Deterministic PRNG (xorshift64, matches the GOAT test convention) ─────

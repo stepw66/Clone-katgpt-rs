@@ -8,7 +8,7 @@
 //!
 //! Run: cargo test --release --test bench_245_still_kv_goat --features still_kv
 
-use katgpt_rs::still_kv::{
+use katgpt_kv::still_kv::{
     CompactionStrategy, IterativeChunkCompactor, PositionFreeCompactor, StillPerceiver,
     StillPerceiverConfig, cosine_similarity,
 };
@@ -89,7 +89,7 @@ fn compact_single(
     let pos_free = PositionFreeCompactor::new(rope_theta, KV_DIM);
     let unrotated = pos_free.un_rotate_keys(keys_f16, 0);
 
-    let query_bank = katgpt_rs::still_kv::query_bank::create_query_bank(strategy, KV_DIM);
+    let query_bank = katgpt_kv::still_kv::query_bank::create_query_bank(strategy, KV_DIM);
     let queries = query_bank.generate_queries(&unrotated, budget);
     if queries.is_empty() {
         // Fallback: just take first budget tokens
@@ -716,8 +716,8 @@ fn t24_goat_summary() {
 // ── T26: StillCoT vs ThoughtFold — Selection vs Selection+Synthesis ────────
 
 #[cfg(feature = "chain_fold")]
-fn make_fold_context_for_t26() -> katgpt_rs::fold::FoldContext {
-    use katgpt_rs::fold::{FoldContext, StepBoundary};
+fn make_fold_context_for_t26() -> katgpt_speculative::fold::FoldContext {
+    use katgpt_speculative::fold::{FoldContext, StepBoundary};
 
     // 10 reasoning steps, 10 tokens each → 100 total tokens
     let boundaries: Vec<StepBoundary> = (0..10)
@@ -797,7 +797,7 @@ fn make_synthetic_kv_with_dims(
 #[test]
 #[cfg(feature = "chain_fold")]
 fn t26_stillcot_vs_thoughtfold() {
-    use katgpt_rs::fold::{ChainFolder, FoldDecision};
+    use katgpt_speculative::fold::{ChainFolder, FoldDecision};
 
     let num_heads: usize = 4;
     let head_dim: usize = 32;
@@ -946,7 +946,7 @@ fn t26_stillcot_vs_thoughtfold() {
 #[test]
 #[cfg(feature = "chain_fold")]
 fn t27_goat_stillcot_gate() {
-    use katgpt_rs::fold::ChainFolder;
+    use katgpt_speculative::fold::ChainFolder;
 
     let num_heads: usize = 4;
     let head_dim: usize = 32;

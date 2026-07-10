@@ -8,10 +8,10 @@
 //! - BackendKind::Gate variant exists
 //! - Router stats are accurate
 
-use katgpt_rs::inference_backend::BackendKind;
+use katgpt_backend::BackendKind;
 use katgpt_rs::inference_router::InferenceRouter;
 use katgpt_rs::transformer::{ForwardContext, MultiLayerKVCache, TransformerWeights};
-use katgpt_rs::trigger_gate::{ComputeTier, TriggerGate, TriggerGateConfig};
+use katgpt_core::trigger_gate::{ComputeTier, TriggerGate, TriggerGateConfig};
 use katgpt_rs::types::{Config, Rng};
 
 fn fast_gate_config() -> TriggerGateConfig {

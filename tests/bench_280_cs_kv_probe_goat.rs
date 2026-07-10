@@ -37,7 +37,7 @@
 
 #![allow(clippy::too_many_lines)]
 
-use katgpt_rs::cs_kv_probe::{
+use katgpt_kv::cs_kv_probe::{
     CsKvProbe, CsProbeConfig, DensityBudget, Episode, GatedKvSlice, KvGroupRanking, sample_masks,
 };
 
@@ -45,7 +45,7 @@ use katgpt_rs::cs_kv_probe::{
 // Re-uses the library's per-thread `TrackingAllocator` (debug builds). In
 // release builds the gate degrades to a timing sanity check.
 #[cfg(debug_assertions)]
-use katgpt_rs::alloc::{get_alloc_stats, reset_alloc_stats};
+use katgpt_core::alloc::{get_alloc_stats, reset_alloc_stats};
 
 // ============================================================================
 // G1: CS ranking beats random — known-sparse ground truth {3, 17, 42} / 64.
@@ -80,7 +80,7 @@ fn g1_cs_ranking_beats_random() {
     // Black-box eval: retained-signal-head agreement with label, averaged over
     // episodes. Ablating a signal head removes its contribution → eval drops →
     // that head surfaces as important under the CS probe.
-    let eval = |mask: &katgpt_rs::cs_kv_probe::AblationMask, eps: &[Episode]| -> f32 {
+    let eval = |mask: &katgpt_kv::cs_kv_probe::AblationMask, eps: &[Episode]| -> f32 {
         let mut acc = 0.0_f32;
         for e in eps {
             for &h in &signal_heads {

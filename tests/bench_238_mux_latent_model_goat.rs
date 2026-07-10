@@ -12,7 +12,7 @@ use std::hint::black_box;
 use std::time::Instant;
 
 use katgpt_core::Config;
-use katgpt_rs::mux_latent::{
+use katgpt_core::mux_latent::{
     CompressionRatio, LatentPrefillAdapter, MuxLatentConfig, MuxLatentEncoder,
     forward_prefill_with_compression,
 };

@@ -14,7 +14,7 @@
 
 #![cfg(all(feature = "sp_kv", feature = "octopus"))]
 
-use katgpt_rs::octopus::{OctopusConfig, OctopusKVCache};
+use katgpt_quant::octopus::{OctopusConfig, OctopusKVCache};
 use katgpt_rs::sp_kv::types::{SpKvConfig, SpKvQuantCache};
 
 /// Build an OCTOPUS cache matching the historical `make_cache(dim, kb, vb)` shape.

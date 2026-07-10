@@ -13,7 +13,7 @@ use std::time::Instant;
 
 use katgpt_rs::inference_router::InferenceRouter;
 use katgpt_rs::transformer::{ForwardContext, MultiLayerKVCache, TransformerWeights};
-use katgpt_rs::trigger_gate::{TriggerGate, TriggerGateConfig};
+use katgpt_core::trigger_gate::{TriggerGate, TriggerGateConfig};
 use katgpt_rs::types::{Config, Rng};
 
 /// Fast gate config for benchmarks (tiny min interval so tier changes fire quickly).

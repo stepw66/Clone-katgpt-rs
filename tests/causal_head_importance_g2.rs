@@ -22,7 +22,7 @@
 //! - Attention-mass top-K includes bystanders (Jaccard < 1.0) once bystanders exist.
 
 use katgpt_core::causal_head_importance::{direct_effect_importance, partition_by_causal_score};
-use katgpt_rs::rt_turbo::calibrate_from_scores;
+use katgpt_speculative::rt_turbo::calibrate_from_scores;
 use katgpt_rs::types::RtTurboConfig;
 
 const N_HEADS: usize = 16;

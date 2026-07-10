@@ -6,7 +6,7 @@
 mod tests {
     use std::collections::HashMap;
 
-    use katgpt_rs::tokenizer::{
+    use katgpt_tokenizer::{
         Certifier, ColourId, ConvexSolver, ConvexToToastBridge, GraphBuilder, Rounder,
         RoundingScheme, SpecialTokens, ToastTokenizerImpl, VertexId,
     };

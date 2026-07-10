@@ -6,7 +6,7 @@
 
 #![cfg(feature = "maxsim")]
 
-use katgpt_rs::rerank::{RerankMethod, ndcg_at, rerank};
+use katgpt_attn_match::rerank::{RerankMethod, ndcg_at, rerank};
 use katgpt_rs::types::Rng;
 
 // ── Constants ─────────────────────────────────────────────────

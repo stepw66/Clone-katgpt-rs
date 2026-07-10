@@ -19,9 +19,9 @@
 use std::boxed::Box;
 use std::time::{Duration, Instant};
 
-use katgpt_rs::dense_mesh::traits::{DenseEdge, DenseNode};
-use katgpt_rs::dense_mesh::types::{DenseHidden, LayerRole};
-use katgpt_rs::dense_mesh::{
+use katgpt_transformer::dense_mesh::traits::{DenseEdge, DenseNode};
+use katgpt_transformer::dense_mesh::types::{DenseHidden, LayerRole};
+use katgpt_transformer::dense_mesh::{
     EdgeBandit, EdgeBanditArm, IdentityEdge, LayerwiseTopology, MeshConfig, MeshScratch, Topology,
     compute_router,
 };
@@ -472,15 +472,15 @@ fn prof_dense_mesh_zero_alloc_hot_path() {
     {
         // Allocation audit — global counters are shared across tests, so we
         // measure the *delta* across N forward calls.
-        katgpt_rs::alloc::reset_alloc_stats();
-        let (before_count, _) = katgpt_rs::alloc::get_alloc_stats();
+        katgpt_core::alloc::reset_alloc_stats();
+        let (before_count, _) = katgpt_core::alloc::get_alloc_stats();
         let _ = before_count; // reset gives 0
 
         for _ in 0..n_iters {
             let _ = topo.forward(&input, &mut scratch, &cfg);
         }
 
-        let (after_count, after_bytes) = katgpt_rs::alloc::get_alloc_stats();
+        let (after_count, after_bytes) = katgpt_core::alloc::get_alloc_stats();
 
         let per_call_allocs = after_count as f64 / n_iters as f64;
         let per_call_bytes = after_bytes as f64 / n_iters as f64;

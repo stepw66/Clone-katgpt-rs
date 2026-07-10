@@ -6,7 +6,7 @@
 //!
 //! Run: `cargo test --features ega_attn --test test_139_ega_goat -- --nocapture`
 
-use katgpt_rs::ega_attn::EgaGate;
+use katgpt_attn::ega_attn::EgaGate;
 
 /// G2: Parameter overhead — EGA adds < 1% of model parameters
 #[test]

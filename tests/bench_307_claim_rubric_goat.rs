@@ -10,8 +10,8 @@
 
 #![cfg(feature = "claim_rubric")]
 
-use katgpt_rs::claim_rubric::FeatureClass;
-use katgpt_rs::claim_rubric::{
+use katgpt_claim::claim_rubric::FeatureClass;
+use katgpt_claim::claim_rubric::{
     Claim, ClaimValidator, EvidenceItemId, EvidenceItemId::*, EvidenceLevel::*,
 };
 

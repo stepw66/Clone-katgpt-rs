@@ -2,7 +2,7 @@
 //!
 //! Measures: boundary detection, draft scoring overhead, acceptance rate proxy.
 
-use katgpt_rs::precision_aware_draft::BoundaryPenalty;
+use katgpt_speculative::precision_aware_draft::BoundaryPenalty;
 
 #[test]
 fn test_boundary_detection_speed() {

@@ -20,7 +20,7 @@ use katgpt_rs::sp_kv::{
     GateBiasBuffer, SpKvConfig, SpKvForwardContext, SpKvGateMode, SpKvPredictors, SpKvQuantCache,
 };
 use katgpt_rs::transformer::{ForwardContext, TransformerWeights};
-use katgpt_rs::turboquant::TurboQuantKVCache;
+use katgpt_quant::turboquant::TurboQuantKVCache;
 use katgpt_rs::types::{Config, Rng, kv_dim};
 
 /// Number of iterations for timing benchmarks.

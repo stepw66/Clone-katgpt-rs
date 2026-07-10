@@ -19,11 +19,11 @@
 
 #![cfg(feature = "gauge_invariant")]
 
-use katgpt_rs::gauge_invariant::{
+use katgpt_spectral::gauge_invariant::{
     GaugePair, GaugeRebalanceScratch, gauge_invariant_compose, gauge_invariant_lerp,
     gauge_rebalance,
 };
-use katgpt_rs::newton_schulz::{InvSqrtScratch, ns_inv_sqrt_psd, ns_inv_sqrt_psd_into};
+use katgpt_core::newton_schulz::{InvSqrtScratch, ns_inv_sqrt_psd, ns_inv_sqrt_psd_into};
 use std::time::{Duration, Instant};
 
 // ── Helpers ──────────────────────────────────────────────────────────────
@@ -467,7 +467,7 @@ fn t06_msign_via_ns_inv_sqrt_matches_orthonormality() {
 #[cfg(feature = "sparse_task_vector")]
 #[test]
 fn t07_sparse_task_vector_compose_gauge_invariant() {
-    use katgpt_rs::sparse_task_vector::SparseTaskVector;
+    use katgpt_sparse::sparse_task_vector::SparseTaskVector;
 
     let a = SparseTaskVector::from_dense(
         &[0.5, 0.0, 0.0, 0.0, 0.3, 0.0, 0.0, 0.0, 0.2, 0.0, 0.0, 0.0],
