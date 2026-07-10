@@ -765,50 +765,67 @@ impl InferenceBackend for GpuBackend {
         let pipelines = GpuPipelines::create(device)?;
 
         // Upload all weights to GPU buffers
+        let n_layer = weights.layers.len();
         let wb = GpuWeightBuffers {
             wte: upload_buffer(device, &weights.wte),
             wpe: upload_buffer(device, &weights.wpe),
             lm_head: upload_buffer(device, &weights.lm_head),
-            attn_wq: weights
-                .layers
-                .iter()
-                .map(|l| upload_buffer(device, &l.attn_wq))
-                .collect(),
-            attn_wk: weights
-                .layers
-                .iter()
-                .map(|l| upload_buffer(device, &l.attn_wk))
-                .collect(),
-            attn_wv: weights
-                .layers
-                .iter()
-                .map(|l| upload_buffer(device, &l.attn_wv))
-                .collect(),
-            attn_wo: weights
-                .layers
-                .iter()
-                .map(|l| upload_buffer(device, &l.attn_wo))
-                .collect(),
-            mlp_w1: weights
-                .layers
-                .iter()
-                .map(|l| upload_buffer(device, &l.mlp_w1))
-                .collect(),
-            mlp_w2: weights
-                .layers
-                .iter()
-                .map(|l| upload_buffer(device, &l.mlp_w2))
-                .collect(),
-            attn_norm_gamma: weights
-                .layers
-                .iter()
-                .map(|l| upload_buffer(device, &l.attn_norm_gamma))
-                .collect(),
-            mlp_norm_gamma: weights
-                .layers
-                .iter()
-                .map(|l| upload_buffer(device, &l.mlp_norm_gamma))
-                .collect(),
+            attn_wq: {
+                let mut v = Vec::with_capacity(n_layer);
+                for l in &weights.layers {
+                    v.push(upload_buffer(device, &l.attn_wq));
+                }
+                v
+            },
+            attn_wk: {
+                let mut v = Vec::with_capacity(n_layer);
+                for l in &weights.layers {
+                    v.push(upload_buffer(device, &l.attn_wk));
+                }
+                v
+            },
+            attn_wv: {
+                let mut v = Vec::with_capacity(n_layer);
+                for l in &weights.layers {
+                    v.push(upload_buffer(device, &l.attn_wv));
+                }
+                v
+            },
+            attn_wo: {
+                let mut v = Vec::with_capacity(n_layer);
+                for l in &weights.layers {
+                    v.push(upload_buffer(device, &l.attn_wo));
+                }
+                v
+            },
+            mlp_w1: {
+                let mut v = Vec::with_capacity(n_layer);
+                for l in &weights.layers {
+                    v.push(upload_buffer(device, &l.mlp_w1));
+                }
+                v
+            },
+            mlp_w2: {
+                let mut v = Vec::with_capacity(n_layer);
+                for l in &weights.layers {
+                    v.push(upload_buffer(device, &l.mlp_w2));
+                }
+                v
+            },
+            attn_norm_gamma: {
+                let mut v = Vec::with_capacity(n_layer);
+                for l in &weights.layers {
+                    v.push(upload_buffer(device, &l.attn_norm_gamma));
+                }
+                v
+            },
+            mlp_norm_gamma: {
+                let mut v = Vec::with_capacity(n_layer);
+                for l in &weights.layers {
+                    v.push(upload_buffer(device, &l.mlp_norm_gamma));
+                }
+                v
+            },
         };
 
         let n_embd = config.n_embd;

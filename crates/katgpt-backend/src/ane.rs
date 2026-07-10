@@ -324,7 +324,9 @@ pub fn build_transformer_model_spec(weights: &TransformerWeights, config: &Confi
     let vocab_size = config.vocab_size;
     let mlp_hidden = config.mlp_hidden;
 
-    let mut layers = Vec::new();
+    // 1 embedding + 13 layers per transformer block + 1 lm_head.
+    // Pre-allocate to avoid reallocation as we push n_layer*13 + 2 layers.
+    let mut layers = Vec::with_capacity(1 + n_layer * 13 + 1);
     let mut cur = "embedding_out".to_string();
 
     // ── Embedding: wte (token) + wpe (position) via InnerProduct ──
@@ -738,7 +740,11 @@ fn run_lm_head_into(
 /// the 1000µs threshold, indicating the model likely fell back to CPU.
 pub fn validate_residency(model: &coreml::Model, config: &Config) -> Result<u64, AneError> {
     let mut rng = katgpt_types::Rng::new(0);
-    let hidden: Vec<f32> = (0..config.n_embd).map(|_| rng.uniform()).collect();
+    let n_embd = config.n_embd;
+    let mut hidden: Vec<f32> = Vec::with_capacity(n_embd);
+    for _ in 0..n_embd {
+        hidden.push(rng.uniform());
+    }
     let mut logits = vec![0.0f32; config.vocab_size];
 
     let start = std::time::Instant::now();
