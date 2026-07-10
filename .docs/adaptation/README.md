@@ -11,6 +11,7 @@
 | [`model_adaptation.md`](model_adaptation.md) | Survey of model adaptation techniques (LoRA, merge, spectral-quant KV, ELF SDE, CNA steering) |
 | [`lucebox_techniques.md`](lucebox_techniques.md) | Advanced techniques — TurboQuant → SpectralQuant migration, PFlash block-sparse prefill |
 | [`peira_distillation.md`](peira_distillation.md) | PEIRA — modelless distillation (feature `peira_distill`) |
+| [`tilr_subspace_family.md`](tilr_subspace_family.md) | Subspace-projection family — TILR alignment-gated correction (Plan 425), cross-referencing `subspace_steering`/`spectral_rewire`/`river_valley` |
 
 ## See also
 

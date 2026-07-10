@@ -274,21 +274,26 @@ Plan 301's `thin_svd_into` directly.
 
 ---
 
-## Phase 4 — Integration Notes + Docs (P2)
+## Phase 4 — Integration Notes + Docs (P2) ✅ DONE (2026-07-10)
 
 ### Tasks
 
-- [ ] **T4.1** Add a README section under `katgpt-rs/.docs/` (if a steering /
+- [x] **T4.1** Add a README section under `katgpt-rs/.docs/` (if a steering /
       subspace doc group exists) or a standalone note cross-referencing Plan 412
       (subspace_steering), Plan 423 (spectral_rewire), Plan 152 (river_valley).
       Frame TILR as the "alignment-gated" member of the subspace-projection family.
-- [ ] **T4.2** Add an example at `katgpt-rs/examples/tilr_demo.rs`: synthetic
+      ✅ DONE (2026-07-10): `.docs/adaptation/tilr_subspace_family.md` — family
+      table, when-to-use guide, pipeline diagram, no-harm contract, reuse map.
+- [x] **T4.2** Add an example at `katgpt-rs/examples/tilr_demo.rs`: synthetic
       contrastive pair → SVD → γ-gated correction → show (a) no-harm when γ=0,
       (b) full correction when γ=1, (c) graceful intermediate behavior.
-- [ ] **T4.3** Cross-reference from Research 408 §4 consumer wiring:
-      - riir-ai HLA no-harm personality refinement (follow-up issue).
-      - riir-neuron-db freeze/thaw shard refinement (follow-up issue).
-      - riir-ai `reestimation.rs` γ-gated step size (follow-up issue).
+      ✅ DONE (2026-07-10): `examples/tilr_demo.rs` — full pipeline demo with all
+      three behaviors verified via assertions.
+- [x] **T4.3** Cross-reference from Research 408 §4 consumer wiring:
+      ✅ DONE (2026-07-10): three follow-up issues created:
+      - riir-ai HLA no-harm personality refinement → `.issues/128`.
+      - riir-neuron-db freeze/thaw shard refinement → `.issues/129`.
+      - riir-ai `reestimation.rs` γ-gated step size → `.issues/130`.
 
 ---
 
