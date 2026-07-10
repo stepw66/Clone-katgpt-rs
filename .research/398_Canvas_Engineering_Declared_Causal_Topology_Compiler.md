@@ -284,7 +284,7 @@ pub fn transfer_distance(a: &SemanticType, b: &SemanticType) -> f32 {
 
 → `katgpt-rs/.plans/419_canvas_schema_compiler.md` (open primitive: compiler + reachability + transfer_distance, feature flag `canvas_schema`, opt-in until GOAT gate).
 
-**Fusion PoC follow-up:** → `riir-ai/.benchmarks/043_canvas_npc_cognitive_stack_modelless.md` (defend-wrong PoC for the §2.5 fusion: does compiled canvas + reachability improve per-NPC behavior modellessly over un-unified constituents? If YES → re-evaluate for Super-GOAT; if NO → stays GOAT, compiler ships on structural merits). **RESOLVED 2026-07-09 — see §7 PoC Addendum below.** Result: could not isolate a canvas-attributable gain from the tuned classifier; stays GOAT. A cleaner re-PoC needs a non-designer-tuned discriminator.
+**Fusion PoC follow-up:** → `riir-ai/.benchmarks/043_canvas_npc_cognitive_stack_modelless.md` (defend-wrong PoC for the §2.5 fusion: does compiled canvas + reachability improve per-NPC behavior modellessly over un-unified constituents? If YES → re-evaluate for Super-GOAT; if NO → stays GOAT, compiler ships on structural merits). **RESOLVED 2026-07-09 — see §7 PoC Addendum below.** Result: could not isolate a canvas-attributable gain from the tuned classifier; stays GOAT. The correct re-PoC path is routing through `FaithfulnessProbe` (Plan 278, already wired in riir-poc via `jlens_concept_readout_goat.rs`) — see §7.
 
 **riir-train follow-up (noted, not blocked):** train a small DiT within a declared NPC-cognitive-stack topology; measure parameter efficiency vs flat baseline at our scale. This is the genuine training dependency for the empirical headline; it lives in riir-train.
 
@@ -333,13 +333,56 @@ structural/correctness merits (reachability-by-construction, Plan 419 G1–G6
 PASS), **not** on this PoC. The PoC does not award Super-GOAT, and its inability
 to isolate a canvas-attributable gain strengthens (not weakens) the
 "not Super-GOAT" conclusion. `canvas_schema` stays opt-in pending a production
-consumer. The behavioral question remains genuinely open; a cleaner re-PoC would
-need a discriminator that is NOT designer-tuned (e.g. mined via MAG/Plan 418 or
-learned via riir-train) so any behavioral delta can be attributed to the canvas
-structure rather than the classifier.
+consumer.
+
+### The correct re-PoC path: route through `FaithfulnessProbe` (we ship the tool)
+
+The ad-hoc displacement-alignment flee metric was the **wrong tool**. We ship
+the right one: `FaithfulnessProbe` (Plan 278,
+`crates/katgpt-core/src/faithfulness/probe.rs`) — a **causal-intervention**
+probe, not a correlational metric. It runs a 5-variant intervention suite
+(`Empty`, `Shuffle`, `Corrupt`, `Irrelevant`, `Filler`) on an injected memory
+segment and returns a `FaithfulnessProfile` whose `is_faithfully_used(t)`
+verdict requires a small `empty_delta` (graceful absence) plus large deltas on
+the meaningful interventions.
+
+**Infrastructure is already wired.** `riir-poc` already depends on
+`faithfulness_probe` (`crates/riir-poc/Cargo.toml` line 23) and already has a
+precedent bench using it — `benches/jlens_concept_readout_goat.rs` imports
+`DefaultFaithfulnessProbe` + `FaithfulnessProbe::faithfulness_profile` and runs
+the verdict at a 0.5 threshold. The canvas PoC lives in the same crate and could
+have followed this exact pattern; it reinvented a noisy correlational metric
+instead.
+
+**Mapping onto the canvas question:**
+- `ConsumerContext` = the NPC action function (canvas variant reads affect only;
+  leaky variant reads affect OR perception via the shortcut).
+- `Memory` = the affect signal.
+- `Empty` intervention on affect: canvas variant loses its sole input
+  (`can_reach` blocks perception→action at horizon 1) → large `empty_delta` →
+  proves the gate is structurally load-bearing. Leaky variant still has the
+  shortcut → small `empty_delta` → proves redundancy.
+- `Irrelevant` intervention on affect: canvas variant degrades (depends on
+  affect quality); leaky variant may not (perception compensates). Isolates how
+  much each variant relies on affect quality.
+
+**What this settles and what it does not:**
+
+| Question | `FaithfulnessProbe` settles it? |
+|---|---|
+| Is the canvas gate causally load-bearing (affect faithfully used)? | Yes — cleanly, via causal intervention |
+| Is the behavioral delta canvas-attributable (not classifier-artifact)? | Mostly — the `Empty` delta is canvas-attributable by construction; the `Irrelevant` delta exposes classifier-quality dependence |
+| Does canvas produce *better* behavior? | No — still needs a validated affect signal (non-designer-tuned); the probe characterizes the dependency but does not prove quality |
+
+So a re-PoC routing through `DefaultFaithfulnessProbe` would cleanly settle the
+structural-attribution half (the part the ad-hoc PoC botched) and sharply
+characterize the classifier-quality dependence (the `Irrelevant` delta). The
+behavioral-quality claim still ultimately needs a non-designer-tuned
+discriminator, but the probe is the correct first instrument — it replaces
+guesswork with causal isolation.
 
 ---
 
 ## TL;DR
 
-Canvas engineering declares a typed schema and compiles it to attention masks + loss weights. The **modelless value** is the compiler + reachability-as-exact-marginal-independence + transfer_distance + schema-mediated latent exchange. The **headline empirical value** (1.73× parameter efficiency, cortical R²=0.825) is training-dependent. Most constituent primitives ship (`region_subspace_bridge`, AC-Prefix, StillPerceiver, `LoopMode::TrainingFree`). **Verdict: GOAT** — the unified `CanvasSchema` compiler is novel and modelless, connects ≥4 pillars, and gives a provable correctness property (reachability by construction); but it is a unifying type-system abstraction, not a new empirical capability class at the modelless level, and the behavioral gain requires riir-train. A fusion PoC (record `riir-ai/.benchmarks/043_*`, §7) could not isolate a canvas-attributable gain from the tuned classifier; Super-GOAT re-evaluation stays open pending a PoC with a non-designer-tuned discriminator. Plan 419 ships the open compiler primitive.
+Canvas engineering declares a typed schema and compiles it to attention masks + loss weights. The **modelless value** is the compiler + reachability-as-exact-marginal-independence + transfer_distance + schema-mediated latent exchange. The **headline empirical value** (1.73× parameter efficiency, cortical R²=0.825) is training-dependent. Most constituent primitives ship (`region_subspace_bridge`, AC-Prefix, StillPerceiver, `LoopMode::TrainingFree`). **Verdict: GOAT** — the unified `CanvasSchema` compiler is novel and modelless, connects ≥4 pillars, and gives a provable correctness property (reachability by construction); but it is a unifying type-system abstraction, not a new empirical capability class at the modelless level, and the behavioral gain requires riir-train. A fusion PoC (record `riir-ai/.benchmarks/043_*`, §7) could not isolate a canvas-attributable gain from the tuned classifier; the ad-hoc flee metric was the wrong tool and a re-PoC should route through `FaithfulnessProbe` (Plan 278, already wired in riir-poc). Super-GOAT re-evaluation stays open pending that causal-intervention re-PoC. Plan 419 ships the open compiler primitive.
