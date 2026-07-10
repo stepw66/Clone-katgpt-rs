@@ -65,16 +65,24 @@ use katgpt_types::{kv_dim, matmul, matmul_relu, rmsnorm};
 ///
 /// # Returns
 ///
-/// `(all_logits, all_attn_weights)` where `all_attn_weights[q][h * seq_len + t]`
-/// is the attention weight from query `q` to key `t` under head `h`. Weights
-/// to ineligible positions (`position_order[t] > position_order[q]`) are
-/// exactly 0.0.
+/// `(all_logits, all_attn_weights)` — both FLAT row-major buffers.
+/// - `all_logits[q * vocab_size + v]` is the logit for vocab token `v` at query `q`.
+/// - `all_attn_weights[q * attn_row_stride + h * seq_len + t]` is the attention
+///   weight from query `q` to key `t` under head `h`, where
+///   `attn_row_stride = n_head * seq_len`.
+///
+/// Weights to ineligible positions (`position_order[t] > position_order[q]`)
+/// are exactly 0.0.
+///
+/// This matches the flat layout of [`forward_bidirectional_positions`] for
+/// API consistency (Plan 401 originally shipped nested; flat eliminates
+/// `seq_len` separate inner-heap allocations per output buffer).
 pub fn forward_set_causal_positions(
     weights: &TransformerWeights,
     tokens: &[usize],
     config: &Config,
     position_order: &[usize],
-) -> (Vec<Vec<f32>>, Vec<Vec<f32>>) {
+) -> (Vec<f32>, Vec<f32>) {
     assert_eq!(
         position_order.len(),
         tokens.len(),
@@ -125,8 +133,10 @@ pub fn forward_set_causal_positions(
     // through the SIMD polynomial exp (which doesn't handle special values —
     // the Cephes range-reduction saturates and produces NaN). The scalar
     // f32::exp on eligible positions is correct for all finite inputs.
-    let mut all_logits = vec![vec![0.0f32; config.vocab_size]; seq_len];
-    let mut all_attn_weights = vec![vec![0.0f32; config.n_head * seq_len]; seq_len];
+    let vocab = config.vocab_size;
+    let attn_row_stride = config.n_head * seq_len;
+    let mut all_logits = vec![0.0f32; seq_len * vocab];
+    let mut all_attn_weights = vec![0.0f32; seq_len * attn_row_stride];
 
     let mut q_buf = vec![0.0f32; n];
     let mut attn_out_buf = vec![0.0f32; n];
@@ -194,7 +204,8 @@ pub fn forward_set_causal_positions(
 
             // Persist weights for inspection/debugging. Ineligible positions
             // are exactly 0.0 (never touched in passes 2/3).
-            all_attn_weights[q][h * seq_len..h * seq_len + seq_len]
+            let attn_base = q * attn_row_stride + h * seq_len;
+            all_attn_weights[attn_base..attn_base + seq_len]
                 .copy_from_slice(&scores_buf[..seq_len]);
 
             // Weighted value sum over eligible positions only.
@@ -219,11 +230,12 @@ pub fn forward_set_causal_positions(
         matmul(&mut x_mlp, &layer.mlp_w2, &hidden, n, config.mlp_hidden);
         simd::simd_add_inplace(&mut x_mlp[..n], &xr2_buf[..n]);
 
+        let logit_base = q * vocab;
         matmul(
-            &mut all_logits[q],
+            &mut all_logits[logit_base..logit_base + vocab],
             &weights.lm_head,
             &x_mlp,
-            config.vocab_size,
+            vocab,
             n,
         );
     }
@@ -261,11 +273,12 @@ mod tests {
 
         let (_, attn) = forward_set_causal_positions(&weights, &tokens, &config, &position_order);
 
+        let attn_stride = config.n_head * tokens.len();
         for q in 0..tokens.len() {
             let q_gen_step = position_order[q];
             for h in 0..config.n_head {
                 for t in 0..tokens.len() {
-                    let w = attn[q][h * tokens.len() + t];
+                    let w = attn[q * attn_stride + h * tokens.len() + t];
                     if position_order[t] > q_gen_step {
                         assert_eq!(
                             w, 0.0,
@@ -295,9 +308,10 @@ mod tests {
 
         let (_, attn) = forward_set_causal_positions(&weights, &tokens, &config, &position_order);
 
+        let attn_stride = config.n_head * tokens.len();
         for q in 0..tokens.len() {
             for h in 0..config.n_head {
-                let self_weight = attn[q][h * tokens.len() + q];
+                let self_weight = attn[q * attn_stride + h * tokens.len() + q];
                 assert!(
                     self_weight > 0.0,
                     "Self-attention weight at q={q}, h={h} should be > 0, got {self_weight}",
@@ -325,12 +339,13 @@ mod tests {
 
         let (_, attn) = forward_set_causal_positions(&weights, &tokens, &config, &position_order);
 
+        let attn_stride = config.n_head * tokens.len();
         for q in 0..tokens.len() {
             let q_gen_step = position_order[q];
             for h in 0..config.n_head {
                 let sum: f32 = (0..tokens.len())
                     .filter(|&t| position_order[t] <= q_gen_step)
-                    .map(|t| attn[q][h * tokens.len() + t])
+                    .map(|t| attn[q * attn_stride + h * tokens.len() + t])
                     .sum();
                 assert!(
                     (sum - 1.0).abs() < 1e-5,
@@ -354,7 +369,8 @@ mod tests {
 
         let (_, attn) = forward_set_causal_positions(&weights, &tokens, &config, &position_order);
 
-        for (q, attn_row) in attn.iter().enumerate().take(tokens.len()) {
+        let attn_stride = config.n_head * tokens.len();
+        for (q, attn_row) in attn.chunks_exact(attn_stride).enumerate().take(tokens.len()) {
             for h in 0..config.n_head {
                 for t in 0..tokens.len() {
                     let w = attn_row[h * tokens.len() + t];

@@ -603,19 +603,15 @@ impl<'a> SetCausalForwardFn for CpuSetCausalForward<'a> {
     fn forward_set_causal(&self, tokens: &[usize], gen_steps: &[u32]) -> Vec<f32> {
         // Convert u32 gen-steps to usize position_order (zero-cost widening on 64-bit).
         let position_order: Vec<usize> = gen_steps.iter().map(|&g| g as usize).collect();
-        let (logits_2d, _attn_weights) = crate::forward_set_causal::forward_set_causal_positions(
+        // forward_set_causal_positions returns FLAT logits (row-major,
+        // q * vocab_size + v) — directly usable, no re-flattening needed.
+        let (logits, _attn_weights) = crate::forward_set_causal::forward_set_causal_positions(
             self.weights,
             tokens,
             self.config,
             &position_order,
         );
-        // Flatten Vec<Vec<f32>> → Vec<f32>.
-        let vocab = self.config.vocab_size;
-        let mut flat = Vec::with_capacity(logits_2d.len() * vocab);
-        for row in logits_2d {
-            flat.extend_from_slice(&row);
-        }
-        flat
+        logits
     }
 }
 
@@ -973,12 +969,12 @@ mod tests {
         let tokens = vec![0, 1, 2, 3, 4, 5, 6, 7];
         let gen_steps = vec![0u32, 0, 1, 1, 2, 2, 3, 3];
 
-        // Direct call (the source of truth).
+        // Direct call (the source of truth) — now returns FLAT logits.
         let position_order: Vec<usize> = gen_steps.iter().map(|&g| g as usize).collect();
-        let (logits_2d, _) =
+        let (direct_flat, _) =
             forward_set_causal_positions(&weights, &tokens, &config, &position_order);
 
-        // Adapter call.
+        // Adapter call — also FLAT (identical layout, trivially equivalent).
         let forward = CpuSetCausalForward {
             weights: &weights,
             config: &config,
@@ -988,9 +984,10 @@ mod tests {
         // Compare.
         let vocab = config.vocab_size;
         assert_eq!(flat.len(), tokens.len() * vocab);
+        assert_eq!(flat.len(), direct_flat.len());
         for p in 0..tokens.len() {
             for v in 0..vocab {
-                let direct = logits_2d[p][v];
+                let direct = direct_flat[p * vocab + v];
                 let adapter = flat[p * vocab + v];
                 assert!(
                     direct == adapter,

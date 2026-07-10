@@ -472,32 +472,35 @@ mod tests {
         // (block-causal uses SIMD Cephes polynomial exp; set-causal uses scalar
         // f32::exp. The ~1 ULP difference accumulates through the value sum
         // and MLP, producing differences up to ~1e-4 on logit magnitudes ~10.)
-        assert_eq!(logits_bc.len(), logits_sc.len(), "logits length mismatch");
+        assert_eq!(logits_bc.len(), logits_sc.len() / config.vocab_size, "logits length mismatch");
+        let vocab = config.vocab_size;
         for q in 0..tokens.len() {
             assert_eq!(
                 logits_bc[q].len(),
-                logits_sc[q].len(),
+                vocab,
                 "vocab length mismatch"
             );
-            for v in 0..logits_bc[q].len() {
-                let diff = (logits_bc[q][v] - logits_sc[q][v]).abs();
-                let max_abs = logits_bc[q][v].abs().max(logits_sc[q][v].abs());
+            for v in 0..vocab {
+                let l_sc = logits_sc[q * vocab + v];
+                let diff = (logits_bc[q][v] - l_sc).abs();
+                let max_abs = logits_bc[q][v].abs().max(l_sc.abs());
                 let rel_tol = (max_abs * 1e-3).max(1e-5);
                 assert!(
                     diff < rel_tol,
                     "Logit mismatch at q={q}, v={v}: bc={}, sc={}, diff={diff} (rel_tol={rel_tol})",
                     logits_bc[q][v],
-                    logits_sc[q][v],
+                    l_sc,
                 );
             }
         }
 
         // Attention weights must match within exp tolerance.
+        let attn_stride = config.n_head * tokens.len();
         for q in 0..tokens.len() {
             for h in 0..config.n_head {
                 for t in 0..tokens.len() {
                     let w_bc = attn_bc[q][h * tokens.len() + t];
-                    let w_sc = attn_sc[q][h * tokens.len() + t];
+                    let w_sc = attn_sc[q * attn_stride + h * tokens.len() + t];
                     let diff = (w_bc - w_sc).abs();
                     assert!(
                         diff < 1e-5,
@@ -538,10 +541,12 @@ mod tests {
         // Attention weights should match within SIMD-vs-scalar exp tolerance.
         // (bidirectional uses SIMD Cephes polynomial exp; set-causal uses scalar
         // f32::exp on eligible positions only — same math, different rounding.)
+        // Both are now FLAT row-major: attn[q * (n_head*seq_len) + h*seq_len + t].
+        let attn_stride = config.n_head * seq_len;
         for q in 0..seq_len {
             for h in 0..config.n_head {
                 for t in 0..seq_len {
-                    let w_sc = attn_sc[q][h * seq_len + t];
+                    let w_sc = attn_sc[q * attn_stride + h * seq_len + t];
                     // bidirectional attn is flat: [q * (n_head*seq_len) + h*seq_len + t]
                     let w_bi = attn_bi[q * config.n_head * seq_len + h * seq_len + t];
                     let diff = (w_sc - w_bi).abs();
@@ -554,11 +559,11 @@ mod tests {
             }
         }
 
-        // Logits should match within relative tolerance (sc is nested, bi is flat).
+        // Logits should match within relative tolerance (both sc and bi are now flat).
         // Accumulated exp differences can reach ~1e-4 on logit magnitudes ~10.
         for q in 0..seq_len {
             for v in 0..config.vocab_size {
-                let l_sc = logits_sc[q][v];
+                let l_sc = logits_sc[q * config.vocab_size + v];
                 let l_bi = logits_bi[q * config.vocab_size + v];
                 let diff = (l_sc - l_bi).abs();
                 let max_abs = l_sc.abs().max(l_bi.abs());
