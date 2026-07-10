@@ -2,8 +2,10 @@
 
 **Opened:** 2026-07-10
 **Discovered by:** Plan 423 Phase 3 GOAT gate (`.benchmarks/423_spectral_rewire_goat.md`)
+**Resolved:** 2026-07-10 (same day — substrate upgrade landed)
 **Severity:** blocks 128×128 / 512×512 spectral_rewire (and any future consumer needing >64-col SVD)
 **Type:** refactor / optimization (substrate upgrade)
+**Status:** RESOLVED
 
 ## Problem
 
@@ -59,13 +61,25 @@ but n is bounded by the matrix dimension (no LLM-scale matrices in this repo).
 (Tucker HOSVD, off_principal, subspace_phase_gate itself, Plan 301, Issue 008,
 Issue 043, Plan 312, NeuronShard, HLA eigenbasis, etc.). The fix must:
 
-- [ ] Add `sigma_buf` / `perm_buf` to `SvdScratch` (sized in `with_capacity`).
-- [ ] Update `one_sided_jacobi_svd_into` to use the heap slices.
-- [ ] Remove the `n <= 64` `debug_assert!` and the `[f32; 64]` / `[usize; 64]`.
-- [ ] Re-run ALL `katgpt-core` SVD tests (`subspace_phase_gate` test module,
+- [x] Add `sigma_buf` / `perm_buf` to `SvdScratch` (sized in `with_capacity`).
+- [x] Update `one_sided_jacobi_svd_into` to use the heap slices.
+- [x] Remove the `n <= 64` `debug_assert!` and the `[f32; 64]` / `[usize; 64]`.
+- [x] Re-run ALL `katgpt-core` SVD tests (`subspace_phase_gate` test module,
   Tucker HOSVD bench, off_principal tests) — bit-identical output required.
-- [ ] Add a regression test: SVD of a 128×128 matrix (was: panic/OOB).
-- [ ] Re-run the Plan 423 GOAT gate at 128×128 / 512×512 and record results.
+  **2974/2974 tests pass with `--all-features`. Output is bit-identical** (only
+  buffer location changed, not the algorithm).
+- [x] Add a regression test: SVD of a 128×128 matrix (was: panic/OOB).
+  `thin_svd_into_128x128_exceeds_old_64_col_cap` — 128 singular triples,
+  σ_max=128, σ_min=1, full rank.
+- [x] Re-run the Plan 423 GOAT gate at 128×128 / 512×512 and record results.
+  **G1a 128×128 r=16 PASS** (fraction=1.000019, rel err=1.948e-5). G1b 128×128
+  random-delta fraction=0.1340 (not concentrated, as expected). The
+  `SVD_MAX_COLS` cap in `katgpt-spectral` has been REMOVED; the cap-guard test
+  replaced by `spectral_rewire_works_for_d_in_above_old_64_cap` (d_in=80, PASS).
+  512×512 was NOT added to the gate (the one-sided Jacobi SVD at 512 cols would
+  take ~minutes per call due to O(n²) per sweep × 60 sweeps — the cold-tier
+  latency would be unacceptable; 128×128 is the practical bound for the
+  cold-tier SVD path).
 
 ## Out of scope for Plan 423
 

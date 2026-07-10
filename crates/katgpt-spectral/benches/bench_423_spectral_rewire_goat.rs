@@ -18,13 +18,10 @@
 //! - **G1a (numerical stability at scale — PASS gate):** an on-manifold delta
 //!   `ΔW = U_r M V_rᵀ` constructed in `W₀`'s own top-r SVD subspace must be
 //!   recovered with `on_manifold_fraction > 0.999` and relative recovery error
-//!   `< 1e-4` at every supported scale. Scales are bounded by [`SVD_MAX_COLS`]
-//!   (= 64): the one-sided Jacobi SVD caps `d_in ≤ 64`, so we test 64×64 r=8
-//!   (the largest supported square), 128×64 r=16, and 512×64 r=32 (the largest
-//!   supported row count). This validates the SVD + projection *machinery* at
-//!   scale — it does NOT validate the spectral *concentration assumption*.
-//!   **The 128×128 / 512×512 targets from Plan 423 are BLOCKED by the SVD cap**
-//!   — see Issue 124.
+//!   `< 1e-4` at every supported scale. We test 64×64 r=8, 128×64 r=16,
+//!   512×64 r=32, and (since Issue 124 resolved) 128×128 r=16. This validates
+//!   the SVD + projection *machinery* at scale — it does NOT validate the
+//!   spectral *concentration assumption*.
 //! - **G1b (concentration characterization — REPORT, not pass/fail):** for a
 //!   *random* (Gaussian) delta, measure `on_manifold_fraction`. Theory predicts
 //!   `≈ r²/(d_out·d_in)` (a generic delta is NOT concentrated in the base
@@ -73,7 +70,7 @@
 
 use katgpt_core::{SvdResultScratch, SvdScratch, thin_svd_into};
 use katgpt_spectral::spectral_rewire::{
-    SVD_MAX_COLS, SpectralRewireIndex, SpectralRewireScratch, spectral_rewire_into,
+    SpectralRewireIndex, SpectralRewireScratch, spectral_rewire_into,
     spectral_rewire_with_index_into,
 };
 use std::alloc::{GlobalAlloc, Layout, System};
@@ -184,7 +181,6 @@ fn cosine(a: &[f32], b: &[f32]) -> f32 {
 // ---------------------------------------------------------------------------
 
 fn g1a_numerical_stability(d_out: usize, d_in: usize, rank: usize) -> bool {
-    assert!(d_in <= SVD_MAX_COLS, "G1a d_in must be within SVD cap");
     let mut rng = make_rng(0xA1A1 ^ ((d_out as u64) ^ (d_in as u64)));
     let w0 = rand_matrix(&mut rng, d_out, d_in);
     let m_diag: Vec<f32> = (0..rank).map(|i| 0.1 * (i as f32 + 1.0)).collect();
@@ -211,7 +207,6 @@ fn g1a_numerical_stability(d_out: usize, d_in: usize, rank: usize) -> bool {
 // ---------------------------------------------------------------------------
 
 fn g1b_concentration_characterization(d_out: usize, d_in: usize, rank: usize) {
-    assert!(d_in <= SVD_MAX_COLS, "G1b d_in must be within SVD cap");
     let mut rng = make_rng(0xB1B1 ^ ((d_out as u64) ^ (d_in as u64)));
     let w0 = rand_matrix(&mut rng, d_out, d_in);
     // A RANDOM delta — NOT aligned with W₀'s subspace.
@@ -234,7 +229,6 @@ fn g1b_concentration_characterization(d_out: usize, d_in: usize, rank: usize) {
 // ---------------------------------------------------------------------------
 
 fn g2_singular_direction_preservation(d_out: usize, d_in: usize, rank: usize) -> bool {
-    assert!(d_in <= SVD_MAX_COLS, "G2 d_in must be within SVD cap");
     let mut rng = make_rng(0xC2C2 ^ ((d_out as u64) ^ (d_in as u64)));
     let w0 = rand_matrix(&mut rng, d_out, d_in);
 
@@ -363,7 +357,6 @@ fn g4_alloc_free() -> bool {
 
 fn g5_latency() -> bool {
     fn measure_svd_path(d_out: usize, d_in: usize, r: usize, n: usize) -> f64 {
-        assert!(d_in <= SVD_MAX_COLS);
         let mut rng = make_rng((d_out as u64).wrapping_mul((d_in as u64) ^ (r as u64)));
         let w0 = rand_matrix(&mut rng, d_out, d_in);
         let delta = rand_matrix(&mut rng, d_out, d_in);
@@ -379,7 +372,6 @@ fn g5_latency() -> bool {
     }
 
     fn measure_index_path(d_out: usize, d_in: usize, r: usize, n: usize) -> f64 {
-        assert!(d_in <= SVD_MAX_COLS);
         let mut rng = make_rng((d_out as u64).wrapping_mul((d_in as u64) ^ (r as u64)));
         let w0 = rand_matrix(&mut rng, d_out, d_in);
         let delta = rand_matrix(&mut rng, d_out, d_in);
@@ -438,8 +430,8 @@ fn g5_latency() -> bool {
     );
     println!("    note: 64×64 target recalibrated 10µs→50µs (plan’s 10µs predated the");
     println!("          flop count; ~75K flops of memory-bound rank-1 axpy ≈ 29µs measured).");
-    println!("          512×512 BLOCKED by SVD 64-col cap (Issue 124). SVD path is");
-    println!("          {:.1}× / {:.0}× slower (512×64 / 64×64) — cold-tier only.",
+    println!("          SVD cap (Issue 124) RESOLVED — arbitrary d_in now supported.");
+    println!("          SVD path is {:.1}× / {:.0}× slower (512×64 / 64×64) — cold-tier only.",
         svd_big / idx_big.max(1e-12), svd_small / idx_mid.max(1e-12));
 
     pass_npc && pass_big && pass_mid
@@ -453,16 +445,18 @@ fn main() {
     println!("=== Plan 423 Phase 3 — Spectral Rewiring GOAT gate ===\n");
 
     println!("── G1a (numerical stability at scale — PASS gate) ──");
-    println!("  (scales bounded by SVD 64-col cap; 128×128 / 512×512 blocked — Issue 124)");
     let g1a_64 = g1a_numerical_stability(64, 64, 8);
     let g1a_128 = g1a_numerical_stability(128, 64, 16);
     let g1a_512 = g1a_numerical_stability(512, 64, 32);
-    let g1a = g1a_64 && g1a_128 && g1a_512;
+    // Issue 124 resolved: 128×128 now works (SVD cap lifted).
+    let g1a_128sq = g1a_numerical_stability(128, 128, 16);
+    let g1a = g1a_64 && g1a_128 && g1a_512 && g1a_128sq;
 
     println!("\n── G1b (concentration characterization — REPORT) ──");
     g1b_concentration_characterization(64, 64, 8);
     g1b_concentration_characterization(128, 64, 16);
     g1b_concentration_characterization(512, 64, 32);
+    g1b_concentration_characterization(128, 128, 16);
 
     println!("\n── G2 (singular-direction preservation) ──");
     let g2 = g2_singular_direction_preservation(64, 64, 16);

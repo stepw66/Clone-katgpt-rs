@@ -43,13 +43,13 @@
 use katgpt_core::simd::simd_dot_f32;
 use katgpt_core::{SvdResultScratch, SvdScratch, thin_svd_into};
 
-/// Maximum number of columns the underlying one-sided Jacobi SVD
-/// (`katgpt_core::thin_svd_into`) supports. Fixed-size `[f32; 64]` /
-/// `[usize; 64]` stack arrays in the Jacobi argsort path cap `n_cols` at 64.
-/// [`spectral_rewire_into`] factors W₀ as `(d_out × d_in)`, so `d_in` is the
-/// capped dimension. Square matrices larger than 64×64 are unsupported until
-/// the SVD substrate is upgraded (Issue 124).
-pub const SVD_MAX_COLS: usize = 64;
+// Issue 124 (resolved 2026-07-10): the one-sided Jacobi SVD substrate in
+// `katgpt_core::thin_svd_into` previously used fixed `[f32; 64]` / `[usize; 64]`
+// stack arrays, capping `n_cols ≤ 64`. The argsort buffers have been moved to
+// `SvdScratch` (heap-allocated, sized once), so the cap is LIFTED. Arbitrary
+// `d_in` (matrix column count) is now supported — only bounded by available
+// memory for the scratch buffers. The former `SVD_MAX_COLS` constant and the
+// `d_in <= 64` guards have been removed.
 
 // ---------------------------------------------------------------------------
 // SpectralRewireScratch — pre-allocated reusable buffers
@@ -172,8 +172,7 @@ pub struct SpectralRewireOutput<'a> {
 ///
 /// # Panics
 ///
-/// Panics if `w0.len()` or `delta.len()` ≠ `d_out * d_in`, if `rank` is 0,
-/// or if `d_in > 64` (the one-sided Jacobi SVD column cap — see [`SVD_MAX_COLS`]).
+/// Panics if `w0.len()` or `delta.len()` ≠ `d_out * d_in`, or if `rank` is 0.
 pub fn spectral_rewire_into<'a>(
     w0: &[f32],
     delta: &[f32],
@@ -196,18 +195,6 @@ pub fn spectral_rewire_into<'a>(
         delta.len()
     );
     assert!(rank >= 1, "spectral_rewire_into: rank must be >= 1, got {rank}");
-    // The underlying one-sided Jacobi SVD (`katgpt_core::thin_svd_into`) uses
-    // fixed-size stack arrays capped at n_cols <= 64. We SVD W₀ as
-    // (d_out × d_in), so d_in is the capped dimension. Square matrices larger
-    // than 64×64 are NOT supported until the SVD substrate is upgraded — see
-    // Issue 124 (spectral_rewire SVD cap). The cap does NOT bind d_out.
-    assert!(
-        d_in <= SVD_MAX_COLS,
-        "spectral_rewire_into: d_in={d_in} exceeds the one-sided Jacobi SVD cap \
-         ({SVD_MAX_COLS} columns). The underlying thin_svd_into uses fixed \
-         [f32; 64] stack arrays. Square matrices >64×64 are unsupported until \
-         the SVD substrate is upgraded (Issue 124)."
-    );
     let r = rank.min(d_out.min(d_in));
 
     scratch.ensure_capacity(d_out, d_in, r);
@@ -493,8 +480,7 @@ impl SpectralRewireIndex {
     ///
     /// # Panics
     ///
-    /// Panics if `w0.len() != d_out * d_in`, `rank == 0`, or `d_in > 64`
-    /// (the one-sided Jacobi SVD column cap — see [`SVD_MAX_COLS`]).
+    /// Panics if `w0.len() != d_out * d_in` or `rank == 0`.
     pub fn new(w0: &[f32], d_out: usize, d_in: usize, rank: usize) -> Self {
         assert_eq!(
             w0.len(),
@@ -503,10 +489,6 @@ impl SpectralRewireIndex {
             w0.len()
         );
         assert!(rank >= 1, "SpectralRewireIndex::new: rank must be >= 1");
-        assert!(
-            d_in <= SVD_MAX_COLS,
-            "SpectralRewireIndex::new: d_in={d_in} exceeds the SVD cap ({SVD_MAX_COLS})"
-        );
         let r = rank.min(d_out.min(d_in));
 
         let mut svd_result = SvdResultScratch::with_capacity(d_out, d_in);
@@ -1115,32 +1097,40 @@ mod tests {
         assert!(std::panic::catch_unwind(|| rewiring_matrix_diagnostics(&[1.0, 2.0], 2)).is_err());
     }
 
-    // ── SVD cap guard (Issue 124): d_in > 64 panics with a clear message ──
-
+    // ── Issue 124 resolved: d_in > 64 now WORKS (cap lifted) ──
+    // Previously the one-sided Jacobi SVD used fixed [f32; 64] / [usize; 64]
+    // stack arrays, capping d_in at 64. After the substrate upgrade (buffers
+    // moved to SvdScratch), spectral_rewire works on arbitrary d_in.
     #[test]
-    fn svd_cap_guard_panics_for_large_d_in() {
-        // d_in = 65 exceeds the one-sided Jacobi SVD 64-column cap. The guard
-        // must panic with a clear message instead of an opaque OOB deep in
-        // thin_svd_into.
+    fn spectral_rewire_works_for_d_in_above_old_64_cap() {
         let d_out = 8;
-        let d_in = 65; // one over the cap
-        let w0 = vec![0.0_f32; d_out * d_in];
-        let delta = vec![0.0_f32; d_out * d_in];
-        let mut scratch = SpectralRewireScratch::with_capacity(d_out, d_in, 4);
-        let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            spectral_rewire_into(&w0, &delta, d_out, d_in, 4, &mut scratch);
-        }));
-        assert!(res.is_err(), "d_in=65 should panic (SVD cap)");
-        // Verify the guard message mentions the cap.
-        let payload = res.unwrap_err();
-        let msg = payload
-            .downcast_ref::<String>()
-            .map(|s| s.as_str())
-            .or_else(|| payload.downcast_ref::<&'static str>().copied())
-            .unwrap_or("");
+        let d_in = 80; // exceeds the old 64-col cap
+        let rank = 4;
+        let mut rng = make_rng(7171);
+        let w0 = rand_matrix(&mut rng, d_out, d_in);
+        // Construct a genuinely on-manifold delta: ΔW = U_r · diag · V_rᵀ.
+        let mut svd_result = katgpt_core::SvdResultScratch::with_capacity(d_out, d_in);
+        let mut svd_work = katgpt_core::SvdScratch::with_capacity(d_in, d_out);
+        katgpt_core::thin_svd_into(&w0, d_out, d_in, &mut svd_result, &mut svd_work);
+        let mut delta = vec![0.0_f32; d_out * d_in];
+        for j in 0..rank {
+            let sv = svd_result.singular_value(j);
+            let u = svd_result.left_singular_vector(j);
+            let v = svd_result.right_singular_vector(j);
+            for r in 0..d_out {
+                for c in 0..d_in {
+                    delta[r * d_in + c] += sv * u[r] * v[c];
+                }
+            }
+        }
+
+        let mut scratch = SpectralRewireScratch::with_capacity(d_out, d_in, rank);
+        let out = spectral_rewire_into(&w0, &delta, d_out, d_in, rank, &mut scratch);
+        // An on-manifold delta must be recovered with high fidelity.
         assert!(
-            msg.contains("SVD") && msg.contains("64"),
-            "panic message should mention the SVD 64-cap, got: {msg}"
+            out.on_manifold_fraction > 0.99,
+            "on-manifold delta should be recovered, fraction = {}",
+            out.on_manifold_fraction
         );
     }
 

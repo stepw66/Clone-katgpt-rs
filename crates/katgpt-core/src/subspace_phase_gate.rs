@@ -553,6 +553,16 @@ pub struct SvdScratch {
     v: Vec<f32>,
     /// Column norms (singular values during iteration). Length n.
     col_norms_sq: Vec<f32>,
+    /// Singular-value argsort buffer (unsorted σ snapshot). Length n_cols.
+    ///
+    /// Issue 124 (2026-07-10): previously a fixed `[f32; 64]` stack array in
+    /// `one_sided_jacobi_svd_into`, capping `n_cols ≤ 64`. Heap-allocated in
+    /// the reusable scratch so the cap is lifted with zero hot-path cost.
+    sigma_buf: Vec<f32>,
+    /// Permutation buffer (column index argsort by descending σ). Length n_cols.
+    ///
+    /// Issue 124: previously a fixed `[usize; 64]` stack array. See `sigma_buf`.
+    perm_buf: Vec<usize>,
 }
 
 impl SvdScratch {
@@ -562,6 +572,8 @@ impl SvdScratch {
             a: vec![0.0; m_rows * n_cols],
             v: vec![0.0; n_cols * n_cols],
             col_norms_sq: vec![0.0; n_cols],
+            sigma_buf: vec![0.0; n_cols],
+            perm_buf: vec![0; n_cols],
         }
     }
 
@@ -574,6 +586,12 @@ impl SvdScratch {
         }
         for v in &mut self.col_norms_sq {
             *v = 0.0;
+        }
+        for v in &mut self.sigma_buf {
+            *v = 0.0;
+        }
+        for v in &mut self.perm_buf {
+            *v = 0;
         }
     }
 }
@@ -682,6 +700,20 @@ fn one_sided_jacobi_svd_into(
         "work.v len {} < n*n={}",
         work.v.len(),
         n * n
+    );
+    // Issue 124: argsort buffers live in the scratch (sized once), not on the
+    // stack. Previously fixed `[f32; 64]` / `[usize; 64]` capped n_cols ≤ 64.
+    debug_assert!(
+        work.sigma_buf.len() >= n,
+        "work.sigma_buf len {} < n={}",
+        work.sigma_buf.len(),
+        n
+    );
+    debug_assert!(
+        work.perm_buf.len() >= n,
+        "work.perm_buf len {} < n={}",
+        work.perm_buf.len(),
+        n
     );
 
     // Reset result for this matrix size (grows buffers if needed, zero-fill).
@@ -809,10 +841,12 @@ fn one_sided_jacobi_svd_into(
     // Phase 2 GOAT uses D=48). PCA via Jacobian SVD is a documented public-API
     // use case; the previous k ≤ 16 cap panicked on valid inputs (N ≥ 17, D=48).
     let k = m.min(n); // number of singular triples to output
-    debug_assert!(n <= 64, "one-sided Jacobi result scratch supports n <= 64");
 
-    // Stack snapshot of raw (unsorted) singular values — one per column (n total).
-    let mut raw_sigma: [f32; 64] = [0.0; 64];
+    // Snapshot of raw (unsorted) singular values — one per column (n total).
+    // Issue 124: moved from a fixed `[f32; 64]` stack array to the reusable
+    // heap buffer in `SvdScratch`. The buffer is reused across calls (sized
+    // once in `with_capacity`); only the `n`-length prefix is touched here.
+    let raw_sigma = &mut work.sigma_buf;
     for i in 0..n {
         let mut s_sq: f32 = 0.0;
         for r in 0..m {
@@ -823,7 +857,7 @@ fn one_sided_jacobi_svd_into(
     }
 
     // Argsort ALL n column indices by descending singular value.
-    let mut perm: [usize; 64] = [0; 64];
+    let perm = &mut work.perm_buf;
     for i in 0..n {
         perm[i] = i;
     }
@@ -1596,6 +1630,42 @@ mod tests {
         );
         // Rank-3 (the 3 non-zero singular values).
         assert_eq!(result.rank, 3, "rank should be 3, got {}", result.rank);
+    }
+
+    // ── Issue 124 regression: the previous `one_sided_jacobi_svd_into` used ─
+    //    fixed `[f32; 64]` / `[usize; 64]` stack arrays for the σ argsort,
+    //    capping `n_cols ≤ 64`. In release builds the `debug_assert!` compiled
+    //    away, so `n_cols > 64` silently wrote OOB. After the heap-allocate fix
+    //    (buffers moved to `SvdScratch`), 128×128 must work without panic.
+    #[test]
+    fn thin_svd_into_128x128_exceeds_old_64_col_cap() {
+        // 128×128 diagonal matrix: σ_i = (128 - i) for i in 0..128.
+        // This exceeds the old 64-col cap (Issue 124).
+        let n = 128;
+        let m = 128;
+        let m_flat: Vec<f32> = (0..m * n)
+            .map(|idx| {
+                let row = idx / n;
+                let col = idx % n;
+                if row == col {
+                    (n - row) as f32
+                } else {
+                    0.0
+                }
+            })
+            .collect();
+        let mut work = SvdScratch::with_capacity(n, m);
+        let mut result = SvdResultScratch::with_capacity(m, n);
+        thin_svd_into(&m_flat, m, n, &mut result, &mut work);
+
+        // All 128 singular triples present.
+        assert_eq!(result.len(), 128, "128×128 should give 128 triples");
+        // The largest singular value is σ = 128 (the (0,0) entry).
+        assert!((result.singular_value(0) - 128.0).abs() < 0.1, "σ_max ≈ 128");
+        // The smallest is σ = 1 (the (127,127) entry).
+        assert!((result.singular_value(127) - 1.0).abs() < 0.1, "σ_min ≈ 1");
+        // Full rank.
+        assert_eq!(result.rank, 128, "full-rank 128×128");
     }
 
     // ── Issue 043 regression: rank-deficient SVD must not be slower than ────

@@ -21,7 +21,7 @@ assumption that makes the primitive *useful*.
 
 | Gate | Result | Detail |
 |---|---|---|
-| **G1a** numerical stability at scale | **PASS** | On-manifold deltas recovered with fraction >0.999, rel err ~8e-6 at 64×64/128×64/512×64 |
+| **G1a** numerical stability at scale | **PASS** | On-manifold deltas recovered with fraction >0.999, rel err ~8e-6 at 64×64/128×64/512×64, and ~1.9e-5 at 128×128 (Issue 124 resolved) |
 | **G1b** concentration characterization | **REPORT** | Random deltas NOT concentrated (0.12–0.18 vs theory 0.016–0.031) |
 | **G2** singular-direction preservation | **PASS** | cosine = 1.000000 (target >0.99) |
 | **G3** determinism | **PASS** | Bit-identical across 100 runs |
@@ -40,16 +40,20 @@ relative recovery error `< 1e-4`:
 | 64×64 | 8 | 1.000008 | 8.33e-6 |
 | 128×64 | 16 | 1.000010 | 8.95e-6 |
 | 512×64 | 32 | 1.000008 | 7.81e-6 |
+| 128×128 | 16 | 1.000019 | 1.95e-5 |
 
 This validates the SVD + matmul machinery is numerically sound at the largest
 supported scales. It does NOT validate the concentration assumption (a delta
 constructed to be on-manifold is trivially on-manifold).
 
-**Scales are bounded by `SVD_MAX_COLS = 64`** (Issue 124): the one-sided Jacobi
-SVD in `katgpt-core/subspace_phase_gate` uses fixed `[f32; 64]` / `[usize; 64]`
-stack arrays for the argsort, capping `n_cols ≤ 64`. The 128×128 / 512×512
-targets from Plan 423 are BLOCKED by this cap. The primitive SVDs `W₀` as
-`(d_out × d_in)`, so `d_in` is the capped dimension; `d_out` is unbounded.
+**Scales are no longer bounded by `SVD_MAX_COLS`** (Issue 124 RESOLVED
+2026-07-10): the one-sided Jacobi SVD argsort buffers have been moved from
+fixed `[f32; 64]` / `[usize; 64]` stack arrays to heap-allocated fields in
+`SvdScratch`, so arbitrary `d_in` is now supported. The former `SVD_MAX_COLS`
+constant and `d_in <= 64` guards have been removed from `katgpt-spectral`.
+512×512 was NOT added to the gate — the one-sided Jacobi SVD at 512 cols would
+take minutes per call (O(n²) pairs × 60 sweeps), making the cold-tier latency
+unacceptable. 128×128 is the practical cold-tier bound.
 
 ## G1b — Concentration Characterization (REPORT)
 
@@ -60,6 +64,7 @@ For a **random** (Gaussian) delta — not aligned with `W₀`'s subspace:
 | 64×64 | 8 | 0.1210 | 0.0156 |
 | 128×64 | 16 | 0.1749 | 0.0312 |
 | 512×64 | 32 | 0.1778 | 0.0312 |
+| 128×128 | 16 | 0.1340 | 0.0156 |
 
 **Interpretation:** a generic delta is NOT concentrated in the base's top-r
 subspace (measured ~0.12–0.18, well below the 0.5 concentration threshold). This
@@ -105,7 +110,9 @@ The cached-index path is **15× / 69× faster** than the SVD path (512×64 / 64�
 was recalibrated 10µs → 50µs: the original 10µs predated the flop count (~75K
 flops of memory-bound rank-1 axpy ≈ 29µs measured at ~2.5 GFLOP/s effective).
 
-**512×512 is BLOCKED** by the SVD 64-col cap (Issue 124).
+**512×512 is not tested** — the one-sided Jacobi SVD at 512 cols would take
+minutes per call (O(n²) pairs × 60 sweeps). 128×128 is the practical cold-tier
+bound. Issue 124 (the 64-col cap) is RESOLVED.
 
 ## What Landed This Phase
 
@@ -121,15 +128,15 @@ Beyond the GOAT gate, Phase 3 drove two improvements to the primitive:
 
 ## Open Follow-ups
 
-- **Issue 124** — upgrade the one-sided Jacobi SVD substrate to remove the
-  64-column cap (heap-allocate the `[f32; 64]` / `[usize; 64]` argsort buffers).
-  Unblocks 128×128 / 512×512. Out of scope for Plan 423 (different crate, 16+
-  consumers).
+- **Issue 124** — **RESOLVED** (2026-07-10). The one-sided Jacobi SVD substrate
+  now heap-allocates the argsort buffers (`sigma_buf` / `perm_buf` in
+  `SvdScratch`). Arbitrary `d_in` is supported; 128×128 verified in the GOAT
+  gate. The `SVD_MAX_COLS` cap in `katgpt-spectral` has been removed.
 - **Issue 123** — real-delta concentration test. The make-or-break for promotion
   to default. Blocked on a real delta source (freeze/thaw pipeline in
   riir-neuron-db, or LoRA overlay path in riir-ai, or training deltas from
   riir-train).
-- **SIMD optimization** (optional) — the 64×64 index path at 29µs could likely
+- **SIMD optimization** (optional) — the 64×64 index path at ~29µs could likely
   hit the original 10µs target with proper SIMD matmuls. Not blocking; file as
   issue if the 64×64 hot-loop case becomes a real workload.
 
