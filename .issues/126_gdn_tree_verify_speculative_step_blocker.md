@@ -2,7 +2,7 @@
 
 **Date:** 2026-07-10
 **Plan:** [424 GDN Tree Verification](../.plans/424_gdn_tree_verification_primitive.md) T4.3
-**Status:** OPEN — blocked by architectural gap
+**Status:** RESOLVED for pure-GDN2 models (T4.3 shipped). Hybrid QwenDeltaNet (mixed Attention+DeltaNet layers) remains a riir-ai follow-up.
 
 ## Problem
 

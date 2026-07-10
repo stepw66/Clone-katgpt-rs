@@ -93,6 +93,14 @@ impl TreeTopology {
     pub fn decay(&self, t: usize) -> f64 {
         self.cumulative_log_decay[t].exp()
     }
+
+    /// Returns the depth of topo-node `k` = number of proper ancestors.
+    /// Root nodes have depth 0, their children depth 1, etc.
+    #[inline]
+    pub fn depth(&self, k: usize) -> usize {
+        let abits = &self.ancestor_bits[k * self.n_words..(k + 1) * self.n_words];
+        abits.iter().map(|&w| w.count_ones() as usize).sum()
+    }
 }
 
 /// Build tree topology from parent pointers and per-node decay factors.
@@ -588,6 +596,99 @@ pub fn commit_accepted_multihead(
         let hp = params.head_params(head, t, d_k, d_v);
         commit_accepted(topo, accepted_leaf, &hp, s0_per_head[head], d_k, d_v);
     }
+}
+
+// ── DDTree → Topology conversion (Plan 424 T4.3) ─────────────
+
+/// Convert a flat list of DDTree nodes (path-encoded) into the parent-index
+/// topology that [`build_topology`] consumes.
+///
+/// DDTree nodes encode the path from root as a packed `u128` (`parent_path`),
+/// where each token occupies 16 bits (MSB = root). A node B at depth `d` is a
+/// child of the node A at depth `d-1` whose `parent_path` equals `B.parent_path
+/// >> 16`.
+///
+/// Multiple roots (depth-0 nodes) are supported — they form independent
+/// subtrees in the topology, which the tree verify processes correctly (no
+/// cross-subtree ancestor relationships).
+///
+/// # Arguments
+/// * `nodes` — DDTree nodes (any order). Duplicates by `(depth, parent_path)`
+///   are deduplicated (highest score wins).
+/// * `alpha` — Uniform decay factor for all nodes (GDN2's decay is
+///   token-independent). All nodes receive the same α.
+///
+/// # Returns
+/// `(TreeTopology, Vec<usize> token_ids)` where `token_ids[i]` is the token
+/// ID of topology node `i` (in the topology's original indexing, NOT topo
+/// order — use `topo.topo_order` to remap).
+///
+/// # Panics
+/// Panics if `nodes` is empty or if a non-root node has no matching parent
+/// (corrupted tree).
+pub fn build_topology_from_tree_nodes(
+    nodes: &[crate::speculative::types::TreeNode],
+    alpha: f32,
+) -> (TreeTopology, Vec<usize>) {
+    use crate::speculative::types::TreeNode;
+    use std::collections::HashMap;
+
+    assert!(!nodes.is_empty(), "DDTree nodes must be non-empty");
+
+    // ── Deduplicate by (depth, parent_path), keeping highest score ──
+    let mut best: HashMap<(usize, u128), &TreeNode> = HashMap::new();
+    for node in nodes {
+        best.entry((node.depth, node.parent_path))
+            .and_modify(|existing| {
+                if node.score > existing.score {
+                    *existing = node;
+                }
+            })
+            .or_insert(node);
+    }
+
+    // ── Collect and sort by (depth, parent_path) for deterministic order ──
+    let mut sorted: Vec<&TreeNode> = best.into_values().collect();
+    sorted.sort_by(|a, b| {
+        a.depth
+            .cmp(&b.depth)
+            .then_with(|| a.parent_path.cmp(&b.parent_path))
+    });
+
+    let n = sorted.len();
+
+    // ── Build parent index array ──
+    // Index: (depth, parent_path) → original node index in `sorted`.
+    let mut index: HashMap<(usize, u128), usize> = HashMap::with_capacity(n);
+    for (i, node) in sorted.iter().enumerate() {
+        index.insert((node.depth, node.parent_path), i);
+    }
+
+    let mut parents = vec![usize::MAX; n];
+    let mut token_ids = vec![0usize; n];
+    let alphas = vec![alpha; n];
+
+    for (i, node) in sorted.iter().enumerate() {
+        token_ids[i] = node.token_idx;
+        if node.depth > 0 {
+            // Parent's parent_path = this node's parent_path >> 16
+            let parent_key = (node.depth - 1, node.parent_path >> 16);
+            let parent_idx = *index
+                .get(&parent_key)
+                .unwrap_or_else(|| {
+                    panic!(
+                        "DDTree node at depth {} has no matching parent (depth {}, path {:#x})",
+                        node.depth,
+                        node.depth - 1,
+                        node.parent_path >> 16
+                    )
+                });
+            parents[i] = parent_idx;
+        }
+    }
+
+    let topo = build_topology(&parents, &alphas);
+    (topo, token_ids)
 }
 
 // ── Tests ──────────────────────────────────────────────────────
@@ -1136,5 +1237,80 @@ mod tests {
         for &v in &mh1 {
             assert!(v.is_finite(), "non-finite multi-head output: {v}");
         }
+    }
+
+    // ── build_topology_from_tree_nodes tests (Plan 424 T4.3) ──
+
+    use crate::speculative::types::TreeNode;
+
+    fn make_node(depth: usize, token_idx: usize, parent_path: u128, score: f32) -> TreeNode {
+        TreeNode { depth, token_idx, parent_path, score }
+    }
+
+    #[test]
+    fn test_topology_from_ddtree_simple_chain() {
+        // Chain: token 5 → token 3 → token 1
+        let nodes = vec![
+            make_node(0, 5, 0x0005, -1.0),
+            make_node(1, 3, 0x0005_0003, -2.0),
+            make_node(2, 1, 0x0005_0003_0001, -3.0),
+        ];
+        let (topo, token_ids) = build_topology_from_tree_nodes(&nodes, 0.9);
+        assert_eq!(topo.n_nodes, 3);
+        assert_eq!(token_ids.len(), 3);
+        // A chain has exactly one root (no ancestors).
+        let root_count = (0..topo.n_nodes)
+            .filter(|&k| {
+                let abits = &topo.ancestor_bits[k * topo.n_words..(k + 1) * topo.n_words];
+                abits.iter().all(|&w| w == 0)
+            })
+            .count();
+        assert_eq!(root_count, 1, "chain must have exactly one root");
+    }
+
+    #[test]
+    fn test_topology_from_ddtree_branching() {
+        // Two roots, each with a child:
+        //   root A (token 5) → child (token 3)
+        //   root B (token 8) → child (token 7)
+        let nodes = vec![
+            make_node(0, 5, 0x0005, -1.0),
+            make_node(0, 8, 0x0008, -1.5),
+            make_node(1, 3, 0x0005_0003, -2.0),
+            make_node(1, 7, 0x0008_0007, -2.5),
+        ];
+        let (topo, token_ids) = build_topology_from_tree_nodes(&nodes, 0.95);
+        assert_eq!(topo.n_nodes, 4);
+        assert_eq!(token_ids.len(), 4);
+        // Two roots = two nodes with no ancestors
+        let root_count = (0..topo.n_nodes)
+            .filter(|&k| {
+                let abits = &topo.ancestor_bits[k * topo.n_words..(k + 1) * topo.n_words];
+                abits.iter().all(|&w| w == 0)
+            })
+            .count();
+        assert_eq!(root_count, 2, "branching tree must have two roots");
+    }
+
+    #[test]
+    fn test_topology_from_ddtree_deduplicates() {
+        // Same node appears twice with different scores — highest score wins.
+        let nodes = vec![
+            make_node(0, 5, 0x0005, -1.0),
+            make_node(0, 5, 0x0005, -0.5), // higher score (less negative)
+        ];
+        let (topo, _token_ids) = build_topology_from_tree_nodes(&nodes, 0.9);
+        assert_eq!(topo.n_nodes, 1, "duplicate nodes must be deduplicated");
+    }
+
+    #[test]
+    #[should_panic(expected = "no matching parent")]
+    fn test_topology_from_ddtree_missing_parent_panics() {
+        // Node at depth 1 but no parent at depth 0 with matching path.
+        let nodes = vec![
+            make_node(0, 5, 0x0005, -1.0),
+            make_node(1, 3, 0x0099_0003, -2.0), // parent path 0x0099 doesn't exist
+        ];
+        let _ = build_topology_from_tree_nodes(&nodes, 0.9);
     }
 }

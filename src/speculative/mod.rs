@@ -37,6 +37,9 @@ pub use katgpt_speculative::residency_audit;
 // root in `step_paged.rs` (consumes `DDTreeBranchCache` + `forward_paged`).
 pub use katgpt_forward::step;
 pub mod step_paged;
+// Plan 424 T4.3: GDN tree verify speculative step for pure-GDN2 models.
+#[cfg(feature = "gdn_tree_verify")]
+pub mod step_gdn_tree;
 pub mod types;
 // Plan 394 (2026-07-05): `verifier` moved to katgpt-forward. Re-export
 // preserves every historical `katgpt_rs::speculative::verifier::*` path

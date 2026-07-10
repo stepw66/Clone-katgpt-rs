@@ -18,6 +18,10 @@ pub mod forward;
 // `katgpt-core/gdn_tree_verify`).
 #[cfg(feature = "gdn_tree_verify")]
 pub mod tree_verify_bridge;
+// Plan 424 T4.3: tree-structured forward pass for pure-GDN2 models. Uses the
+// bridge + verify primitive to process all tree nodes without rollback.
+#[cfg(feature = "gdn_tree_verify")]
+pub mod tree_forward;
 
 pub use forward::{forward_gdn2, generate_gdn2_into};
 pub use kernel::{
