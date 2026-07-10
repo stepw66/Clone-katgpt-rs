@@ -87,8 +87,16 @@ family members.
 
 ## Consumer wiring (follow-up issues)
 
-Consumer integration is explicitly deferred per Plan 425 Out of Scope:
+Consumer integration status:
 
-- **Issue 128** — riir-ai HLA no-harm personality refinement
-- **Issue 129** — riir-neuron-db freeze/thaw shard refinement
-- **Issue 130** — riir-ai `reestimation.rs` γ-gated step size
+- **Issue 128** — riir-ai HLA no-harm personality refinement. **T1–T4 COMPLETE**
+  (two approaches: CGSP priority table via `tilr_hla_refinement`, committed_blend
+  HLA vector via `tilr_personality_refine` / Plan 438). T5 promotion deferred —
+  needs real-session personality-divergence gain data.
+- **Issue 129** — riir-neuron-db freeze/thaw shard refinement. **T1–T4 COMPLETE**.
+  T5 deferred.
+- **Issue 130** — riir-ai `reestimation.rs` γ-gated step size. **RESOLVED —
+  Option C (redirect to Issue 128).** The reestimation path is closed-form
+  batch extract-and-replace with no additive step-size for TILR to gate. The
+  TILR γ-gate is already correctly applied in the committed_blend HLA path
+  (Plan 438), where there IS an additive update. Closed 2026-07-11.
