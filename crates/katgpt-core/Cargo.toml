@@ -1273,3 +1273,9 @@ required-features = ["mag_mining"]
 name = "mag_g6"
 harness = false
 required-features = ["mag_mining"]
+
+# Plan 424: GDN Rollback-Free Tree Verification — G2 (perf) + G4 (alloc-free) GOAT gate.
+[[bench]]
+name = "bench_424_gdn_tree_verify"
+harness = false
+required-features = ["gdn_tree_verify"]
