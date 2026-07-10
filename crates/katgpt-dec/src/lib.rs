@@ -66,6 +66,8 @@ pub mod motor_gated;
 #[cfg(feature = "heat_kernel_trajectory")]
 pub mod nonlinear_heat_kernel;
 pub mod operators;
+#[cfg(feature = "cochain_point_sampler")]
+pub mod point_sampler;
 #[cfg(feature = "sheaf_admm")]
 pub mod sheaf_admm;
 pub mod simd;
@@ -128,6 +130,16 @@ pub use sheaf_admm::{
 // single-complex DEC operators into a two-level fine→coarse→fine hierarchy.
 #[cfg(feature = "htno_v_cycle")]
 pub use htno::{VCycleRestriction, VCycleScratch, grid_coarsen_2x2, htno_v_cycle, htno_v_cycle_into};
+
+// Continuous cochain point sampler (Plan 422, Research 404) — Whitney/de-Rham
+// reconstruction for continuous field queries inside primitives.
+#[cfg(feature = "cochain_point_sampler")]
+pub use point_sampler::{
+    LocalCoordEncode, PointSamplerScratch, lambda_coordinate_quad, lambda_coordinate_tri,
+    local_coord_aug_dim, local_coordinate_aug_barycentric, local_coordinate_aug_cartesian,
+    local_coordinate_quad, local_coordinate_tri, sample_cochain_at_point_quad_into,
+    sample_cochain_at_point_tri_into, sample_point_quad_into, sample_point_tri_into,
+};
 
 pub use types::{CellComplex, CoboundaryIndex, CochainField, MAX_RANK};
 

@@ -72,6 +72,14 @@ sheaf_admm = []  # DEFAULT-ON (Plan 407 Phase 2 GOAT G1–G6 ALL PASS)
 # on grid coarsenings (the production path) and path-complex coarsenings.
 htno_v_cycle = []
 
+# Continuous cochain point sampler (Plan 422, Research 404) — Whitney/de-Rham
+# reconstruction for modelless intra-primitive field queries. Turns a discrete
+# CochainField into a continuously-queryable field: sample at any continuous
+# point inside a quad (grid) or triangle (mesh) with local-coordinate
+# conditioning (Cartesian sincos / barycentric sort+CDF remap). Stays opt-in
+# (Gain verdict — substrate completeness, not a default-path win).
+cochain_point_sampler = []
+
 [[bench]]
 name = "bench_407_sheaf_admm_goat"
 harness = false
