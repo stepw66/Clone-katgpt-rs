@@ -66,6 +66,12 @@ pub mod outlier_guard;
 #[cfg(feature = "hla_eigenbasis_recovery")]
 pub mod hla_eigenbasis;
 
+// Spectral Rewiring — weight delta purification via base SVD projection
+// (Plan 423, Research 406). The on-principal complement of `off_principal`
+// (Plan 264). Opt-in until GOAT gate passes.
+#[cfg(feature = "spectral_rewire")]
+pub mod spectral_rewire;
+
 #[cfg(all(feature = "spectral_quant", feature = "maxsim"))]
 pub use forward::par_maxsim_score_spectralquant;
 pub use forward::{

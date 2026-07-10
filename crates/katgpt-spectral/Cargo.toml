@@ -115,3 +115,12 @@ peira_distill = ["katgpt-core/peira_distill"]
 # katgpt-rs/src/hla_eigenbasis.rs; the historical `katgpt_rs::hla_eigenbasis`
 # path is preserved via the root re-export.
 hla_eigenbasis_recovery = ["uuid", "blake3"]
+
+# Spectral Rewiring — weight delta purification via base SVD projection
+# (Plan 423, Research 406 — Zhang et al. arXiv:2607.03065). Projects ΔW onto
+# W₀'s top-rank SVD subspace, extracting the compact rewiring matrix M = U_rᵀΔWV_r
+# and the purified on-manifold delta ΔW* = U_r M V_rᵀ. The on-principal complement
+# of `off_principal_retrieval` (Plan 264). Needs katgpt-core/subspace_phase_gate
+# for thin_svd_into + SvdResultScratch + SvdScratch. Opt-in until the Plan 423
+# GOAT gate passes (G1 spectral concentration at NPC scale is the make-or-break).
+spectral_rewire = ["katgpt-core/subspace_phase_gate"]

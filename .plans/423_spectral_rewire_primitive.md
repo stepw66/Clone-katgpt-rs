@@ -4,7 +4,7 @@
 **Research:** [406_Spectral_Rewiring_Weight_Delta_Purification.md](../.research/406_Spectral_Rewiring_Weight_Delta_Purification.md)
 **Source paper:** [arXiv:2607.03065](https://arxiv.org/abs/2607.03065) — Zhang et al., *Spectral Rewiring for Exploration, Purification, and Model Merging*, Tsinghua AIR / ByteDance Seed, Jul 2026
 **Target:** `katgpt-rs/crates/katgpt-spectral/src/spectral_rewire.rs` (new module) + Cargo feature `spectral_rewire`
-**Status:** 🚧 OPEN
+**Status:** 🚧 Phase 1 ✅ COMPLETE (T1.1–T1.7, 7/7 tests pass, `9df7cdbd`+impl). Phase 2–4 pending.
 **Verdict from research:** GOAT (Q1✓ Q2✓ Q3 partial Q4✓) — opt-in until GOAT gate validates spectral concentration at NPC-scale.
 
 **Constraints:**
@@ -76,12 +76,12 @@ access pattern in this crate.
 
 ### Tasks
 
-- [ ] **T1.1** Create `katgpt-spectral/src/spectral_rewire.rs` module skeleton.
+- [x] **T1.1** Create `katgpt-spectral/src/spectral_rewire.rs` module skeleton.
   Gate behind `spectral_rewire` feature in `katgpt-spectral/Cargo.toml`.
   Add `pub mod spectral_rewire;` in `katgpt-spectral/src/lib.rs` under the
   feature gate. Enable `katgpt-core/subspace_phase_gate` as a feature dep
   (for `thin_svd_into` + `SvdResultScratch` + `SvdScratch`).
-- [ ] **T1.2** Define `SpectralRewireScratch` struct — pre-allocated reusable
+- [x] **T1.2** Define `SpectralRewireScratch` struct — pre-allocated reusable
   buffers:
 
   ```rust
@@ -106,7 +106,7 @@ access pattern in this crate.
   Implement `SpectralRewireScratch::with_capacity(d_out, d_in, max_rank)` and
   `ensure_capacity(&mut self, d_out, d_in, rank)` (grows buffers only if
   dimensions increased — mirrors `VCycleScratch` / `PointSamplerScratch` pattern).
-- [ ] **T1.3** Implement `spectral_rewire_into` — the zero-alloc hot path:
+- [x] **T1.3** Implement `spectral_rewire_into` — the zero-alloc hot path:
 
   ```rust
   pub fn spectral_rewire_into(
@@ -122,7 +122,7 @@ access pattern in this crate.
   Steps: SVD W₀ → truncate to rank r → compute M = U_rᵀΔWV_r → compute
   ΔW* = U_r M V_rᵀ → compute residual → compute on_manifold_fraction.
   All writes go into `scratch` buffers. No allocation after warmup.
-- [ ] **T1.4** Implement `SpectralRewireOutput` — borrows into scratch:
+- [x] **T1.4** Implement `SpectralRewireOutput` — borrows into scratch:
 
   ```rust
   pub struct SpectralRewireOutput<'a> {
@@ -136,16 +136,16 @@ access pattern in this crate.
       pub on_manifold_fraction: f32,
   }
   ```
-- [ ] **T1.5** Implement convenience wrapper `spectral_rewire` (allocating) —
+- [x] **T1.5** Implement convenience wrapper `spectral_rewire` (allocating) —
   calls `spectral_rewire_into` with a local scratch, copies results into owned
   `Vec<f32>`. For tests, examples, and cold-path callers only.
-- [ ] **T1.6** Add root forwarding in `katgpt-rs/Cargo.toml`:
+- [x] **T1.6** Add root forwarding in `katgpt-rs/Cargo.toml`:
   `spectral_rewire = ["katgpt-spectral/spectral_rewire"]` (opt-in, NOT in default).
   Add `pub use katgpt_spectral::spectral_rewire;` re-export in root `lib.rs`.
-- [ ] **T1.7** Unit test: synthetic delta. Construct W₀ = random d_out×d_in,
-  construct ΔW = U_r M_true V_rᵀ for known M_true (rank-r). Verify
-  `spectral_rewire_into` recovers M_true within 1e-4 relative error (round-trip
-  exactness — the projection is lossless when ΔW is exactly on-manifold).
+- [x] **T1.7** Unit test: synthetic delta round-trip. **PASS** — 7/7 tests green:
+  round-trip (ΔW* matches ΔW < 1e-4 rel, on_manifold_fraction > 0.999, M norm match),
+  zero-delta, on+off=ΔW reconstruction, fraction ∈ [0,1], higher-rank-monotone
+  (full-rank → 1.0), non-square (16×4 r=3), scratch-reuse consistency.
 
 ---
 

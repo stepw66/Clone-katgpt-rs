@@ -375,6 +375,9 @@ pub use katgpt_quant::planar_quant;
 pub use katgpt_spectral::hla_eigenbasis;
 #[cfg(feature = "off_principal_retrieval")]
 pub use katgpt_spectral::off_principal;
+// Plan 423 — Spectral Rewiring (on-principal complement of off_principal).
+#[cfg(feature = "spectral_rewire")]
+pub use katgpt_spectral::spectral_rewire;
 #[cfg(feature = "kog_cpu_fusion")]
 pub use katgpt_transformer::mbu;
 #[cfg(feature = "plot")]
