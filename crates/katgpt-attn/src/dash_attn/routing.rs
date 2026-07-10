@@ -7,7 +7,7 @@
 use katgpt_core::simd::simd_dot_f32;
 use katgpt_core::types::DashAttnConfig;
 
-use super::entmax::{entmax_1p5_into, entmax_gqa_aggregate, entmax_support_into};
+use super::entmax::{entmax_1p5_into, entmax_support_into};
 
 /// Result of entmax routing for one query head.
 #[derive(Debug)]
@@ -224,7 +224,6 @@ pub fn compute_routing_bias(
     n_kv_heads: usize,
     config: &DashAttnConfig,
 ) -> Vec<RoutingResult> {
-    let n_query_heads = queries.len();
     let n_chunks = summaries.len();
 
     // Reuse scratch buffers across heads (zero-alloc routing)
@@ -236,9 +235,10 @@ pub fn compute_routing_bias(
         .map(|q| score_blocks_entmax_into(q, summaries, config, &mut scratch))
         .collect();
 
-    // GQA aggregation: reference probs without cloning
-    let head_probs: Vec<&[f32]> = per_head.iter().map(|r| r.probs.as_slice()).collect();
-    let _agg_probs = entmax_gqa_aggregate(&head_probs, n_query_heads, n_kv_heads, n_chunks);
+    // NOTE: GQA aggregation via entmax_gqa_aggregate is intentionally omitted —
+    // per-head routing results are returned directly. Downstream consumers
+    // index per-head; KV-group-averaged biases would be a separate API if needed.
+    let _ = n_kv_heads;
 
     per_head
 }
@@ -255,16 +255,12 @@ pub fn compute_routing_bias_into(
     config: &DashAttnConfig,
     scratch: &mut RoutingScratch,
 ) -> Vec<RoutingResult> {
-    let n_query_heads = queries.len();
-    let n_chunks = summaries.len();
-
     let per_head: Vec<RoutingResult> = queries
         .iter()
         .map(|q| score_blocks_entmax_into(q, summaries, config, scratch))
         .collect();
 
-    let head_probs: Vec<&[f32]> = per_head.iter().map(|r| r.probs.as_slice()).collect();
-    let _agg_probs = entmax_gqa_aggregate(&head_probs, n_query_heads, n_kv_heads, n_chunks);
+    let _ = n_kv_heads;
 
     per_head
 }
