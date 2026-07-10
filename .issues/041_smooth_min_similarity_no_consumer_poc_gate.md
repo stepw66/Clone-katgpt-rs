@@ -106,9 +106,9 @@ Engram (Plan 299) is exact-hash only. A "soft Engram" would add a cosine-fallbac
 
 ## Tasks (tracking only — no impl)
 
-- [ ] **T1** (deferred) When ItemEmbedIndex grows a per-token embedding path (Path A), re-open this issue and write the PoC at `riir-ai/crates/riir-poc/benches/smooth_min_vs_cosine.goat.rs`.
-- [ ] **T2** (deferred) When AnyRAG gets a real retrieval backend (Path B), re-open and wire smooth-min as the scoring function.
-- [ ] **T3** (deferred) When Engram adds a soft-fallback tier (Path C), re-open and evaluate whether smooth-min or plain cosine is the right fallback scorer (PoC required — smooth-min changes Engram's latency character).
+- [-] **T1** (deferred) When ItemEmbedIndex grows a per-token embedding path (Path A), re-open this issue and write the PoC at `riir-ai/crates/riir-poc/benches/smooth_min_vs_cosine.goat.rs`.
+- [-] **T2** (deferred) When AnyRAG gets a real retrieval backend (Path B), re-open and wire smooth-min as the scoring function.
+- [-] **T3** (deferred) When Engram adds a soft-fallback tier (Path C), re-open and evaluate whether smooth-min or plain cosine is the right fallback scorer (PoC required — smooth-min changes Engram's latency character).
 - [-] **T4** (won't-do unless a consumer lands) Write `smooth_min_similarity` + `edit_penalty` in `katgpt-core/src/similarity.rs` behind feature flag `smooth_min_similarity`. Blocked on T1/T2/T3.
 
 ---
