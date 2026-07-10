@@ -66,7 +66,7 @@ use super::sketch_types::{DEFAULT_ELO, ELO_SCALE, SketchEntry, SketchId};
 /// | `burn_in` | 200 | Initial samples to discard (convergence warmup) |
 /// | `elo_offset` | 1200 | Elo baseline (standard chess) |
 /// | `elo_scale` | 400 | Elo per log10 unit (standard chess) |
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct PlackettLuceConfig {
     /// Number of sketches per rating match (P=7 per paper).
     pub match_size: usize,

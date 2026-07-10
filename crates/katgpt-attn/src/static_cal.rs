@@ -117,7 +117,7 @@ fn hash_scales(scales: &[f32]) -> [u8; 32] {
 }
 
 /// Per-head activation statistics collected during calibration pass.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct HeadStats {
     pub layer: usize,
     pub head: usize,

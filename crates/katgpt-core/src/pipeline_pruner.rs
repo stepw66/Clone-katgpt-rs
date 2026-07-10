@@ -44,7 +44,7 @@ impl Default for QueryFeatures {
 }
 
 /// Classifies queries into pipeline configurations.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct QueryClassifier {
     /// Entropy threshold for reasoning classification.
     pub entropy_threshold: f32,

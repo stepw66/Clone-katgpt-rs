@@ -67,7 +67,7 @@ pub struct Episode {
 
 /// Metadata about an episode's verification history.
 #[cfg(feature = "egcs")]
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Copy, Debug, Default)]
 pub struct EpisodeMetadata {
     /// How many times this episode was verified correct.
     pub verification_count: usize,

@@ -38,7 +38,7 @@ const REGRET_BUDGET_C: f32 = 2.0;
 ///
 /// The slack term ξ(D̂ₛ) = (√(8·D̂ₛ + 1) - 1) / δ prevents premature
 /// phase escalation when feedback is delayed.
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct SafePhasedState {
     /// Current aggression level (starts at 1).
     phase: u32,

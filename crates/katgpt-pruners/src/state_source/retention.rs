@@ -1,6 +1,6 @@
 /// Retention metric for GOAT proofs: does method X preserve Y% of
 /// baseline action diversity?
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct RetentionMetric {
     /// Entropy of the baseline (reference) distribution.
     pub baseline_entropy: f32,

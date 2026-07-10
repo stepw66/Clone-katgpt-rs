@@ -32,7 +32,7 @@ use crate::traits::FeatureClass;
 // ── Review Summary ──────────────────────────────────────────────
 
 /// Computed review metrics snapshot for display/logging.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Copy, Debug, Default)]
 pub struct ReviewSummary {
     /// % of cases where base was WRONG and reviewer FIXED it.
     pub helpfulness: f64,
@@ -78,7 +78,7 @@ pub struct ReviewSummary {
 /// println!("{metrics}"); // "helpful=33.3% harmful=33.3% ratio=1.0:1 n=3"
 /// ```
 /// Snapshot of entropy anomaly statistics for a session (Plan 061).
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Copy, Debug, Default)]
 pub struct EntropyAnomalySummary {
     /// Mean entropy across all recorded positions.
     pub mean: f64,
@@ -550,7 +550,7 @@ impl fmt::Display for ReviewMetrics {
 ///
 /// Detects "right answer, wrong logic" — paths where the final outcome was
 /// correct but intermediate steps were shaky, indicating reward hacking.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Copy, Debug, Default)]
 pub struct PathConsistencySummary {
     /// Number of paths where final answer was correct but intermediate steps were shaky.
     pub reward_hacking: u64,
@@ -578,7 +578,7 @@ impl fmt::Display for PathConsistencySummary {
 ///
 /// Running means of valence, arousal, desperation, and calm projections
 /// from mid-layer activations during decode.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Copy, Debug, Default)]
 pub struct EmotionProfileSummary {
     /// Mean valence across all recorded decode steps.
     pub valence: f64,
@@ -610,7 +610,7 @@ impl fmt::Display for EmotionProfileSummary {
 /// screening-stack composer and the FPCG promotion gate answer: "is the
 /// prediction-side stack actually being exercised in production, or is the
 /// session 100% detection reads?"
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Copy, Debug, Default)]
 pub struct FeatureReadSummary {
     /// Raw count of reads tagged [`FeatureClass::Detection`] this session.
     pub detection_reads: u64,

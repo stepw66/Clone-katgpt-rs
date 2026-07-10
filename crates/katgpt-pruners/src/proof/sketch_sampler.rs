@@ -86,7 +86,7 @@ const MIN_SAMPLE_VISITS: usize = 0;
 // ── SketchSamplerConfig ───────────────────────────────────────
 
 /// Configuration for [`SketchSampler`].
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct SketchSamplerConfig {
     /// Exploration constant for P-UCB (paper: 0.2).
     pub c: f64,

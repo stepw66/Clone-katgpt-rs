@@ -66,7 +66,7 @@ const MAX_POSITIONS: usize = 16;
 ///
 /// Updated on every [`record`](SessionKnowledge::record) call. When insights
 /// are evicted from the ring buffer, the corresponding counters are decremented.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Copy, Debug, Default)]
 struct PositionStats {
     /// Number of accepted insights at this position.
     accepted: usize,

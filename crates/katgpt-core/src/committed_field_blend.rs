@@ -452,7 +452,7 @@ pub mod pi_sensitivity {
     ///
     /// `per_draw` is a fixed `[f32; 8]` matching the renoise-CE convention.
     /// Unused slots (when `k_draws < 8`) are zero-initialized.
-    #[derive(Clone, Debug, Default, PartialEq)]
+    #[derive(Clone, Copy, Debug, Default, PartialEq)]
     pub struct PiSensitivityScore<const N: usize> {
         /// Mean L2 output drift across k draws (lower = less sensitive).
         pub mean_drift: f32,

@@ -416,7 +416,7 @@ impl AdvantageMarginGate {
 /// * `1.0` — full reasoning (return `π+`).
 /// * `>1.0` — extrapolation: sharpen beyond the model's own update.
 #[cfg(feature = "product_policy_sharpen")]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct ProductPolicySharpen {
     /// Trust weight `w` for the product-policy interpolation.
     pub w: f32,

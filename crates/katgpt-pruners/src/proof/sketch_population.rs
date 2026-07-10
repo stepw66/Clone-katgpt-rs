@@ -34,7 +34,7 @@ use super::sketch_types::{DEFAULT_ELO, SketchEntry, SketchId};
 // ── PopulationConfig ───────────────────────────────────────────
 
 /// Configuration for the sketch population database.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct PopulationConfig {
     /// Maximum number of entries to keep (eviction threshold).
     ///

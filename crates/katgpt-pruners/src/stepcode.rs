@@ -27,7 +27,7 @@ use super::g_zero::DeltaBanditPruner;
 // ── PathStep ────────────────────────────────────────────────────
 
 /// A single step in a verified DDTree path.
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct PathStep {
     /// Arm (token index) selected at this depth.
     pub arm: usize,

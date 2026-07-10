@@ -72,7 +72,7 @@ pub const DEFAULT_TRACE_SIGNAL_THRESHOLD: f32 = 3.5;
 // ── Wrapper ─────────────────────────────────────────────────────────────
 
 /// Configuration for [`TraceInformedFeedbackBandit`].
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct TraceInformedConfig {
     /// Trace signal above this forces `WeightUpdate` (before stall detection fires).
     ///

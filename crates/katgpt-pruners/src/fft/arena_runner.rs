@@ -15,7 +15,7 @@ use super::players::FftPlayer;
 use super::types::{Action, GameEvent, TURN_LIMIT, Team};
 
 /// Configuration for an FFT arena tournament matchup.
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct FftArenaConfig {
     /// Number of battles per matchup.
     pub games: usize,

@@ -32,7 +32,7 @@ pub enum SimulationStrategy {
 // ── SimulationGateConfig ──────────────────────────────────────────
 
 /// Configuration for the simulation gate.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct SimulationGateConfig {
     /// Compression ratio threshold for "definitely reducible" (skip simulation).
     /// Below this → AnalyticalShortcut.

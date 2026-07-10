@@ -67,7 +67,7 @@ static STOPWORD_SET: LazyLock<HashSet<&'static str>> =
 ///
 /// Uses thread-local scratch buffers to avoid allocations in the hot path.
 /// Each thread reuses its own pre-allocated buffers via `thread_local!`.
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct RuleBasedVerifier {
     /// Minimum Jaccard similarity threshold for paraphrase matching.
     /// Paper default: 0.55.

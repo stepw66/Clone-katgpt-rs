@@ -132,7 +132,7 @@ pub fn build_dd_tree_pruned(
 ///
 /// Default reproduces pure log-prob best-first (λ = 0, jump-ahead disabled).
 #[cfg(feature = "lodestar")]
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct LodestarConfig {
     /// A* distance weight λ. Heap key = `score − λ·d(s)`.
     /// λ = 0 (default) → pure log-prob ordering, byte-identical to `build_dd_tree_pruned`.
@@ -3132,7 +3132,7 @@ impl ResidualTracker {
 ///
 /// When `enable` is `false`, all RecFM checks are no-ops (zero cost on hot path).
 #[cfg(feature = "recfm")]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct CrossScaleConfig {
     /// Enable RecFM cross-scale consistency filtering.
     pub enable: bool,

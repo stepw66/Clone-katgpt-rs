@@ -16,7 +16,7 @@ use crate::mux::top_k::{MAX_TOP_K, extract_top_k_into};
 const PEAK_DOMINANCE_RATIO: f32 = 0.8;
 
 /// BFS engine that drives dynamic-width expansion of a `MuxDdTree`.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct MuxBfs {
     /// Maximum superposition width (matches tree K).
     pub k: usize,

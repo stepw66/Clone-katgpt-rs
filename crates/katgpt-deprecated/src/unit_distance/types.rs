@@ -202,7 +202,7 @@ impl PrimePair {
 /// From Lemma 2.2 of the Remarks paper: given conjugate prime pairs
 /// {(P_s, cP_s)} with exponents {k_s}, the number of elements u with
 /// |σ(u)| = 1 for all embeddings σ is at least Π(k_s + 1) / h(K).
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct PigeonholeResult {
     /// Root discriminant rd(K).
     pub root_discriminant: f64,

@@ -21,7 +21,7 @@ const DEFAULT_ARM: usize = 2;
 /// Uses Thompson sampling with Beta posteriors to balance exploration
 /// (trying different fold budgets) and exploitation (using the best-known
 /// budget). Reward = acceptance_rate * token_reduction_ratio.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct FoldBandit {
     /// Beta distribution α (successes) per arm.
     alphas: [f32; 5],

@@ -20,7 +20,7 @@ use crate::simd::simd_dot_f32;
 // ── Configuration ─────────────────────────────────────────────────
 
 /// SLoD configuration with sensible defaults for hyperbolic KG embeddings.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct SlodConfig {
     /// k for kNN graph construction.
     /// Default: computed as `max(10, min(sqrt(N), 50))`.

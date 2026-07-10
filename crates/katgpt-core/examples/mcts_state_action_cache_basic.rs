@@ -27,7 +27,7 @@ use katgpt_core::mcts_state_action_cache::{
 // terminal in 2 steps). The DeterministicTransition contract holds: `apply`
 // is a pure function of (state, action).
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 struct DemoState {
     v: u8,
 }

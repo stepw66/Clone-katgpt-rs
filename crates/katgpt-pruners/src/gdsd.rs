@@ -45,7 +45,7 @@ use katgpt_speculative::ScreeningPruner;
 // ── Config ──────────────────────────────────────────────────────
 
 /// Configuration for [`GdsdPruner`].
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct GdsdConfig {
     /// KL regularization coefficient β (default: 0.001).
     ///

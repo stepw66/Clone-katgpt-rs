@@ -20,7 +20,7 @@ use super::sink_classify::{SinkClassifierConfig, SinkKind, StableRankScratch, cl
 // ── Core types ──────────────────────────────────────────────────
 
 /// Combined representation geometry report for a set of hidden states.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct GeometryReport {
     pub layer_index: usize,
     pub n_tokens: usize,
@@ -316,7 +316,7 @@ pub fn summarize_layer_sinks(
 /// hidden states. The `global_erank_for_contrast` field lets a caller see at a
 /// glance whether the two metrics disagree (the load-bearing signal — see Plan
 /// 415 G2).
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct WithinClassGeometryReport {
     /// Entropy-based effective rank of the within-class residual covariance.
     /// Lower → more within-class collapse. `NaN` only if there are no

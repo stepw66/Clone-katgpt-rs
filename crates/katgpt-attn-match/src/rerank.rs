@@ -27,7 +27,7 @@ pub enum RerankMethod {
 ///
 /// Field order: usize (8-byte aligned) before f32 (4-byte aligned)
 /// eliminates 4 bytes of padding on 64-bit targets.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct RerankedDoc {
     /// Index into the original `docs` slice.
     pub doc_index: usize,

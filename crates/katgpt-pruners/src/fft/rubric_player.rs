@@ -61,7 +61,7 @@ const FFT_CRITERIA: usize = 3;
 // ── RoundStats ─────────────────────────────────────────────────
 
 /// Per-round metrics tracking for rubric scoring.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Copy, Debug, Default)]
 struct RoundStats {
     attacks_made: u32,
     heals_made: u32,

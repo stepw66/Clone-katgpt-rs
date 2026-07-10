@@ -272,7 +272,7 @@ pub fn sigmoid_band_weights(band_energies: &[f32; 3]) -> [f32; 3] {
 ///
 /// Each band maps to distinct draft-tree parameters optimized for that
 /// temporal pattern regime.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct SpecBandConfig {
     /// Number of parallel branches at each draft-tree level.
     pub draft_tree_width: usize,

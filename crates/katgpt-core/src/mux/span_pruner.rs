@@ -13,7 +13,7 @@ const MIN_PEAKS: usize = 2;
 
 /// Pruner that validates whether a logit distribution supports
 /// a valid superposition span at a given tree depth.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct MuxSpanPruner {
     /// Geometric decay threshold: peak[i+1] / peak[i] >= decay_rate.
     pub decay_rate: f32,

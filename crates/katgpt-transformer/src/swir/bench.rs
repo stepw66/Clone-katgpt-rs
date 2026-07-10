@@ -149,7 +149,7 @@ impl Default for BenchConfig {
 }
 
 /// Per-problem result.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct ProblemResult {
     /// Problem index.
     pub index: usize,
@@ -464,7 +464,7 @@ pub fn run_pareto_sweep(
 }
 
 /// One point on the Pareto curve.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct ParetoPoint {
     pub c_max: u32,
     pub accuracy: f32,

@@ -58,7 +58,7 @@ const NUM_TEMPLATES: usize = 10;
 // ── RoundStats ─────────────────────────────────────────────────
 
 /// Per-round metrics tracking for reward scoring.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Copy, Debug, Default)]
 struct RoundStats {
     attacks_made: u32,
     heals_made: u32,

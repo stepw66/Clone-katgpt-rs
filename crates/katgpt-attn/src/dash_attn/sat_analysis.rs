@@ -12,7 +12,7 @@ use katgpt_kv::cache_prune::SummedAreaTable;
 /// Captures how self-contained a head's attention pattern is:
 /// high `contextualization_score` means the head mostly attends within
 /// its own segment — a reusable KV-cache candidate.
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Copy, Debug, serde::Serialize, serde::Deserialize)]
 pub struct HeadSparsityInfo {
     /// Total attention this head directs toward positions within its own segment.
     pub intra_attention: f32,

@@ -23,7 +23,7 @@ const DEFAULT_TAPE_WIDTH: usize = 7;
 /// 1. Reads the opponent's recent moves as initial tape
 /// 2. Applies the rule once to produce a new tape
 /// 3. Returns the center cell as the output action
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct CaStrategy {
     /// Rule number (0–255 for elementary CAs).
     rule: u8,

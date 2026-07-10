@@ -102,7 +102,7 @@ pub struct RefinementResult {
 // ── TrajectoryRefinedDraft: Core refinement engine ───────────
 
 /// Configuration for TRDraft.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct TrdConfig {
     /// Maximum refinement attempts per failed branch.
     pub max_refinement_steps: usize,

@@ -321,7 +321,7 @@ impl EigenbasisTracker {
 /// Provenance report for a recovered eigenbasis. Carries the deterministic id
 /// and content hash callers need to validate a cached basis against the window
 /// that produced it (the issue's freeze/thaw risk §3 mitigation).
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct EigenbasisProvenance {
     /// `Uuid::now_v7()` assigned at recovery time. Monotonic in time, sortable.
     pub window_id: [u8; 16],

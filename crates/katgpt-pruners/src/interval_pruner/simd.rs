@@ -366,7 +366,7 @@ pub enum RouteDecision {
 /// cubical nerve operations. Below the threshold, scalar code is faster
 /// due to SIMD setup overhead.
 #[cfg(feature = "interval_pruner")]
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct AdaptiveConfig {
     /// Minimum mask length for SIMD-accelerated interval operations.
     pub interval_simd_threshold: usize,

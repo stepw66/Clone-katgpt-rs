@@ -195,7 +195,7 @@ impl Default for AmConfig {
 }
 
 /// Reconstruction-quality report (computed when `report_reconstruction = true`).
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Copy, Default)]
 pub struct ReconstructionReport {
     /// Relative Frobenius error of attention output reconstruction:
     /// `||X·Cv − Y||_F / ||Y||_F`.

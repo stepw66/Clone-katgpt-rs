@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use super::edit::SkillEdit;
 
 /// Result of validating a candidate skill against the current skill.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct ValidationGate {
     /// Whether the candidate skill was accepted (score improved).
     pub accepted: bool,

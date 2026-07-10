@@ -3,7 +3,7 @@
 use katgpt_types::{SenseKind, SenseModule, TernaryDir};
 
 /// Lightweight KG embedding for octree construction.
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct KgEmbedding {
     pub entity_hash: u64,
     pub relation_hash: u64,

@@ -57,7 +57,7 @@ pub struct TextChunk {
 }
 
 /// Per-chunk metadata in a [`ChunkedCompactOutput`].
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Copy, Debug, Default)]
 pub struct ChunkMeta {
     /// Original global position where this chunk began.
     pub chunk_start: usize,
@@ -85,7 +85,7 @@ pub struct ChunkedCompactOutput {
 }
 
 /// Chunked compactor that splits long KV caches and compacts each chunk.
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct ChunkedCompactor {
     /// Tokens per chunk (excluding overlap).
     pub chunk_size: usize,

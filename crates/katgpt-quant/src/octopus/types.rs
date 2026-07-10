@@ -16,7 +16,7 @@ use super::codebook::ScalarCodebook;
 ///
 /// Total bits per triplet: `2(bits+1) + (bits-1) = 3·bits + 1`.
 /// This non-uniform split gives 31-41% MSE reduction over uniform at d=128.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct OctopusConfig {
     /// Deterministic rotation seed.
     pub seed: u64,

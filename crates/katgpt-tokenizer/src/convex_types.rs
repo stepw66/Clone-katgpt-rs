@@ -154,7 +154,7 @@ impl std::fmt::Display for RoundingScheme {
 
 /// Optimality certification result.
 /// Compares achieved compression against the LP-proven lower bound.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
 pub struct OptimalityCert {
     /// LP lower bound on compression.
     pub lp_lower_bound: f64,

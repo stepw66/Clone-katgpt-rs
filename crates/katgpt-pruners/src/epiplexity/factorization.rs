@@ -48,7 +48,7 @@ impl std::fmt::Display for FactorizationOrder {
 /// - Reverse order (board → moves) has **higher** S_T than forward (moves → board)
 /// - Higher S_T correlates with better OOD generalization
 /// - This validates that "explaining" moves from positions is harder but more informative
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct FactorizationScorer {
     /// Capacity for the internal epiplexity estimators.
     capacity: usize,

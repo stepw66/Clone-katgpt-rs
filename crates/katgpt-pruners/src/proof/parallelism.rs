@@ -49,7 +49,7 @@ pub fn should_use_population() -> bool {
 /// Provides logging-friendly introspection via [`fallback_reason`].
 ///
 /// [`fallback_reason`]: ParallelismGuard::fallback_reason
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct ParallelismGuard {
     /// Number of rayon threads at construction time.
     threads: usize,

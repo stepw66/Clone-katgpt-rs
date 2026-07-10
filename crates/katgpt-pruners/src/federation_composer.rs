@@ -12,7 +12,7 @@
 use katgpt_core::traits::{ConstraintPruner, ScreeningPruner};
 
 /// Residual check result after each federation step.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct ResidualCheck {
     pub candidates_before: usize,
     pub candidates_after: usize,

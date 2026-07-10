@@ -570,7 +570,7 @@ fn fill_softmax(logits: &[f32], out: &mut [f32]) {
 ///
 /// Updates are sigmoid-blended: `new = old + α · tanh(correction)`. Bounded
 /// and stable. Never softmax (per project conventions).
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct TvpThresholdAdapter {
     promote_at: f32,
     demote_at: f32,
@@ -656,7 +656,7 @@ impl TvpThresholdAdapter {
 /// Arms: K ∈ {2, 4, 8}. Reward = routing_decision_quality - probe_cost.
 /// If K=4 signal is decisive → next time K=2 (saves probes).
 /// If K=4 signal is ambiguous → escalate to K=8 (more evidence).
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct TvpProbeCountBandit {
     /// Per-arm Q-value (estimated reward).
     q_values: [f32; 3], // K=2, K=4, K=8

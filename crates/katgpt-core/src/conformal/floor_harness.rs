@@ -254,7 +254,7 @@ impl UqPrimitiveUnderTest for FloorAdapter {
 
 /// The three "Report the Floor" metrics computed for one side (primitive or
 /// floor) over the scored portion of the corpus.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Copy, Debug, Default)]
 pub struct UqMetrics {
     /// Mean interval-CRPS (lower is better). Uniform-on-interval closed form.
     pub mean_crps_interval: f32,

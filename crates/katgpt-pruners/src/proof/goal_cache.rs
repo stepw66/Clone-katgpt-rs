@@ -27,7 +27,7 @@ pub use katgpt_core::proof_cache::{GoalHash, GoalResult, GoalVerifier, ProofGoal
 ///
 /// Captures hit/miss counters and cache size at a point in time.
 /// Safe to send across threads and store in benchmark results.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ProofGoalSnapshot {
     /// Number of unique goals cached.
     pub entries: usize,

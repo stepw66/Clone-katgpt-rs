@@ -156,7 +156,7 @@ impl Reward {
 /// Table 4. Callers in shorter-budget contexts (e.g., 20Hz game ticks)
 /// should override `stagnation_branch_threshold` and
 /// `stagnation_global_threshold` to tick-count equivalents.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct ProgressiveMcgsConfig {
     /// Maximum number of nodes before eviction kicks in.
     /// Default: 100_000 (paper uses 500 expansions, but our graphs grow wider).

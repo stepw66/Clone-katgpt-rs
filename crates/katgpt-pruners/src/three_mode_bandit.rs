@@ -108,7 +108,7 @@ impl From<NeuroSymbolicMode> for usize {
 /// Features used to select the neuro-symbolic mode.
 ///
 /// 4× f32 = 16 bytes, cache-line friendly.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Copy, Default)]
 pub struct ModeFeatures {
     /// Active ConstraintPruner rules / max rules ∈ [0, 1].
     pub constraint_density: f32,
@@ -157,7 +157,7 @@ impl ModeFeatures {
 /// UCB1 arm state per neuro-symbolic mode.
 ///
 /// 12 bytes per arm, 72 bytes total for 6 arms.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct BanditArm {
     /// Total visits to this arm.
     pub visits: u32,

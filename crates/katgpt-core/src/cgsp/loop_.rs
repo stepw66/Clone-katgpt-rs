@@ -31,7 +31,7 @@ use crate::cgsp::types::{
 
 /// Tunable parameters for the loop. All defaults chosen to give a reasonable
 /// plasma-tier budget (≤ 1µs per cycle for k ≤ 4) on Apple Silicon NEON.
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct CgspConfig {
     /// Number of candidates to sample per cycle (k).
     pub k: usize,
@@ -499,7 +499,7 @@ where
 ///
 /// When entropy drops below `tau_low`, exploration is injected by mixing the
 /// current priorities with the uniform distribution.
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct EntropyCollapse {
     pub tau_low: f32,
     pub last_entropy: f32,

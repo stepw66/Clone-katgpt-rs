@@ -38,7 +38,7 @@ pub struct CuratorVerdict {
 /// 1. KG consistency: dot-product similarity between direction vectors.
 /// 2. Spectral flatness: variance of leaf hashes exceeds entropy floor.
 /// 3. Latent conditioning: sigmoid projection of query onto direction is valid.
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct CuratorVerifier {
     /// Minimum acceptable KG consistency (dot-product similarity).
     pub kg_consistency_threshold: f32,

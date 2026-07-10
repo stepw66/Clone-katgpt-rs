@@ -62,7 +62,7 @@ pub struct OnlineCompactResult {
 }
 
 /// Mid-trajectory compactor for unbounded generation.
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct OnlineCompactor {
     /// Maximum compacted tokens before triggering compaction.
     pub phys_budget: usize,

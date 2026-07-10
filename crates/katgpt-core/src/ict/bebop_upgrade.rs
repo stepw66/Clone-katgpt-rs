@@ -39,7 +39,7 @@ use crate::ict::math::collision_purity;
 ///
 /// The EMA fields smooth β and α across tokens; downstream Bebop-style
 /// adaptive-γ loops can read them via the public accessors.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct AcceptanceForecastH2 {
     /// Linear forecast intercept (Bebop `a`).
     pub a: f32,

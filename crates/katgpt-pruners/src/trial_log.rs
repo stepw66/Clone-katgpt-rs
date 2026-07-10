@@ -35,7 +35,7 @@ use super::decision_explainer::DecisionExplanation;
 ///
 /// Distilled from StepCodeReasoner's execution-trace anchors.
 /// Each entry records what happened at one DDTree depth (one "anchor").
-#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq)]
 pub struct AnchorTrace {
     /// Depth in DDTree (anchor position).
     pub depth: usize,
@@ -89,7 +89,7 @@ pub struct TrialRecord {
 // ── Summary ─────────────────────────────────────────────────────
 
 /// Aggregate statistics over a set of trial records.
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct TrialSummary {
     /// Total number of episodes.
     pub total_episodes: usize,

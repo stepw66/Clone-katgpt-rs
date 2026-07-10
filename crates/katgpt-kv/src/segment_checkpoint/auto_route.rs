@@ -8,7 +8,7 @@
 ///
 /// Adjusts SSC k and segment_size based on current QPS to balance
 /// throughput vs accuracy dynamically.
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct SegmentAutoRoute {
     /// High QPS threshold for SSC mode.
     pub high_qps_threshold: f32,

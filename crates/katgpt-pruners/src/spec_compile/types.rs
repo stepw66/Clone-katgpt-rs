@@ -32,7 +32,7 @@ pub struct SpecRule {
 }
 
 /// A prefix entry: token + depth that must match for a rule to activate.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct PrefixEntry {
     /// The depth in the output sequence.
     pub depth: usize,

@@ -18,7 +18,7 @@ pub enum VerifyTier {
 }
 
 /// LLMExecGuard configuration.
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct LlmExecGuardConfig {
     /// Sigmoid steepness for confidence computation. Default: 2.0.
     pub steepness: f32,

@@ -18,7 +18,7 @@ use katgpt_core::traits::ScreeningPruner;
 /// Each subgoal covers `[depth_start, depth_end)` in the marginal array.
 /// The blake3 hash enables memoization — identical subgoals across branches
 /// are solved once and cached.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct Subgoal {
     /// Start depth in the marginal sequence (inclusive).
     pub depth_start: usize,

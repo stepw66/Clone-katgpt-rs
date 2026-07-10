@@ -55,7 +55,7 @@ fn sigmoid(x: f32) -> f32 {
 // ── ParameterKey ─────────────────────────────────────────────────
 
 /// 8-byte cache-line friendly key identifying a pruner parameter.
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct ParameterKey {
     pub pruner_id: u32,
     pub parameter_idx: u16,
@@ -67,7 +67,7 @@ pub struct ParameterKey {
 /// 12-byte running statistics for a parameter.
 ///
 /// Variance is tracked via Welford's online algorithm for numerical stability.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Copy, Debug, Default)]
 pub struct ParameterStats {
     pub reward_sum: f32,
     pub visits: u32,
@@ -100,7 +100,7 @@ impl CalibrationStep {
 // ── CalibratorConfig ─────────────────────────────────────────────
 
 /// Tunable thresholds for reward-gated calibration.
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct CalibratorConfig {
     /// Minimum visits before a parameter is eligible for absorption.
     pub min_visits: usize,

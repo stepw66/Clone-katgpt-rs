@@ -46,7 +46,7 @@ use super::types::RubricVector;
 // ── Config ──────────────────────────────────────────────────────
 
 /// Configuration for [`RubricBanditPruner`].
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct RubricBanditConfig {
     /// Normalize rewards by max possible score (default: true).
     ///

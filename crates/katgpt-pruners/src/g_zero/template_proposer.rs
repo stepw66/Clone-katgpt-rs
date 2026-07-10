@@ -133,7 +133,7 @@ impl QueryTemplate {
 // ── Template Stats ──────────────────────────────────────────────
 
 /// Per-template bandit statistics for UCB1 selection.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Copy, Debug, Default)]
 struct TemplateStats {
     /// Total accumulated δ from observations.
     total_delta: f32,

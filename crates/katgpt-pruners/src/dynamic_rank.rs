@@ -17,7 +17,7 @@ use katgpt_core::traits::ScreeningPruner;
 // ── Diagnostic ──────────────────────────────────────────────────
 
 /// Result of static ranking diagnosis.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct StaticRankingReport {
     /// Whether the inner pruner produces static (context-invariant) ranking.
     pub is_static: bool,

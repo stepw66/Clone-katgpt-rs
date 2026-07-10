@@ -72,7 +72,7 @@ fn sq_norm(v: &[f32]) -> f32 {
 // ---------------------------------------------------------------------------
 
 /// Cluster centroid query bank — initializes queries as k-means++ centroids.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct ClusterQueryBank {
     /// Latent dimension per query.
     pub latent_dim: usize,
@@ -216,7 +216,7 @@ impl QueryBank for ClusterQueryBank {
 // ---------------------------------------------------------------------------
 
 /// Attention-weighted query bank — places queries at high-attention positions.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct AttentionQueryBank {
     /// Latent dimension per query.
     pub latent_dim: usize,
@@ -324,7 +324,7 @@ fn sample_uniform(
 /// Simplified first implementation: pick top-k tokens by per-token variance
 /// across the kv_dim axis. These high-variance tokens approximate the most
 /// information-rich directions in the data.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct SpectralQueryBank {
     /// Latent dimension per query.
     pub latent_dim: usize,
@@ -387,7 +387,7 @@ impl QueryBank for SpectralQueryBank {
 ///
 /// Divides the sequence into equal-sized regions and computes the centroid
 /// (mean) of each region. Returns `budget` region centroids.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct BfcfQueryBank {
     /// Latent dimension per query.
     pub latent_dim: usize,
@@ -469,7 +469,7 @@ impl QueryBank for BfcfQueryBank {
 /// Hadamard-like pattern. For query `i`, element `j` is set to
 /// `±1/sqrt(latent_dim)` with the sign alternating based on `(i + j) % 2`
 /// with an offset from `i` to decorrelate different queries.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct MuxQueryBank {
     /// Latent dimension per query.
     pub latent_dim: usize,

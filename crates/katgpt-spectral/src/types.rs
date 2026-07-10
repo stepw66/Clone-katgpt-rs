@@ -95,7 +95,7 @@ pub struct SpectralQuantLayer {
 ///
 /// Field order: u64 (8B) → usize (8B) → f32 (4B) → u8/bool (1B, packed).
 /// Eliminates inter-field padding on 64-bit targets.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct SpectralQuantKVCacheConfig {
     /// Random seed for reproducibility.
     pub seed: u64,

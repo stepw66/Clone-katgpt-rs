@@ -38,7 +38,7 @@ pub struct PredictedOutcome {
 }
 
 /// Record of a prediction vs actual outcome for bandit reward.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct PredictionRecord {
     /// Cosine similarity between predicted and actual features.
     pub accuracy: f32,
@@ -49,7 +49,7 @@ pub struct PredictionRecord {
 }
 
 /// Configuration for ECHO environment predictor.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct EnvPredictorConfig {
     /// Sigmoid temperature for confidence scoring. Default: 1.0.
     pub temperature: f32,

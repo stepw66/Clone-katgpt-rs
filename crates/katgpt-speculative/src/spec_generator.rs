@@ -22,7 +22,7 @@ pub struct TokenCondition {
 }
 
 /// Token generator output: a logit-indexed candidate.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct TokenOutput {
     /// Token index in the vocabulary.
     pub token_idx: usize,

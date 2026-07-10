@@ -8,7 +8,7 @@ use crate::mux_latent::config::CompressionRatio;
 
 /// A single latent patch — the wire-level unit.
 /// Size: 4 + 32 + 32 = 68 bytes (fits in 1 cache line with padding).
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 #[repr(C)]
 pub struct LatentPatch {
     /// Which segment to patch (maps to octree morton code).

@@ -8,7 +8,7 @@
 //! No teacher, no gradients — purely online statistics.
 
 /// Configuration for variance minimization.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct VarianceMinimizerConfig {
     /// EMA decay for running mean (0.99 = slow adaptation).
     pub mean_decay: f32,

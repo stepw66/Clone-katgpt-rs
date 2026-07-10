@@ -65,7 +65,7 @@ impl FoldDecision {
 // ── FoldResult ──────────────────────────────────────────────────
 
 /// Result of a chain fold operation.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct FoldResult {
     /// Total steps in original chain.
     pub total_steps: usize,
@@ -118,7 +118,7 @@ impl FoldContext {
 // ── FoldStats ───────────────────────────────────────────────────
 
 /// Statistics about fold operations for feedback integration.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Copy, Default)]
 pub struct FoldStats {
     /// Total tokens saved across all queries.
     pub total_tokens_saved: usize,

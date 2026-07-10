@@ -42,7 +42,7 @@ use katgpt_core::speculative::sampling::sample_from_distribution;
 // ---------------------------------------------------------------------------
 
 /// Configuration for strided anchor-then-fill decoding.
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct AnchorConfig {
     /// Stride S: predict every S-th position via AR in Round 1.
     /// S=1 → pure AR (every position anchored).

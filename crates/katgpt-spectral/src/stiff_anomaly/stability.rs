@@ -242,7 +242,7 @@ impl EvaluateBuffers {
 ///
 /// Uses z-score of the minimum eigenvalue change to detect stiff collisions
 /// and soft alignment ratio to detect elastic absorption.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct StiffAnomalyGate {
     /// Z-score threshold for stiff collision detection (default: -2.0).
     /// A negative threshold catches eigenvalue collapse.

@@ -18,7 +18,7 @@ pub struct PlanarQuantLayer {
 }
 
 /// Configuration for PlanarQuant KV cache.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct PlanarQuantConfig {
     /// Number of transformer layers.
     pub n_layers: usize,

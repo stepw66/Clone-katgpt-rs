@@ -42,7 +42,7 @@ use crate::band_conditioner::{
 // ── ColliderConstraint ──────────────────────────────────────────────────────
 
 /// Configuration for [`ColliderConstraint`].
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct ColliderConstraintConfig {
     /// Segment length `L ≥ 2` (paper requirement).
     pub segment_len: usize,

@@ -618,7 +618,7 @@ pub enum ConvergenceSelector {
 /// The wall on/off switch lives at the parent `Config.wall_config: Option<WallConfig>`
 /// level — `None` means use RoPE/fallback, `Some(_)` means Wall is active. There is
 /// no `use_wall` field on the struct itself (the canonical design since Plan 173).
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Copy, Debug, serde::Serialize, serde::Deserialize)]
 #[cfg(feature = "wall_attention")]
 pub struct WallConfig {
     /// Gate bias initialization value. Default 6.0 = open gate (vanilla attention behavior).
@@ -693,7 +693,7 @@ impl WallConfig {
 /// Controls when mid-reasoning early exit triggers and how efficiency rewards
 /// are shaped. Feature-gated behind `collapse_aware_thinking`.
 #[allow(dead_code)]
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct ThinkingBudget {
     /// Maximum thinking tokens before forced termination.
     pub max_tokens: u32,

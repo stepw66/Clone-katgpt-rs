@@ -5,7 +5,7 @@
 //! indicates how many standard deviations the real result is above chance.
 
 /// Monte Carlo null test result.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct MonteCarloNull {
     /// Mean of the null distribution (random data scores).
     pub null_mean: f32,

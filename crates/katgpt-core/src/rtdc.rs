@@ -102,7 +102,7 @@ impl DepthTieredRoots {
 /// Selects which depth to verify at, given a continuous σ.
 ///
 /// Built from SLoD `ScaleBoundary` set (must have ≥2 boundaries for 3 tiers).
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct DepthSelector {
     /// σ thresholds from SLoD `boundary_scan`, ascending.
     ///

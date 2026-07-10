@@ -8,7 +8,7 @@ use super::types::{DreamerConfig, WorkingRegion};
 /// Bandit arm metadata needed for region selection.
 ///
 /// Callers provide this data; Dreamer doesn't depend on concrete `BanditPruner` type.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct ArmInfo {
     pub index: usize,
     pub q_value: f32,

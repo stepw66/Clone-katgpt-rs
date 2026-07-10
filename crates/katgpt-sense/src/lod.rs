@@ -35,7 +35,7 @@ impl SenseLodLevel {
 }
 
 /// Routes distances to LOD levels using spectral scale boundaries.
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct SenseLodRouter {
     sigma1: f32,
     sigma2: f32,

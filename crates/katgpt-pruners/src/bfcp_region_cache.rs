@@ -64,7 +64,7 @@ fn classify_tier(freq: u32, hot_threshold: u32, warm_threshold: u32) -> FreqTier
 
 /// Entry in the LFU min-heap: (freq, hash). `Ord` is reverse by freq so `BinaryHeap::pop`
 /// gives the minimum-frequency entry.
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 struct LfuEntry {
     freq: u32,
     hash: [u8; 32],

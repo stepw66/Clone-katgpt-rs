@@ -292,7 +292,7 @@ mod tests {
 // ── RuliologyAbsorbCompress ─────────────────────────────────────
 
 /// Promotion config for ruliology absorb-compress.
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct RuliologyPromoteConfig {
     /// Minimum visits before an arm can be promoted.
     pub min_visits: u32,

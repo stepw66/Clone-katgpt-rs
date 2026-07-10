@@ -140,7 +140,7 @@ pub struct HopMarginal {
 // ── Hop Tree Config ───────────────────────────────────────────
 
 /// Configuration for hop DDTree building.
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct HopTreeConfig {
     /// Maximum number of tree nodes (budget). Default: 64.
     pub tree_budget: usize,

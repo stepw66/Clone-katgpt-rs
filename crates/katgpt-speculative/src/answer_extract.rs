@@ -313,7 +313,7 @@ impl AnswerExtractor for ThinkTokenExtractor {
 /// let ext = DiscreteActionExtractor::new(9);
 /// assert_eq!(ext.extract_answer(&[], "I choose action 5"), Some("5".to_string()));
 /// ```
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct DiscreteActionExtractor {
     /// Maximum number of actions (exclusive upper bound).
     /// Extracted values must be in `0..max_actions`.

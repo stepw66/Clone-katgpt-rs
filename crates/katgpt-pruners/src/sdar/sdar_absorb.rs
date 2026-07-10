@@ -147,7 +147,7 @@ impl SdarAbsorbConfig {
 /// to remove the per-arm `Vec<PromotionStats>` allocation and the stats
 /// tracking branch in [`SdarGatedAbsorbCompress::observe`].
 #[cfg(debug_assertions)]
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Copy, Debug, Default)]
 pub struct PromotionStats {
     /// Number of promotion attempts (compress calls that included this arm).
     pub promotion_attempts: usize,
@@ -193,7 +193,7 @@ impl PromotionStats {
 // ── ArmAbsorbState ──────────────────────────────────────────────
 
 /// Per-arm absorb tracking state.
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 struct ArmAbsorbState {
     /// Accumulated reward observations.
     reward_sum: f32,

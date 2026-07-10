@@ -15,7 +15,7 @@ use crate::types::WinMatrix;
 // ── IrreducibilityResult ──────────────────────────────────────
 
 /// Result of irreducibility analysis.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct IrreducibilityResult {
     /// Compression ratio of the win matrix (0.0 = fully compressible, 1.0 = fully random).
     /// Ratio = compressed_size / raw_size.

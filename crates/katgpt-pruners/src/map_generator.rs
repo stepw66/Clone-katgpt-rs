@@ -64,7 +64,7 @@ pub struct GeneratedDungeon {
 ///
 /// Use builder methods to customize, then call `generate_single_floor`
 /// or `generate_multi_floor`.
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct MapGenerator {
     pub width: usize,
     pub height: usize,

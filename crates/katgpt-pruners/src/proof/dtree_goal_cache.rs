@@ -51,7 +51,7 @@ use super::goal_cache::{GoalResult, ProofGoalCache, ProofGoalSnapshot};
 ///
 /// Captures tree identity, branch progress, and cache performance at a
 /// point in time. Safe to send across threads and store in benchmark results.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct DTreeCacheSnapshot {
     /// Decode step identifier this cache is scoped to.
     pub tree_id: u64,

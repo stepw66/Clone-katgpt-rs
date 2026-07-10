@@ -28,7 +28,7 @@ use crate::temporal_deriv::TemporalDerivativeKernel;
 pub const DEFAULT_THETA_SURPRISE: f32 = 0.10;
 
 /// Configuration for delta memory state.
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct DeltaMemoryConfig {
     /// Memory rank r (paper default: 8). State is r×r = 64 floats.
     pub rank: usize,

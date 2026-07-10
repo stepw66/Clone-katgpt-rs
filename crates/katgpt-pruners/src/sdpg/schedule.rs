@@ -9,7 +9,7 @@
 /// Warmup: linearly ramp β from 0 to β_base over warmup_steps.
 /// Decay: linearly decay β from β_base to 0 over decay_steps.
 /// After decay_steps: β = 0 (teacher fully phased out).
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct BetaSchedule {
     /// Maximum teacher influence strength.
     pub beta_base: f32,

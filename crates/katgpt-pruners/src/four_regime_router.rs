@@ -135,7 +135,7 @@ impl RegimeArm {
 /// Features for regime routing decisions.
 ///
 /// 4 × f32 = 16 bytes, cache-line friendly.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Copy, Default)]
 pub struct RegimeFeatures {
     /// Fraction of recent DDTree branches that failed ∈ [0, 1].
     pub failure_rate: f32,

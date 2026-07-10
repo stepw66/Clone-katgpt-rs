@@ -309,7 +309,7 @@ fn compute_go_delta_from_tokens(
 // ── Template Delta Accumulator ─────────────────────────────────
 
 /// Accumulates δ observations for a single template.
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 struct TemplateDeltaAccumulator {
     total: f32,
     count: usize,
@@ -339,7 +339,7 @@ impl TemplateDeltaAccumulator {
 // ── T33: GoTemplateProposer ────────────────────────────────────
 
 /// Per-template bandit stats for UCB1 selection.
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 struct TemplateBanditStats {
     /// Total accumulated δ.
     total_delta: f32,
@@ -502,7 +502,7 @@ fn template_from_idx(idx: usize) -> GoTemplate {
 // ── T35: DeltaGatedAbsorbCompress ──────────────────────────────
 
 /// Configuration for delta-gated absorb-compress in Go.
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct GoDeltaGatedConfig {
     /// Minimum δ threshold for promotion.
     pub delta_threshold: f32,
@@ -523,7 +523,7 @@ impl Default for GoDeltaGatedConfig {
 }
 
 /// Per-template accumulated stats for absorb-compress.
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 struct TemplateDeltaStats {
     /// Total δ accumulated.
     total_delta: f32,

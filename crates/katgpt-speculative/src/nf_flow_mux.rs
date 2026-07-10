@@ -7,7 +7,7 @@
 //! Requires: `nf_flow_score` + `mux_pruner` features.
 
 /// Score for a MUX multiplexed position.
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct MuxFlowScore {
     /// Flow density at this position.
     pub density: f32,

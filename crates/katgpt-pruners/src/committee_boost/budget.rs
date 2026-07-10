@@ -19,7 +19,7 @@
 /// - `r`: comparator votes — number of pairwise comparisons per pair
 ///
 /// Derived from Theorem 3 parameters (α₀, β₀, σ₀, L, δ, |P_N|).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CommitteeBudget {
     /// Proposer width: number of candidates generated per round.
     pub k: usize,

@@ -8,7 +8,7 @@ use katgpt_core::types::QuantizedKVCache;
 // Config
 
 /// Configuration for [`OscKVCache`].
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct OscKVConfig {
     /// Number of transformer layers.
     pub n_layers: usize,

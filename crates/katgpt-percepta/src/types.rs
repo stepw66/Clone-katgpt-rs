@@ -23,7 +23,7 @@ pub enum TieBreak {
 /// produces either the average or the latest value depending on tie-breaking mode.
 ///
 /// Ported from `HullMeta` in `hull2d_cht.h`.
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct HullMeta {
     /// Running sum of value pairs.
     pub vsum: [f64; 2],

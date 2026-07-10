@@ -29,7 +29,7 @@ pub const DEFAULT_NATURALISTIC_VARIANCE: f32 = 0.0005;
 ///
 /// Reuses the pattern from `pruners::acceptance_variance` and
 /// `pruners::reward_calibrator`. Kept local to CHIAR module to avoid coupling.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Copy, Debug, Default)]
 pub struct WelfordVariance {
     count: u64,
     mean: f64,

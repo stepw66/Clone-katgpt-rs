@@ -22,7 +22,7 @@ const NO_ENTITY: i32 = -1;
 /// Represents the deterministic state of a grid-based tactical puzzle.
 ///
 /// Fields ordered by alignment (u64/u32 → u8) to minimize padding.
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct GameState {
     pub total_cost: u32,
     pub killed_monsters: u32,

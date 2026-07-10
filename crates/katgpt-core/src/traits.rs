@@ -525,7 +525,7 @@ impl<S: GameState> RolloutPolicy<S> for RandomRolloutPolicy {
 /// - Comparing action space across game domains
 ///
 /// Per-player aggregate tracked during insert for O(1) reads.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Copy, Debug, Default)]
 struct PlayerAgg {
     // OPT: usize first avoids 4 bytes of padding between f32 and usize
     count: usize,
@@ -1259,7 +1259,7 @@ impl QGradientOracle for NoGuidanceOracle {
 /// Captures episode statistics needed for graduated reward computation.
 /// Lightweight: stack-friendly, no heap allocations in the struct itself.
 #[cfg(feature = "partial_scoring")]
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Copy, Debug, Default)]
 pub struct GameTrace {
     /// Final reward from the game engine (binary: win=1.0, loss=0.0).
     pub final_reward: f64,
@@ -1298,7 +1298,7 @@ pub trait PartialScorer: Send + Sync {
 /// Each field can be perturbed by a [`ProblemMutator`] to create
 /// harder variants for open-ended problem evolution.
 #[cfg(feature = "problem_mutator")]
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct GameConfig {
     /// Maximum steps per episode.
     pub max_steps: u32,

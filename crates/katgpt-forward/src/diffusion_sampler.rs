@@ -56,7 +56,7 @@ pub const N_FEATURES: usize = 6;
 ///
 /// Lightweight stats that capture the model's confidence at each position
 /// without requiring the full embedding (which would be d=384 in production).
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Copy, Debug, Default)]
 pub struct SamplerFeatures {
     /// Top-1 token probability after softmax.
     pub top1_prob: f32,
@@ -787,7 +787,7 @@ pub fn collect_trajectories(
 // ── Integration Helper ────────────────────────────────────────
 
 /// Decision from the sampler for a single position in the denoising loop.
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct SamplerDecision {
     /// Predicted P(correct) for the top-1 token.
     pub p_correct: f32,

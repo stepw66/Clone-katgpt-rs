@@ -69,7 +69,7 @@ const W_CENTER: usize = 3;
 /// Each field is a dimension in the search space. The AutoResearch loop
 /// explores combinations to find the config that maximizes win rate
 /// against a baseline player.
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct GoResearchConfig {
     /// Board dimension (typically 9 for speed).
     pub board_size: usize,

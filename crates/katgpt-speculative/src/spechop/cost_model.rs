@@ -82,7 +82,7 @@ pub fn starvation_prob(k: usize, alpha: f64, beta: f64, volatility: f64) -> f64 
 ///
 /// Tracks running averages of speculator latency, target tool latency,
 /// and decode segment latency to compute α and β from real data.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Copy, Debug, Default)]
 pub struct InferenceStats {
     /// Running average of speculator latency: `E[T_spec]`.
     pub avg_spec_latency_ns: f64,

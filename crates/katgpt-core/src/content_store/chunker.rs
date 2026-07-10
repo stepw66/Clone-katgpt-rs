@@ -191,7 +191,7 @@ const GEAR_TABLE: [u64; 256] = compute_gear_table();
 /// the chunker struct at ~40 bytes (vs ~2080 bytes), improving cache density
 /// when chunkers are stored in collections, and is bit-identical at the
 /// table-access site (both lower to a fixed-address `.rodata` load).
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct FastCdcChunker {
     /// Minimum chunk size — no cut points before this offset.
     pub min_size: usize,
@@ -347,7 +347,7 @@ impl ChunkingStrategy for FastCdcChunker {
 /// Defaults match the FastCDC paper (Xia et al. 2016, §5.2) for ~8 KiB average
 /// chunks.
 #[repr(C)]
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct ChunkerConfig {
     /// Minimum chunk size — no cut points before this offset.
     pub min_size: usize,

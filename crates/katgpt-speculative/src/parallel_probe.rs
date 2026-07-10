@@ -32,7 +32,7 @@ use katgpt_types::{Config, Rng};
 /// Configuration for the Parallel-Probe controller.
 ///
 /// Paper defaults from Table 2 across 4 model sizes (0.6B–8B).
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct ParallelProbeConfig {
     /// Number of tokens between probe steps.
     /// Paper fixes this at 500.

@@ -125,7 +125,7 @@ pub trait TrajectoryDoctor {
 }
 
 /// Simple bracket-tracking TrajectoryDoctor.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Copy, Debug, Default)]
 pub struct BracketTrajectoryDoctor {
     /// Maximum allowed bracket nesting depth.
     pub max_depth: u32,

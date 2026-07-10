@@ -277,7 +277,7 @@ pub struct VocabChannel {
 }
 
 /// Configuration for the ROTATE decomposition pipeline.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct VocabChannelConfig {
     /// Number of channels to extract per neuron
     pub max_channels: usize,

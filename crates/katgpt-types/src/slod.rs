@@ -7,7 +7,7 @@
 //! `katgpt_core::slod::ScaleBoundary` (bit-for-bit path preserved).
 
 /// A detected scale boundary from the spectral analysis.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct ScaleBoundary {
     /// Diffusion scale σ at which this boundary was detected.
     pub sigma: f32,

@@ -52,7 +52,7 @@ impl fmt::Display for ComputeTier {
 // ---------------------------------------------------------------------------
 
 /// Configuration parameters that control tier promotion / demotion behaviour.
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Copy, Debug, serde::Serialize, serde::Deserialize)]
 pub struct TriggerGateConfig {
     /// Activate GPU when QPS exceeds this. Default: 10_000.0
     pub gpu_activate_qps: f64,
@@ -130,7 +130,7 @@ impl TriggerGateConfig {
 /// - High threshold: variance above this → model uncertain → promote to GPU.
 /// - Low threshold: variance below this → model confident → allow demotion to CPU.
 #[cfg(feature = "rv_gated_routing")]
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Copy, Debug, serde::Serialize, serde::Deserialize)]
 pub struct RvThresholds {
     /// Variance above this → promote tier (GPU). Default: 0.10
     pub rv_theta_high: f64,

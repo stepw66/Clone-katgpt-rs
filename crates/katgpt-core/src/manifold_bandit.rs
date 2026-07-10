@@ -216,7 +216,7 @@ impl TreeNode {
 /// Composes with Dual-Pool CGSP (Plan 312): Dual-Pool handles pool-level strategy
 /// switches; this handles per-arm belief drift. They operate on different axes
 /// of non-stationarity.
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct BayesianFilterArm {
     /// Beta(α) — successes + pseudocount. Starts at 1.0 (uniform prior).
     pub alpha: f32,
@@ -297,7 +297,7 @@ impl Default for BayesianFilterArm {
 /// construction pipeline (PCA → UMAP → Chart Test → HDBSCAN). In Phase 1 they are
 /// stored but unused — the tree topology is supplied directly via
 /// [`LatentTaskTree::from_root`].
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct LatentTaskTreeConfig {
     /// Reduce embeddings to this dimensionality before UMAP (Phase 3). Default: 16.
     pub pca_dim: usize,

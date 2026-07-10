@@ -234,7 +234,7 @@ pub enum PrunerType {
 }
 
 /// A single step in the provenance chain — records an AbsorbCompress episode.
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct ProvenanceStep {
     /// Episode identifier (monotonically increasing).
     pub episode_id: u64,

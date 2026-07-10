@@ -60,7 +60,7 @@ pub enum ThermalPath {
 }
 
 /// Configuration for the FlashAR consensus thermal path router.
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct ConsensusConfig {
     /// Confidence threshold for PLASMA path (both agree AND conf > τ_p).
     /// Default: 0.7

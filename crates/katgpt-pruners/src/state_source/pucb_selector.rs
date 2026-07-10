@@ -41,7 +41,7 @@ pub const DEFAULT_TOP_K: usize = 64;
 /// Generic P-UCB selector for populations of `(id, score, visits)` items.
 ///
 /// Filters to top-K by score, normalizes to [0,1], applies UCB bonus.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct PUCBSelector {
     /// Exploration constant c.
     pub exploration_constant: f64,

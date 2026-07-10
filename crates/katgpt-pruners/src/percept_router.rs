@@ -29,7 +29,7 @@ pub enum ComputePath {
 // ── PerceptRouterConfig ─────────────────────────────────────────
 
 /// Symbolic percept router configuration.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct PerceptRouterConfig {
     /// Complexity threshold for fast → standard transition.
     pub fast_threshold: f32,

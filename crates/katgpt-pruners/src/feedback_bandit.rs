@@ -40,7 +40,7 @@ const ARM_WEIGHT: usize = 5;
 // ── Configuration ─────────────────────────────────────────────
 
 /// Configuration for FeedbackBandit stall detection and reward shaping.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct FeedbackBanditConfig {
     /// Number of consecutive episodes with low reward delta before stall triggers.
     /// Default: 10.
@@ -154,7 +154,7 @@ impl TrajectorySummary {
 // ── Per-Context Feedback Stats (arms 4-5) ─────────────────────
 
 /// Q-values and visit counts for the 2 feedback arms (HarnessUpdate, WeightUpdate).
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 struct FeedbackContextStats {
     /// Q-values: [HarnessUpdate, WeightUpdate].
     q_values: [f32; 2],

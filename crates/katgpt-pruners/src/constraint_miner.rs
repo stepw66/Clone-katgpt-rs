@@ -119,7 +119,7 @@ impl SequenceConstraint {
 }
 
 /// Configuration for the constraint miner.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct ConstraintMiner {
     /// Minimum episode count for a pattern to be considered (default: 10).
     pub min_support: usize,

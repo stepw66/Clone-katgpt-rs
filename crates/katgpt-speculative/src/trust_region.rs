@@ -15,7 +15,7 @@ use katgpt_types::Rng;
 // ---------------------------------------------------------------------------
 
 /// Configuration for trust-region adaptive speculation.
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct TrustRegionConfig {
     /// Trust threshold above which window expands. Default: 0.85
     pub trust_high: f32,

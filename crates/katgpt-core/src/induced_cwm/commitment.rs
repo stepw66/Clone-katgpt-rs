@@ -41,7 +41,7 @@
 ///
 /// Construct via [`from_kernel`](Self::from_kernel) (computes BLAKE3) or
 /// [`from_parts`](Self::from_parts) (raw fields, for deserialisation paths).
-#[derive(Clone, Debug, Eq, PartialEq, Hash, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct CwmCommitment {
     /// BLAKE3 over the kernel's canonical bytes. Two kernels with identical
     /// canonical bytes produce identical `blake3`.

@@ -11,7 +11,7 @@
 //! are fundamentally uncovered by the current proposer set.
 
 /// Result of exponential convergence fit on oracle best-of-k rates.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct ConvergenceFit {
     /// Estimated asymptote: lim_{k→∞} p_oracle(k).
     pub asymptote: f64,
@@ -49,7 +49,7 @@ pub struct CoverageDiagnostic {
 }
 
 /// Blind-spot floor estimate from oracle best-of-k curve.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct BlindSpotEstimate {
     /// Blind-spot floor: B ≈ 1 - max(p_oracle).
     pub blind_spot_floor: f64,

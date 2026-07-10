@@ -95,7 +95,7 @@ impl From<ScheduleError> for SpecializationError {
 // ── Output Types ──────────────────────────────────────────────
 
 /// Reduction statistics comparing universal vs specialized model.
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct SpecializationReduction {
     /// Number of dimensions in the universal model.
     pub universal_dims: usize,

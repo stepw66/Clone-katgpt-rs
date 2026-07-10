@@ -17,7 +17,7 @@
 ///   - `gamma_mgpo`        MGPO advantage exponent
 ///   - `lambda_long2short` Long2Short tiebreak weight
 ///   - `tiebreak_eps`      reliability tie tolerance for the brevity tiebreak
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct ClrConfig {
     /// Embedding dimension per claim (`k` in the paper).
     pub k: usize,

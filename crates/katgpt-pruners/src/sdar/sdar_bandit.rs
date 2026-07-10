@@ -49,7 +49,7 @@ use katgpt_speculative::ScreeningPruner;
 // ── Config ──────────────────────────────────────────────────────
 
 /// Configuration for [`SdarBanditPruner`].
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct SdarBanditConfig {
     /// Sigmoid sharpness β (default: 5.0 from SDAR paper).
     ///
@@ -107,7 +107,7 @@ impl SdarBanditConfig {
 // ── GateStats ───────────────────────────────────────────────────
 
 /// Per-arm gate statistics for debugging.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Copy, Debug, Default)]
 pub struct GateStats {
     /// Number of gated updates.
     pub update_count: usize,

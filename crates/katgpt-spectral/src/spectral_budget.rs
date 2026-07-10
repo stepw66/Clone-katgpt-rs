@@ -111,7 +111,7 @@ pub fn ns_depth_for_depth_fraction(depth_fraction: f32) -> u8 {
 // ── Predictive Config ───────────────────────────────────────────
 
 /// Pre-computed NS configuration per depth fraction.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct NsDepthConfig {
     /// Relative depth (0.0 = first layer, 1.0 = last)
     pub depth_fraction: f32,

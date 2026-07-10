@@ -39,7 +39,7 @@ pub struct IndexedSegment {
 // ---------------------------------------------------------------------------
 
 /// Result of a segment match query.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct SegmentMatch {
     /// Which previous hop matched.
     pub source_hop_idx: usize,

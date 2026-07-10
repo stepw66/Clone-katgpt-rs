@@ -66,7 +66,7 @@ impl BtComparison {
 /// - λ=0.01 regularization prevents score explosion
 /// - 100 iterations sufficient for n≤50 candidates
 /// - 1e-6 tolerance for convergence check
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct BtConfig {
     /// L2 regularization strength (default: 0.01).
     ///

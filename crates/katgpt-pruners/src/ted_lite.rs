@@ -14,7 +14,7 @@
 //! All code behind `#[cfg(feature = "ted_lite")]`.
 
 /// Divergence metrics for a single pruner.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct PrunerDivergence {
     /// Σ |τ_current - τ_original| / N — threshold divergence.
     pub threshold_divergence: f32,

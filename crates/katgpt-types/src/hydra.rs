@@ -7,7 +7,7 @@
 /// Per-layer Hydra profile entry (modelless mode).
 /// Pre-computed from calibration data, stored in config.
 #[cfg(feature = "hydra_budget")]
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct HydraLayerProfile {
     /// Mean absolute direct effect on top-token logit.
     pub mean_de: f32,
@@ -19,7 +19,7 @@ pub struct HydraLayerProfile {
 
 /// Hydra budget configuration.
 #[cfg(feature = "hydra_budget")]
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct HydraBudgetConfig {
     /// Skip layers with |DE| below this threshold.
     pub skip_threshold: f32,

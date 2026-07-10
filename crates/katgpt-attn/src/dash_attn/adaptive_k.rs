@@ -25,7 +25,7 @@ use super::vortex_flow::{RoutingDecision, VortexFlow, VortexScratch};
 // ---------------------------------------------------------------------------
 
 /// Configuration for adaptive k budget selection.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct AdaptiveKConfig {
     /// Minimum k (floor for budget allocation).
     pub k_min: usize,

@@ -34,7 +34,7 @@
 // ---------------------------------------------------------------------------
 
 /// Score entry with original index, used for sorting while tracking positions.
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 struct IndexedScore {
     /// Original position in the input slice.
     idx: usize,

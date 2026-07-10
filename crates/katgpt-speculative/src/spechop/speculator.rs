@@ -22,7 +22,7 @@ use crate::spechop::types::SpecError;
 ///
 /// When `enable` is `false`, all RecFM checks are no-ops (zero cost).
 #[cfg(feature = "recfm")]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct CrossHopConfig {
     /// Enable cross-hop velocity consistency checks.
     pub enable: bool,

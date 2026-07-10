@@ -68,7 +68,7 @@ impl PrunerSnapshot {
 // ── DivergenceError ─────────────────────────────────────────────────
 
 /// Error for divergence-exceeding edits.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct DivergenceError {
     /// The proposed threshold delta.
     pub proposed_delta: f32,

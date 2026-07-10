@@ -28,7 +28,7 @@ use katgpt_types::Rng;
 /// Each arm tracks its accumulated wealth, Q-value estimate, and pull count.
 /// Wealth acts as an economic resource: positive wealth enables continued play,
 /// negative wealth triggers bankruptcy and rebirth.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct WealthArm {
     /// Accumulated economic wealth. Replenished by rewards, drained by bids/rent.
     pub wealth: f64,
@@ -79,7 +79,7 @@ impl WealthArm {
 // ── WealthPrunerConfig ────────────────────────────────────────────
 
 /// Configuration for `WealthBanditPruner`.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct WealthPrunerConfig {
     /// Initial wealth for each arm. Default: 0.5.
     pub initial_wealth: f64,

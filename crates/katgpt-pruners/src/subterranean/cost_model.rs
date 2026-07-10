@@ -14,7 +14,7 @@ use crate::subterranean::path_enumerator::PathEnumerator;
 /// The cost advantage scales with procedure complexity (node count and path count).
 /// Paper: "cost scales roughly as O(ln(path_count)) for the compiled approach,
 /// while in-context scales linearly with path_count."
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize)]
 pub struct ProcedureCostModel {
     /// Number of nodes in the procedure graph.
     pub node_count: usize,

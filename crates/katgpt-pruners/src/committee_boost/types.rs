@@ -52,7 +52,7 @@ impl fmt::Display for FailureMode {
 /// - `Rec → 1.0`: selector recovers nearly all latent capability
 /// - `Rec → 0.0`: selector adds nothing beyond single-shot
 /// - `Rec < 0.0`: selector is worse than single-shot (broken)
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct OracleGapRecovery {
     /// Single-shot accuracy (Pass@1).
     pub p1: f64,
@@ -154,7 +154,7 @@ impl OracleGapRecovery {
 ///
 /// Theoretical guarantees require (k, m, r) to satisfy bounds
 /// parameterized by (α₀, β₀, σ₀, L, δ).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CommitteeBudget {
     /// Proposer width — number of candidates generated per query.
     pub k: usize,
@@ -202,7 +202,7 @@ impl CommitteeBudget {
 /// - `a` is the asymptotic ceiling
 /// - `b` is the initial gap (a - p_oracle(1))
 /// - `c` is the convergence rate
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct ConvergenceFit {
     /// Asymptotic ceiling: `lim_{k→∞} p_oracle(k)`.
     pub ceiling: f64,
@@ -221,7 +221,7 @@ pub struct ConvergenceFit {
 /// The blind-spot floor `B ≈ 1 - max(p_oracle(k))` represents the
 /// fraction of problems that NO committee member can solve —
 /// the proposer diversity ceiling.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct BlindSpotEstimate {
     /// Blind-spot floor: fraction of problems no member solves.
     pub blind_spot_floor: f64,

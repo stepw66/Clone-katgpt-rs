@@ -1,7 +1,7 @@
 //! Core types for the Auto-Dreamer offline memory consolidation module.
 
 /// Configuration for the Dreamer consolidation scheduler.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct DreamerConfig {
     /// Episodes between consolidation events (paper: k=5-10).
     pub cadence: usize,

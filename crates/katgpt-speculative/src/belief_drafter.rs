@@ -461,7 +461,7 @@ fn greedy_sample(logits: &[f32]) -> (usize, f32) {
 // ── BeliefDrafter ───────────────────────────────────────────────
 
 /// A single drafted token from the belief drafter.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct BeliefDraftToken {
     /// Token index in the vocabulary.
     pub token_idx: usize,

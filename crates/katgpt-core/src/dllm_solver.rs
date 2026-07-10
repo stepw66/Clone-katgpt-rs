@@ -20,7 +20,7 @@ pub enum SolverKind {
 }
 
 /// Configuration for CriticalIntervalGate.
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct CriticalIntervalConfig {
     /// Vocab size for computing default threshold.
     pub vocab_size: usize,
@@ -673,7 +673,7 @@ impl RcdConfig {
 /// Zero-cost when `enabled=false` — the runtime check in `denoise_loop_rcd_3sr` falls
 /// through to `denoise_loop_rcd` with no further work.
 #[cfg(feature = "d2f_3sr_warm_start")]
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct ThreeStateReuseConfig {
     /// γ for UnchangedVisible positions — default 1.0 (full reuse).
     pub gamma_visible: f32,

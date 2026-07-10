@@ -38,7 +38,7 @@ use super::count_sketch::CountSketch;
 /// | `buffer_size` | 64 | Max selected arms to track (ring buffer) |
 /// | `selection_ratio` | 0.5 | Fraction of candidates to consider |
 /// | `feature_dim` | 64 | Dimension of per-arm feature vectors |
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct OpusConfig {
     /// Temperature τ for Boltzmann sampling. τ→0 greedy, τ→∞ uniform.
     pub temperature: f32,

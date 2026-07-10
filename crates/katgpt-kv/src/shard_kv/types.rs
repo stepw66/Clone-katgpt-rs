@@ -21,7 +21,7 @@ pub struct VqCodebook {
 }
 
 /// Configuration for ShardKV cache.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct ShardConfig {
     /// Number of transformer layers.
     pub n_layers: usize,

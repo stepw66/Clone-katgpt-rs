@@ -30,7 +30,7 @@ impl fmt::Display for RegionLabel {
 // ── HalfSpace ───────────────────────────────────────────────────
 
 /// Half-space constraint defining one face of the polytope.
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct HalfSpace {
     /// Logit dimension index.
     pub dim: u16,

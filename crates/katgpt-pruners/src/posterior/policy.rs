@@ -28,7 +28,7 @@ pub enum LifecycleAction {
 }
 
 /// Configuration for precision policy thresholds.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct PrecisionPolicyConfig {
     /// Surprise threshold for PATCH trigger (sigmoid gate must exceed this).
     pub patch_surprise_threshold: f32,

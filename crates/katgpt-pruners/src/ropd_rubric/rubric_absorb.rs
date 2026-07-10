@@ -41,7 +41,7 @@ use super::types::RubricVector;
 /// - `gap_threshold`: 0.3 — meaningful gap in a criterion
 /// - `min_weight_for_absorb`: 2.0 — only "strong" criteria trigger absorb
 /// - `min_references`: 2 — ROPD ablation shows m=1 costs 17.9 pts
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct RubricGatedConfig {
     /// Minimum weighted gap to trigger absorb (default: 0.3).
     ///

@@ -24,7 +24,7 @@ const BLOCKED_BIAS: f32 = -20.0;
 const VALIDITY_THRESHOLD: f32 = -10.0;
 
 /// A single token-level log-probability bias.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct TokenBias {
     /// Token index in the vocabulary.
     pub token_idx: usize,

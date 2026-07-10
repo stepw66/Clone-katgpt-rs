@@ -57,7 +57,7 @@ pub enum VerificationResult {
 ///
 /// Tracks remaining verifications per tier. When Tier 2 is exhausted,
 /// enters conservative mode (Tier 0 DFA only, no speculative exploration).
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 #[repr(C)]
 pub struct ExplorationBudget {
     /// DFA bracket balance checks remaining (default: u32::MAX = unlimited).
@@ -148,7 +148,7 @@ impl Default for ExplorationBudget {
 // ── Config ────────────────────────────────────────────────────
 
 /// User-configurable limits for the exploration budget.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct ExplorationBudgetConfig {
     /// DFA bracket balance checks (default: u32::MAX = unlimited).
     pub tier0_limit: u32,

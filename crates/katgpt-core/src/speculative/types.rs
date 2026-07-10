@@ -112,7 +112,7 @@ impl Ord for TreeNode {
 /// Per-step execution stability metrics (Plan 102: TileRT pipeline).
 /// Zero overhead when `stability_metrics` feature is disabled.
 #[cfg(feature = "stability_metrics")]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct StabilitySnapshot {
     /// Per-phase wall time in nanoseconds: [draft, snapshot, verify, accept_reject]
     pub phase_latencies_ns: [u64; 4],
@@ -406,7 +406,7 @@ impl DecodeStrategy {
 ///
 /// γ=0 is identical to current behavior (safe default).
 /// γ>0 increases exploration diversity at potential cost to greedy optimality.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct SdeConfig {
     /// Noise re-injection scale (ELF default: 1.0, our default: 0.0 = disabled).
     pub gamma: f32,
@@ -527,7 +527,7 @@ impl MarginalFusionConfig {
 /// - Low confidence (< low_threshold): use unconditioned KV
 /// - Medium: blend proportional to confidence
 #[cfg(feature = "dflare_kv_routing")]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct KvRoutingConfig {
     /// Above this pruner relevance, use fully conditioned KV.
     pub high_confidence_threshold: f32,
@@ -577,7 +577,7 @@ impl KvRoutingConfig {
 /// `weight(depth) = exp(-depth / gamma)`. More nodes at early depths,
 /// fewer at later depths. Total budget stays the same.
 #[cfg(feature = "dflare_progressive_budget")]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct PositionWeightedBudget {
     /// Exponential decay rate. Higher = more front-loaded.
     /// Typical values: 2, 4, 8.
@@ -860,7 +860,7 @@ pub const LDT_THETA_ELIM: f32 = 1.0 / (1.0 + 8.0); // ≈ 0.111
 /// screening threshold, making the pruner conservative: only eliminate
 /// candidates when very confident.
 #[cfg(feature = "lattice_deduction")]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct LdtPruneConfig {
     /// Elimination threshold (default: LDT_THETA_ELIM ≈ 0.111).
     pub theta_elim: f32,
@@ -932,7 +932,7 @@ pub trait ConflictDetector: Send + Sync {
 /// This mirrors LDT's θ_eval_CLS > θ_train_CLS insight: conflict signals
 /// become more trustworthy as the state commits.
 #[cfg(feature = "lattice_deduction")]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct EntropyConflictDetector {
     /// Maximum fraction of candidates that can be pruned in one step.
     /// LDT's conflict threshold θ_cls = 0.6 analog.
@@ -1037,7 +1037,7 @@ pub struct RoutingOverlapSnapshot {
 /// Amdahl decomposition of speculative verification cost.
 /// T(K+1)/T(1) = f_sparse * unique_ratio + (1-f_sparse)
 #[cfg(feature = "spec_cost_model")]
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct SpecCostSnapshot {
     /// Fraction of forward pass in sparse MLP operations
     pub f_sparse: f64,
@@ -1111,7 +1111,7 @@ impl TesNode {
 /// This bridges trajectory-level evaluation (SimpleTES) to per-step credit
 /// signals needed for DPO/GRPO training (G-Zero Phase 2).
 #[cfg(feature = "tes_loop")]
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct TrajectoryCredit {
     /// Number of trajectories (C in SimpleTES notation).
     pub num_trajectories: usize,

@@ -423,7 +423,7 @@ pub struct DataSegment {
 }
 
 /// Global variable descriptor.
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct Global {
     /// Value type (`VALTYPE_*`).
     pub valtype: u8,

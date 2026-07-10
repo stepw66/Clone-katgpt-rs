@@ -158,7 +158,7 @@ impl Clone for FeatureHasher {
 }
 
 /// Extract features from DDTree context for memory hashing.
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct ContextFeatures {
     /// Domain hash (from PromptRouter domain string)
     pub domain: u64,
@@ -237,7 +237,7 @@ impl ContextFeatures {
 }
 
 /// Extract features from generation outcome for memory values.
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct OutcomeFeatures {
     /// Hint-δ value (from DeltaBanditPruner)
     pub delta: f32,

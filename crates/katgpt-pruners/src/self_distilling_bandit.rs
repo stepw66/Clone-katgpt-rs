@@ -27,7 +27,7 @@ use katgpt_types::Rng;
 // ── Config ──────────────────────────────────────────────────────
 
 /// Configuration for the self-distilling bandit.
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct SelfDistillingConfig {
     /// Blend factor: `(1 - alpha) * episode_reward + alpha * acceptance_reward`.
     /// Higher alpha → more weight on acceptance signal.
@@ -213,7 +213,7 @@ impl DomainQTable {
 // ── Convergence Metrics ─────────────────────────────────────────
 
 /// Rolling convergence metrics for monitoring bandit learning.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Copy, Debug, Default)]
 pub struct ConvergenceMetrics {
     /// Rolling average of combined rewards.
     pub avg_reward: f32,

@@ -146,7 +146,7 @@ pub struct IrrepPruner {
 /// Configuration for [`IrrepPruner`].
 ///
 /// Default: threshold=0.7, top_k=10, pre-alloc=0 (lazy).
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct IrrepPrunerConfig {
     pub max_vocab: usize,
     pub convergence_threshold: f32,

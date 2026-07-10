@@ -36,7 +36,7 @@ pub struct TurboQuantLayer {
 }
 
 /// Configuration for TurboQuant KV cache.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct TurboQuantKVCacheConfig {
     /// Number of layers.
     pub n_layers: usize,

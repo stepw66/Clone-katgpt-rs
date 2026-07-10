@@ -54,7 +54,7 @@
 use fastrand::Rng;
 
 /// Configuration for a renoise-CE probe.
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct RenoiseCeConfig {
     /// Perturbation magnitude (paper: `t=0.40` for flow LMs; domain-specific).
     /// For Gaussian perturbation this is the std-dev; for mask perturbation
@@ -94,7 +94,7 @@ impl Default for RenoiseCeConfig {
 ///
 /// `per_draw` is a fixed `[f32; 8]` matching the paper's `k=8` max. Unused
 /// slots (when `k_draws < 8`) are zero-initialized and excluded from the mean.
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct RenoiseCeScore {
     /// Mean cross-entropy drift across `k` draws (lower = more stable).
     pub drift: f32,

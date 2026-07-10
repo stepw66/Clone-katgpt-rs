@@ -24,7 +24,7 @@ pub enum EvictionPolicy {
 }
 
 /// Statistics about the current buffer state.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct BufferStats {
     /// Total original tokens fed into the buffer.
     pub total_input_tokens: usize,

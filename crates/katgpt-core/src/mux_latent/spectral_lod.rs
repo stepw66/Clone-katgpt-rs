@@ -12,7 +12,7 @@
 use crate::mux_latent::config::CompressionRatio;
 
 /// Spectral energy analysis of a context window.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct SpectralLOD {
     /// FFT size for spectral analysis. Must be power of 2.
     pub fft_size: usize,

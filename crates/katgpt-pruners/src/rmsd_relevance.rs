@@ -36,7 +36,7 @@ use std::cmp::Ordering;
 
 /// RMSD configuration for modelless path.
 /// Defaults from paper: T=20 (top actions), S=5 (final selection).
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct RmsdConfig {
     /// Heuristic pre-filter: select top T actions by |ΔQ| magnitude (paper: T=20).
     pub top_t: usize,
@@ -56,7 +56,7 @@ impl Default for RmsdConfig {
 // ── Metrics ─────────────────────────────────────────────────────
 
 /// Metrics from RMSD filtering step.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Copy, Debug, Default)]
 pub struct RmsdMetrics {
     /// Total actions considered.
     pub total_actions: usize,
@@ -76,7 +76,7 @@ pub struct RmsdMetrics {
 
 /// Step 1: Heuristic pre-filter by magnitude.
 /// Selects top-T positions by |teacher_logprob - student_logprob| magnitude.
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct LogprobMagnitudeFilter {
     /// Number of top positions to keep.
     pub top_t: usize,
@@ -109,7 +109,7 @@ impl LogprobMagnitudeFilter {
 
 /// Top-K vocabulary KL approximation for efficiency.
 /// Avoids full-vocabulary computation by summing only over top-K tokens.
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct TopKlApproximator {
     /// Number of top vocabulary items to consider.
     pub top_k: usize,
@@ -160,7 +160,7 @@ pub trait RelevanceMask {
 }
 
 /// Magnitude-only judge: select top-S by |ΔQ| magnitude (modelless path).
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct MagnitudeJudge {
     /// Number of final selections.
     pub top_s: usize,
@@ -192,7 +192,7 @@ impl RelevanceMask for MagnitudeJudge {
 /// Two-step process:
 /// 1. Top-T by |ΔQ| magnitude (heuristic pre-filter)
 /// 2. Top-S from T (magnitude-only judge for modelless path)
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct RmsdRelevanceFilter {
     /// Top-T actions to consider (Step 1).
     pub top_t: usize,
@@ -282,7 +282,7 @@ impl RmsdRelevanceFilter {
 /// Snapshot student → teacher on plateau detection.
 /// In modelless path: snapshot student Q-values as new teacher reference
 /// when metric plateaus for `patience` steps.
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct TeacherContinuation {
     /// Steps without improvement before snapshot.
     pub plateau_patience: usize,

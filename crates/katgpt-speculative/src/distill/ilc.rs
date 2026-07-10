@@ -32,7 +32,7 @@ use crate::{ScreeningPruner, TreeNode};
 pub type ClusterId = usize;
 
 /// Configuration for `IlcClusterer`.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct IlcConfig {
     /// Vocabulary size (branching factor m in the paper).
     pub vocab_size: usize,

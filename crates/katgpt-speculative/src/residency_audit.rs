@@ -20,7 +20,7 @@ use std::time::Instant;
 ///
 /// Captures whether the pruner's tree construction lands on fast paths
 /// or silently degrades (high prune ratio but expensive retained-node cost).
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct ResidencyReport {
     /// Fraction of retained nodes on fast verification path (≥0.8 is healthy).
     pub fast_path_ratio: f32,

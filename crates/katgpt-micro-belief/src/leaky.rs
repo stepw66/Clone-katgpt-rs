@@ -47,7 +47,7 @@ use crate::types::{MicroRecurrentBeliefState, RecurrenceFamily};
 /// Construct with [`new`](Self::new). The kernel is stateless aside from its
 /// config (`lr`, `max_delta`, `dim`) — the belief vector lives in the caller's
 /// `&mut [f32]`.
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct LeakyIntegrator {
     /// Learning rate (`config.hla_learning_rate` in `ReconstructionState`).
     pub lr: f32,

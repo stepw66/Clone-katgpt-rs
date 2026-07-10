@@ -167,7 +167,7 @@ impl LatentPrefillAdapter {
 }
 
 /// Summary of the compression benefit for prefill.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct CompressionSummary {
     /// Original token count.
     pub original_tokens: usize,

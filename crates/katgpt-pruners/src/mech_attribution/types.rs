@@ -43,7 +43,7 @@ impl std::fmt::Display for CatalystPattern {
 }
 
 /// Configuration for influence scoring.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct InfluenceConfig {
     /// Fraction of top-K samples to mark as high-influence. Default: 0.1
     pub top_k_fraction: f32,

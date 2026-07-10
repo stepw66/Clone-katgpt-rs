@@ -44,7 +44,7 @@ use super::types::HintDelta;
 /// Default δ threshold: 0.02 (minimum δ to consider a hint "meaningful").
 /// The G-Zero paper retains the lower half of the δ distribution,
 /// but for gating individual arms we use a fixed threshold.
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct DeltaGatedConfig {
     /// Minimum δ to absorb an arm (default: 0.02).
     ///

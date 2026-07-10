@@ -189,7 +189,7 @@ impl ReconstructionConfig {
 
 /// Accumulated KG triple evidence from reconstruction.
 /// Fixed-size for zero-allocation hot path.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Copy, Debug, Default)]
 pub struct TripleEvidence {
     /// Per-kind activation strengths (indexed by SenseKind discriminant).
     pub kind_activations: [f32; 6],
@@ -275,7 +275,7 @@ impl TripleEvidence {
 ///
 /// Layout: `matrix[module_idx * 8 + dim] = sign × row_scale`
 /// where `sign ∈ {-1, 0, +1}` is extracted from `directions[dim]` bit `dim`.
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct ProjectionWeights {
     /// `[6 × 8]` row-major: one row per module, one column per HLA dimension.
     pub matrix: [f32; 48],

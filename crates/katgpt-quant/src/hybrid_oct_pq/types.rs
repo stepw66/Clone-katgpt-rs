@@ -10,7 +10,7 @@ use crate::octopus::types::OctopusCodebook;
 ///
 /// Uses PlanarQuant's 2D Givens rotation (O(d) FMAs) with OCTOPUS's
 /// octahedral triplet encoding ((b+1, b-1) bit split).
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct HybridOctPqConfig {
     /// Random seed for 2D Givens rotation generation (deterministic).
     pub seed: u64,

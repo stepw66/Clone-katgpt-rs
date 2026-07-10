@@ -139,7 +139,7 @@ pub trait ReachableDualPoolRouter {
 /// Tunable parameters for [`DualPoolBandit`].
 ///
 /// Defaults follow DecentMem Eq. 6/7/8: gain `α = 0.5`, decay `β = 0.5`.
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct DualPoolConfig {
     /// Weight gain on a successful route_update (paper's `α` in Eq. 6/7).
     pub alpha_update_gain: f32,

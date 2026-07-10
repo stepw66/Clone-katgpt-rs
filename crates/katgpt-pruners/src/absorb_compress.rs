@@ -60,7 +60,7 @@ use super::skill_test::{PrunerTestGate, TestCase};
 /// reviewer's benefit-to-risk ratio exceeds this threshold. This prevents
 /// hardening a net-negative reviewer's decisions into permanent blocks.
 /// Paper default: 2.0 (conservative — allows slightly worse reviewers).
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct CompressConfig {
     /// Minimum visits before an arm is eligible for compression.
     pub min_visits: usize,

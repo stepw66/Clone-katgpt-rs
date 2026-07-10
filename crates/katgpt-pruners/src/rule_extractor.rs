@@ -99,7 +99,7 @@ impl ExtractedRule {
 /// Configuration for rule extraction from DDTree paths.
 ///
 /// Controls TOP-K selection and minimum quality threshold.
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct RuleExtractor {
     /// Maximum rules to return.
     pub top_k: usize,

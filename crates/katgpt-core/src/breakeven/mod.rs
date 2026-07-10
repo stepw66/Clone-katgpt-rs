@@ -409,7 +409,7 @@ impl Default for BreakevenBandit {
 // ---------------------------------------------------------------------------
 
 /// Snapshot of breakeven routing state for logging/display.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct BreakevenStats {
     pub cpu_to_gpu_n: f64,
     pub gpu_to_ane_n: f64,

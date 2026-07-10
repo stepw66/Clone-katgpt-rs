@@ -163,7 +163,7 @@ impl BcoSample {
 ///
 /// The reward shift δ is maintained as an EMA of the midpoint between
 /// positive and negative sample averages, centering the BCO signal.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct BcoOptimizer {
     /// BCO temperature τ (paper: 0.1). Scales the reward signal before sigmoid.
     pub temperature: f32,
@@ -255,7 +255,7 @@ impl BcoOptimizer {
 /// - `bco_temperature = 0.1` — BCO reward scaling
 /// - `kl_penalty = 0.1` — KL divergence gating strength
 /// - `dynamic_prior = true` — use current student Q as anchor
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct VpdConfig {
     /// E-step frequency: 1 E-step per F M-steps (paper: F=5).
     pub e_step_frequency: usize,

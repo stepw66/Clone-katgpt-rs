@@ -11,7 +11,7 @@ use super::cht::CHT;
 use super::types::{HullMeta, TieBreak};
 
 /// Result of a hard attention query.
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct AttentionResult {
     /// Resolved value (averaged or latest per tie-break mode).
     pub value: [f64; 2],

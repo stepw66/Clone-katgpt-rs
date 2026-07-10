@@ -23,7 +23,7 @@ const BUDGET_ARMS: [f32; 6] = [0.5, 0.75, 1.0, 1.25, 1.5, 2.0];
 const NUM_DISTANCE_BINS: usize = 4;
 
 /// Configuration for [`AdaptiveCoTBudget`].
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct AdaptiveCoTConfig {
     /// EMA smoothing factor for reward updates. Default: 0.1.
     pub ema_alpha: f32,

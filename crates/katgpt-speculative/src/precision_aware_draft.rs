@@ -5,7 +5,7 @@
 
 /// Boundary penalty scorer for speculative drafting.
 /// Penalizes draft tokens whose logits are close to quantization grid boundaries.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct BoundaryPenalty {
     /// Weight of the boundary penalty in draft scoring.
     pub penalty_weight: f32,

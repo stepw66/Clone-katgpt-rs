@@ -10,7 +10,7 @@
 use crate::posterior::precision::PrecisionVector;
 
 /// Computes surprise from precision updates and gates it with sigmoid.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct SurpriseComputer {
     /// Sensitivity parameter β for sigmoid gating.
     /// Higher β = more sensitive to surprise.

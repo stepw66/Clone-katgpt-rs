@@ -72,7 +72,7 @@
 /// store `s_1..s_T` as `0..T-1`. To preserve the paper's 1-indexed public API,
 /// we keep `state_indices()` returning 1-indexed values (matching the docstring
 /// of [`from_segments`]).
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct BandConditioningSet {
     /// Up to 4 state indices, 1-indexed (`s_1 = 1`). Empty slots are `0`.
     /// Stored sorted ascending.

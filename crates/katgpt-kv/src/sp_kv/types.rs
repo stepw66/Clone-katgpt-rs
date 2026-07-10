@@ -19,7 +19,7 @@ pub enum SpKvGateMode {
 ///
 /// Controls utility predictor architecture, gating behavior, and local window size.
 /// Feature-gated behind `sp_kv` in `Cargo.toml`.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct SpKvConfig {
     /// Local sliding window always retained (default: 128).
     /// Positions within `window` of the current token are never gated out.

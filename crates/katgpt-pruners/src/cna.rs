@@ -32,7 +32,7 @@ use katgpt_speculative::ScreeningPruner;
 // ── Types ───────────────────────────────────────────────────────
 
 /// A single discovered neuron from contrastive pair analysis.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct CnaNeuron {
     /// Transformer layer index.
     pub layer: usize,
@@ -64,7 +64,7 @@ pub struct CnaCircuit {
 }
 
 /// Configuration for CNA discovery.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct CnaDiscoveryConfig {
     /// Fraction of total MLP activations to select (default: 0.001 = 0.1%).
     pub top_pct: f32,

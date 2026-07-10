@@ -41,7 +41,7 @@ impl TernaryValue {
 
 /// A KG octree leaf node carrying a ternary direction.
 /// 32 bytes: 4 × u64 bitmask representation of 128 ternary nodes.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct TernaryDir {
     /// Bitmask representation: 2 bits per ternary node.
     /// 00 = Zero, 01 = Positive, 10 = Negative.

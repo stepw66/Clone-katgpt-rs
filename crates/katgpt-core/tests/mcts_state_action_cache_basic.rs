@@ -28,7 +28,7 @@ use katgpt_core::mcts_state_action_cache::{
 // The DeterministicTransition contract holds by construction: `apply` is a
 // pure function of `(state, action)` — no RNG, no mutable shared state.
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct ToyState {
     v: u8,
 }

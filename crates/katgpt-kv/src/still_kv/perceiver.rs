@@ -9,7 +9,7 @@
 //! T14: Full forward pipeline wired as num_blocks × (cross + self).
 
 /// Configuration for the StillPerceiver compactor.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct StillPerceiverConfig {
     /// Latent dimension for the perceiver bottleneck.
     pub latent_dim: usize,

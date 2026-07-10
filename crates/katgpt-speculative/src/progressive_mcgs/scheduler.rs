@@ -48,7 +48,7 @@ pub enum SelectMode {
 ///
 /// Hyperparameters default to paper Table 4 values; override for tick-budget
 /// contexts via [`EntropyGatedScheduler::with_config`] or field mutation.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct EntropyGatedScheduler {
     /// Floor on UCT-selection probability. Paper default 0.2.
     pub w_min: f32,

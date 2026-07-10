@@ -253,7 +253,7 @@ impl DungeonMap {
 /// State for multi-floor dungeon.
 ///
 /// Fields ordered by alignment (u64/u32 → u8) to minimize padding.
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct DungeonState {
     pub total_cost: u32,
     pub killed_monsters: u32,

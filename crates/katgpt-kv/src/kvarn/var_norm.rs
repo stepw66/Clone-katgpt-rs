@@ -21,7 +21,7 @@ pub struct VarianceNormScales {
 }
 
 /// Variance normalization configuration.
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct VarNormConfig {
     /// Number of Sinkhorn iterations (default: 8).
     pub iterations: usize,
