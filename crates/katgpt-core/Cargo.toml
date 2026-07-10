@@ -131,6 +131,7 @@ moa_inference = []  # MoA Mixture of Activations — token-adaptive activation m
 sia_feedback = ["sr2am_configurator", "katgpt-types/sia_feedback"]  # FeedbackBandit — harness + weight co-evolution (Plan 163, Research 033)
 hydra_budget = ["katgpt-types/hydra_budget"]  # Hydra-Aware Adaptive Layer Budget types (Research 148, Plan 165)
 deltanet_inference = ["katgpt-types/deltanet_inference"]  # DeltaNet GPU inference — hybrid DeltaNet/Attention decode (Plan 182, Research R036)
+gdn_tree_verify = []  # GDN Rollback-Free Tree Verification — masked triangular solve for delta-rule speculative trees (Plan 424, Research 407, arXiv:2607.06763 §3.4). Pure-math substrate: operates on flat &[f32] slices, no dep on Gdn2State/Config. Opt-in until G1–G4 GOAT gate passes.
 rim_slots = ["katgpt-types/rim_slots"]  # RiM Reasoning Buffer Slots — fixed latent workspace for DDTree (Plan 172, Research 192)
 wall_attention = ["katgpt-types/wall_attention"]  # Wall Attention — diagonal forget gates replacing RoPE (Plan 173, Research Wall Attention)
 mux_pruner = []  # MuxSpanPruner — vocabulary simplex pruning (Research 158, MUX)

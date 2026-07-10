@@ -1618,6 +1618,14 @@ pub mod skill_opt;
 #[cfg(feature = "ssd_block")]
 pub mod ssd_block;
 
+// GDN Rollback-Free Tree Verification — masked triangular solve for delta-rule
+// speculative trees (Plan 424, Research 407, arXiv:2607.06763 §3.4). Reduces
+// tree verification for GDN recurrent layers to (I+X)U=βV, eliminating state
+// rollback entirely. Pure-math substrate: flat &[f32] slices, no Gdn2State/Config
+// dep. Opt-in until G1–G4 GOAT gate passes.
+#[cfg(feature = "gdn_tree_verify")]
+pub mod gdn_tree_verify;
+
 // Test-only `#[global_allocator]` so `alloc::tests::*` pass when running
 // `cargo test -p katgpt-core --lib`. Downstream consumers (katgpt-rs root,
 // riir-engine, etc.) install their OWN `#[global_allocator]`; this static is
