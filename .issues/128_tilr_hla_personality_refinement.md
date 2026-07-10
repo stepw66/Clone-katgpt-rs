@@ -152,6 +152,13 @@ promotion for both is deferred pending real-session personality-divergence gain.
       events) captures meaningful personality directions in production game
       sessions. The synthetic benchmark proves the amplification mechanism; the
       real-session benchmark confirms the calibration is semantically valid.
+      **DISPATCH PATH LANDED** (Plan 439, 2026-07-11): the CommittedBlend
+      → riir-games NPC tick dispatch is now wired (`tick_committed_blend`,
+      Phase 2e-cb). Real-session validation is unblocked — NPCs can now opt
+      into CommittedBlend mode via `ensure_committed_blend_state` and evolve
+      via `f_pi(z)` in production game sessions. The TILR bridge can be
+      constructed and calibrated from real re-commit event z-snapshots.
+      See `riir-ai/.plans/439_committed_blend_riir_games_dispatch.md`.
 
 ## Cross-references
 
