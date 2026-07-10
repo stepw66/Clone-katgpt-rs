@@ -208,8 +208,12 @@ modulation: divergence = 0.000 (identical drift). With modulation: divergence
 The multiplier primitive (`faithfulness_reward_multiplier`), integration
 contract (`FaithfulnessRateSource` trait + `AuditRunnerRateSource`), and PoC
 are shipped behind `action_faithfulness_drift` (opt-in, default-off).
-Production wiring deferred pending Plan 308 production integration (real
-probe scheduling).
+**Phase 4 T4.1 (production wiring) shipped 2026-07-10**: `AuditRunnerRateSource`
+is now wired into `cognitive_branch.rs` at the DriftGate call site. The
+`AuditRunner` is stored on `MapInstance` (all 5 construction sites). When empty
+(no probes have run), rate=1.0 → multiplier=1.0 → bit-identical reward.
+Phase 4 T4.2 (real probe scheduling) deferred pending Plan 308 production
+integration.
 
 See: `riir-ai/.benchmarks/430_action_faithfulness_drift.md` for full results.
 
