@@ -4,7 +4,7 @@
 **Research:** [katgpt-rs/.research/407_Trees_from_Marginals_GDN_Tree_Verify.md](../.research/407_Trees_from_Marginals_GDN_Tree_Verify.md)
 **Source paper:** [arXiv:2607.06763](https://arxiv.org/abs/2607.06763) — Oda et al., "Trees from Marginals", §3.4
 **Target:** `katgpt-rs/crates/katgpt-core/src/gdn_tree_verify/` (new module) + Cargo feature `gdn_tree_verify`
-**Status:** Phases 1-3 complete, Phase 5 GOAT gate complete (G1-G4 all PASS, G3 restored after Issue 125 shim-removal `--all-features` regression fixed), Phase 4 T4.1-T4.4 + T4.3b + T4.3c complete (multi-head batching + bridge + speculative step integration + integration tests + convention alignment + hybrid QwenDeltaNet riir-ai consumer), Phase 6 complete (T6.1 config flag + T6.2 benchmark, negative result). **All tasks complete.** Weaver adapter training recipe captured in riir-train/.research/402.
+**Status:** Phases 1-3 complete, Phase 5 GOAT gate complete (G1-G4 all PASS, G3 restored after Issue 125 shim-removal `--all-features` regression fixed), Phase 4 T4.1-T4.4 + T4.3b + T4.3c complete (multi-head batching + bridge + speculative step integration + integration tests + convention alignment + hybrid QwenDeltaNet riir-ai consumer), Phase 6 complete (T6.1 config flag + T6.2 benchmark, negative result). **All tasks complete.** Weaver adapter training recipe captured in riir-train/.research/402; implementation plan opened as riir-train/.plans/314 (LK loss + Muon/AdamW + top-K=512; GOAT = acceptance-length gain). Katgpt-rs runtime integration deferred until trained weights exist.
 
 ---
 
