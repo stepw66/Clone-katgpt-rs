@@ -219,11 +219,25 @@ consumer (`CompositionActivationConsumer`) — behavior =
 scheduled at audit cadence (every N=64 ticks) in `cognitive_branch.rs`, ahead
 of the drift phase. Dead injections (zero-weight compositions) →
 `input_faithful_rate` drops → drift reward dampened. 11 unit tests + 1
-production integration test all PASS. All primitives shipped; remaining piece
-is empirical production validation (whether the dead-injection failure mode
-occurs in real gameplay).
+production integration test all PASS.
 
-See: `riir-ai/.benchmarks/430_action_faithfulness_drift.md` for full results.
+**Plan 431 (production validation + promotion, 2026-07-10): PROMOTED to
+DEFAULT-ON.** A production validation test ran the real map-tick loop (default
+town map, 10 NPCs, 130 ticks, audit cadence at ticks 64/128) with a
+persistently dead-injected NPC (`w` re-zeroed each tick — the real-world
+failure mode of a shard that consistently fails to bind). **Maximal separation:
+dead rate 0.0000 vs faithful 1.0000; dead multiplier 0.0000 vs faithful 1.0000;
+zero false positives on a healthy population (min rate 1.0000).** The production
+audit path (real `CompositionActivationConsumer` from `compositions[i].w` → real
+`record_audit` → real `AuditRunnerRateSource` → real `fused_reward`) detects
+dead-injection and dampens reward exactly as designed, with no false-positives.
+`action_faithfulness_drift` is now DEFAULT-ON in both `riir-engine` and
+`riir-games`. The only remaining piece (organic dead-injection in real gameplay)
+is a production-telemetry question, not a mechanism question.
+
+See: `riir-ai/.benchmarks/430_action_faithfulness_drift.md` (mechanism GOAT) and
+`riir-ai/.benchmarks/431_action_faithfulness_drift_production_validation.md`
+(production validation + promotion) for full results.
 
 ---
 
