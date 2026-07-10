@@ -309,6 +309,51 @@ mod tests {
     }
 
     #[test]
+    fn test_simulation_gate_lightweight_branch() {
+        // Regression test: the LightweightSimulation branch must be reachable.
+        // A prior summary erroneously reported line 141 checked reducible_threshold
+        // (which would have made the borderline branch dead code). The committed
+        // code is correct, but no prior test actually exercised the branch —
+        // the matching_pennies test accepts BOTH AnalyticalShortcut and
+        // LightweightSimulation, and matching_pennies routes to AnalyticalShortcut.
+        //
+        // Force a borderline zone: reducible_threshold=0.0 (nothing is reducible),
+        // irreducible_threshold=2.0 (ratio is in [0,1] so nothing is irreducible).
+        // Any non-degenerate matrix should land in LightweightSimulation.
+        let config = SimulationGateConfig {
+            reducible_threshold: 0.0,
+            irreducible_threshold: 2.0,
+            lightweight_rounds: 15,
+            full_rounds: 50,
+        };
+        let gate = SimulationGate::new(config);
+
+        let n = 22;
+        let mut payoffs = Vec::with_capacity(n);
+        let mut state: u64 = 42;
+        for _ in 0..n {
+            let mut row = Vec::with_capacity(n);
+            for _ in 0..n {
+                state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
+                let val = ((state >> 33) as f64 / (1u64 << 31) as f64) * 2.0 - 1.0;
+                row.push(val);
+            }
+            payoffs.push(row);
+        }
+        let ids: Vec<u64> = (0..n as u64).collect();
+        let matrix = WinMatrix::new(payoffs, ids);
+        let result = gate.route(&matrix);
+
+        assert_eq!(
+            result.strategy,
+            SimulationStrategy::LightweightSimulation,
+            "ratio={:.4} should be borderline with thresholds [0.0, 2.0)",
+            result.compression_ratio
+        );
+        assert_eq!(result.recommended_rounds, 15);
+    }
+
+    #[test]
     fn test_simulation_gate_config_custom_thresholds() {
         let config = SimulationGateConfig {
             reducible_threshold: 0.5,
