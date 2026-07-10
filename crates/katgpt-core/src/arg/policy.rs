@@ -112,6 +112,7 @@ pub struct PolicyEnvelope<'a> {
 /// Decision returned by [`PolicyEnvelope::evaluate`]: whether to short-circuit
 /// the pipeline and whether constraints must be threaded downstream.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(u8)]
 pub enum ShouldProceed {
     /// Pipeline may continue. Constraints still apply if `state = Restrict`.
     Continue,

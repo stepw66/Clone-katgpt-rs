@@ -47,6 +47,7 @@ pub const MAX_DRAFT_WIDTH: usize = 64;
 
 /// Thermal path assigned per position based on ternary consensus + confidence.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(u8)]
 pub enum ThermalPath {
     /// Both paths agree, high confidence — accept immediately, zero verification.
     Plasma,

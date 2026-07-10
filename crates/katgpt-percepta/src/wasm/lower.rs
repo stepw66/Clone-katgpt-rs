@@ -215,6 +215,7 @@ const I64_MEM_REMAP: [u8; 256] = build_remap_table(I64_MEM_OPS);
 
 /// Kind of bitwise operation for byte-level expansion.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(u8)]
 enum BitOp {
     And,
     Or,

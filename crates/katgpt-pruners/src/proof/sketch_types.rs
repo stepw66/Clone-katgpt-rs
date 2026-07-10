@@ -279,6 +279,7 @@ impl fmt::Display for Goal {
 /// | `Combine` | Merge prior proof attempts | Team tactic merge |
 /// | `NovelApproach` | Try new proof technique | Switch opening/heuristic |
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[repr(u8)]
 pub enum DiversityStrategy {
     /// Split complex goals into sub-goals.
     ///

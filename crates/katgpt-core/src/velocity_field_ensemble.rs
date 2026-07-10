@@ -539,6 +539,7 @@ where
 /// Both shipped schedules have **constant** `γ_t` (a nice analytical
 /// property — see the derivation in each variant's doc).
 #[derive(Clone, Copy, Debug, PartialEq)]
+#[repr(u8)]
 pub enum Schedule {
     /// Linear schedule: `α_t = 1 − t`, `β_t = t`. Derivative `γ_t = 1`
     /// (constant). This is the simplest schedule; `D*_t = (1 − t) / t`.

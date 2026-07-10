@@ -145,6 +145,7 @@ impl ProcedureCostModel {
 
 /// Classification of procedure graph complexity.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[repr(u8)]
 pub enum ComplexityTier {
     /// 0–10 paths: LoRA may suffice.
     Trivial,

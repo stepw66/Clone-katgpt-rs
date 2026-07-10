@@ -18,6 +18,7 @@ use std::fmt;
 
 /// Source step that generated a reflection QA pair.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(u8)]
 pub enum ReflectionStep {
     /// Direct extraction: (state, action, outcome) → "What action at state S?"
     DirectExtraction,
@@ -48,6 +49,7 @@ impl fmt::Display for ReflectionStep {
 
 /// Game domain for reflection synthesis.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(u8)]
 pub enum ReflectionDomain {
     /// Bomberman arena.
     Bomber,

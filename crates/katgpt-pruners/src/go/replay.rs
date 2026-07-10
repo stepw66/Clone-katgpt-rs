@@ -55,6 +55,7 @@ impl From<GoActionSer> for GoAction {
 /// Serializable wrapper for [`GoCell`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
+#[repr(u8)]
 pub enum GoCellSer {
     Black,
     White,
@@ -343,6 +344,7 @@ impl From<GoActionBin> for GoActionSer {
 
 /// Postcard-native player cell variant (externally tagged).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[repr(u8)]
 enum GoCellBin {
     Black,
     White,

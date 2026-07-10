@@ -64,6 +64,7 @@ pub fn mix_thinking_signal(soft_embed: &mut [f32], control_token_embed: &[f32], 
 /// - [`ExplicitExit`](Self::ExplicitExit): we just exited Latent mode — β_t blends
 ///   toward the concrete token, away from the soft embedding.
 #[derive(Debug, Clone, Copy, PartialEq)]
+#[repr(u8)]
 pub enum SignalMixKind {
     LatentEntry,
     ExplicitExit,

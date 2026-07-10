@@ -23,6 +23,7 @@ pub struct PosteriorEvidence {
 
 /// Binary verified outcome.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
 pub enum EvidenceOutcome {
     Success,
     Failure,

@@ -737,6 +737,7 @@ impl GoPlayer for GoHLPlayer {
 ///
 /// Start with 4 proven patterns; expand based on δ signal results.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[repr(u8)]
 pub enum GoTemplate {
     /// Play on star points — strongest opening heuristic.
     CornerStar,

@@ -8,6 +8,7 @@ use super::types::{BASE_CT_FILL, BASE_HIT_RATE, GameEvent, Unit};
 // ── Status Effect ───────────────────────────────────────────────
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[repr(u8)]
 pub enum StatusEffect {
     Poison,
     Regen,

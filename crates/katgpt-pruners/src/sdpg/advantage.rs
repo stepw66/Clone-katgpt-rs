@@ -12,6 +12,7 @@
 
 /// How to compute teacher-student advantage.
 #[derive(Clone, Debug, Default)]
+#[repr(u8)]
 pub enum AdvantageMode {
     /// Raw Q-value delta: advantage_i = teacher_q[i] - student_q[i]
     /// Simplest oracle signal. No distribution assumption.

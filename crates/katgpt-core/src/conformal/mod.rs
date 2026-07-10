@@ -95,6 +95,7 @@ pub trait PointForecaster {
 
 /// Residual pool indexing strategy.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(u8)]
 pub enum ResidualMode {
     /// Single residual pool (lag `m`) reused for all horizons.
     /// Matches CSP `residual_mode="paper"`. Interval width is constant across
@@ -116,6 +117,7 @@ impl Default for ResidualMode {
 
 /// Unit for the residual pool's exponential recency decay.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(u8)]
 pub enum DecayUnit {
     /// Decay by absolute observation age (time steps). CSP v0.1.4 default.
     /// Same-phase observations one season apart are `m` steps apart.

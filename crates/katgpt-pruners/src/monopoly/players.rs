@@ -129,6 +129,7 @@ impl DecisionContext {
 
 /// Macro-level game phase for strategy adaptation.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(u8)]
 pub enum GamePhase {
     /// Rounds 1–10 or low property ownership — expand aggressively.
     Early,
@@ -153,6 +154,7 @@ impl GamePhase {
 
 /// Strategy profiles for the HL bandit layer.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(u8)]
 pub enum Strategy {
     Expansion,
     Development,

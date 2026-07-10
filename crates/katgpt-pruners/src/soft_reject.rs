@@ -37,6 +37,7 @@ use katgpt_core::traits::ConstraintPruner;
 
 /// Verdict returned by [`soft_reject_decide`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
 pub enum SoftRejectVerdict {
     /// `reject_confidence ≤ τ_low` — take the candidate (as today).
     Accept,

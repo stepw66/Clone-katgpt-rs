@@ -137,6 +137,7 @@ impl fmt::Display for ParallelismGuard {
 /// diversity injection) or a lightweight fallback (basic UCB, epsilon-greedy)
 /// is used for sketch selection.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[repr(u8)]
 pub enum SketchSelectionStrategy {
     /// Population + P-UCB sampling (parallel mode).
     ///

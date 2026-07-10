@@ -9,6 +9,7 @@
 
 /// Difficulty tier for query classification.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[repr(u8)]
 pub enum DifficultyTier {
     Easy,
     Medium,

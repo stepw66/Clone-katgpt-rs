@@ -51,6 +51,7 @@ pub struct CoEvolutionResult {
 
 /// Mutation types for FSM graphs.
 #[derive(Debug, Clone, Copy, PartialEq)]
+#[repr(u8)]
 pub enum MutationType {
     /// Flip the output of a random state.
     OutputFlip,

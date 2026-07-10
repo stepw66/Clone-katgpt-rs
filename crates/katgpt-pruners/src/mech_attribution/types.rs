@@ -13,6 +13,7 @@ pub struct MechInfluenceScore {
 
 /// Structural catalyst patterns that drive circuit formation in LLMs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[repr(u8)]
 pub enum CatalystPattern {
     /// XML-like `<tag>...</tag>` repetition with consistent structure.
     XmlRepetition,

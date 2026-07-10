@@ -40,6 +40,7 @@ pub const MORTGAGE_INTEREST_RATE: f32 = 0.10; // 10%
 // ── Enums ──────────────────────────────────────────────────────
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[repr(u8)]
 pub enum PropertyGroup {
     Brown,
     LightBlue,
@@ -105,12 +106,14 @@ pub enum SquareKind {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[repr(u8)]
 pub enum TaxKind {
     Income,
     Luxury,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(u8)]
 pub enum TurnPhase {
     PreTurn,
     Rolling,
@@ -124,6 +127,7 @@ pub enum TurnPhase {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[repr(u8)]
 pub enum JailReason {
     LandedOnGoToJail,
     Speeding,
@@ -131,6 +135,7 @@ pub enum JailReason {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(u8)]
 pub enum ReleaseMethod {
     PaidFine,
     UsedCard,
@@ -139,6 +144,7 @@ pub enum ReleaseMethod {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(u8)]
 pub enum JailDecision {
     PayFine,
     UseCard,

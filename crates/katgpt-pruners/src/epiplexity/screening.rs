@@ -13,6 +13,7 @@ use katgpt_speculative::ScreeningPruner;
 
 /// How to derive the epiplexity weight for blending with inner pruner.
 #[derive(Clone, Debug, Default)]
+#[repr(u8)]
 pub enum EpiplexityWeight {
     /// Uniform weight — returns 1.0 (baseline, no epiplexity modulation).
     #[default]

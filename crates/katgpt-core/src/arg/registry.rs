@@ -139,6 +139,7 @@ impl InfoUnit {
 /// Grey-zone comparison result (ARG §3.4 Validation). The `CompareFn` trait
 /// returns this; the registry uses it to decide Strong vs Grey vs No.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[repr(u8)]
 pub enum CompareResult {
     /// Definitely the same information — collapse to canonical.
     Same,

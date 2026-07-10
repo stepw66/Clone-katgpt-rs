@@ -149,6 +149,7 @@ impl Default for GoResearchConfig {
 
 /// Status of a research arm.
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[repr(u8)]
 pub enum ArmStatus {
     /// Active and being evaluated.
     Active,
@@ -515,6 +516,7 @@ impl GoPlayer for ResearchPlayer {
 
 /// Baseline player type for evaluation.
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[repr(u8)]
 pub enum BaselinePlayer {
     /// Random legal moves with occasional pass.
     Random,

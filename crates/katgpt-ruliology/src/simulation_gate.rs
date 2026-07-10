@@ -16,6 +16,7 @@ use crate::types::WinMatrix;
 
 /// Decision made by the simulation gate.
 #[derive(Debug, Clone, Copy, PartialEq)]
+#[repr(u8)]
 pub enum SimulationStrategy {
     /// Game is reducible — use analytical shortcut (e.g., Nash equilibrium lookup).
     /// Skip expensive simulation. The cached payoff matrix is sufficient.

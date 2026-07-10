@@ -16,6 +16,7 @@ use crate::fft::types::*;
 /// The bandit-weighted proposer learns which templates are most effective
 /// by observing the δ signal from template-modified vs unmodified scores.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[repr(u8)]
 pub enum FFTTemplate {
     HealFirst,
     CureDebuffFirst,

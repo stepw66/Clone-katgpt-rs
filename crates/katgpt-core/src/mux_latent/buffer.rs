@@ -15,6 +15,7 @@ use crate::mux_latent::spectral_lod::SpectralLOD;
 
 /// Eviction policy when the latent budget is exceeded.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
 pub enum EvictionPolicy {
     /// Evict oldest segments first (FIFO).
     OldestFirst,

@@ -38,6 +38,7 @@ pub mod segment_match;
 /// before calling `build_hop_dd_tree_with_schedule`.
 #[cfg(feature = "thinking_prune")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+#[repr(u8)]
 pub enum SpechopSchedule {
     /// Apply the full ScreeningPruner at every hop/loop step.
     Uniform,

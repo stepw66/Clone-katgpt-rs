@@ -8,6 +8,7 @@ use crate::lattice_operad::word_problem::canonicalize;
 
 /// Composition operator for pruner expressions.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
 pub enum ComposeOp {
     /// Conjunction (AND) — both must accept.
     And,

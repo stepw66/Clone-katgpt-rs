@@ -13,6 +13,7 @@ use super::EpiplexityEstimator;
 
 /// Which factorization order to use for scoring game traces.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[repr(u8)]
 pub enum FactorizationOrder {
     /// Actions → State order (e.g., moves → board position).
     /// Easier to compute, lower epiplexity for structured data.

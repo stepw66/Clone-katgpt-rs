@@ -24,6 +24,7 @@ type AdjacencyList = Vec<Vec<EdgeEntry>>;
 
 /// Node identifiers for the Go procedure graph.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[repr(u8)]
 pub enum GoNode {
     /// Game initialization, first stone placement.
     Start,

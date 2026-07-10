@@ -23,6 +23,7 @@ use serde::{Deserialize, Serialize};
 /// Each variant maps to a deterministic WASM-checkable criterion.
 /// Criteria are domain-agnostic; templates select which apply and with what weight.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[repr(u8)]
 pub enum RubricCriterion {
     /// Did it answer the question / complete the task?
     TaskFulfillment,

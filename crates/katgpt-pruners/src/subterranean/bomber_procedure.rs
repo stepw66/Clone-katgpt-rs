@@ -24,6 +24,7 @@ type AdjacencyList = Vec<Vec<EdgeEntry>>;
 
 /// Node identifiers for the Bomberman procedure graph.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[repr(u8)]
 pub enum BomberNode {
     /// Game initialization phase.
     Start,

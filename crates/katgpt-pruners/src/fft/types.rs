@@ -26,6 +26,7 @@ pub const POISON_CHANCE: f32 = 0.30;
 // ── Class ──────────────────────────────────────────────────────
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[repr(u8)]
 pub enum Class {
     Knight,
     Archer,
@@ -144,6 +145,7 @@ impl Class {
 // ── Team ───────────────────────────────────────────────────────
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[repr(u8)]
 pub enum Team {
     Party,
     Enemy,
@@ -161,6 +163,7 @@ impl fmt::Display for Team {
 // ── ActionType ─────────────────────────────────────────────────
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[repr(u8)]
 pub enum ActionType {
     Attack,
     Defend,

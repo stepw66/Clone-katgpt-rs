@@ -594,6 +594,7 @@ impl GameState for GoState {
 /// - Midgame: influence + connection
 /// - Endgame: territory enclosure
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(u8)]
 enum OpeningPhase {
     Early,
     Mid,

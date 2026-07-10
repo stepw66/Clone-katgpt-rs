@@ -20,6 +20,7 @@ use super::rubric::RubricVerdict;
 
 /// Binary combine op for the [`FireRule::Box`] variant.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[repr(u8)]
 pub enum CombineOp {
     /// Left AND Right.
     And,

@@ -64,6 +64,7 @@ pub enum RejectionReason {
 
 /// Outcome of a refinement attempt — determines bandit reward.
 #[derive(Debug, Clone, Copy, PartialEq)]
+#[repr(u8)]
 pub enum RefinementOutcome {
     /// Refined branch accepted by verifier. Reward: +1.0
     Accepted,

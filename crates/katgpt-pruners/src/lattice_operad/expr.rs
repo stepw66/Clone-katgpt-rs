@@ -2,6 +2,7 @@
 
 /// Result of evaluating a pruner expression for a single token.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
 pub enum PrunerResult {
     /// Token is definitely valid (all pruners accept).
     Accept,

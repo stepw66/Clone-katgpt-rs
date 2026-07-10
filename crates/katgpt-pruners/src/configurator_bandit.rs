@@ -438,6 +438,7 @@ impl ConfiguratorBandit {
 /// | `WinConfirmed` | "bug triggered" | Positive reward + update GOAT proof |
 /// | `InvalidState` | "compilation error" | Zero reward + flag for validator check |
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
 pub enum ExplorationOutcome {
     /// Move sequence didn't reach target game state.
     /// Sailor: "not reached" → LLM fixes driver/stubs.

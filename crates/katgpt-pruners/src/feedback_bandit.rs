@@ -86,6 +86,7 @@ pub struct WeightUpdateRequest {
 
 /// Hint for the training bridge about which RL algorithm to use.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
 pub enum RlAlgorithmHint {
     /// Dense reward signal → GRPO (group relative policy optimization).
     Grpo,

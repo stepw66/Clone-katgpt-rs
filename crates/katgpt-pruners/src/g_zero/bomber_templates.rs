@@ -10,6 +10,7 @@ use std::cmp::Ordering;
 
 /// 8 strategy archetypes for Bomberman G-Zero.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[repr(u8)]
 pub enum BomberTemplate {
     /// Maximize distance from bombs.
     FleeBlast,

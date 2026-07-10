@@ -198,6 +198,7 @@ impl katgpt_core::qgf::QgfVarianceSignal for TvpSignal {
 /// Mirrors `dllm_solver::CriticalTierDecision` so the two gates compose
 /// uniformly inside `InferenceRouter::forward`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
 pub enum TvpTierDecision {
     /// No TVP signal available (no probes run yet) → defer to upstream routing.
     Defer,

@@ -144,6 +144,7 @@ impl Default for GoTournamentConfig {
 
 /// Outcome of a single game from our perspective.
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[repr(u8)]
 pub enum GameOutcome {
     /// We won.
     Win,

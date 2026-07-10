@@ -201,6 +201,7 @@ pub type Priority = f32;
 /// `OrderOnly` — every shipped solver is search-dominated and hint-receptive.
 /// This is a non-breaking default: the absorb runs exactly as before.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[repr(u8)]
 pub enum HintPolicy {
     /// Hints only reorder the search — never injected as hard constraints.
     /// Correct for custom backtracking + DDTree speculation (all shipped solvers).

@@ -535,6 +535,7 @@ impl AneCost {
 /// - Family-gated ops: CPU (won't lower on this chip).
 /// - Working-set spill: GPU (tiles better) or CPU fallback.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[repr(u8)]
 pub enum Device {
     /// CPU SIMD / scalar — the right choice for tiny ops below the ANE
     /// dispatch floor, or for family-gated ops that don't lower.

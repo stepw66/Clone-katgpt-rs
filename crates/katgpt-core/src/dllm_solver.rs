@@ -183,6 +183,7 @@ pub fn build_dd_tree_adaptive(
 /// Result of CriticalInterval + TriggerGate integration.
 #[cfg(all(feature = "critical_interval_gate", feature = "rv_gated_routing"))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
 pub enum CriticalTierDecision {
     /// No critical interval detected — defer to default routing.
     Defer,

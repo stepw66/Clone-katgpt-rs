@@ -10,6 +10,7 @@ use katgpt_speculative::ScreeningPruner;
 
 /// Entropy state for the current decoding position.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[repr(u8)]
 pub enum EntropyState {
     /// Low entropy — tight screening (use inner relevance as-is).
     #[default]

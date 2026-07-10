@@ -6,6 +6,7 @@ use std::time::Duration;
 
 /// Which game domain the tournament runs in.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[repr(u8)]
 pub enum ArenaKind {
     Bomber,
     Fft,
