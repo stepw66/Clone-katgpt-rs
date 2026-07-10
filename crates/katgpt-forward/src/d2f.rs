@@ -1985,6 +1985,7 @@ mod tests {
     // ── Plan 109 T5: D2fPipeline + SoftDecodeConfig Integration ────
 
     #[test]
+    #[cfg(feature = "dmax_spd")]
     fn test_pipeline_with_soft_config_uses_soft_decode() {
         let config = Config::micro_dllm();
         let mut rng = Rng::new(42);
@@ -2031,6 +2032,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "dmax_spd")]
     fn test_pipeline_multi_block_spd_coherent() {
         let config = Config::micro_dllm();
         let mut rng = Rng::new(42);
