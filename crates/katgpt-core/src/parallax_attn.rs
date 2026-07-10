@@ -245,8 +245,6 @@ pub struct ParallaxScratch {
     pub scores: Vec<f32>,
     /// Σ_KV cross-covariance, length `head_dim * head_dim`
     pub sigma_kv: Vec<f32>,
-    /// Scaled v row for outer product, length `head_dim`
-    pub pv_buf: Vec<f32>,
     /// Correction output, length `head_dim`
     pub correction: Vec<f32>,
     /// Cached dimensions from the last `ensure_capacity` call. Fast-path returns
@@ -263,7 +261,6 @@ impl ParallaxScratch {
             col_sums: vec![0.0; seq_len],
             scores: vec![0.0; seq_len],
             sigma_kv: vec![0.0; head_dim * head_dim],
-            pv_buf: vec![0.0; head_dim],
             correction: vec![0.0; head_dim],
             cached_seq_len: seq_len,
             cached_head_dim: head_dim,
@@ -276,7 +273,6 @@ impl ParallaxScratch {
         self.col_sums.fill(0.0);
         self.scores.fill(0.0);
         self.sigma_kv.fill(0.0);
-        self.pv_buf.fill(0.0);
         self.correction.fill(0.0);
     }
 
@@ -304,10 +300,6 @@ impl ParallaxScratch {
         }
         if self.sigma_kv.len() != d2 {
             self.sigma_kv.resize(d2, 0.0);
-            changed = true;
-        }
-        if self.pv_buf.len() != d {
-            self.pv_buf.resize(d, 0.0);
             changed = true;
         }
         if self.correction.len() != d {

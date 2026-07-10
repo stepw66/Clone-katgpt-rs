@@ -57,7 +57,8 @@ pub fn compute_and_select_top_k(
     let gates: Vec<(u32, f32)> = summaries
         .iter()
         .map(|&(id, summary)| {
-            let dot: f32 = query.iter().zip(summary.iter()).map(|(q, s)| q * s).sum();
+            let min_len = query.len().min(summary.len());
+            let dot: f32 = katgpt_core::simd::simd_dot_f32(&query[..min_len], &summary[..min_len], min_len);
             let gate = 1.0 / (1.0 + (-dot).exp()); // sigmoid, NOT softmax
             (id, gate)
         })

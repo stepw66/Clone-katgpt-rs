@@ -33,8 +33,8 @@ pub fn compute_branch_state(
         let dim = cached_states[0].1.len();
         let mut weighted_state = vec![0.0f32; dim];
         let mut total_weight = 0.0f32;
-        let mut segment_ids = Vec::new();
-        let mut gates = Vec::new();
+        let mut segment_ids = Vec::with_capacity(cached_states.len());
+        let mut gates = Vec::with_capacity(cached_states.len());
 
         for &(id, cached_kv, gate) in cached_states {
             segment_ids.push(id);
@@ -62,8 +62,8 @@ pub fn compute_branch_state(
     let mut weighted_state = vec![0.0f32; dim];
     let mut total_weight = 0.0f32;
 
-    let mut segment_ids = Vec::new();
-    let mut gates = Vec::new();
+    let mut segment_ids = Vec::with_capacity(cached_states.len());
+    let mut gates = Vec::with_capacity(cached_states.len());
 
     // Current branch contribution (weight = 1.0)
     for kv in branch_kv {
