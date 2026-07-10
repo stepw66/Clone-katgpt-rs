@@ -12,10 +12,10 @@
 //! cargo run --example cucg_shard_freeze_isomorphism
 //! ```
 
-use katgpt_rs::compaction::rubrics::shard_freeze::{
+use katgpt_core::compaction::rubrics::shard_freeze::{
     SHARD_FREEZE_FLATNESS_THRESHOLD, ShardFreezeFeatures, ShardFreezeRubric,
 };
-use katgpt_rs::compaction::{Backstop, ClosedUnitCompactionGate, FireRule, RubricScratch};
+use katgpt_core::compaction::{Backstop, ClosedUnitCompactionGate, FireRule, RubricScratch};
 
 fn main() {
     println!("═══ CUCG × can_freeze Isomorphism (G7, Plan 333) ═══");

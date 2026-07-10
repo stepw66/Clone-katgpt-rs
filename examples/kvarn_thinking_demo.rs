@@ -10,7 +10,7 @@
 
 #![cfg(all(feature = "kvarn", feature = "thinking_cot"))]
 
-use katgpt_rs::kvarn::{pseudo_decode_eval, var_norm::VarNormConfig};
+use katgpt_kv::kvarn::{pseudo_decode_eval, var_norm::VarNormConfig};
 
 // ---------------------------------------------------------------------------
 // Deterministic PRNG (xorshift64)

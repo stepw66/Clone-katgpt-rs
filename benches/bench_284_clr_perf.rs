@@ -36,7 +36,7 @@ use std::hint::black_box;
 use std::time::Instant;
 
 use fastrand::Rng;
-use katgpt_rs::clr::{
+use katgpt_claim::clr::{
     Claim, ClrConfig, ClrScratch, DirectionVectorSource, FnClaimExtractor,
     SigmoidProjectionVerifier, Trajectory, clr_vote_minimal,
 };

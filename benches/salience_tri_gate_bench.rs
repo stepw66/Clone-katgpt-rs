@@ -27,7 +27,7 @@
 
 #![cfg(feature = "salience_tri_gate")]
 
-use katgpt_rs::salience::{SalienceDecision, SalienceTriGate};
+use katgpt_core::salience::{SalienceDecision, SalienceTriGate};
 use std::time::{Duration, Instant};
 
 // ─── Config ─────────────────────────────────────────────────────────────────

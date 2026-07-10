@@ -3,7 +3,7 @@
 fn main() {
     #[cfg(feature = "llmexec_guard")]
     {
-        use katgpt_rs::llmexec_guard::{LlmExecGuardConfig, llmexec_confidence, verify_tier};
+        use katgpt_core::llmexec_guard::{LlmExecGuardConfig, llmexec_confidence, verify_tier};
 
         println!("=== Plan 223: LLMExecGuard Demo ===\n");
         let config = LlmExecGuardConfig::default();

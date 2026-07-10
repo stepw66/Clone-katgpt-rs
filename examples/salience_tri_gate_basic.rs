@@ -14,7 +14,7 @@
 //! cargo run --example salience_tri_gate_basic --features salience_tri_gate
 //! ```
 
-use katgpt_rs::salience::{SalienceDecision, SalienceTriGate};
+use katgpt_core::salience::{SalienceDecision, SalienceTriGate};
 
 /// Activation dimension for this demo. The gate is generic over `D` — pick
 /// whatever fits your latent space.

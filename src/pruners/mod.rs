@@ -3,7 +3,7 @@
 //! Plan 005 (2026-06-29): the pruners module was extracted to the
 //! `katgpt-pruners` workspace crate. Everything except `bomber` moved.
 //! Bomber stays here because it depends on main-crate-only modules
-//! (`crate::transformer`, `crate::inference_router`, `crate::trigger_gate`).
+//! (`crate::transformer`, `crate::inference_router`, `katgpt_core::trigger_gate`).
 //!
 //! Existing `use crate::pruners::*` import paths continue to work via the
 //! blanket `pub use katgpt_pruners::*` re-export below — no caller-side

@@ -11,7 +11,7 @@
 
 #![cfg(feature = "ega_attn")]
 
-use katgpt_rs::ega_attn::{EgaGate, compute_energy_gate, z_normalize};
+use katgpt_attn::ega_attn::{EgaGate, compute_energy_gate, z_normalize};
 
 const SEQ_LEN: usize = 16;
 const HEAD_DIM: usize = 16;

@@ -18,7 +18,7 @@
 #![cfg(feature = "off_principal_retrieval")]
 
 use katgpt_core::simd::simd_dot_f32;
-use katgpt_rs::off_principal::OffPrincipalIndex;
+use katgpt_spectral::off_principal::OffPrincipalIndex;
 
 const D: usize = 64;
 const N_ADAPTERS: usize = 8;

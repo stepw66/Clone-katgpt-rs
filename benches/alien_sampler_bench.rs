@@ -17,7 +17,7 @@
 
 #![cfg(feature = "alien_sampler")]
 
-use katgpt_rs::alien_sampler::{
+use katgpt_deprecated::alien_sampler::{
     AlienConfig, AlienSampler, CoherenceScorer, MedianTopMAvailability,
 };
 use std::time::{Duration, Instant};
@@ -166,7 +166,7 @@ fn bench_rank_trait(
 ) -> Duration {
     let mut sc = vec![0.0_f32; n];
     let mut sa = vec![0.0_f32; n];
-    let mut out: Vec<katgpt_rs::alien_sampler::ScoredCandidate> = Vec::with_capacity(n);
+    let mut out: Vec<katgpt_deprecated::alien_sampler::ScoredCandidate> = Vec::with_capacity(n);
     let op = || {
         sampler
             .rank_into(candidates, &mut sc, &mut sa, &mut out)
@@ -195,7 +195,7 @@ fn bench_rank_batch(
     let mut sc = vec![0.0_f32; n];
     let mut sa = vec![0.0_f32; n];
     let mut cosine_scratch = vec![0.0_f32; bank_len];
-    let mut out: Vec<katgpt_rs::alien_sampler::ScoredCandidate> = Vec::with_capacity(n);
+    let mut out: Vec<katgpt_deprecated::alien_sampler::ScoredCandidate> = Vec::with_capacity(n);
     let op = || {
         // Batch-fill coherence (trivial dot per candidate).
         for (i, cand) in candidates.iter().enumerate() {

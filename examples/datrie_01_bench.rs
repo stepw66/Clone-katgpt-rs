@@ -11,7 +11,7 @@ use std::collections::HashMap;
 use std::hint::black_box;
 use std::time::Instant;
 
-use katgpt_rs::tokenizer::{DatrieTreeIndex, DatrieVocab, SplitNode, SplitTree};
+use katgpt_tokenizer::{DatrieTreeIndex, DatrieVocab, SplitNode, SplitTree};
 
 // ── Config ─────────────────────────────────────────────────────
 

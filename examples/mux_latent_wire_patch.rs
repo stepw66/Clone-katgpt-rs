@@ -10,7 +10,7 @@
 //! Run: cargo run --example mux_latent_wire_patch --features mux_latent_wire
 
 #[cfg(feature = "mux_latent_wire")]
-use katgpt_rs::mux_latent::{
+use katgpt_core::mux_latent::{
     CompressionRatio, LatentPatch, LatentPatchBatch, LatentPatcher, MuxLatentConfig,
     MuxLatentEncoder,
 };
@@ -23,7 +23,7 @@ fn main() {
 
 #[cfg(feature = "mux_latent_wire")]
 fn main() {
-    use katgpt_rs::mux_latent::LatentSegment;
+    use katgpt_core::mux_latent::LatentSegment;
 
     println!("╔══════════════════════════════════════════════════════════╗");
     println!("║   MUX-Latent Wire Patch — Latent-to-Latent on Wire     ║");

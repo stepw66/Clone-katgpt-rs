@@ -7,7 +7,7 @@
 fn main() {
     #[cfg(feature = "bckvss")]
     {
-        use katgpt_rs::bckvss::{
+        use katgpt_band::bckvss::{
             BandConditionerSelector, BandConditionerSelectorConfig, QueryEmb, SegmentSelector,
             SyntheticScm, matthews_corr, perplexity_proxy,
         };

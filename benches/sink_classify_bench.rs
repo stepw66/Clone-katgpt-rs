@@ -14,7 +14,7 @@
 
 #![cfg(feature = "sink_aware_attn")]
 
-use katgpt_rs::data_probe::sink_classify::{
+use katgpt_core::data_probe::sink_classify::{
     SinkClassifierConfig, StableRankScratch, classify_sink_at, stable_rank_update_into,
 };
 use std::time::{Duration, Instant};

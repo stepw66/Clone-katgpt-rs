@@ -12,7 +12,7 @@
 //! cargo run --example attn_match_head_budget --features attn_match --release
 //! ```
 
-use katgpt_rs::attn_match::head_budget::{
+use katgpt_attn_match::head_budget::{
     HeadBudgetSchedule, HeadBudgetSolver, HeadSensitivityCurve,
 };
 

@@ -1194,8 +1194,8 @@ pub struct HLPlayer {
     /// T3 evidence #3 (the n-armed bandit cannot learn context-dependent
     /// safety because the same action gets the same Q regardless of board
     /// state).
-    #[cfg(feature = "contextual_bandit")]
-    round_contexts: Vec<[f32; super::contextual_bandit::CONTEXT_DIM]>,
+    #[cfg(any(feature = "contextual_bandit", feature = "binned_blend", feature = "kernel_blend"))]
+    round_contexts: Vec<[f32; super::blend_context::CONTEXT_DIM]>,
     /// Linear contextual bandit (Issue 371 Option 1 — T6). When present,
     /// replaces the n-armed `arm_q` lookup in `select_action`'s centered blend
     /// and the `update_arm_q` call in `update_outcome`. The n-armed fields
@@ -1204,6 +1204,18 @@ pub struct HLPlayer {
     /// the contextual bandit is active.
     #[cfg(feature = "contextual_bandit")]
     contextual_bandit: super::contextual_bandit::ContextualBandit,
+    /// Binned nonlinear blend estimator (Plan 436 / Issue 428). When present,
+    /// replaces the n-armed `arm_q` lookup with a per-(bin, arm) Q table
+    /// conditioned on blast_proximity. Mutually exclusive with `kernel_blend`
+    /// and `contextual_bandit` in practice.
+    #[cfg(feature = "binned_blend")]
+    binned_blend: super::blend_estimators::BinnedBlendEstimator,
+    /// Kernel nonlinear blend estimator (Plan 436 / Issue 428). When present,
+    /// replaces the n-armed `arm_q` lookup with a Nadaraya-Watson weighted
+    /// average over observed (context, arm, reward) triples. Mutually exclusive
+    /// with `binned_blend` and `contextual_bandit` in practice.
+    #[cfg(feature = "kernel_blend")]
+    kernel_blend: super::blend_estimators::KernelBlendEstimator,
     last_dir: Option<BomberAction>,
     /// Shared bandit stats for multi-agent cooperative learning.
     /// When `Some`, Q-values/visits/compressed are delegated here.

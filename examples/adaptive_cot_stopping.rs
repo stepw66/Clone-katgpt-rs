@@ -8,7 +8,7 @@
 fn main() {
     #[cfg(feature = "adaptive_cot_identifiability")]
     {
-        use katgpt_rs::adaptive_cot_stopper::{AdaptiveCoTConfig, AdaptiveCoTStopper};
+        use katgpt_band::adaptive_cot_stopper::{AdaptiveCoTConfig, AdaptiveCoTStopper};
 
         println!("=== Plan 265 Phase 4: Adaptive CoT Stopping ===\n");
 

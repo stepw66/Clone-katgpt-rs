@@ -18,7 +18,7 @@
 
 #![cfg(feature = "orthogonal_procrustes")]
 
-use katgpt_rs::procrustes::{ProcrustesConfig, ProcrustesScratch, orthogonal_procrustes};
+use katgpt_spectral::procrustes::{ProcrustesConfig, ProcrustesScratch, orthogonal_procrustes};
 use std::time::{Duration, Instant};
 
 /// Deterministic xorshift32 PRNG (matches the unit-test PRNG).

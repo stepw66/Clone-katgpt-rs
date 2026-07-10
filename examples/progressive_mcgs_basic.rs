@@ -15,7 +15,7 @@
 //! cargo run --example progressive_mcgs_basic --features progressive_mcgs --release
 //! ```
 
-use katgpt_rs::progressive_mcgs::{
+use katgpt_speculative::progressive_mcgs::{
     BranchId, EntropyGatedScheduler, NodeId, ProgressiveMcgsConfig, ProgressiveMcgsSearch, Reward,
     SearchDomain,
 };
@@ -34,7 +34,7 @@ struct SyntheticDomain {
 impl SearchDomain<u32> for SyntheticDomain {
     fn propose(
         &mut self,
-        _graph: &katgpt_rs::progressive_mcgs::ProgressiveMcgs<u32>,
+        _graph: &katgpt_speculative::progressive_mcgs::ProgressiveMcgs<u32>,
         _parent: NodeId,
         _branch: BranchId,
         _reference_nodes: &[NodeId],
@@ -47,7 +47,7 @@ impl SearchDomain<u32> for SyntheticDomain {
 
     fn evaluate(
         &mut self,
-        graph: &katgpt_rs::progressive_mcgs::ProgressiveMcgs<u32>,
+        graph: &katgpt_speculative::progressive_mcgs::ProgressiveMcgs<u32>,
         node: NodeId,
     ) -> Reward {
         // Look up the node's branch from the graph, then sample from that

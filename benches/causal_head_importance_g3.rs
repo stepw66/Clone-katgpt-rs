@@ -20,7 +20,7 @@ use std::hint::black_box;
 use std::time::Instant;
 
 use katgpt_core::causal_head_importance::partition_by_causal_score;
-use katgpt_rs::rt_turbo::calibrate_from_scores;
+use katgpt_speculative::rt_turbo::calibrate_from_scores;
 use katgpt_rs::types::RtTurboConfig;
 
 fn synthetic_scores(n_heads: usize, seed: u64) -> Vec<f32> {

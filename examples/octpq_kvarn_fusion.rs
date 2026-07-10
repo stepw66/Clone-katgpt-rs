@@ -14,8 +14,8 @@
 
 #![cfg(all(feature = "kvarn", feature = "hybrid_oct_pq"))]
 
-use katgpt_rs::kvarn::hadamard::hadamard_rows;
-use katgpt_rs::kvarn::var_norm::VarNormConfig;
+use katgpt_kv::kvarn::hadamard::hadamard_rows;
+use katgpt_kv::kvarn::var_norm::VarNormConfig;
 
 // ── Constants ─────────────────────────────────────────────────────
 
@@ -188,12 +188,12 @@ fn variance_normalize_with_convergence(
     rows: usize,
     cols: usize,
     config: &VarNormConfig,
-) -> (katgpt_rs::kvarn::var_norm::VarianceNormScales, usize) {
+) -> (katgpt_kv::kvarn::var_norm::VarianceNormScales, usize) {
     let imb_before = compute_imbalance(tile, rows, cols);
     let original = tile.to_vec();
 
     // Run full VarN
-    let scales = katgpt_rs::kvarn::variance_normalize(tile, rows, cols, config);
+    let scales = katgpt_kv::kvarn::variance_normalize(tile, rows, cols, config);
 
     let imb_after = compute_imbalance(tile, rows, cols);
     let total_reduction = imb_before - imb_after;
@@ -223,7 +223,7 @@ fn find_convergence_iter(
             ..config.clone()
         };
         let mut partial_tile = original.to_vec();
-        katgpt_rs::kvarn::variance_normalize(&mut partial_tile, rows, cols, &partial_config);
+        katgpt_kv::kvarn::variance_normalize(&mut partial_tile, rows, cols, &partial_config);
         let imb = compute_imbalance(&partial_tile, rows, cols);
         if imb <= threshold {
             return k;
@@ -239,7 +239,7 @@ fn rtn_roundtrip_with_scales(
     rows: usize,
     cols: usize,
     bits: i32,
-    scales: &katgpt_rs::kvarn::var_norm::VarianceNormScales,
+    scales: &katgpt_kv::kvarn::var_norm::VarianceNormScales,
 ) -> Vec<f32> {
     let mut buf = tile.to_vec();
     rtn_roundtrip(&mut buf, bits);

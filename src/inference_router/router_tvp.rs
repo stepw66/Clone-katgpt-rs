@@ -22,7 +22,7 @@ use crate::pruners::thicket_variance_probe::{
     ComputeTier as KpComputeTier, TvpConfig, TvpSignal, TvpTierDecision, tvp_tier_decision,
 };
 #[cfg(feature = "thicket_variance_probe")]
-use crate::trigger_gate::ComputeTier;
+use katgpt_core::trigger_gate::ComputeTier;
 
 #[cfg(feature = "thicket_variance_probe")]
 pub(crate) fn tier_to_kp(tier: ComputeTier) -> KpComputeTier {

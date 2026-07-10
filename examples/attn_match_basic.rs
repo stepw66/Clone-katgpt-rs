@@ -11,7 +11,7 @@
 //! cargo run --example attn_match_basic --features attn_match --release
 //! ```
 
-use katgpt_rs::attn_match::{
+use katgpt_attn_match::{
     compact::compact,
     types::{AmConfig, KeySelector},
 };

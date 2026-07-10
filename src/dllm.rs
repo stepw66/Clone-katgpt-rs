@@ -2467,7 +2467,7 @@ mod tests {
             &mut Rng::new(42),
         );
 
-        let mut rcd_cfg = crate::dllm_solver::RcdConfig::disabled();
+        let mut rcd_cfg = katgpt_core::dllm_solver::RcdConfig::disabled();
         let (rcd_tokens, rcd_steps) = denoise_loop_rcd(
             &weights,
             &target,
@@ -2503,7 +2503,7 @@ mod tests {
 
         let target = vec![3, 7, 3, 7];
 
-        let mut rcd_cfg = crate::dllm_solver::RcdConfig::new(config.vocab_size, config.n_embd);
+        let mut rcd_cfg = katgpt_core::dllm_solver::RcdConfig::new(config.vocab_size, config.n_embd);
         let (tokens, steps) = denoise_loop_rcd(
             &weights,
             &target,
@@ -2559,7 +2559,7 @@ mod tests {
                 &mut NoConstraint,
                 &mut Rng::new(42),
             );
-            let mut rcd_cfg = crate::dllm_solver::RcdConfig::new(config.vocab_size, config.n_embd);
+            let mut rcd_cfg = katgpt_core::dllm_solver::RcdConfig::new(config.vocab_size, config.n_embd);
             let (rcd_tokens, rcd_steps) = denoise_loop_rcd(
                 &weights,
                 target,
@@ -2623,8 +2623,8 @@ mod tests {
         );
 
         // Both RCD and 3SR disabled → must produce baseline behavior.
-        let mut rcd_cfg = crate::dllm_solver::RcdConfig::disabled();
-        let tsr_cfg = crate::dllm_solver::ThreeStateReuseConfig::disabled();
+        let mut rcd_cfg = katgpt_core::dllm_solver::RcdConfig::disabled();
+        let tsr_cfg = katgpt_core::dllm_solver::ThreeStateReuseConfig::disabled();
         let (tsr_tokens, tsr_steps) = denoise_loop_rcd_3sr(
             &weights,
             &target,
@@ -2661,8 +2661,8 @@ mod tests {
 
         let target = vec![3, 7, 3, 7];
 
-        let mut rcd_cfg = crate::dllm_solver::RcdConfig::new(config.vocab_size, config.n_embd);
-        let tsr_cfg = crate::dllm_solver::ThreeStateReuseConfig::default();
+        let mut rcd_cfg = katgpt_core::dllm_solver::RcdConfig::new(config.vocab_size, config.n_embd);
+        let tsr_cfg = katgpt_core::dllm_solver::ThreeStateReuseConfig::default();
         let (tokens, steps) = denoise_loop_rcd_3sr(
             &weights,
             &target,
@@ -2710,7 +2710,7 @@ mod tests {
         let mut tsr_steps_total = 0usize;
 
         for target in &targets {
-            let mut rcd_cfg = crate::dllm_solver::RcdConfig::new(config.vocab_size, config.n_embd);
+            let mut rcd_cfg = katgpt_core::dllm_solver::RcdConfig::new(config.vocab_size, config.n_embd);
             let (rcd_tokens, rcd_steps) = denoise_loop_rcd(
                 &weights,
                 target,
@@ -2723,8 +2723,8 @@ mod tests {
             );
 
             let mut rcd_cfg_t =
-                crate::dllm_solver::RcdConfig::new(config.vocab_size, config.n_embd);
-            let tsr_cfg = crate::dllm_solver::ThreeStateReuseConfig::default();
+                katgpt_core::dllm_solver::RcdConfig::new(config.vocab_size, config.n_embd);
+            let tsr_cfg = katgpt_core::dllm_solver::ThreeStateReuseConfig::default();
             let (tsr_tokens, tsr_steps) = denoise_loop_rcd_3sr(
                 &weights,
                 target,

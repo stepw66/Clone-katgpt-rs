@@ -39,7 +39,7 @@
 
 #![cfg(feature = "alien_sampler")]
 
-use katgpt_rs::alien_sampler::{
+use katgpt_deprecated::alien_sampler::{
     AlienConfig, AlienSampler, CoherenceScorer, MedianTopMAvailability, ScoredCandidate,
 };
 use rayon::prelude::*;

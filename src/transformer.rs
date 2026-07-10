@@ -2797,7 +2797,7 @@ pub fn forward_quantized<'a, C: types::QuantizedKVCache>(
 pub fn forward_turboquant<'a>(
     ctx: &'a mut ForwardContext,
     weights: &TransformerWeights,
-    cache: &mut crate::turboquant::TurboQuantKVCache,
+    cache: &mut katgpt_quant::turboquant::TurboQuantKVCache,
     token: usize,
     pos: usize,
     config: &Config,

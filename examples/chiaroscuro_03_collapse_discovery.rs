@@ -11,7 +11,7 @@
 
 #[cfg(feature = "chiaroscuro")]
 fn main() {
-    use katgpt_rs::chiaroscuro::{
+    use katgpt_attn::chiaroscuro::{
         collapse::CollapseDiscoveryHarness,
         op_trait::{ChiaroscuroOp, ChiaroscuroRouter, DctMixOp, FullAttnOp},
         tau::DEFAULT_TAU_HI,

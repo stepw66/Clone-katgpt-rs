@@ -10,7 +10,7 @@
 //! cargo run --example attn_match_online --features attn_match --release
 //! ```
 
-use katgpt_rs::attn_match::{online::OnlineCompactor, types::AmConfig};
+use katgpt_attn_match::{online::OnlineCompactor, types::AmConfig};
 
 fn synth_token(offset: usize, d: usize, seed: u32) -> (Vec<f32>, Vec<f32>) {
     let mut k = vec![0.0f32; d];

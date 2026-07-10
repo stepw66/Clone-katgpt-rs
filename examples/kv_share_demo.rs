@@ -7,7 +7,7 @@
 #[cfg(feature = "kv_share")]
 use katgpt_core::types::{AttentionProjection, CacheLayout};
 #[cfg(feature = "kv_share")]
-use katgpt_rs::kv_share::{
+use katgpt_kv::kv_share::{
     attention_flops_factor, cache_layout, cache_slots_per_layer, memory_per_token, merge_kv_weights,
 };
 

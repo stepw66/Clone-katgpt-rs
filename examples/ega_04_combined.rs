@@ -12,7 +12,7 @@
 
 #![cfg(feature = "ega_attn")]
 
-use katgpt_rs::ega_attn::{EgaGate, compute_energy_gate, sigmoid};
+use katgpt_attn::ega_attn::{EgaGate, compute_energy_gate, sigmoid};
 use katgpt_rs::types::SdpaOutputGate;
 
 // ── Configuration ─────────────────────────────────────────────

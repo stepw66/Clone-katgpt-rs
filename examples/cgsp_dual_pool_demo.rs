@@ -19,7 +19,7 @@
 
 #![cfg(feature = "cgsp_dual_pool")]
 
-use katgpt_rs::cgsp::{
+use katgpt_core::cgsp::{
     DualPoolBandit, DualPoolConfig, PoolId, ReachableDualPoolRouter, traits::HintDeltaBandit,
     types::Priority,
 };

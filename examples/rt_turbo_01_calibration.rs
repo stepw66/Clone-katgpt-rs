@@ -9,7 +9,7 @@
 //! 4. Print classification results and stats
 //! 5. Serialize calibration to JSON for offline reuse
 
-use katgpt_rs::rt_turbo::*;
+use katgpt_speculative::rt_turbo::*;
 use katgpt_rs::types::RetrievalHeadRole;
 
 // ── Deterministic PRNG (no `rand` dependency) ──────────────────
@@ -274,7 +274,7 @@ fn main() {
     #[cfg(feature = "causal_head_importance")]
     {
         use katgpt_core::causal_head_importance::direct_effect_importance;
-        use katgpt_rs::rt_turbo::calibrate_from_causal_scores;
+        use katgpt_speculative::rt_turbo::calibrate_from_causal_scores;
         use katgpt_rs::types::CalibrationMode;
 
         println!("\n========================================");

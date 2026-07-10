@@ -62,7 +62,7 @@
 //! ```
 
 use fastrand::Rng;
-use katgpt_rs::screening::{
+use katgpt_pruners::screening::{
     ComplexityProxy, CompressionPriorSampler, EntropyComplexity, L1Complexity, RleComplexity,
 };
 use std::hint::black_box;

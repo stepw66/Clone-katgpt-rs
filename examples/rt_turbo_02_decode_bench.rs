@@ -9,7 +9,7 @@
 //! 4. Compare retrieval vs local head routing patterns
 //! 5. Show sparsity ratios and efficiency stats
 
-use katgpt_rs::rt_turbo::*;
+use katgpt_speculative::rt_turbo::*;
 
 // ── Deterministic PRNG (no `rand` dependency) ──────────────────
 

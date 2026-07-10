@@ -7,7 +7,7 @@
 //! - Lower error accumulation in pseudo-decode
 //! - Meets GOAT criteria: ≤2% quality loss at 2.3 bits/elem
 
-use katgpt_rs::kvarn::{pseudo_decode_eval, var_norm::VarNormConfig};
+use katgpt_kv::kvarn::{pseudo_decode_eval, var_norm::VarNormConfig};
 
 // ── Deterministic PRNG (no `rand` dependency) ──────────────────
 
@@ -349,7 +349,7 @@ fn main() {
     let rtn_per_tok = rtn_total / (n_iters * bench_seq_len as u32 * 2); // key + value
 
     // ── Phase 3: Pre-fill KVarN cache (store only, not timed for dequant comparison) ──
-    use katgpt_rs::kvarn::kv_cache::{KVarNConfig, KVarNKVCache};
+    use katgpt_kv::kvarn::kv_cache::{KVarNConfig, KVarNKVCache};
     let bench_config = KVarNConfig {
         n_layers: 1,
         kv_dim,

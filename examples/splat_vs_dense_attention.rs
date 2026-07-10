@@ -11,7 +11,7 @@
 fn main() {
     #[cfg(feature = "specialist_projection")]
     {
-        use katgpt_rs::specialist_projection::{SpecialistMask, route_specialist_projection};
+        use katgpt_sparse::specialist_projection::{SpecialistMask, route_specialist_projection};
 
         println!("=== Plan 265 Phase 2: SPLAT vs. Dense Attention ===\n");
 

@@ -18,7 +18,7 @@
 
 #![cfg(feature = "spectral_rank")]
 
-use katgpt_rs::spectral_concentration::{
+use katgpt_spectral::spectral_concentration::{
     adaptive_rank, cot_budget_from_concentration, spectral_concentration,
 };
 

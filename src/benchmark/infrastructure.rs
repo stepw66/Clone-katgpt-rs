@@ -11,7 +11,7 @@ use crate::transformer::{
     forward_paged, forward_raven, raven_readout, raven_update,
 };
 #[cfg(feature = "turboquant")]
-use crate::turboquant::TurboQuantKVCache;
+use katgpt_quant::turboquant::TurboQuantKVCache;
 #[cfg(any(feature = "turboquant", feature = "hla_attention"))]
 use crate::types::kv_dim;
 use crate::types::{Config, Rng};

@@ -10,8 +10,8 @@
 //! cargo run --example cucg_skip_if_reliable
 //! ```
 
-use katgpt_rs::compaction::rubrics::search::SearchRubric;
-use katgpt_rs::compaction::{Backstop, ClosedUnitCompactionGate, FireRule, RubricScratch};
+use katgpt_core::compaction::rubrics::search::SearchRubric;
+use katgpt_core::compaction::{Backstop, ClosedUnitCompactionGate, FireRule, RubricScratch};
 
 fn main() {
     println!("═══ CUCG skip-if-reliable Suppression (G2, Plan 333) ═══");

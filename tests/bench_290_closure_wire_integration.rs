@@ -20,7 +20,7 @@
 use katgpt_core::closure::{
     GateResult, MotifAdmitter, MotifMiner, OperatorKind, PrimitiveKind, compute_tar_score,
 };
-use katgpt_rs::closure_mining::mine_motifs_at_sleep_cycle;
+use katgpt_core::closure::mining::mine_motifs_at_sleep_cycle;
 use katgpt_pruners::closure_wire::{COMPRESS_PRIMITIVE_ID, PtgTracedPruner};
 use katgpt_rs::pruners::{AbsorbCompress, AbsorbCompressLayer, CompressConfig};
 use katgpt_rs::speculative::types::NoScreeningPruner;

@@ -9,7 +9,7 @@
 
 #[cfg(feature = "cs_kv_probe")]
 fn main() {
-    use katgpt_rs::cs_kv_probe::{CsKvProbe, CsProbeConfig, DensityBudget, Episode, GatedKvSlice};
+    use katgpt_kv::cs_kv_probe::{CsKvProbe, CsProbeConfig, DensityBudget, Episode, GatedKvSlice};
 
     let n_heads = 64_usize;
     let d = 128_usize; // KV cache dim per episode.
@@ -34,7 +34,7 @@ fn main() {
         .collect();
 
     // Eval: mean agreement between retained signal heads and label across episodes.
-    let eval = |mask: &katgpt_rs::cs_kv_probe::AblationMask, eps: &[Episode]| -> f32 {
+    let eval = |mask: &katgpt_kv::cs_kv_probe::AblationMask, eps: &[Episode]| -> f32 {
         let mut acc = 0.0_f32;
         for e in eps {
             for &h in &signal_heads {

@@ -12,7 +12,7 @@
 
 #![cfg(feature = "gauge_invariant")]
 
-use katgpt_rs::gauge_invariant::{
+use katgpt_spectral::gauge_invariant::{
     GaugePair, GaugeRebalanceScratch, gauge_invariant_compose, gauge_rebalance,
 };
 

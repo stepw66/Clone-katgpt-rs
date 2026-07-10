@@ -21,7 +21,7 @@
 
 #![cfg(feature = "cgsp")]
 
-use katgpt_rs::cgsp::{
+use katgpt_core::cgsp::{
     BreakevenDifficultyFilter, CgspConfig, CgspLoop, ColinearityBatchGate, ComplexityWeights,
     CuriosityPrioritySnapshot, CycleResult, Direction, EntropyCollapse, HlaProjectionGuide,
     PoolConjecturer, Priority, ScratchBuffers, Target, entropy_nats, sigmoid,

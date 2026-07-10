@@ -8,7 +8,7 @@
 fn main() {
     #[cfg(feature = "collider_consistency")]
     {
-        use katgpt_rs::collider_pruner::{
+        use katgpt_band::collider_pruner::{
             ColliderConstraint, ColliderConstraintConfig, InterleavedTaskBenchmark,
         };
 

@@ -5,7 +5,7 @@
 //! buffer-mediated expansion.
 
 #[cfg(feature = "mux_latent_context")]
-use katgpt_rs::mux_latent::{
+use katgpt_core::mux_latent::{
     CompressionRatio, LatentContextBuffer, MuxLatentConfig, MuxLatentEncoder, expand_all,
     expand_segment, select_segments_to_expand,
 };

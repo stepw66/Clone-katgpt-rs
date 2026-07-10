@@ -3,7 +3,7 @@
 fn main() {
     #[cfg(feature = "critical_interval_gate")]
     {
-        use katgpt_rs::dllm_solver::{
+        use katgpt_core::dllm_solver::{
             CriticalIntervalConfig, is_critical_interval, select_solver, shannon_entropy,
         };
 

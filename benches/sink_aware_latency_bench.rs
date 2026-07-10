@@ -30,7 +30,7 @@
 
 #![cfg(feature = "sink_aware_attn")]
 
-use katgpt_rs::data_probe::sink_classify::{
+use katgpt_core::data_probe::sink_classify::{
     CachedSinkClassification, SinkAwarePolicy, SinkClassifierConfig, StableRankScratch,
     apply_dual_policy_gate, apply_dual_policy_gate_cached_flat, apply_dual_policy_gate_flat,
 };

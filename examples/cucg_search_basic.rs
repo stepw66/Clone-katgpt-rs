@@ -9,8 +9,8 @@
 //! cargo run --example cucg_search_basic
 //! ```
 
-use katgpt_rs::compaction::rubrics::search::{SearchRubric, TrajectoryFeatures};
-use katgpt_rs::compaction::{Backstop, ClosedUnitCompactionGate, FireRule, RubricScratch};
+use katgpt_core::compaction::rubrics::search::{SearchRubric, TrajectoryFeatures};
+use katgpt_core::compaction::{Backstop, ClosedUnitCompactionGate, FireRule, RubricScratch};
 
 fn main() {
     println!("═══ CUCG SearchRubric Basic Example (Plan 333) ═══");

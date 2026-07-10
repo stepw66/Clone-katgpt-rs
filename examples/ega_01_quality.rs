@@ -11,7 +11,7 @@
 
 #![cfg(feature = "ega_attn")]
 
-use katgpt_rs::ega_attn::{EgaGate, compute_energy_gate, sigmoid, z_normalize};
+use katgpt_attn::ega_attn::{EgaGate, compute_energy_gate, sigmoid, z_normalize};
 
 // ── Micro config ──────────────────────────────────────────────────
 const SEQ_LEN: usize = 16;

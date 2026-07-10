@@ -14,7 +14,7 @@
 //! cargo run --release --bench attn_match_router_bench --features attn_match
 //! ```
 
-use katgpt_rs::attn_match::router::{
+use katgpt_attn_match::router::{
     SolverBackend, SolverRouter, SolverRouterConfig, pick_backend,
 };
 

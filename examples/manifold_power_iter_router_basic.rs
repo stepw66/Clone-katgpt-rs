@@ -15,11 +15,11 @@
 
 #![cfg(feature = "manifold_power_iter_router")]
 
-use katgpt_rs::manifold_power_iter_router::{
+use katgpt_spectral::manifold_power_iter_router::{
     MpiRouterConfig, compute_diagnostics, compute_expert_gram_into, gate_sigmoid_topk,
     manifold_power_iter_router,
 };
-use katgpt_rs::spectral_retract::PowerRetractScratch;
+use katgpt_spectral::spectral_retract::PowerRetractScratch;
 use std::time::Instant;
 
 /// Deterministic xorshift64 PRNG.

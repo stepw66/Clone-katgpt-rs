@@ -19,7 +19,7 @@
 #![cfg(feature = "clr")]
 
 use katgpt_core::simd::simd_dot_f32;
-use katgpt_rs::clr::{
+use katgpt_claim::clr::{
     Claim, ClrConfig, ClrScratch, DirectionVectorSource, FnClaimExtractor,
     SigmoidProjectionVerifier, Trajectory, VoteResult, clr_vote,
 };

@@ -15,7 +15,7 @@
 //! cargo run --example attn_match_chunked --features attn_match,still_kv --release
 //! ```
 
-use katgpt_rs::attn_match::{
+use katgpt_attn_match::{
     chunked::{ChunkedCompactor, TextChunk},
     types::AmConfig,
 };

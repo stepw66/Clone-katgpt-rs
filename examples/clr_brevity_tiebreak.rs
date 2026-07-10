@@ -19,7 +19,7 @@
 
 #![cfg(feature = "clr")]
 
-use katgpt_rs::clr::{Cluster, Trajectory, brevity_tiebreak};
+use katgpt_claim::clr::{Cluster, Trajectory, brevity_tiebreak};
 
 fn main() {
     println!("═══════════════════════════════════════════════════════════════");

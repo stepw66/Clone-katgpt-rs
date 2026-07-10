@@ -11,7 +11,7 @@
 
 #[cfg(feature = "chiaroscuro")]
 fn main() {
-    use katgpt_rs::chiaroscuro::{
+    use katgpt_attn::chiaroscuro::{
         kv::{ChiaroscuroKvStrategy, DEFAULT_DCT_TRUNCATED_COEFFS},
         tau::StreamingTauCalibrator,
     };

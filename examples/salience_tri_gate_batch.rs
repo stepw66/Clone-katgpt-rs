@@ -19,7 +19,7 @@
 
 use std::time::Instant;
 
-use katgpt_rs::salience::{SalienceDecision, SalienceTriGate};
+use katgpt_core::salience::{SalienceDecision, SalienceTriGate};
 
 const D: usize = 8;
 const D_SPEAK: [f32; D] = [1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0];

@@ -18,8 +18,8 @@
 
 #![cfg(feature = "closed_unit_compaction")]
 
-use katgpt_rs::compaction::rubrics::search::{SearchRubric, TrajectoryFeatures};
-use katgpt_rs::compaction::{Backstop, ClosedUnitCompactionGate, FireRule, RubricScratch};
+use katgpt_core::compaction::rubrics::search::{SearchRubric, TrajectoryFeatures};
+use katgpt_core::compaction::{Backstop, ClosedUnitCompactionGate, FireRule, RubricScratch};
 use std::time::{Duration, Instant};
 
 const WARMUP: usize = 1_000;
@@ -68,8 +68,8 @@ fn bench_evaluate_latency(gate: &ClosedUnitCompactionGate<SearchRubric, 4>) -> f
 }
 
 /// Compress a CompactionDecision to a u64 for the sink (prevents elision).
-fn decision_tag<const N: usize>(d: &katgpt_rs::compaction::CompactionDecision<N>) -> u64 {
-    use katgpt_rs::compaction::CompactionDecision;
+fn decision_tag<const N: usize>(d: &katgpt_core::compaction::CompactionDecision<N>) -> u64 {
+    use katgpt_core::compaction::CompactionDecision;
     match d {
         CompactionDecision::Compress { audit } => 0xC0DE_0001_u64 ^ (audit.decision as u64),
         CompactionDecision::Continue { audit } => 0xC0DE_0002_u64 ^ (audit.decision as u64),

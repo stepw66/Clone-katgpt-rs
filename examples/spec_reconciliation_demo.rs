@@ -5,7 +5,7 @@
 //! Run with:
 //!   cargo run --example spec_reconciliation_demo --features spec_reconciliation
 
-use katgpt_rs::spec_reconciliation::{
+use katgpt_speculative::spec_reconciliation::{
     AdaptiveReconciler, ReconciliationConfig, ReconciliationResult, ReconciliationVerdict,
     SpecReconciler, TrajectoryPoint,
 };

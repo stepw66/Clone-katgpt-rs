@@ -16,7 +16,7 @@
 
 #![cfg(feature = "cgsp")]
 
-use katgpt_rs::cgsp::{
+use katgpt_core::cgsp::{
     BreakevenDifficultyFilter, CgspConfig, CgspLoop, ColinearityBatchGate, ComplexityWeights,
     CycleResult, Direction, EntropyCollapse, HlaProjectionGuide, NoOpBatchGate,
     NoOpDifficultyFilter, PoolConjecturer, Priority, ScratchBuffers, Target, entropy_nats, sigmoid,
@@ -132,13 +132,13 @@ fn force_collapse<C, G, S, B, Col, Df, Qg>(
     lp: &mut CgspLoop<C, G, S, B, Col, Df, Qg>,
     collapsed_arm: usize,
 ) where
-    C: katgpt_rs::cgsp::traits::CuriosityConjecturer,
-    G: katgpt_rs::cgsp::traits::QualityGuide,
+    C: katgpt_core::cgsp::traits::CuriosityConjecturer,
+    G: katgpt_core::cgsp::traits::QualityGuide,
     S: Solver,
     B: HintDeltaBandit,
     Col: CollapseSignal,
-    Df: katgpt_rs::cgsp::traits::DifficultyFilter,
-    Qg: katgpt_rs::cgsp::traits::BatchQualityGate,
+    Df: katgpt_core::cgsp::traits::DifficultyFilter,
+    Qg: katgpt_core::cgsp::traits::BatchQualityGate,
 {
     for (i, p) in lp.bandit_mut().priorities_mut().iter_mut().enumerate() {
         *p = if i == collapsed_arm { 1.0 } else { 0.0 };
@@ -155,13 +155,13 @@ fn count_cycles_to_recover<C, G, S, B, Col, Df, Qg>(
     cap: usize,
 ) -> (usize, bool)
 where
-    C: katgpt_rs::cgsp::traits::CuriosityConjecturer,
-    G: katgpt_rs::cgsp::traits::QualityGuide,
+    C: katgpt_core::cgsp::traits::CuriosityConjecturer,
+    G: katgpt_core::cgsp::traits::QualityGuide,
     S: Solver,
     B: HintDeltaBandit,
     Col: CollapseSignal,
-    Df: katgpt_rs::cgsp::traits::DifficultyFilter,
-    Qg: katgpt_rs::cgsp::traits::BatchQualityGate,
+    Df: katgpt_core::cgsp::traits::DifficultyFilter,
+    Qg: katgpt_core::cgsp::traits::BatchQualityGate,
 {
     for c in 0..cap {
         let _ = lp.cycle(target, scratch);

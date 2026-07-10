@@ -9,28 +9,28 @@
 //! When a backend is `None` the router falls back to CPU transparently.
 //!
 //! _Root-resident by design (Issue 033 §C, Option C)._ Depends on root-only
-//! `crate::trigger_gate`, `crate::dllm_solver`, and `crate::pruners::acceptance_variance`
+//! `katgpt_core::trigger_gate`, `katgpt_core::dllm_solver`, and `crate::pruners::acceptance_variance`
 //! for dynamic tier routing.
 
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::time::Instant;
 
-use crate::inference_backend::InferenceBackend;
+use katgpt_backend::InferenceBackend;
 use crate::transformer::{ForwardContext, MultiLayerKVCache, TransformerWeights};
-use crate::trigger_gate::{ComputeTier, TriggerGate, TriggerGateConfig};
+use katgpt_core::trigger_gate::{ComputeTier, TriggerGate, TriggerGateConfig};
 use crate::types::{Config, Rng, sample_token_into, softmax_scaled};
 
 #[cfg(feature = "rv_gated_routing")]
 use crate::pruners::acceptance_variance::AcceptanceVarianceTracker;
 
 #[cfg(feature = "rv_gated_routing")]
-use crate::trigger_gate::RvThresholds;
+use katgpt_core::trigger_gate::RvThresholds;
 
 #[cfg(all(feature = "critical_interval_gate", feature = "rv_gated_routing"))]
-use crate::dllm_solver::{CriticalIntervalConfig, CriticalTierDecision, critical_tier_decision};
+use katgpt_core::dllm_solver::{CriticalIntervalConfig, CriticalTierDecision, critical_tier_decision};
 
 #[cfg(feature = "rcd_residual")]
-use crate::dllm_solver::{ResidualMode, tier_to_residual_mode};
+use katgpt_core::dllm_solver::{ResidualMode, tier_to_residual_mode};
 
 // Plan 267 — Thicket Variance Probe (TVP) decoding-space density signal.
 // Composes with RV (Plan 202) for the G4 ablation gate: TVP+RV ≥ max(TVP, RV).
@@ -46,10 +46,10 @@ use crate::pruners::thicket_variance_probe::{TvpConfig, TvpSignal, TvpTierDecisi
 // Observation-only: exposes CHIAR KV strategy utilization and regime gate
 // via RouterStats. Does NOT influence tier routing (CHIAR is per-token).
 #[cfg(feature = "chiaroscuro")]
-use crate::chiaroscuro::{ChiarRouterHook, ChiarRouterStats};
+use katgpt_attn::chiaroscuro::{ChiarRouterHook, ChiarRouterStats};
 
 #[cfg(feature = "modality_pruned_load")]
-use crate::pipeline_pruner::QueryClassifier;
+use katgpt_core::pipeline_pruner::QueryClassifier;
 
 // ---------------------------------------------------------------------------
 // Issue 018 — sibling-module split.
@@ -118,7 +118,7 @@ pub struct RouterStats {
     pub lodestar_budget_remaining: i32,
     /// Breakeven routing stats (Plan 250).
     #[cfg(feature = "breakeven_routing")]
-    pub breakeven: crate::breakeven::BreakevenStats,
+    pub breakeven: katgpt_core::breakeven::BreakevenStats,
     /// Current TVP signal (Plan 267). `None` if `thicket_variance_probe` disabled.
     #[cfg(feature = "thicket_variance_probe")]
     pub tvp_signal: Option<TvpSignal>,
@@ -179,7 +179,7 @@ pub struct InferenceRouter {
     last_critical_entropy: f32,
     /// Breakeven bandit for cost-aware tier routing (Plan 250).
     #[cfg(feature = "breakeven_routing")]
-    breakeven: crate::breakeven::BreakevenBandit,
+    breakeven: katgpt_core::breakeven::BreakevenBandit,
     /// TVP signal (Plan 267) — decoding-space disagreement from K parallel probes.
     /// Starts as `None` (no probes run yet). Updated via `update_tvp()` after
     /// the probe-runner completes. When `None`, has zero routing impact.
@@ -245,7 +245,7 @@ impl InferenceRouter {
             #[cfg(all(feature = "critical_interval_gate", feature = "rv_gated_routing"))]
             last_critical_entropy: 0.0,
             #[cfg(feature = "breakeven_routing")]
-            breakeven: crate::breakeven::BreakevenBandit::with_defaults(),
+            breakeven: katgpt_core::breakeven::BreakevenBandit::with_defaults(),
             #[cfg(feature = "thicket_variance_probe")]
             tvp_signal: None,
             #[cfg(feature = "thicket_variance_probe")]
@@ -451,7 +451,7 @@ impl InferenceRouter {
         // Feed timing into breakeven bandit (Plan 250).
         #[cfg(feature = "breakeven_routing")]
         {
-            use crate::breakeven::BreakevenTierPair;
+            use katgpt_core::breakeven::BreakevenTierPair;
             match tier_final {
                 ComputeTier::CpuOnly => {
                     // CPU is the baseline for CpuToGpu pair.
@@ -782,7 +782,7 @@ impl InferenceRouter {
 
     /// Borrow the breakeven bandit (Plan 250).
     #[cfg(feature = "breakeven_routing")]
-    pub fn breakeven(&self) -> &crate::breakeven::BreakevenBandit {
+    pub fn breakeven(&self) -> &katgpt_core::breakeven::BreakevenBandit {
         &self.breakeven
     }
 
@@ -826,7 +826,7 @@ impl InferenceRouter {
     /// Only available when `modality_pruned_load` feature is enabled.
     #[cfg(feature = "modality_pruned_load")]
     #[inline]
-    pub fn select_pipeline(&self, prompt: &str) -> crate::pipeline_pruner::PipelineConfig {
+    pub fn select_pipeline(&self, prompt: &str) -> katgpt_core::pipeline_pruner::PipelineConfig {
         self.query_classifier.classify_prompt(prompt)
     }
 

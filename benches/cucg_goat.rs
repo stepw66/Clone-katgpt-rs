@@ -14,11 +14,11 @@
 
 #![cfg(feature = "closed_unit_compaction")]
 
-use katgpt_rs::compaction::rubrics::search::SearchRubric;
-use katgpt_rs::compaction::rubrics::shard_freeze::{
+use katgpt_core::compaction::rubrics::search::SearchRubric;
+use katgpt_core::compaction::rubrics::shard_freeze::{
     SHARD_FREEZE_FLATNESS_THRESHOLD, ShardFreezeRubric,
 };
-use katgpt_rs::compaction::{Backstop, ClosedUnitCompactionGate, FireRule, RubricScratch};
+use katgpt_core::compaction::{Backstop, ClosedUnitCompactionGate, FireRule, RubricScratch};
 
 fn main() {
     println!("═══ CUCG GOAT Gate Report (Plan 333, Research 300) ═══");
@@ -190,7 +190,7 @@ fn g2_skip_if_reliable() -> (String, bool) {
 // ─── G3: probe latency independent of L ───────────────────────────────────────
 
 fn g3_probe_latency() -> (String, bool) {
-    use katgpt_rs::compaction::probe::CacheReuseProbe;
+    use katgpt_core::compaction::probe::CacheReuseProbe;
     let probe = CacheReuseProbe::new();
     let prompt = b" [RUBRIC]";
     let mut measurements = Vec::new();

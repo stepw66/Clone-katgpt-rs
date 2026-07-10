@@ -28,7 +28,7 @@
 
 #![cfg(feature = "hla_eigenbasis_recovery")]
 
-use katgpt_rs::hla_eigenbasis::{
+use katgpt_spectral::hla_eigenbasis::{
     EigenbasisScratch, EigenbasisTracker, energy_ratio, recover_eigenbasis_from_window,
     recover_eigenbasis_from_window_fast, window_total_energy,
 };

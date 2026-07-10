@@ -17,7 +17,7 @@
 //! cargo run --example cce_demo --features cce_moderator
 //! ```
 
-use katgpt_rs::cce::{
+use katgpt_core::cce::{
     CceLp, CcePrimalDual, Deviation, DeviationClass, ExternalRegret, OccupationMeasure,
     PayoffTensor,
 };

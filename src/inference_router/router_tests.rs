@@ -347,7 +347,7 @@ fn test_critical_entropy_updates_last_observed() {
 #[cfg(feature = "breakeven_routing")]
 #[test]
 fn test_breakeven_tracker_n_star() {
-    use crate::breakeven::BreakevenTracker;
+    use katgpt_core::breakeven::BreakevenTracker;
 
     let tracker = BreakevenTracker::new(1000);
     for _ in 0..50 {
@@ -368,7 +368,7 @@ fn test_breakeven_tracker_n_star() {
 #[cfg(feature = "breakeven_routing")]
 #[test]
 fn test_breakeven_tracker_amortized_flips() {
-    use crate::breakeven::BreakevenTracker;
+    use katgpt_core::breakeven::BreakevenTracker;
 
     let tracker = BreakevenTracker::new(10_000);
     for _ in 0..50 {
@@ -395,8 +395,8 @@ fn test_breakeven_tracker_amortized_flips() {
 #[cfg(feature = "breakeven_routing")]
 #[test]
 fn test_breakeven_bandit_prefers_amortized() {
-    use crate::breakeven::{BreakevenBandit, BreakevenTierPair};
-    use crate::trigger_gate::ComputeTier;
+    use katgpt_core::breakeven::{BreakevenBandit, BreakevenTierPair};
+    use katgpt_core::trigger_gate::ComputeTier;
 
     let bandit = BreakevenBandit::new(100, 200, 50);
     for _ in 0..20 {
@@ -417,7 +417,7 @@ fn test_breakeven_bandit_prefers_amortized() {
 #[cfg(feature = "breakeven_routing")]
 #[test]
 fn test_fidelity_matcher_higher_compression_later() {
-    use crate::breakeven::fidelity::{CompressionLevel, FidelityMatcher};
+    use katgpt_core::breakeven::fidelity::{CompressionLevel, FidelityMatcher};
 
     let fm = FidelityMatcher::new(0.1);
     let early = fm.error_matched_level(0);
@@ -430,8 +430,8 @@ fn test_fidelity_matcher_higher_compression_later() {
 #[cfg(feature = "breakeven_routing")]
 #[test]
 fn test_router_breakeven_routes_differently() {
-    use crate::breakeven::{BreakevenBandit, BreakevenTierPair};
-    use crate::trigger_gate::ComputeTier;
+    use katgpt_core::breakeven::{BreakevenBandit, BreakevenTierPair};
+    use katgpt_core::trigger_gate::ComputeTier;
 
     let bandit = BreakevenBandit::new(100, 200, 50);
     for _ in 0..20 {

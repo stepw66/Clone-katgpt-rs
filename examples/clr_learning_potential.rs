@@ -20,7 +20,7 @@
 
 #![cfg(feature = "clr")]
 
-use katgpt_rs::clr::{ClrConfig, learning_potential, should_write_memory};
+use katgpt_claim::clr::{ClrConfig, learning_potential, should_write_memory};
 
 fn main() {
     println!("═══════════════════════════════════════════════════════════════");
