@@ -38,6 +38,7 @@ use super::entmax_router::{EntmaxCache, EntmaxRouter};
 use super::meta_router::{DynPolicy, DynRoutingCache, MetaRouter};
 #[cfg(feature = "msa_sparse")]
 use super::msa_distill::{MaxPoolBlockScorer, MaxStdDevBlockScorer, MsaBlockCache};
+use super::routing::RoutingScratch;
 use super::value_energy::{ValueEnergyCache, ValueEnergyRouter};
 
 // ---------------------------------------------------------------------------
@@ -458,6 +459,8 @@ pub struct VortexScratch {
     pub argtopk_pairs: Vec<(usize, f32)>,
     /// Routing query buffer for channel-aware routing (reused across calls).
     pub routing_query_buf: Vec<f32>,
+    /// Entmax routing scratch (reused across calls by EntmaxRouter::forward_indexer).
+    pub routing_scratch: RoutingScratch,
 }
 
 impl VortexScratch {
@@ -468,6 +471,7 @@ impl VortexScratch {
             indices: Vec::with_capacity(max_blocks),
             argtopk_pairs: Vec::with_capacity(max_blocks),
             routing_query_buf: Vec::new(),
+            routing_scratch: RoutingScratch::new(0, 0),
         }
     }
 

@@ -56,6 +56,7 @@ pub fn score_blocks_entmax_with_entropy(
 }
 
 /// Pre-allocated scratch buffers for entmax routing.
+#[derive(Debug)]
 pub struct RoutingScratch {
     /// Logits buffer: [n_chunks].
     logits: Vec<f32>,

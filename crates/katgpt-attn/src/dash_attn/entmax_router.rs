@@ -6,7 +6,7 @@
 
 use katgpt_core::types::DashAttnConfig;
 
-use super::routing::score_blocks_entmax;
+use super::routing::{score_blocks_entmax, score_blocks_entmax_into};
 use super::vortex_flow::{RoutingDecision, VortexFlow, VortexScratch};
 
 // ---------------------------------------------------------------------------
@@ -125,7 +125,7 @@ impl VortexFlow for EntmaxRouter {
         cache: &Self::Cache,
         n_blocks: usize,
         top_k: usize,
-        _scratch: &mut VortexScratch,
+        scratch: &mut VortexScratch,
     ) -> RoutingDecision {
         if n_blocks == 0 {
             return RoutingDecision::new();
@@ -134,8 +134,9 @@ impl VortexFlow for EntmaxRouter {
         let n = n_blocks.min(cache.summaries.len());
         let summaries = &cache.summaries[..n];
 
-        // Delegate to existing entmax routing
-        let result = score_blocks_entmax(query, summaries, &self.config);
+        // Delegate to existing entmax routing, reusing the scratch's
+        // RoutingScratch buffers (avoids 5 Vec allocations per call).
+        let result = score_blocks_entmax_into(query, summaries, &self.config, &mut scratch.routing_scratch);
 
         // Convert RoutingResult → RoutingDecision
         // Take top_k from active indices (already sorted by entmax support)
