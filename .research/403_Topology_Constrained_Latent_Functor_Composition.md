@@ -154,9 +154,17 @@ No "N LLM calls/step" structure. Compute unit is "one gated functor application 
 - **riir-ai (private runtime):** the fusion is **pillar-level if the PoC passes**. Until then, deferred — guide is NOT created now (GOAT verdict, not Super-GOAT).
 - **riir-chain / riir-neuron-db:** schema-keyed region swap touches `MerkleFrozenEnvelope` (neuron-db), but the primary value is the gated graph (riir-ai). No reroute.
 
-### 3.3 §3.6 defend-wrong PoC — NOT triggered for the GOAT
+### 3.3 §3.6 defend-wrong PoC — RUN, RESULT: FAIL (NO Super-GOAT)
 
-The verdict is GOAT (not PASS) and makes no quality-parity claim. The fusion PoC is the right *follow-up* for Super-GOAT re-evaluation, not a blocker for the GOAT. The PoC MUST use `FaithfulnessProbe` (per R398 §7 lesson — the ad-hoc flee metric was the wrong tool; causal intervention is the right one).
+The PoC ran on 2026-07-10 (Plan 428 Phase 2). Three competitors (Floor / Free composition / Gated graph) tested via FaithfulnessProbe causal intervention on affect→action.
+
+**Result:** Free composition has LARGER non-empty deltas than Gated (opposite of the Super-GOAT hypothesis). Both variants pass `is_faithfully_used` — the probe does not discriminate. The delta asymmetry is a baseline-construction artifact (Free's baseline includes perception, bilinear action amplifies perturbation). The gate's value is structural (reachability guarantee + isolated swap + zero latency overhead), not behavioral.
+
+**R403 stays GOAT.** Phase 3 (Super-GOAT promotion) does NOT execute; `canvas_functor_gate` stays opt-in.
+
+See: `riir-ai/.benchmarks/428_canvas_functor_poc.md` for raw `FaithfulnessProfile` numbers.
+
+The PoC used `FaithfulnessProbe` (per R398 §7 lesson — the ad-hoc flee metric was the wrong tool; causal intervention is the right one) and shipped-bridge producers (per Issue 043 lesson — no designer-tuned classifier).
 
 ---
 
