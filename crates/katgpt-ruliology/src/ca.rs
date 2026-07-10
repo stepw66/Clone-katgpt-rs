@@ -103,19 +103,22 @@ impl CaStrategy {
         let w = DEFAULT_TAPE_WIDTH;
         let n_configs = 1usize << w;
         let mut fingerprint = Vec::with_capacity(n_configs * w);
+        // Reusable scratch tapes — hoisted out of the inner loop to avoid
+        // 256 * n_configs allocations (was vec![0u8; w] per config).
+        let mut tape = vec![0u8; w];
+        let mut new_tape = vec![0u8; w];
 
         for ca in all {
             fingerprint.clear();
 
             // For each possible initial tape configuration.
             for config in 0..n_configs {
-                let mut tape = vec![0u8; w];
                 for (i, cell) in tape.iter_mut().enumerate() {
                     *cell = ((config >> i) & 1) as u8;
                 }
 
-                // Apply CA rule once.
-                let new_tape = Self::step(&tape, ca.rule);
+                // Apply CA rule once into new_tape.
+                Self::step_into(&tape, ca.rule, &mut new_tape);
 
                 // Record the center cell output.
                 fingerprint.push(new_tape[w / 2]);
@@ -130,17 +133,29 @@ impl CaStrategy {
         distinct
     }
 
-    /// Single CA step: apply rule to each cell's neighborhood (wrap-around).
-    fn step(tape: &[u8], rule: u8) -> Vec<u8> {
+    /// Single CA step into a caller-provided buffer: apply rule to each cell's
+    /// neighborhood (wrap-around). `out` must be the same length as `tape`.
+    ///
+    /// This is the zero-alloc variant of [`step`](Self::step); used by hot
+    /// enumeration paths that reuse a scratch buffer across many calls.
+    #[inline]
+    fn step_into(tape: &[u8], rule: u8, out: &mut [u8]) {
         let n = tape.len();
-        let mut new_tape = vec![0u8; n];
+        debug_assert_eq!(out.len(), n);
         for i in 0..n {
             let left = tape[(i + n - 1) % n];
             let center = tape[i];
             let right = tape[(i + 1) % n];
             let neighborhood = (left << 2) | (center << 1) | right;
-            new_tape[i] = (rule >> neighborhood) & 1;
+            out[i] = (rule >> neighborhood) & 1;
         }
+    }
+
+    /// Single CA step: apply rule to each cell's neighborhood (wrap-around).
+    fn step(tape: &[u8], rule: u8) -> Vec<u8> {
+        let n = tape.len();
+        let mut new_tape = vec![0u8; n];
+        Self::step_into(tape, rule, &mut new_tape);
         new_tape
     }
 }

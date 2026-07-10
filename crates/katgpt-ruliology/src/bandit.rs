@@ -103,10 +103,15 @@ impl RuliologyBandit {
         let pareto = win_matrix.pareto_front(&complexities);
 
         // Create arms from Pareto-optimal strategies
+        // Index strategies by id once to avoid O(n²) find() inside the
+        // pareto loop below (was strategies.iter().find() per pareto entry).
+        use std::collections::HashMap;
+        let by_id: HashMap<u64, &FsmStrategy> =
+            strategies.iter().map(|s| (s.id(), s)).collect();
         let arms: Vec<RuliologyArm> = pareto
             .iter()
             .filter(|(_, payoff, _)| *payoff >= payoff_threshold)
-            .filter_map(|(id, _, _)| strategies.iter().find(|s| s.id() == *id))
+            .filter_map(|(id, _, _)| by_id.get(id).copied())
             .map(|s| RuliologyArm::new(s.clone()))
             .collect();
 
@@ -151,23 +156,35 @@ impl RuliologyBandit {
 
     /// Best arm by payoff estimate.
     pub fn best_arm(&self) -> usize {
-        self.arms
-            .iter()
-            .enumerate()
-            .max_by(|(_, a), (_, b)| a.payoff().partial_cmp(&b.payoff()).unwrap())
-            .map(|(i, _)| i)
-            .unwrap_or(0)
+        let mut best = 0usize;
+        let mut best_payoff = f64::NEG_INFINITY;
+        for (i, arm) in self.arms.iter().enumerate() {
+            let p = arm.payoff();
+            // total_cmp is NaN-deterministic and avoids the panic that
+            // partial_cmp(...).unwrap() would trigger on a NaN payoff.
+            if p.total_cmp(&best_payoff).is_gt() {
+                best_payoff = p;
+                best = i;
+            }
+        }
+        best
     }
 
     /// Best arm by payoff, excluding already-promoted arms.
     pub fn best_unpromoted_arm(&self, promoted: &HashSet<usize>) -> usize {
-        self.arms
-            .iter()
-            .enumerate()
-            .filter(|(i, _)| !promoted.contains(i))
-            .max_by(|(_, a), (_, b)| a.payoff().partial_cmp(&b.payoff()).unwrap())
-            .map(|(i, _)| i)
-            .unwrap_or(0)
+        let mut best = 0usize;
+        let mut best_payoff = f64::NEG_INFINITY;
+        for (i, arm) in self.arms.iter().enumerate() {
+            if promoted.contains(&i) {
+                continue;
+            }
+            let p = arm.payoff();
+            if p.total_cmp(&best_payoff).is_gt() {
+                best_payoff = p;
+                best = i;
+            }
+        }
+        best
     }
 
     /// Get all arms.
