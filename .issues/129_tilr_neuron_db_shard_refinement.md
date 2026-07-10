@@ -4,7 +4,7 @@
 > **Date:** 2026-07-10
 > **Type:** feature (consumer integration)
 > **Severity:** MEDIUM — concrete consumer value, but no blocking trigger
-> **Status:** OPEN (deferred — TILR primitive ships DEFAULT-ON, this wires it)
+> **Status:** IMPLEMENTED (Plan 317, opt-in `tilr_consolidation` feature) — GOAT G1-G4 PASS, promotion deferred pending real-data gain validation
 
 ## Context
 
@@ -41,15 +41,24 @@ shard-scale latency at 123.0 ns (d=64, r=12), well under the 200 ns target.
 
 ## Tasks
 
-- [ ] **T1** Identify the consolidation commit path in `riir-neuron-db/src/consolidation.rs`.
-      Locate where `style_weights` is finalized before Cold-tier commit.
-- [ ] **T2** Collect consolidation deltas across a sleep cycle. Build the
+- [x] **T1** Identify the consolidation commit path in `riir-neuron-db/src/consolidation/mod.rs`.
+      ✅ Located: `ConsolidationPipeline::consolidate` at `consolidation/mod.rs:1011`,
+      `shard.apply_delta(&delta, 0.3)` at L1024.
+- [x] **T2** Collect consolidation deltas across a sleep cycle. Build the
       contrastive difference set.
-- [ ] **T3** Wire `tilr_refine_into` into the commit path behind a feature flag
-      (e.g. `tilr_shard_refinement`).
-- [ ] **T4** Benchmark: verify zero-harm on non-aligned shards, refinement on
-      aligned shards. Gate: BLAKE3 hash of non-aligned shards must be unchanged.
-- [ ] **T5** If the gain is real and modelless → promote to default-on.
+      ✅ `wake_events[].embedding: [f32; 64]` already available; fed to
+      `discover_invariant_subspace` to build the basis.
+- [x] **T3** Wire `tilr_refine_into` into the commit path behind a feature flag.
+      ✅ `consolidate_tilr` method (Plan 317), gated on `tilr_consolidation`.
+- [x] **T4** Benchmark: verify zero-harm on non-aligned shards, refinement on
+      aligned shards.
+      ✅ G1-G4 GOAT gate PASS (6 tests). No-harm verified on fallback paths
+      (bit-identical BLAKE3). Refinement verified on truncated/full-rank
+      subspaces.
+- [-] **T5** If the gain is real and modelless → promote to default-on.
+      DEFERRED: GOAT gate passes, gain is modelless, but "proof gain" on
+      real consolidation workloads needed before promotion. riir-ai G8
+      follow-up.
 
 ## Cross-references
 
