@@ -7,9 +7,10 @@
 > **Status:** BOTH APPROACHES IMPLEMENTED. Approach A (`PriorityTableBandit::prios`,
 > CGSP curiosity table) COMPLETE behind `tilr_hla_refinement` (T1–T4, 9 tests).
 > Approach B (`CommittedBlendState::z`, committed-blend HLA) COMPLETE behind
-> `tilr_personality_refine` (T1–T4, 11 tests, Plan 438). Both are opt-in;
-> T5 promotion for both deferred pending real-session gain. See "Two valid
-> targets" below.
+> `tilr_personality_refine` (T1–T4, 11 tests, Plan 438). Both are opt-in.
+> T5: synthetic personality-divergence benchmarks PASS for Approach B (2 tests,
+> 2026-07-11) — mechanism proven; final default-on promotion still pending
+> real-session gain validation. See "T5 status" below.
 
 ## Context
 
@@ -136,8 +137,21 @@ promotion for both is deferred pending real-session personality-divergence gain.
       validation + error rejection), G4 perf smoke (<1µs/call at d=8).
       50/50 committed_blend tests pass (11 new + 39 pre-existing), 0 regressions.
 - [-] **T5** If the gain is real and modelless → promote to default-on.
-      DEFERRED: G1–G4 pass and the refinement is pure modelless. Promotion
-      requires real-session personality-divergence gain validation.
+      **PARTIAL PROGRESS** (2026-07-11): Synthetic personality-divergence
+      benchmarks PASS — mechanism proven.
+      - `t5_personality_subspace_amplification_gain`: single-NPC multi-tick
+        trajectory showing TILR amplifies axis-0 (valence) dynamics while axes
+        1-7 are bit-identical (no z[0] feedback in default library).
+      - `t5_two_npc_personality_divergence_gain`: two-NPC divergence showing
+        TILR amplifies personality divergence between NPCs with different
+        committed pi vectors (crowd-scale emergent personality gain).
+      Both tests pass under `--features tilr_personality_refine`. 13/13
+      tilr_bridge tests pass (11 G1-G4 + 2 T5), 0 regressions.
+      **REMAINING for default-on promotion**: real-session validation that the
+      calibrated subspace (from contrastive z-snapshot differences at re-commit
+      events) captures meaningful personality directions in production game
+      sessions. The synthetic benchmark proves the amplification mechanism; the
+      real-session benchmark confirms the calibration is semantically valid.
 
 ## Cross-references
 
