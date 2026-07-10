@@ -20,7 +20,7 @@ Canvas engineering declares a **typed schema** (regions, their connectivity, tem
 
 **Distilled for katgpt-rs (modelless, inference-time):** a generic `CanvasSchema` compiler + `reachability_horizon` primitive + `transfer_distance` scalar. No game IP, no chain IP, no shard IP. The compiler emits an `AttentionMaskSpec` (consumable by the existing AC-Prefix / VortexFlow mask builders) and a `LossWeightMask` (consumable by training-time callers; at inference only the mask is used). The looped-attention half of the paper is **already distilled** (Research 097 → Plan 136 `LoopMode::TrainingFree`; Research 266 → FPRM Gain) and is NOT re-distilled here.
 
-**Verdict: GOAT.** The compiler + reachability semantics is a novel modelless primitive connecting ≥3 pillars (DEC topology, HLA per-entity latent state, latent_functor typed programs, AC-Prefix masks, freeze/thaw exchange). But (a) the constituent sub-primitives largely ship (`region_subspace_bridge` Plan 416, AC-Prefix Plan 313, StillPerceiver, `LoopMode::TrainingFree`); (b) the headline empirical value is training-dependent and requires riir-train to validate; (c) the reachability semantics, while elegant, is a reframing of "sparse attention = causal graph" that we implicitly already use. It is a **unifying abstraction** (a type system for latent state), not a new empirical capability class at the modelless level. A fusion idea (canvas × DEC reachability × region_subspace × freeze/thaw schema exchange) is flagged as a potential Super-GOAT **if** a defend-wrong PoC proves the compiled canvas improves per-NPC behavior modellessly over the un-unified constituents — tracked in `.issues/043`. The modelless compiler ships; the empirical Super-GOAT claim waits for a PoC.
+**Verdict: GOAT.** The compiler + reachability semantics is a novel modelless primitive connecting ≥3 pillars (DEC topology, HLA per-entity latent state, latent_functor typed programs, AC-Prefix masks, freeze/thaw exchange). But (a) the constituent sub-primitives largely ship (`region_subspace_bridge` Plan 416, AC-Prefix Plan 313, StillPerceiver, `LoopMode::TrainingFree`); (b) the headline empirical value is training-dependent and requires riir-train to validate; (c) the reachability semantics, while elegant, is a reframing of "sparse attention = causal graph" that we implicitly already use. It is a **unifying abstraction** (a type system for latent state), not a new empirical capability class at the modelless level. A fusion idea (canvas × DEC reachability × region_subspace × freeze/thaw schema exchange) is flagged as a potential Super-GOAT **if** a defend-wrong PoC proves the compiled canvas improves per-NPC behavior modellessly over the un-unified constituents — tested in a PoC (resolved 2026-07-09, §7) that could not isolate a canvas-attributable gain from the tuned classifier. The modelless compiler ships; the empirical Super-GOAT claim waits for a cleaner PoC.
 
 ---
 
@@ -143,7 +143,7 @@ The paper's headline gains appear to need training. Exhausting the three modelle
 
 ### 2.5 Fusion — what novel combination does this enable?
 
-**Fusion idea (novelty TBD — needs PoC before Super-GOAT verdict, tracked in `.issues/043`):**
+**Fusion idea (novelty TBD — needs a PoC with a non-designer-tuned discriminator before Super-GOAT verdict; the first PoC could not isolate a canvas-attributable gain, see §7):**
 
 > Canvas Engineering compiler × DEC reachability × `region_subspace_bridge` × freeze/thaw schema-mediated exchange × HLA per-NPC latent state → "A typed NPC cognitive stack where each NPC's latent state is a **compiled canvas** with declared causal topology (perception → affect → action, memory ↔ affect), reachability guarantees (perception cannot influence action without traversing affect, by construction), and schema-mediated freeze/thaw exchange (two NPCs with the same cognitive schema can swap latent state directly)."
 
@@ -183,7 +183,7 @@ The paper has no "N LLM calls/step" structure. Its compute unit is "one DiT deno
 - **Q3 (Product selling point?): YES (architectural), NO (empirical, modelless).** "Our NPC cognitive stack has a typed schema compiler with declared causal topology and reachability guarantees" is a real architectural selling point. "And it improves NPC behavior modellessly" is unproven.
 - **Q4 (Force multiplier?): YES.** Connects to DEC topology, HLA per-entity latent state, latent_functor typed programs, AC-Prefix masks, freeze/thaw schema exchange, region_subspace steering. ≥4 pillars/systems.
 
-**Q2 fails at the modelless level → not Super-GOAT now.** The fusion idea (§2.5) is flagged as a potential Super-GOAT if a PoC proves modelless behavioral gain — tracked in `.issues/043`. Per §1.5, "candidate" language is avoided: this is a GOAT with a tracked fusion follow-up, not a deferred Super-GOAT commitment.
+**Q2 fails at the modelless level → not Super-GOAT now.** The fusion idea (§2.5) is flagged as a potential Super-GOAT if a PoC proves modelless behavioral gain — the first PoC (§7, resolved 2026-07-09) could not isolate a canvas-attributable gain from the tuned classifier, so Super-GOAT remains un-awarded. Per §1.5, "candidate" language is avoided: this is a GOAT with a tracked fusion follow-up, not a deferred Super-GOAT commitment.
 
 ### 3.2 MOAT gate per domain (§1.6)
 
@@ -194,7 +194,7 @@ The paper has no "N LLM calls/step" structure. Its compute unit is "one DiT deno
 
 ### 3.3 §3.6 defend-wrong PoC — NOT triggered now
 
-The §3.6 PoC rule triggers for PASS verdicts that downgrade on "runtime analog already ships" OR for quality-parity claims. This verdict is **GOAT** (not PASS) and makes **no quality-parity claim** — it explicitly states the modelless behavioral gain is unproven and currently negative (paper's 19% degradation finding). The compiler primitive ships on its structural/correctness merits (reachability guarantee by construction), not on a behavioral-parity claim. A PoC is the right *follow-up* for the fusion's potential Super-GOAT re-evaluation (`.issues/043`), not a blocker for the GOAT.
+The §3.6 PoC rule triggers for PASS verdicts that downgrade on "runtime analog already ships" OR for quality-parity claims. This verdict is **GOAT** (not PASS) and makes **no quality-parity claim** — it explicitly states the modelless behavioral gain is unproven and currently negative (paper's 19% degradation finding). The compiler primitive ships on its structural/correctness merits (reachability guarantee by construction), not on a behavioral-parity claim. A PoC is the right *follow-up* for the fusion's potential Super-GOAT re-evaluation (§7 records the first one, inconclusive), not a blocker for the GOAT.
 
 ---
 
@@ -284,7 +284,7 @@ pub fn transfer_distance(a: &SemanticType, b: &SemanticType) -> f32 {
 
 → `katgpt-rs/.plans/419_canvas_schema_compiler.md` (open primitive: compiler + reachability + transfer_distance, feature flag `canvas_schema`, opt-in until GOAT gate).
 
-**Fusion PoC follow-up:** → `katgpt-rs/.issues/043_canvas_modelless_behavioral_gain_poc.md` (defend-wrong PoC for the §2.5 fusion: does compiled canvas + reachability improve per-NPC behavior modellessly over un-unified constituents? If YES → re-evaluate for Super-GOAT; if NO → stays GOAT, compiler ships on structural merits). **RESOLVED 2026-07-09 — see §7 PoC Addendum below.**
+**Fusion PoC follow-up:** → `riir-ai/.benchmarks/043_canvas_npc_cognitive_stack_modelless.md` (defend-wrong PoC for the §2.5 fusion: does compiled canvas + reachability improve per-NPC behavior modellessly over un-unified constituents? If YES → re-evaluate for Super-GOAT; if NO → stays GOAT, compiler ships on structural merits). **RESOLVED 2026-07-09 — see §7 PoC Addendum below.** Result: could not isolate a canvas-attributable gain from the tuned classifier; stays GOAT. A cleaner re-PoC needs a non-designer-tuned discriminator.
 
 **riir-train follow-up (noted, not blocked):** train a small DiT within a declared NPC-cognitive-stack topology; measure parameter efficiency vs flat baseline at our scale. This is the genuine training dependency for the empirical headline; it lives in riir-train.
 
@@ -295,25 +295,51 @@ pub fn transfer_distance(a: &SemanticType, b: &SemanticType) -> f32 {
 **Bench:** `riir-ai/crates/riir-poc/benches/canvas_npc_cognitive_stack_modelless.rs`
 **Record:** `riir-ai/.benchmarks/043_canvas_npc_cognitive_stack_modelless.md`
 
-**Result: MODELLESS BEHAVIORAL SIGNAL DETECTED, but stays GOAT.**
+**Result: COULD NOT ISOLATE A CANVAS-ATTRIBUTABLE GAIN FROM THE TUNED CLASSIFIER. Stays GOAT.**
 
-The canvas `can_reach` gate produces a measurable behavioral difference in a
-controlled NPC cognitive-stack toy domain:
-- The canvas NPC approaches fake threats (MinD -1.53 vs leaky baseline) — it does
-  NOT false-flee from perceptually-identical-but-harmless entities.
-- True-flee rate maintained (-0.7pp, negligible).
-- Action-affect coherence improved (+0.0978).
+The canvas `can_reach` gate enforces the declared perception→affect→action
+topology correctly (T0 passes: `can_reach(perception,action,1)=false`,
+`can_reach(perception,action,2)=true`). But the behavioral metrics do **not**
+attributably support a canvas-attributable gain, for three reasons:
 
-But this is a **precision/recall trade-off**, not a new capability class:
-- Better when fakes are truly harmless (more exploration, less wasted fleeing).
-- Riskier if fakes can become real (less cautious).
+1. **Designer-tuned affect classifier (the load-bearing confound).** The affect
+   layer that distinguishes real vs fake threats was hand-tuned to correctly
+   classify the toy domain's threats (bench honesty note #3). The canvas gate
+   FORCES action through this perfect discriminator; the leaky shortcut uses raw
+   perception which cannot discriminate. So the observed MinDFake difference
+   (canvas 1.93 vs leaky 3.03–3.46) and the MinDReal difference (canvas 3.87 vs
+   leaky 3.28–3.40) are attributable to the **tuned discriminator**, not to the
+   canvas structure. The canvas contributed the *forcing* (the `can_reach` gate),
+   not the *discrimination*. Strip the hand-tuning and the gain likely vanishes.
+2. **Noisy flee-rate metric.** The floor variant (no flee response at all)
+   reports the HIGHEST TrueFlee rate (37.8%) — pure displacement-alignment noise
+   (bench honesty note #1). A metric that reports the no-response baseline as the
+   top flee-rate cannot ground the T2 "TrueFlee -0.7pp PASS" gate; that gate is
+   measuring noise.
+3. **Canvas has lower TrueFlee than Leaky** (22.6% vs 23.3–24.6%). By the rate
+   metric, canvas flees real threats *slightly less* often. The bench leans on
+   MinDReal to claim better avoidance, but lower flee-rate + higher min-distance
+   is consistent with the canvas NPC simply not entering the flee trigger band
+   (positioning), not with superior fleeing.
 
-**Verdict: Research 398 stays GOAT (not Super-GOAT).** The behavioral signal
-supports the canvas compiler's value but does not constitute a new capability
-class. `canvas_schema` stays opt-in pending a production consumer.
+A more honest framing of the PoC: *the canvas gate's forcing function is only
+beneficial when a downstream discriminator already exists; the PoC could not
+isolate a canvas-attributable behavioral gain from the hand-tuned affect
+classifier, so it does not answer whether canvas structure alone produces a
+behavioral gain.*
+
+**Verdict: Research 398 stays GOAT (not Super-GOAT).** The verdict rests on
+structural/correctness merits (reachability-by-construction, Plan 419 G1–G6
+PASS), **not** on this PoC. The PoC does not award Super-GOAT, and its inability
+to isolate a canvas-attributable gain strengthens (not weakens) the
+"not Super-GOAT" conclusion. `canvas_schema` stays opt-in pending a production
+consumer. The behavioral question remains genuinely open; a cleaner re-PoC would
+need a discriminator that is NOT designer-tuned (e.g. mined via MAG/Plan 418 or
+learned via riir-train) so any behavioral delta can be attributed to the canvas
+structure rather than the classifier.
 
 ---
 
 ## TL;DR
 
-Canvas engineering declares a typed schema and compiles it to attention masks + loss weights. The **modelless value** is the compiler + reachability-as-exact-marginal-independence + transfer_distance + schema-mediated latent exchange. The **headline empirical value** (1.73× parameter efficiency, cortical R²=0.825) is training-dependent. Most constituent primitives ship (`region_subspace_bridge`, AC-Prefix, StillPerceiver, `LoopMode::TrainingFree`). **Verdict: GOAT** — the unified `CanvasSchema` compiler is novel and modelless, connects ≥4 pillars, and gives a provable correctness property (reachability by construction); but it is a unifying type-system abstraction, not a new empirical capability class at the modelless level, and the behavioral gain requires riir-train. A fusion PoC (`.issues/043`) tracks potential Super-GOAT re-evaluation. Plan 419 ships the open compiler primitive.
+Canvas engineering declares a typed schema and compiles it to attention masks + loss weights. The **modelless value** is the compiler + reachability-as-exact-marginal-independence + transfer_distance + schema-mediated latent exchange. The **headline empirical value** (1.73× parameter efficiency, cortical R²=0.825) is training-dependent. Most constituent primitives ship (`region_subspace_bridge`, AC-Prefix, StillPerceiver, `LoopMode::TrainingFree`). **Verdict: GOAT** — the unified `CanvasSchema` compiler is novel and modelless, connects ≥4 pillars, and gives a provable correctness property (reachability by construction); but it is a unifying type-system abstraction, not a new empirical capability class at the modelless level, and the behavioral gain requires riir-train. A fusion PoC (record `riir-ai/.benchmarks/043_*`, §7) could not isolate a canvas-attributable gain from the tuned classifier; Super-GOAT re-evaluation stays open pending a PoC with a non-designer-tuned discriminator. Plan 419 ships the open compiler primitive.
