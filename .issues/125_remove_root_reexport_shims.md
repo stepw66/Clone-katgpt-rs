@@ -68,17 +68,17 @@ Plus spot-check `riir-ai` / `riir-chain` consumers compile.
 
 ## Tasks
 
-- [ ] P1.1: Rewrite katgpt-rs `benches/*.rs` imports to leaf-direct
-- [ ] P1.2: Rewrite katgpt-rs `tests/*.rs` imports to leaf-direct
-- [ ] P1.3: Rewrite katgpt-rs `examples/*.rs` imports to leaf-direct
-- [ ] P1.4: Rewrite katgpt-rs `src/**/*.rs` internal cross-module imports
-- [ ] P1.5: Rewrite riir-engine `cce_runtime/` + `arg_runtime/` imports
-- [ ] P1.6: Audit + rewrite other riir-* consumers
-- [ ] P2.1: Identify single-leaf vs cross-cutting benches
-- [ ] P2.2: Move single-leaf benches + add `[[bench]]` entries to leaf Cargo.tomls
-- [ ] P2.3: Update root `Cargo.toml` (remove moved bench entries)
-- [ ] P3.1: Delete 136 re-export shims from `src/lib.rs`
-- [ ] P4.1: `cargo check --workspace` (default features)
-- [ ] P4.2: `cargo check --workspace --all-features`
-- [ ] P4.3: riir-* consumer compile check
-- [ ] P5.1: Commit on `develop`
+- [x] P1.1: Rewrite katgpt-rs `benches/*.rs` imports to leaf-direct
+- [x] P1.2: Rewrite katgpt-rs `tests/*.rs` imports to leaf-direct
+- [x] P1.3: Rewrite katgpt-rs `examples/*.rs` imports to leaf-direct
+- [x] P1.4: Rewrite katgpt-rs `src/**/*.rs` internal cross-module imports
+- [x] P1.5: Rewrite riir-engine `cce_runtime/` + `arg_runtime/` imports
+- [x] P1.6: Audit + rewrite other riir-* consumers
+- [-] P2.1: Identify single-leaf vs cross-cutting benches — deferred: most benches are cross-cutting (span 3+ leaves + root types), see verdict below
+- [-] P2.2: Move single-leaf benches — deferred: only ~5 of 38 benches are pure single-leaf; not worth the Cargo.toml surgery across 15+ leaf crates
+- [-] P2.3: Update root `Cargo.toml` — deferred with P2.2
+- [x] P3.1: Delete 136 re-export shims from `src/lib.rs` (726 → ~240 lines)
+- [x] P4.1: `cargo check --workspace` (default features) — PASS
+- [-] P4.2: `cargo check --workspace --all-features` — pre-existing failure in katgpt-attn/gdn2/tree_forward.rs (unrelated)
+- [x] P4.3: riir-* consumer compile check — all 4 repos PASS
+- [x] P5.1: Commit on `develop` — all 5 repos committed
