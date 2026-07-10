@@ -580,6 +580,9 @@ pub fn d2f_decode_block_with_prompt_with(
 
     let mut confidence_history = Vec::with_capacity(max_steps);
     let mut converged_step = max_steps;
+    // Reusable exp scratch buffer for sample_temperatured (avoids per-position
+    // allocation in the denoising loop).
+    let mut sample_exp_buf: Vec<f32> = Vec::with_capacity(vocab);
 
     for step in 0..max_steps {
         // Zero-alloc forward pass with block-causal attention
@@ -673,6 +676,7 @@ pub fn d2f_decode_block_with_prompt_with(
                     pruner,
                     screener,
                     rng,
+                    &mut sample_exp_buf,
                 )
             } else {
                 sample_greedy(
@@ -790,6 +794,9 @@ pub fn d2f_decode_block_with_prompt_with_sampler(
 
     let mut confidence_history = Vec::with_capacity(max_steps);
     let mut converged_step = max_steps;
+    // Reusable exp scratch buffer for sample_temperatured (avoids per-position
+    // allocation in the denoising loop).
+    let mut sample_exp_buf: Vec<f32> = Vec::with_capacity(vocab);
 
     for step in 0..max_steps {
         // Zero-alloc forward pass with block-causal attention
@@ -861,6 +868,7 @@ pub fn d2f_decode_block_with_prompt_with_sampler(
                     pruner,
                     screener,
                     rng,
+                    &mut sample_exp_buf,
                 )
             } else {
                 sample_greedy(
@@ -996,6 +1004,9 @@ pub fn d2f_decode_block_with_target_with(
 
 /// Temperature-scaled sampling from valid tokens.
 /// Returns (token, probability).
+///
+/// `exp_buf` is a caller-owned scratch buffer (vocab-sized) reused across
+/// calls to avoid per-position allocation in the denoising loop.
 fn sample_temperatured(
     logits: &[f32],
     mask: usize,
@@ -1007,12 +1018,14 @@ fn sample_temperatured(
     pruner: &dyn ConstraintPruner,
     screener: &dyn ScreeningPruner,
     rng: &mut Rng,
+    exp_buf: &mut Vec<f32>,
 ) -> (usize, f32) {
     let inv_temp = 1.0 / temperature;
 
-    // Single-pass exp computation into a reusable buffer.
+    // Single-pass exp computation into the caller-provided buffer.
     // Avoids recomputing exp() in the second (sampling) pass — exp is ~10-20 cycles.
-    let mut exp_buf: Vec<f32> = Vec::with_capacity(vocab);
+    exp_buf.clear();
+    exp_buf.reserve(vocab);
     let mut scaled_sum = 0.0f32;
     for t in 0..vocab {
         if t == mask || !pruner.is_valid(depth, t, parent_tokens) {
@@ -1263,6 +1276,9 @@ impl<'a> D2fPipeline<'a> {
 
             let mut confidence_history = Vec::with_capacity(max_steps);
             let mut converged_step = max_steps;
+            // Reusable exp scratch buffer for sample_temperatured (avoids
+            // per-position allocation in the denoising loop).
+            let mut sample_exp_buf: Vec<f32> = Vec::with_capacity(vocab);
 
             for step in 0..max_steps {
                 let _seq_len_actual = forward_block_causal_with(
@@ -1313,6 +1329,7 @@ impl<'a> D2fPipeline<'a> {
                             pruner,
                             screener,
                             rng,
+                            &mut sample_exp_buf,
                         )
                     } else {
                         sample_greedy(

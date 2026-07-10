@@ -149,7 +149,6 @@ pub fn forward_dash_attn_prefill(
             if chunk_idx < summary_cache.n_chunks() {
                 for (h, buf) in chunk_keys_buf.iter().enumerate() {
                     let slot = &mut summary_cache.summaries[chunk_idx][h];
-                    slot.resize(hd, 0.0);
                     let entropy_slot = &mut summary_cache.entropy_biases[chunk_idx][h];
                     summarize_chunk_into_with_entropy(
                         summary_query,

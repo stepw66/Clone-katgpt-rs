@@ -574,12 +574,15 @@ pub struct KarcScratch {
     pub w_t: Vec<f64>,
     /// Per-sample feature row (`d_h`, f32 — only used for transient expansion).
     pub feature_row: Vec<f32>,
-    /// Sample-space Gram for the Woodbury path (`N × N`, f64).
-    pub sample_gram: Vec<f64>,
-    /// Sample-space Cholesky (`N × N`, f64).
-    pub sample_chol: Vec<f64>,
-    /// Sample-space back-substitution temp (`N × D`, f64).
-    pub sample_z: Vec<f64>,
+    /// Sample-space Gram for the Woodbury path (`N × N`, f32). Reused across
+    /// fits to avoid per-call allocation.
+    pub sample_gram: Vec<f32>,
+    /// Sample-space Cholesky (`N × N`, f32). Reused across fits.
+    pub sample_chol: Vec<f32>,
+    /// Sample-space back-substitution temp (`N × D`, f32). Reused across fits.
+    pub sample_z: Vec<f32>,
+    /// Transpose scratch for the Wᵀ→Wout layout flip (`d_h × D`, f32).
+    pub w_t_transpose: Vec<f32>,
 }
 
 impl KarcScratch {
@@ -595,6 +598,7 @@ impl KarcScratch {
             sample_gram: Vec::with_capacity(n * n),
             sample_chol: Vec::with_capacity(n * n),
             sample_z: Vec::with_capacity(n * d),
+            w_t_transpose: Vec::with_capacity(d_h * d),
         }
     }
 
@@ -609,6 +613,7 @@ impl KarcScratch {
         self.sample_gram.clear();
         self.sample_chol.clear();
         self.sample_z.clear();
+        self.w_t_transpose.clear();
     }
 }
 
@@ -651,6 +656,18 @@ pub struct LowRankFitScratch {
     pub wout_new: Vec<f64>,
     /// `AᵀA`, `r × r` f64 (built each B-step).
     pub ata: Vec<f64>,
+    /// Kronecker system `M = G ⊗ (AᵀA) + λI`, `(r·d_h)²` f64. Grown on demand
+    /// by [`low_rank_fit`] / [`low_rank_fit_b_with_frozen_a`] to avoid
+    /// re-allocating up to 184 MB per ALS iteration (forecaster path).
+    pub kron_m: Vec<f64>,
+    /// Kronecker RHS `vec(Aᵀ·Covᵀ)`, `r·d_h` f64. Grown on demand.
+    pub kron_rhs: Vec<f64>,
+    /// Kronecker Cholesky factor, `(r·d_h)²` f64. Grown on demand.
+    pub kron_chol: Vec<f64>,
+    /// Kronecker forward-sub temp, `r·d_h` f64. Grown on demand.
+    pub kron_z: Vec<f64>,
+    /// Kronecker solution temp, `r·d_h` f64. Grown on demand.
+    pub kron_x: Vec<f64>,
 }
 
 impl LowRankFitScratch {
@@ -671,6 +688,11 @@ impl LowRankFitScratch {
             wout_old: vec![0.0; d_out * d_h],
             wout_new: vec![0.0; d_out * d_h],
             ata: vec![0.0; r * r],
+            kron_m: Vec::new(),
+            kron_rhs: Vec::new(),
+            kron_chol: Vec::new(),
+            kron_z: Vec::new(),
+            kron_x: Vec::new(),
         }
     }
 }
@@ -978,13 +1000,12 @@ pub fn low_rank_fit(
         //    r*d_h × r*d_h. Re-use sk_g_lambda which is d_h*d_h — still too small.
         //    We need a dedicated rd_h*rd_h buffer.)
         let rd_h = r * d_h;
-        // Re-use rhs_eig (r*d_h ×... no, rhs_eig is r*d_h, 1D). We need rd_h*rd_h.
-        // This is the dominant allocation for the B-step. For the forecaster
-        // path (d_h ≤ 600, r ≤ 8), rd_h ≤ 4800, so rd_h² ≤ 23M f64 = 184 MB.
-        // That's borderline. For the test path (d_h=12, r=2), it's trivial.
-        // We use a growable Vec here; the forecaster path can afford it (cold
-        // path, not the forecast hot path).
-        let mut m = vec![0.0f64; rd_h * rd_h];
+        // Re-use the scratch Kronecker buffers (grown once, reused across ALS
+        // iterations). This avoids re-allocating up to 184 MB per iteration on
+        // the forecaster path (d_h ≤ 600, r ≤ 8). For the test path
+        // (d_h=12, r=2) the buffers stay tiny.
+        scratch.kron_m.resize(rd_h * rd_h, 0.0);
+        let m = &mut scratch.kron_m[..rd_h * rd_h];
         for i1 in 0..r {
             for i2 in 0..r {
                 let ata_i1i2 = scratch.ata[i1 * r + i2];
@@ -1003,20 +1024,21 @@ pub fn low_rank_fit(
         // 3. Build RHS = vec(Aᵀ·Covᵀ) (r × d_h, row-major → vec of length rd_h).
         //    (Aᵀ·Covᵀ)[i,j] = cov_a[j*r+i] (from step 0).
         //    vec(Aᵀ·Covᵀ) stacks rows: idx = i*d_h + j, value = (Aᵀ·Covᵀ)[i,j].
-        let mut rhs = vec![0.0f64; rd_h];
+        scratch.kron_rhs.resize(rd_h, 0.0);
+        let rhs = &mut scratch.kron_rhs[..rd_h];
         for i in 0..r {
             for j in 0..d_h {
                 rhs[i * d_h + j] = scratch.cov_a[j * r + i];
             }
         }
         // 4. Cholesky-solve M · vec(B) = rhs → vec(B) into b_out.
-        let mut chol_m = vec![0.0f64; rd_h * rd_h];
-        let mut z_m = vec![0.0f64; rd_h];
-        let mut x_m = vec![0.0f64; rd_h];
-        cholesky_f64(&mut chol_m, &m, rd_h);
-        chol_solve_f64(&mut x_m, &mut z_m, &chol_m, &rhs, rd_h, 1);
-        // 5. Unpack vec(B) → B (r × d_h, row-major: b_out[k*d_h+j] = x_m[k*d_h+j]).
-        b_out[..rd_h].copy_from_slice(&x_m[..rd_h]);
+        scratch.kron_chol.resize(rd_h * rd_h, 0.0);
+        scratch.kron_z.resize(rd_h, 0.0);
+        scratch.kron_x.resize(rd_h, 0.0);
+        cholesky_f64(&mut scratch.kron_chol, &scratch.kron_m, rd_h);
+        chol_solve_f64(&mut scratch.kron_x, &mut scratch.kron_z, &scratch.kron_chol, &scratch.kron_rhs, rd_h, 1);
+        // 5. Unpack vec(B) → B (r × d_h, row-major: b_out[k*d_h+j] = kron_x[k*d_h+j]).
+        b_out[..rd_h].copy_from_slice(&scratch.kron_x[..rd_h]);
 
         // ── Scale balancing (anti-drift) ──
         // Without balancing, ALS for bilinear ridge has a gauge freedom
@@ -1176,8 +1198,9 @@ pub fn low_rank_fit_b_with_frozen_a(
         }
     }
     // 2. Build the Kronecker system M = G ⊗ (AᵀA) + λI (rd_h × rd_h).
-    //    Same dominant allocation as one ALS B-step (see low_rank_fit comment).
-    let mut m = vec![0.0f64; rd_h * rd_h];
+    //    Uses the shared Kronecker scratch buffers (grown once).
+    scratch.kron_m.resize(rd_h * rd_h, 0.0);
+    let m = &mut scratch.kron_m[..rd_h * rd_h];
     for i1 in 0..r {
         for i2 in 0..r {
             let ata_i1i2 = scratch.ata[i1 * r + i2];
@@ -1194,20 +1217,21 @@ pub fn low_rank_fit_b_with_frozen_a(
         }
     }
     // 3. Build RHS = vec(Aᵀ·Covᵀ) (r × d_h, row-major → vec of length rd_h).
-    let mut rhs = vec![0.0f64; rd_h];
+    scratch.kron_rhs.resize(rd_h, 0.0);
+    let rhs = &mut scratch.kron_rhs[..rd_h];
     for i in 0..r {
         for j in 0..d_h {
             rhs[i * d_h + j] = scratch.cov_a[j * r + i];
         }
     }
     // 4. Cholesky-solve M · vec(B) = rhs → vec(B) into b_out.
-    let mut chol_m = vec![0.0f64; rd_h * rd_h];
-    let mut z_m = vec![0.0f64; rd_h];
-    let mut x_m = vec![0.0f64; rd_h];
-    cholesky_f64(&mut chol_m, &m, rd_h);
-    chol_solve_f64(&mut x_m, &mut z_m, &chol_m, &rhs, rd_h, 1);
+    scratch.kron_chol.resize(rd_h * rd_h, 0.0);
+    scratch.kron_z.resize(rd_h, 0.0);
+    scratch.kron_x.resize(rd_h, 0.0);
+    cholesky_f64(&mut scratch.kron_chol, &scratch.kron_m, rd_h);
+    chol_solve_f64(&mut scratch.kron_x, &mut scratch.kron_z, &scratch.kron_chol, &scratch.kron_rhs, rd_h, 1);
     // 5. Unpack vec(B) → B (r × d_h, row-major).
-    b_out[..rd_h].copy_from_slice(&x_m[..rd_h]);
+    b_out[..rd_h].copy_from_slice(&scratch.kron_x[..rd_h]);
     // NOTE: no scale rebalancing here — A is frozen, so rebalancing would
     // change A (forbidden). The caller accepts A_frozen's scale as-is.
 }
@@ -1580,7 +1604,10 @@ impl<B: KarcBasis<M>, const D: usize, const M: usize, const K: usize> KarcForeca
         let s = &mut self.scratch;
         s.clear();
         // Sample Gram = X Xᵀ, N × N (f32 — sample count is small here).
-        let mut sample_gram_f32 = vec![0.0f32; n * n];
+        // Reuse the pre-allocated scratch buffers (grown on demand, then reused
+        // across fits) instead of allocating 4 fresh Vecs per call.
+        s.sample_gram.resize(n * n, 0.0);
+        let sample_gram_f32 = &mut s.sample_gram[..n * n];
         for i in 0..n {
             let row_i = &self.features_buf[i * d_h..(i + 1) * d_h];
             for j in 0..n {
@@ -1591,8 +1618,8 @@ impl<B: KarcBasis<M>, const D: usize, const M: usize, const K: usize> KarcForeca
         for i in 0..n {
             sample_gram_f32[i * n + i] += lambda;
         }
-        let mut sample_chol_f32 = vec![0.0f32; n * n];
-        let mut sample_z_f32 = vec![0.0f32; n * D];
+        s.sample_chol.resize(n * n, 0.0);
+        s.sample_z.resize(n * D, 0.0);
         let w_t_len = d_h * D;
         self.wout.clear();
         self.wout.resize(w_t_len, 0.0);
@@ -1602,9 +1629,9 @@ impl<B: KarcBasis<M>, const D: usize, const M: usize, const K: usize> KarcForeca
             let w_t = &mut self.wout[..w_t_len];
             ridge_solve_woodbury_f32(
                 w_t,
-                &mut sample_chol_f32,
-                &mut sample_z_f32,
-                &sample_gram_f32,
+                &mut s.sample_chol,
+                &mut s.sample_z,
+                &s.sample_gram,
                 y,
                 x,
                 n,
@@ -1612,12 +1639,13 @@ impl<B: KarcBasis<M>, const D: usize, const M: usize, const K: usize> KarcForeca
                 D,
             );
         }
-        // Transpose Wᵀ (d_h × D) → Wout (D × d_h).
-        let w_t_copy: Vec<f32> = self.wout[..w_t_len].to_vec();
+        // Transpose Wᵀ (d_h × D) → Wout (D × d_h) via a scratch copy.
+        s.w_t_transpose.clear();
+        s.w_t_transpose.extend_from_slice(&self.wout[..w_t_len]);
         self.wout.resize(D * d_h, 0.0);
         for r in 0..D {
             for c in 0..d_h {
-                self.wout[r * d_h + c] = w_t_copy[c * D + r];
+                self.wout[r * d_h + c] = s.w_t_transpose[c * D + r];
             }
         }
         Ok(())
@@ -2124,6 +2152,37 @@ mod tests {
         let mut f: F = KarcForecaster::with_capacity(ChebyshevBasis::new(), 4);
         let err = f.fit_ridge(1e-6).unwrap_err();
         assert_eq!(err, FitError::NoSamples);
+    }
+
+    #[test]
+    fn forecaster_fit_woodbury_path_forecasts_linear_map() {
+        // Force the Woodbury sample-space path: d_h (D*M*K = 2*3*1 = 6) > n (4).
+        // Verifies the reused scratch buffers (sample_gram/sample_chol/sample_z/
+        // w_t_transpose) produce correct forecasts after the zero-alloc refactor.
+        type F = KarcForecaster<ChebyshevBasis<3>, 2, 3, 1>;
+        let mut f: F = KarcForecaster::with_capacity(ChebyshevBasis::new(), 8);
+        // 4 samples (n=4 < d_h=6 → Woodbury path).
+        for i in 0..4 {
+            let x = (i as f32) * 0.3 - 0.5;
+            let delay = [x, x + 0.1];
+            let target = [2.0 * x, 3.0 * x];
+            f.accumulate_pair(&delay, &target);
+        }
+        f.fit_ridge(1e-3).unwrap();
+        assert!(f.is_fitted());
+        let mut out = [0.0f32; 2];
+        assert!(f.forecast_into(&[0.2, 0.3], &mut out));
+        // The fit should approximate the linear map target ≈ [2*0.2, 3*0.2] = [0.4, 0.6].
+        assert!(
+            approx_eq(out[0], 0.4, 0.15),
+            "woodbury forecast[0] at x=0.2: {} (expected ~0.4)",
+            out[0]
+        );
+        assert!(
+            approx_eq(out[1], 0.6, 0.15),
+            "woodbury forecast[1] at x=0.2: {} (expected ~0.6)",
+            out[1]
+        );
     }
 
     // ── Phase 2 tests (Plan 308 T2.1–T2.5) ──

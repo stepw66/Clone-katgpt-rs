@@ -200,16 +200,21 @@ impl FuncAttnWeightsSnapshot {
     }
 }
 
-/// Hash a `&[f32]` slice by streaming each element's little-endian bytes.
+/// Hash a `&[f32]` slice by streaming its contiguous little-endian bytes
+/// in a single BLAKE3 absorb.
 ///
 /// Length-prefixing (u64 LE) prevents collision between e.g. `[1.0]` and
-/// `[1.0, 0.0]`-prefix-of-longer.
+/// `[1.0, 0.0]`-prefix-of-longer. The contiguous absorb mirrors the
+/// `hash_scales` pattern in `static_cal.rs`; it is byte-identical to the
+/// prior per-element form on little-endian targets (f32 has no padding),
+/// so commitments stay consistent within a build.
 #[inline]
 fn hash_f32_slice(hasher: &mut blake3::Hasher, xs: &[f32]) {
     hasher.update(&(xs.len() as u64).to_le_bytes());
-    for x in xs {
-        hasher.update(&x.to_le_bytes());
-    }
+    let bytes: &[u8] = unsafe {
+        std::slice::from_raw_parts(xs.as_ptr() as *const u8, std::mem::size_of_val(xs))
+    };
+    hasher.update(bytes);
 }
 
 /// Atomic hot-swap store for FUNCATTN weight snapshots.
