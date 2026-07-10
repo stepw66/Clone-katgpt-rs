@@ -95,9 +95,10 @@ independently useful**:
 
 | Dependency | Status | Blocking? |
 |---|---|---|
-| `spectral_rewire` primitive (Plan 423) | 🚧 OPEN (this plan session) | **YES** — the on-manifold projection must exist |
+| `spectral_rewire` primitive (Plan 423) | ✅ LANDED (opt-in; mechanism gates pass) | No — on-manifold projection exists |
 | `off_principal` / `SparseTaskVector` (Plan 264) | ✅ COMPLETE, default-on | No — already shipped |
 | Real weight deltas to decompose | ❓ No consumer produces freeze/thaw deltas yet | **YES for validation** — need a real delta source |
+| **Spectral concentration on real deltas** | ❓ UNVALIDATED — G1b shows random deltas are NOT concentrated (0.12–0.18) | **YES — the make-or-break** |
 
 The validation cannot proceed until Plan 423 lands AND a real delta source exists
 (a freeze/thaw pipeline that produces ΔW, or a LoRA overlay that produces BA).
@@ -106,9 +107,12 @@ The validation cannot proceed until Plan 423 lands AND a real delta source exist
 
 ## Tasks (tracking only — no impl until dependencies land)
 
-- [-] **T1** (deferred) When Plan 423 (`spectral_rewire`) lands and passes its
-  GOAT gate, write the PoC: decompose synthetic + real deltas, measure
-  distinctness (spectral profile divergence between ΔW_on and ΔW_off).
+- [-] **T1** (deferred) ~~When Plan 423 (`spectral_rewire`) lands and passes its
+  GOAT gate~~ — **Plan 423 LANDED (2026-07-10), mechanism gates pass.** The
+  remaining blocker is concentration on REAL deltas (G1b shows random deltas
+  are NOT concentrated at 0.12–0.18). PoC is blocked on a real delta source.
+  When one exists, decompose it and measure distinctness (spectral profile
+  divergence between ΔW_on and ΔW_off).
 - [-] **T2** (deferred) When a freeze/thaw delta source exists in riir-neuron-db
   (producing real ΔW = W_frozen − W_base), run the decomposition on real
   personality deltas. Check whether the on-manifold component captures
@@ -127,10 +131,14 @@ The validation cannot proceed until Plan 423 lands AND a real delta source exist
 
 | Scenario | Outcome | Action |
 |---|---|---|
-| G1 (Plan 423) fails — no spectral concentration at NPC scale | Fusion B is moot — if on-manifold projection is meaningless, decomposition is meaningless | Close this issue, note in Plan 423 |
-| G1 passes, but on/off components are statistically identical | Decomposition adds no value (no semantic distinction) | Close this issue, keep SAR as standalone |
-| G1 passes, components are distinct, but only one is useful | Partial win — use the useful component only | Downgrade to single-component usage, close issue |
-| G1 passes, both components distinct + independently useful | **Super-GOAT** — unified decomposition API | Open implementation plan (T4) |
+| Real deltas are NOT concentrated (on_manifold_fraction < 0.5) | Fusion B is moot — if on-manifold projection captures little energy, decomposition captures little | Close this issue; SAR stays a niche cold-tier tool |
+| Real deltas ARE concentrated, but on/off components are statistically identical | Decomposition adds no value (no semantic distinction) | Close this issue, keep SAR as standalone |
+| Real deltas concentrated, components distinct, but only one is useful | Partial win — use the useful component only | Downgrade to single-component usage, close issue |
+| Real deltas concentrated, both components distinct + independently useful | **Super-GOAT** — unified decomposition API | Open implementation plan (T4) |
+
+**G1b baseline (2026-07-10):** random deltas are NOT concentrated (0.12–0.18).
+The decision hinges entirely on whether REAL deltas behave differently — which
+is an empirical question that cannot be answered without a real delta source.
 
 ---
 

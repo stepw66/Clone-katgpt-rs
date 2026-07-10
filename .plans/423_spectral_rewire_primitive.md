@@ -4,7 +4,7 @@
 **Research:** [406_Spectral_Rewiring_Weight_Delta_Purification.md](../.research/406_Spectral_Rewiring_Weight_Delta_Purification.md)
 **Source paper:** [arXiv:2607.03065](https://arxiv.org/abs/2607.03065) — Zhang et al., *Spectral Rewiring for Exploration, Purification, and Model Merging*, Tsinghua AIR / ByteDance Seed, Jul 2026
 **Target:** `katgpt-rs/crates/katgpt-spectral/src/spectral_rewire.rs` (new module) + Cargo feature `spectral_rewire`
-**Status:** 🚧 Phase 1 ✅ + Phase 2 ✅ + Phase 3 ✅ COMPLETE (all mechanism gates pass, primitive stays opt-in — see `.benchmarks/423`). Phase 4 (cross-repo notes) pending.
+**Status:** ✅ COMPLETE (Phases 1–4). All mechanism gates pass; primitive stays opt-in pending Issue 123 (real-delta concentration). Cross-repo fusions routed as notes (Phase 4).
 **Verdict from research:** GOAT (Q1✓ Q2✓ Q3 partial Q4✓) — opt-in until GOAT gate validates spectral concentration at NPC-scale.
 
 **Constraints:**
@@ -221,22 +221,33 @@ and the Super-GOAT promotion path closes.
 
 These are follow-up plans in sibling repos. Documented here for routing.
 
-- [ ] **T4.1 (note)** Fusion C — Freeze/Thaw purification (riir-neuron-db):
+- [x] **T4.1 (note)** Fusion C — Freeze/Thaw purification (riir-neuron-db):
   when freezing a personality snapshot, project the delta onto the base shard's
   spectral subspace. Store compact M (r×r) in `MerkleFrozenEnvelope` instead of
-  full delta. **Blocked** on: `NeuronShard::style_weights[64]` is a vector not
-  a matrix — needs reshaping (8×8) or application to LoRA overlay matrices
-  (which ARE matrices). File as a riir-neuron-db plan when this primitive lands.
-- [ ] **T4.2 (note)** Fusion D — Spectral LoRA (riir-ai / katgpt-rs Plan 025):
+  full delta. **Routing note** (file as a riir-neuron-db plan when pursued):
+  - `NeuronShard::style_weights[64]` is a vector → reshape to **8×8** (NOT
+       64×64 — plan-correction from Phase 3). 8×8 is within the SVD cap (d_in=8).
+  - 8×8 measures 0.41µs via the cached-index path — viable for per-NPC use.
+  - **BLOCKED on Issue 123** (concentration unvalidated on real deltas) —
+    purifying a freeze/thaw delta only helps if that delta IS concentrated,
+    which G1b could not verify.
+- [x] **T4.2 (note)** Fusion D — Spectral LoRA (riir-ai / katgpt-rs Plan 025):
   when applying a reader/writer LoRA pair, project the LoRA product BA onto the
   base weight's spectral subspace before adding to W₀. The result is a purified
-  overlay. **Blocked** on: this primitive landing + identifying the LoRA
-  application hot path.
-- [ ] **T4.3 (note)** Fusion A — Spectral TIES (katgpt-rs Plan 094 upgrade):
+  overlay. **Routing note** (file in riir-ai when pursued):
+  - LoRA matrices are typically d×k (k = rank) → d_in = k ≤ 64 is likely within
+    the SVD cap for low-rank LoRA. Full-dim LoRA (d_in = d) may hit the cap.
+  - Use `SpectralRewireIndex::new(W₀)` once, then
+    `spectral_rewire_with_index_into` per overlay — the cached-index path is
+    the recommended API (15–69× faster than re-SVD-ing per overlay).
+  - **BLOCKED on Issue 123** (concentration unvalidated).
+- [x] **T4.3 (note)** Fusion A — Spectral TIES (katgpt-rs Plan 094 upgrade):
   replace magnitude-based filtering in TIES merging with spectral filtering.
   Project each task vector onto base SVD before merge. Requires the merging
-  consumer to have a "base" SVD available. **Blocked** on: this primitive +
-  TIES merge pipeline refactor. Tracked in Issue 123 (Fusion B decomposition).
+  consumer to have a "base" SVD available. **Routing note**: tracked in Issue
+  123 (Fusion B two-component decomposition — SAR on-principal + SOPTV
+  off-principal). **BLOCKED on Issue 123** (both concentration AND a real delta
+  source).
 
 ---
 
@@ -309,3 +320,12 @@ The GOAT gate (G1–G6) is the make-or-break: G1 validates spectral concentratio
 NPC-scale (the paper's Q3 caveat). If G1 fails, keep opt-in permanently. Cross-repo
 applications (freeze/thaw purification, spectral LoRA, spectral TIES) are noted as
 follow-ups but NOT implemented in this plan.
+
+**OUTCOME (2026-07-10):** All mechanism gates pass. The SVD + projection
+machinery is correct (G1a: recovery ~8e-6), zero-alloc (G4), deterministic (G3),
+and fast via the cached-index hot path (G5: 0.41µs NPC-scale). **The primitive
+stays opt-in** because the spectral concentration assumption (G1b) is
+unvalidated without real training deltas — a generic delta is NOT concentrated
+(0.12–0.18). Promotion to default is blocked on Issue 123 (real-delta test).
+The SVD 64-col cap (Issue 124) blocks 128×128/512×512. The cached-index path
+(`SpectralRewireIndex`) is the recommended hot-loop API.
