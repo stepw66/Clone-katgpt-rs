@@ -633,6 +633,7 @@ impl RegimeTransitionScheduler {
     }
 
     /// Enable or disable background deferral mode.
+    #[inline]
     pub fn set_background_mode(&mut self, enabled: bool) {
         self.background_enabled = enabled;
     }

@@ -865,6 +865,7 @@ impl TvpThresholdAdapter {
     }
 
     /// Override observation count (for freeze/thaw restoration only).
+    #[inline]
     pub fn override_observations(&mut self, n: u64) {
         self.observations = n;
     }

@@ -775,6 +775,7 @@ mod tests {
             }
             PredictiveOutput::from_samples(samples)
         }
+        #[inline]
         fn observe(&mut self, y: f32) {
             self.last_y = y;
         }

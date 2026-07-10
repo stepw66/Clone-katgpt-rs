@@ -740,6 +740,7 @@ impl SpectralQuantKVCache {
     }
 
     /// Set the current write position.
+    #[inline]
     pub fn set_pos(&mut self, pos: usize) {
         self.pos = pos;
     }

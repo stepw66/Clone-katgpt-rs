@@ -171,6 +171,7 @@ impl D2fContext {
     /// Commit KV cache entries for positions `[0..len)`.
     /// After calling this, subsequent forward passes will skip KV computation
     /// for these positions.
+    #[inline]
     pub fn commit(&mut self, len: usize) {
         self.committed_len = len;
     }

@@ -509,6 +509,7 @@ impl SketchEntry {
     }
 
     /// Update Elo rating.
+    #[inline]
     pub fn update_elo(&mut self, new_elo: f64) {
         self.elo_rating = new_elo;
     }

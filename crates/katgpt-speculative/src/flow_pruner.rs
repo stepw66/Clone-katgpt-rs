@@ -90,6 +90,7 @@ impl<P: ScreeningPruner> FlowPruner<P> {
     ///
     /// Call this before each DDTree build to refresh stop probs.
     /// For each depth, extract the EOS token probability or use entropy proxy.
+    #[inline]
     pub fn set_stop_probs(&mut self, stop_probs: Vec<f32>) {
         self.stop_probs = stop_probs;
     }

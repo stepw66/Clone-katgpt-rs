@@ -483,6 +483,7 @@ impl RtTurboCache {
     ///
     /// Stores the selected indices for potential reuse in subsequent
     /// decode steps (until KV cache shifts invalidate them).
+    #[inline]
     pub fn update_selected_indices(&mut self, indices: Vec<Vec<usize>>) {
         self.last_selected_indices = indices;
     }

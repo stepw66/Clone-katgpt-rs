@@ -178,6 +178,7 @@ impl<P: ConstraintPruner, L: EpisodeLookup, S: ConstraintSynthesizer> EpisodePru
     ///
     /// Call this before each generation pass. The hash is used to look up
     /// reference solutions in the episode DB.
+    #[inline]
     pub fn set_prompt(&mut self, hash: u64) {
         self.current_prompt_hash = hash;
     }

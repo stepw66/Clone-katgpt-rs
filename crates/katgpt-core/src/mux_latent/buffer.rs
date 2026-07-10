@@ -224,6 +224,7 @@ impl LatentContextBuffer {
     }
 
     /// Set the eviction policy.
+    #[inline]
     pub fn set_eviction_policy(&mut self, policy: EvictionPolicy) {
         self.eviction_policy = policy;
     }

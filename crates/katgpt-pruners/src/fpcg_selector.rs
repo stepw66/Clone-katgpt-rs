@@ -176,6 +176,7 @@ where
 
     /// Replace the steering direction at runtime (e.g. switch from
     /// "encourage refusal" to "discourage refusal"). Cheap — no reallocation.
+    #[inline]
     pub fn set_direction(&mut self, direction: SteeringDirection) {
         self.direction = direction;
     }

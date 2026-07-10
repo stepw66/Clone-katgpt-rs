@@ -75,6 +75,7 @@ impl GoState {
     }
 
     /// Set komi to a new value.
+    #[inline]
     pub fn set_komi(&mut self, komi: f32) {
         self.komi = komi;
     }

@@ -364,6 +364,7 @@ impl ThinkingController {
     ///
     /// Low trust (< 0.4) biases toward thinking modes.
     /// High trust (> 0.8) biases toward direct mode.
+    #[inline]
     pub fn set_trust_signal(&mut self, trust: f32) {
         self.trust_signal = trust;
     }

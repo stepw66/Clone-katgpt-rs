@@ -812,6 +812,7 @@ impl<P: ScreeningPruner> BanditPruner<P> {
     ///
     /// Arms with Q-value below `cutoff` get relevance = 0.0 (hard masked).
     /// Set to 0.0 to disable (default, backward-compatible).
+    #[inline]
     pub fn set_dual_cutoff(&mut self, cutoff: f32) {
         self.dual_cutoff = cutoff;
     }

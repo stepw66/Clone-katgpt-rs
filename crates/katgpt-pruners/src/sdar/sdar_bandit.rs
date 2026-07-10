@@ -279,6 +279,7 @@ impl<P: ScreeningPruner> SdarBanditPruner<P> {
     /// Set β (sigmoid sharpness).
     ///
     /// Can be adjusted at runtime for adaptive gating experiments.
+    #[inline]
     pub fn set_beta(&mut self, beta: f32) {
         self.beta = beta;
     }

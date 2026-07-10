@@ -443,6 +443,7 @@ impl DeltaMemoryState {
     }
 
     /// Set the surprise threshold θ_surprise.
+    #[inline]
     pub fn set_theta_surprise(&mut self, theta: f32) {
         self.theta_surprise = theta;
     }

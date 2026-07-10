@@ -382,6 +382,7 @@ impl IsoQuantKVCache {
     }
 
     /// Set current position (for manual position management).
+    #[inline]
     pub fn set_pos(&mut self, pos: usize) {
         self.pos = pos;
     }

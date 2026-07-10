@@ -67,6 +67,7 @@ impl<P: ScreeningPruner> EpiplexityScreeningPruner<P> {
     }
 
     /// Set the final converged loss for epiplexity computation.
+    #[inline]
     pub fn set_final_loss(&mut self, final_loss: f32) {
         self.final_loss = final_loss;
     }
@@ -77,6 +78,7 @@ impl<P: ScreeningPruner> EpiplexityScreeningPruner<P> {
     }
 
     /// Record per-position loss drops for LossDrop weighting mode.
+    #[inline]
     pub fn set_position_drops(&mut self, drops: Vec<f32>) {
         self.position_drops = drops;
     }

@@ -730,6 +730,7 @@ impl ShardKVCache {
     ///
     /// All subsequent `store_value` calls will use 8-bit decode streaming
     /// (guaranteed lossless) instead of VQ (lossy but compact).
+    #[inline]
     pub fn mark_prefill_done(&mut self, pos: usize) {
         self.prefill_len = pos;
     }
@@ -741,6 +742,7 @@ impl ShardKVCache {
     }
 
     /// Set the current write position.
+    #[inline]
     pub fn set_pos(&mut self, pos: usize) {
         self.pos = pos;
     }

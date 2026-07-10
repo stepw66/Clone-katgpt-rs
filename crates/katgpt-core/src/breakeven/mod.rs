@@ -381,6 +381,7 @@ impl BreakevenBandit {
     }
 
     /// Set transition sharpness (higher = sharper tier boundary).
+    #[inline]
     pub fn set_transition_sharpness(&mut self, sharpness: f64) {
         self.transition_sharpness = sharpness;
     }

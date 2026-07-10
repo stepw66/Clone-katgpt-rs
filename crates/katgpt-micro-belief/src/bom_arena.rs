@@ -619,6 +619,7 @@ impl ArenaEnvironment for SyntheticThreatArena {
         &self.obs
     }
 
+    #[inline]
     fn apply_action(&mut self, action: ArenaAction) {
         self.last_action = action;
     }
