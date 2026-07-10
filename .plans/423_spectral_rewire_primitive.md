@@ -4,7 +4,7 @@
 **Research:** [406_Spectral_Rewiring_Weight_Delta_Purification.md](../.research/406_Spectral_Rewiring_Weight_Delta_Purification.md)
 **Source paper:** [arXiv:2607.03065](https://arxiv.org/abs/2607.03065) — Zhang et al., *Spectral Rewiring for Exploration, Purification, and Model Merging*, Tsinghua AIR / ByteDance Seed, Jul 2026
 **Target:** `katgpt-rs/crates/katgpt-spectral/src/spectral_rewire.rs` (new module) + Cargo feature `spectral_rewire`
-**Status:** 🚧 Phase 1 ✅ COMPLETE (T1.1–T1.7, 7/7 tests pass, `9df7cdbd`+impl). Phase 2–4 pending.
+**Status:** 🚧 Phase 1 ✅ COMPLETE + Phase 2 ✅ COMPLETE (T2.1–T2.3, 11/11 lib tests + 1 doc-test pass). Phase 3–4 pending.
 **Verdict from research:** GOAT (Q1✓ Q2✓ Q3 partial Q4✓) — opt-in until GOAT gate validates spectral concentration at NPC-scale.
 
 **Constraints:**
@@ -153,17 +153,28 @@ access pattern in this crate.
 
 ### Tasks
 
-- [ ] **T2.1** Implement `rewiring_matrix_diagnostics(m: &[f32], rank: usize)`
+- [x] **T2.1** Implement `rewiring_matrix_diagnostics(m: &[f32], rank: usize)`
   → `RewiringDiagnostics`:
   - `diagonal_energy`: Σᵢ M[i][i]² / Σᵢⱼ M[i][j]² — fraction of rewiring energy
     on the diagonal (in-skill modulation vs cross-skill rewiring).
   - `off_diagonal_energy`: 1 − diagonal_energy.
-  - `spectral_norm_estimate`: largest |M[i][i]| (diagonal dominance proxy).
-  - `rewiring_sparsity`: fraction of off-diagonal |M[i][j]| below a threshold.
-- [ ] **T2.2** Unit test: diagnostics on identity-M (all diagonal, no rewiring)
-  → diagonal_energy = 1.0; on pure off-diagonal M → diagonal_energy = 0.0.
-- [ ] **T2.3** Doc-test: show before/after — a noisy delta with known on-manifold
-  component, demonstrate on_manifold_fraction and the rewiring matrix structure.
+  - `spectral_norm_estimate`: matrix ∞-norm `max_i Σ_j |M[i][j]|` (standard
+    `‖M‖₂` upper bound; tighter than the raw diagonal max originally proposed,
+    same O(r²) cost, still allocation-free).
+  - `rewiring_sparsity`: fraction of off-diagonal `|M[i][j]|` below a relative
+    threshold (`rel_threshold · max|M|`, default 1%).
+  - Also added `rewiring_matrix_diagnostics_with_threshold` for a tunable
+    threshold (open/closed principle; the primary fn delegates with the default).
+- [x] **T2.2** Unit tests: identity-M → `diagonal_energy = 1.0`, `sparsity = 1.0`;
+  pure off-diagonal M → `diagonal_energy = 0.0`, `sparsity = 0.0`. Added a third
+  mixed + edge-case test (all-zero M → zeroed diagnostics; rank-1 → vacuous
+  sparsity = 1.0; threshold sweep; rank-0 / wrong-length panic). **3/3 pass.**
+- [x] **T2.3** Doc-test: mixed-structure rewiring matrix with strong diagonal
+  + cross-skill links, asserts `diagonal_energy > 0.9`, energy sum invariant,
+  and ∞-norm value. Plus an integration unit test running `spectral_rewire`
+  on a synthetic diagonal-M_true on-manifold delta and verifying the recovered
+  `rewiring_matrix` is diagonal-dominant (`diagonal_energy > 0.95`) with
+  `on_manifold_fraction > 0.999`. **1 doc-test + 1 integration test pass.**
 
 ---
 
