@@ -1610,6 +1610,11 @@ pub fn d2f_decode_block_soft(
     let mut confidences = vec![0.0f32; block_len];
     let mut prev_top1: Option<Vec<usize>> = None;
 
+    // Reusable per-step scratch buffers — hoisted outside the denoising loop
+    // to avoid allocating `current_top1` and `masked_positions` every step.
+    let mut current_top1: Vec<usize> = vec![0usize; block_len];
+    let mut masked_positions: Vec<usize> = Vec::with_capacity(block_len);
+
     let max_steps = decode_config.denoise_steps;
 
     for step_idx in 0..max_steps {
@@ -1618,7 +1623,8 @@ pub fn d2f_decode_block_soft(
         let seq_len = forward_block_causal_with(ctx, weights, &tokens, config, block_len);
 
         // Sample top-1 and confidence for each position
-        let mut current_top1 = vec![0usize; block_len];
+        // (current_top1 is reused from the hoisted buffer; cleared+refilled)
+        current_top1.fill(0);
         for pos in 0..seq_len.min(block_len) {
             let logit_off = pos * vocab_size;
             let logit_end = logit_off + vocab_size;
@@ -1648,9 +1654,13 @@ pub fn d2f_decode_block_soft(
             confidences[pos] = conf;
         }
 
-        // Collect currently masked positions
-        let masked_positions: Vec<usize> =
-            (0..block_len).filter(|&p| tokens[p] == mask_id).collect();
+        // Collect currently masked positions into the hoisted buffer
+        masked_positions.clear();
+        for p in 0..block_len {
+            if tokens[p] == mask_id {
+                masked_positions.push(p);
+            }
+        }
 
         // Promote positions: contiguous prefix or all-above-threshold
         if soft_config.contiguous_prefix {
@@ -1698,7 +1708,11 @@ pub fn d2f_decode_block_soft(
             }
         }
 
-        prev_top1 = Some(current_top1);
+        // Swap: current_top1 becomes prev_top1 for next iteration.
+        // We need a fresh buffer for the next iteration's current_top1, so
+        // move the old prev_top1 (if any) back into current_top1 and reuse it.
+        let prev = prev_top1.replace(core::mem::take(&mut current_top1));
+        current_top1 = prev.unwrap_or_else(|| vec![0usize; block_len]);
     }
 
     // Fill any remaining masked positions with final predictions
