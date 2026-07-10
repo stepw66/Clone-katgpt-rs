@@ -113,6 +113,24 @@ The validation cannot proceed until Plan 423 lands AND a real delta source exist
   are NOT concentrated at 0.12–0.18). PoC is blocked on a real delta source.
   When one exists, decompose it and measure distinctness (spectral profile
   divergence between ΔW_on and ΔW_off).
+  
+  **Modelless diagnostic landed (2026-07-10):** two tests validate the
+  MEASUREMENT and SEPARATION mechanism without real deltas:
+  - `concentration_measurement_calibrated_for_mixed_deltas` — constructs deltas
+    with known on/off mixing ratios (α=0.25/0.5/0.75) and verifies the measured
+    `on_manifold_fraction` matches theory within 3%. Self-calibrates against the
+    incidental alignment floor (random delta at d=16, r=4 has fraction ≈ 0.28,
+    NOT 0, due to r²/(d·d) alignment).
+  - `two_component_separation_recovers_known_components` — constructs a delta
+    with orthogonal on/off components, verifies delta_star matches the
+    on-manifold component (rel err < 5%) and recomposition holds (< 1e-4).
+  
+  **Verdict:** the primitive correctly MEASURES concentration and SEPARATES
+  components. The make-or-break is whether REAL TRAINED deltas are concentrated.
+  This is genuinely blocked on riir-train — no trained weight files exist in
+  any of the 5 repos (`*.lora` search: empty). All modelless delta sources
+  (freeze/thaw, random LoRA, consolidation weight_delta) produce UNTRAINED
+  deltas, which are NOT concentrated.
 - [-] **T2** (deferred) When a freeze/thaw delta source exists in riir-neuron-db
   (producing real ΔW = W_frozen − W_base), run the decomposition on real
   personality deltas. Check whether the on-manifold component captures

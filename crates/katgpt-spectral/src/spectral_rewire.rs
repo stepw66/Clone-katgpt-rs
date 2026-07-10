@@ -1221,4 +1221,186 @@ mod tests {
         assert!((0.0..=1.0).contains(&d.rewiring_sparsity));
         assert!(d.spectral_norm_estimate > 0.0);
     }
+
+    // ── Issue 123 modelless diagnostic: concentration measurement calibration ─
+    //
+    // The make-or-break for Issue 123 (Fusion B promotion) is whether REAL
+    // training deltas are concentrated. That requires riir-train (no trained
+    // weights exist in the 5-repo quintet). But we CAN validate the MEASUREMENT
+    // is trustworthy: construct deltas with KNOWN on/off mixing ratios and
+    // verify the primitive measures the correct fraction. When real deltas
+    // eventually arrive, this test guarantees the diagnostic is calibrated.
+    //
+    // Note: `on_manifold_fraction` = ‖ΔW*‖_F / ‖ΔW‖_F (a NORM ratio, the sqrt
+    // of the energy ratio). For a random delta at d_out=d_in=16, r=4, the
+    // incidental alignment is √(r²/(d·d)) = √(16/256) = 0.25 — not zero.
+    #[test]
+    fn concentration_measurement_calibrated_for_mixed_deltas() {
+        let d_out = 16;
+        let d_in = 16;
+        let r = 4;
+        let mut rng = make_rng(23456);
+        let w0 = rand_matrix(&mut rng, d_out, d_in);
+
+        // SVD of W₀ to construct a genuinely on-manifold component.
+        let mut svd_result = katgpt_core::SvdResultScratch::with_capacity(d_out, d_in);
+        let mut svd_work = katgpt_core::SvdScratch::with_capacity(d_in, d_out);
+        katgpt_core::thin_svd_into(&w0, d_out, d_in, &mut svd_result, &mut svd_work);
+
+        // On-manifold component: ΔW_on = U_r · diag(1..r) · V_rᵀ.
+        let mut delta_on = vec![0.0_f32; d_out * d_in];
+        for i in 0..d_out {
+            for j in 0..d_in {
+                let mut acc = 0.0;
+                for k in 0..r {
+                    let u_k = svd_result.left_singular_vector(k);
+                    let v_k = svd_result.right_singular_vector(k);
+                    acc += u_k[i] * ((k + 1) as f32) * v_k[j];
+                }
+                delta_on[i * d_in + j] = acc;
+            }
+        }
+
+        // Off-manifold component: random delta (NOT aligned with W₀'s subspace).
+        let delta_off = rand_matrix(&mut rng, d_out, d_in);
+
+        // Self-calibrate: measure the incidental on-manifold energy of the pure
+        // off-manifold component. This accounts for the r²/(d·d) alignment floor.
+        let mut scratch = SpectralRewireScratch::with_capacity(d_out, d_in, r);
+        let out_off = spectral_rewire_into(&w0, &delta_off, d_out, d_in, r, &mut scratch);
+        let frac_off = out_off.on_manifold_fraction; // ≈ √(r²/(d·d)) ≈ 0.25
+
+        // Pure on-manifold should be ≈ 1.0.
+        let out_on = spectral_rewire_into(&w0, &delta_on, d_out, d_in, r, &mut scratch);
+        assert!(out_on.on_manifold_fraction > 0.999,
+            "pure on-manifold should be ≈1.0, got {}", out_on.on_manifold_fraction);
+
+        // Energies.
+        let e_on: f32 = delta_on.iter().map(|v| v * v).sum();
+        let e_off: f32 = delta_off.iter().map(|v| v * v).sum();
+
+        // For each mixing ratio α, the expected on_manifold_fraction (norm ratio):
+        //   fraction = sqrt( (α²·e_on + (1-α)²·e_off·frac_off²) / (α²·e_on + (1-α)²·e_off) )
+        // where frac_off² is the incidental energy fraction of the random component.
+        let frac_off_sq = frac_off * frac_off;
+        for &alpha in &[0.25_f32, 0.5, 0.75] {
+            let mut delta = vec![0.0_f32; d_out * d_in];
+            for idx in 0..delta.len() {
+                delta[idx] = alpha * delta_on[idx] + (1.0 - alpha) * delta_off[idx];
+            }
+            let out = spectral_rewire_into(&w0, &delta, d_out, d_in, r, &mut scratch);
+
+            let a2 = alpha * alpha;
+            let b2 = (1.0 - alpha) * (1.0 - alpha);
+            let numerator = a2 * e_on + b2 * e_off * frac_off_sq;
+            let denominator = a2 * e_on + b2 * e_off;
+            let expected = (numerator / denominator).sqrt();
+
+            let measured = out.on_manifold_fraction;
+            assert!(
+                (measured - expected).abs() < 0.03,
+                "α={alpha}: measured={measured:.4}, expected≈{expected:.4}"
+            );
+        }
+    }
+
+    // ── Issue 123 modelless diagnostic: two-component separation ──
+    //
+    // Given a delta with known on/off structure, verify the primitive correctly
+    // separates the two components: the recovered delta_star should match the
+    // on-manifold component, and the residual should match the off-manifold
+    // component. This validates the Fusion B decomposition MECHANISM.
+    #[test]
+    fn two_component_separation_recovers_known_components() {
+        let d_out = 12;
+        let d_in = 12;
+        let r = 3;
+        let mut rng = make_rng(34567);
+        let w0 = rand_matrix(&mut rng, d_out, d_in);
+
+        let mut svd_result = katgpt_core::SvdResultScratch::with_capacity(d_out, d_in);
+        let mut svd_work = katgpt_core::SvdScratch::with_capacity(d_in, d_out);
+        katgpt_core::thin_svd_into(&w0, d_out, d_in, &mut svd_result, &mut svd_work);
+
+        // On-manifold: ΔW_on = U_r · diag(2,1,0.5) · V_rᵀ.
+        let m_diag = [2.0_f32, 1.0, 0.5];
+        let mut delta_on = vec![0.0_f32; d_out * d_in];
+        for i in 0..d_out {
+            for j in 0..d_in {
+                let mut acc = 0.0;
+                for k in 0..r {
+                    acc += svd_result.left_singular_vector(k)[i]
+                        * m_diag[k]
+                        * svd_result.right_singular_vector(k)[j];
+                }
+                delta_on[i * d_in + j] = acc;
+            }
+        }
+
+        // Off-manifold: a random component orthogonal to U_r/V_r.
+        // Project out the top-r subspace to guarantee orthogonality.
+        let raw_off = rand_matrix(&mut rng, d_out, d_in);
+        let mut delta_off = vec![0.0_f32; d_out * d_in];
+        for i in 0..d_out {
+            for j in 0..d_in {
+                // Subtract the projection onto each U_k V_lᵀ direction.
+                let mut val = raw_off[i * d_in + j];
+                for k in 0..r {
+                    for l in 0..r {
+                        let u_k = svd_result.left_singular_vector(k);
+                        let v_l = svd_result.right_singular_vector(l);
+                        // Coefficient of raw_off on U_k V_lᵀ.
+                        let mut coef = 0.0;
+                        for a in 0..d_out {
+                            for b in 0..d_in {
+                                coef += raw_off[a * d_in + b] * u_k[a] * v_l[b];
+                            }
+                        }
+                        val -= coef * u_k[i] * v_l[j];
+                    }
+                }
+                delta_off[i * d_in + j] = val;
+            }
+        }
+
+        // Mixed delta: equal energy on and off.
+        let e_on: f32 = delta_on.iter().map(|v| v * v).sum::<f32>().sqrt();
+        let e_off: f32 = delta_off.iter().map(|v| v * v).sum::<f32>().sqrt();
+        let scale_on = 1.0 / e_on;
+        let scale_off = 1.0 / e_off;
+        let delta: Vec<f32> = (0..d_out * d_in)
+            .map(|idx| scale_on * delta_on[idx] + scale_off * delta_off[idx])
+            .collect();
+
+        let mut scratch = SpectralRewireScratch::with_capacity(d_out, d_in, r);
+        let out = spectral_rewire_into(&w0, &delta, d_out, d_in, r, &mut scratch);
+
+        // The on-manifold fraction (norm ratio) for an equal-energy mix where
+        // the off-component is orthogonal to the subspace should be √0.5 ≈ 0.707.
+        assert!(
+            (out.on_manifold_fraction - std::f32::consts::FRAC_1_SQRT_2).abs() < 0.03,
+            "equal-energy orthogonal mix: norm fraction ≈ √0.5, got {}",
+            out.on_manifold_fraction
+        );
+
+        // Recomposition: delta_star + residual ≈ delta (holds by construction).
+        let ds = out.delta_star;
+        let res = out.residual;
+        let max_err = (0..delta.len())
+            .map(|i| (ds[i] + res[i] - delta[i]).abs())
+            .fold(0.0_f32, f32::max);
+        assert!(max_err < 1e-4, "recomposition error = {max_err}");
+
+        // The recovered delta_star should be close to the normalized on-manifold component.
+        let star_err: f32 = (0..delta.len())
+            .map(|i| (ds[i] - scale_on * delta_on[i]).powi(2))
+            .sum::<f32>()
+            .sqrt();
+        let star_norm: f32 = ds.iter().map(|v| v * v).sum::<f32>().sqrt();
+        assert!(
+            star_err / star_norm < 0.05,
+            "delta_star should match on-manifold component, rel err = {}",
+            star_err / star_norm
+        );
+    }
 }
