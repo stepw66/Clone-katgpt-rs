@@ -525,6 +525,26 @@ impl<F: PointForecaster> ConformalIntervalCalibrator<F> {
             DecayUnit::Cycle => self.m as f32,
         };
 
+        // Fast path: pool fits in the stack buffer → compute weights once,
+        // reuse for the CDF walk. Avoids recomputing exp() per entry.
+        if n <= WEIGHTS_BUF_LEN {
+            let mut weights = [0.0_f32; WEIGHTS_BUF_LEN];
+            let mut total_w = 0.0_f32;
+            for (i, w_slot) in weights.iter_mut().enumerate().take(n) {
+                let (_, pushed_tick) = view.get_sorted(i);
+                let age = (tick_now.saturating_sub(pushed_tick)) as f32 / unit_scale;
+                let w = (-lambda * age).exp();
+                *w_slot = w;
+                total_w += w;
+            }
+            if total_w <= 0.0 {
+                return view.get_sorted(n / 2).0;
+            }
+            return Self::quantile_from_weights(&view, &weights[..n], total_w, p, self.orientation);
+        }
+
+        // Slow path (pool > WEIGHTS_BUF_LEN, very rare): per-entry recompute.
+
         // Total weight Σ w_i.
         let mut total_w = 0.0_f32;
         for i in 0..n {

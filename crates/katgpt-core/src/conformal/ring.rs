@@ -68,14 +68,36 @@ impl SortedRing {
             self.len += 1;
         } else {
             // At capacity: evict oldest-tick, then insert sorted.
+            // Combined remove+insert: one shift instead of remove (O(n)) + insert (O(n)).
             if let Some(evict_idx) = self.oldest_tick_index() {
-                self.values.remove(evict_idx);
-                self.ticks.remove(evict_idx);
                 let pos = match self.values.binary_search_by(|v| v.total_cmp(&value)) {
                     Ok(p) | Err(p) => p,
                 };
-                self.values.insert(pos, value);
-                self.ticks.insert(pos, tick);
+                // Shift values + ticks in a single pass depending on relative positions.
+                if evict_idx < pos {
+                    // Shift left: [evict_idx+1..pos] → [evict_idx..pos-1]
+                    let dst = evict_idx;
+                    let src = evict_idx + 1;
+                    let count = pos - evict_idx - 1;
+                    self.values.copy_within(src..src + count, dst);
+                    self.ticks.copy_within(src..src + count, dst);
+                    let ins = pos - 1;
+                    self.values[ins] = value;
+                    self.ticks[ins] = tick;
+                } else if evict_idx > pos {
+                    // Shift right: [pos..evict_idx] → [pos+1..evict_idx+1]
+                    let dst = pos + 1;
+                    let src = pos;
+                    let count = evict_idx - pos;
+                    self.values.copy_within(src..src + count, dst);
+                    self.ticks.copy_within(src..src + count, dst);
+                    self.values[pos] = value;
+                    self.ticks[pos] = tick;
+                } else {
+                    // evict_idx == pos: overwrite in place, zero memmoves.
+                    self.values[pos] = value;
+                    self.ticks[pos] = tick;
+                }
             }
         }
     }
