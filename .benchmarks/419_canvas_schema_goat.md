@@ -18,7 +18,8 @@ gate (reachability soundness). The paper's behavioral headline (1.73× parameter
 efficiency, cortical R²=0.825) is **training-dependent** and explicitly NOT
 claimed here; applying a declared-topology mask to a frozen backbone that was
 not trained within it is a documented 19% loss (paper §5). The behavioral
-question is tracked separately in [`katgpt-rs/.issues/043`](../.issues/043_canvas_modelless_behavioral_gain_poc.md).
+question was tracked in `.issues/043` (resolved-and-removed 2026-07-09,
+inconclusive; see Research 398 §7–8 for results).
 
 **Perf headline:** `compile_schema` on the paper's 199-region ICU schema
 completes in **1.5 µs** (budget 10 ms — 6600× under); `TransitiveClosure::reaches`
@@ -99,8 +100,9 @@ G5 raw: compile_schema(199) = 1515 ns, reaches p50 = 0 ns
   not that latent geometry aligns.
 
 The fusion PoC (does compiled-canvas + reachability improve per-NPC behavior
-modellessly over un-unified constituents?) is the defend-wrong gate for
-Super-GOAT re-evaluation — tracked in `.issues/043`.
+modellessly over un-unified constituents?) was the defend-wrong gate for
+Super-GOAT re-evaluation — `.issues/043` (resolved-and-removed 2026-07-09,
+inconclusive; see Research 398 §7–8).
 
 ---
 
@@ -121,7 +123,7 @@ Cleanup after measurement: `rm -rf /tmp/canvas419`.
 
 - **Plan 419:** [`katgpt-rs/.plans/419_canvas_schema_compiler.md`](../.plans/419_canvas_schema_compiler.md)
 - **Research 398:** [`katgpt-rs/.research/398_Canvas_Engineering_Declared_Causal_Topology_Compiler.md`](../.research/398_Canvas_Engineering_Declared_Causal_Topology_Compiler.md)
-- **Issue 043 (fusion PoC, behavioral gain):** [`katgpt-rs/.issues/043_canvas_modelless_behavioral_gain_poc.md`](../.issues/043_canvas_modelless_behavioral_gain_poc.md)
+- **Issue 043 (fusion PoC, behavioral gain):** `.issues/043` (resolved-and-removed 2026-07-09, inconclusive; see Research 398 §7–8)
 - **Feature catalog entry:** [`katgpt-rs/.docs/feature_catalog/opt_in_features.md`](../.docs/feature_catalog/opt_in_features.md) §12
 
 ---
@@ -132,5 +134,7 @@ Cleanup after measurement: `rm -rf /tmp/canvas419`.
 merits. The reachability guarantee (absent edge ⟹ exact marginal independence
 for binary masks) holds by construction (G1). Perf is far under budget (G5:
 1.5 µs compile, sub-ns reaches). The behavioral gain is training-dependent and
-tracked in `.issues/043`. Promotion to default-on is deferred pending the
-`.issues/043` fusion PoC verdict.
+was tracked in `.issues/043` (resolved-and-removed 2026-07-09, inconclusive;
+see Research 398 §7–8). Promotion to default-on is deferred — the fusion PoC
+resolved inconclusively and the primitive's constituents are already default-on
+with runtime consumers (see Research 398 §8).

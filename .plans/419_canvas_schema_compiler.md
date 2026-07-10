@@ -4,7 +4,7 @@
 **Research:** [katgpt-rs/.research/398_Canvas_Engineering_Declared_Causal_Topology_Compiler.md](../.research/398_Canvas_Engineering_Declared_Causal_Topology_Compiler.md)
 **Source paper:** [canvas-engineering.pdf](http://commandagi.com/research/canvas-engineering.pdf) — Valdez (CommandAGI), July 2026
 **Target:** `crates/katgpt-core/src/canvas/` (new module) + Cargo feature `canvas_schema`
-**Status:** ✅ DONE — Phase 1–6 complete, G1–G6 PASS (opt-in, promotion deferred pending `.issues/043`)
+**Status:** ✅ DONE — Phase 1–6 complete, G1–G6 PASS (opt-in; `.issues/043` fusion PoC resolved inconclusively, promotion deferred — see Research 398 §8)
 
 ---
 
@@ -17,7 +17,7 @@ Ship the **modelless half** of canvas engineering: a typed `CanvasSchema` compil
 - Looped-attention zero-init learned embeddings (covered by `LoopMode::WeightShared` Plan 108 / `LoopMode::TrainingFree` Plan 136).
 - Representation-stability validation across seeds/backbones.
 
-**GOAT gate (the contract):** the compiler + reachability primitives ship on structural/correctness merits — the reachability guarantee is provable by construction (absent edge ⟹ exact marginal independence for binary masks). The behavioral gain is NOT claimed at the modelless level (paper §5 shows modelless application is a 19% loss on untrained backbones) and is tracked separately in `.issues/043` as a fusion PoC. Promote-to-default requires the GOAT gate G1–G6 below; the gate measures *compiler correctness + reachability soundness + perf*, NOT behavioral parity with the paper's training-dependent results.
+**GOAT gate (the contract):** the compiler + reachability primitives ship on structural/correctness merits — the reachability guarantee is provable by construction (absent edge ⟹ exact marginal independence for binary masks). The behavioral gain is NOT claimed at the modelless level (paper §5 shows modelless application is a 19% loss on untrained backbones); the fusion PoC (`.issues/043`, resolved-and-removed 2026-07-09, inconclusive) is documented in Research 398 §7–8. Promote-to-default requires the GOAT gate G1–G6 below; the gate measures *compiler correctness + reachability soundness + perf*, NOT behavioral parity with the paper's training-dependent results.
 
 ---
 
@@ -31,7 +31,7 @@ Ship the **modelless half** of canvas engineering: a typed `CanvasSchema` compil
 | Zero-alloc hot path | `compile_schema` allocates once at schema-load time. `can_reach` / `reachability_horizon` are pure queries over the compiled artifact (no per-call alloc). |
 | CPU/SIMD/GPU auto-route | Compiler runs once at load (CPU). Mask consumption routes per the existing attention path's discipline. |
 | Feature flag isolation | `canvas_schema` is opt-in (NOT default-on) until GOAT gate passes. |
-| 5-repo discipline | Ships in katgpt-core (generic math, no game/chain/shard semantics). Game-runtime fusion (typed NPC cognitive stack) is a riir-ai follow-up gated on `.issues/043` PoC. |
+| 5-repo discipline | Ships in katgpt-core (generic math, no game/chain/shard semantics). Game-runtime fusion (typed NPC cognitive stack) is a riir-ai follow-up; `.issues/043` fusion PoC resolved inconclusively (see Research 398 §7–8). |
 | Files < 2048 lines | Module split: `mod.rs` (types + compiler), `reachability.rs` (graph queries), `transfer.rs` (semantic distance), `mask.rs` (mask builder). |
 | `Uuid::now_v7()` | N/A — no Uuids in this primitive. BLAKE3 commitment is a riir-neuron-db consumer concern (schema-mediated exchange), not this primitive. |
 
@@ -127,7 +127,7 @@ Bench: `katgpt-core/benches/bench_419_canvas_schema_goat.rs`. Record: [`.benchma
 
 ## Out of scope (tracked elsewhere)
 
-- **Game-runtime fusion (typed NPC cognitive stack):** `.issues/043` + future riir-ai plan if PoC passes. NOT this plan.
+- **Game-runtime fusion (typed NPC cognitive stack):** `.issues/043` fusion PoC resolved inconclusively (see Research 398 §7–8); future riir-ai plan only if a new angle emerges. NOT this plan.
 - **Training a DiT within declared topology:** riir-train follow-up. NOT this plan.
 - **Looped attention zero-init embeddings:** covered by `LoopMode::WeightShared` (Plan 108) / `LoopMode::TrainingFree` (Plan 136). NOT re-shipped here.
 - **Schema-mediated latent exchange (freeze/thaw):** the substrate ships (`MerkleFrozenEnvelope`, `CommittedFieldBlend`). A schema-keyed exchange wrapper is a riir-neuron-db follow-up, NOT this plan.

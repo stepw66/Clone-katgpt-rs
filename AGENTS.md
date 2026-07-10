@@ -81,6 +81,16 @@ See `.agents/skills/research/SKILL.md` for the full research workflow:
 paper classification, 5-repo routing, fusion-first distillation, novelty gate,
 GOAT gate, and the mandatory modelless-unblock protocol (§3.5).
 
+## Numbering Discipline
+
+Issue, plan, doc, benchmark, and research numbers are **monotonic and never
+reused** — even after a file is removed per the noise-reduction rule. Before
+creating a new `.issues/` file, read `.issues/.highwater`, use `value + 1` as
+the number, and write the new value back. This prevents the number-recycling
+collision documented in `.issues/121`. The same rule applies to `.plans/`,
+`.docs/`, `.benchmarks/`, and `.research/` — never recycle a number that git
+history shows was already allocated.
+
 ## Branch
 
 `develop` is the working branch. Don't create feature branches; commit

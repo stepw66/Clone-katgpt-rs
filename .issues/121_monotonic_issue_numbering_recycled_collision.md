@@ -1,7 +1,7 @@
 # Issue 121: Monotonic Issue Numbering — Replace Recycled `043` Collision
 
 **Created:** 2026-07-10
-**Status:** Open
+**Status:** RESOLVED (2026-07-10)
 **Severity:** Process / DRY violation (low immediate damage, high long-term grep-noise)
 **Discovered via:** Research 398 re-audit — grepping `043` from git history
 
@@ -82,16 +82,25 @@ lowest currently-free number." Same convention, stricter allocation rule.
 
 ## Tasks
 
-- [ ] **T1** Pick the mechanism (recommend B: `.issues/.highwater` file). Decide repo-wide (each repo
-  owns its counter) or quintet-wide single counter.
-- [ ] **T2** Seed the counter at the current all-time-high per repo (katgpt-rs all-time-high is 120 as
-  of 2026-07-10). Audit riir-ai / riir-chain / riir-neuron-db / riir-train all-time-highs.
-- [ ] **T3** Document the rule in each repo's `AGENTS.md` (or the global personal AGENTS.md) so future
-  agents allocate monotonically. One line: "Issue/plan/doc numbers are monotonic and never reused
-  after removal; allocate from `.issues/.highwater` + 1."
-- [ ] **T4** (Optional, low-priority) Audit existing cross-repo links to recycled numbers (`.issues/043`
-  in particular) and either point them at the persistent benchmark/record file or annotate them. R398's
-  links were fixed this session; other references to recycled numbers may exist.
+- [x] **T1** Mechanism picked: **Option B** (`.issues/.highwater` file), **per-repo counters** (each
+  repo owns its counter — issue numbers are scoped per-repo, cross-repo refs use the repo path prefix).
+- [x] **T2** Counters seeded at git-history all-time-high per repo (verified via `git log --diff-filter=A`):
+  | Repo | All-time-high | Seeded |
+  |------|--------------|--------|
+  | katgpt-rs | 122 | ✅ |
+  | riir-ai | 427 | ✅ |
+  | riir-chain | 008 | ✅ (`.issues/` dir recreated) |
+  | riir-neuron-db | 009 | ✅ |
+  | riir-train | 373 | ✅ |
+  Note: katgpt-rs high-water is 122 (not 120 as originally stated — `122_canvas_functor_topology_modelless_poc.md`
+  was allocated then resolved-and-removed, exactly the recycling this issue addresses).
+- [x] **T3** Rule documented in all 5 repo `AGENTS.md` files (riir-train's `AGENTS.md` created — it was
+  missing). The rule covers `.issues/`, `.plans/`, `.docs/`, `.benchmarks/`, `.research/` uniformly.
+- [x] **T4** Audited all `.issues/043` references repo-wide. Dead file links fixed in: Bench 419
+  (3 locations), feature catalog §12 (3 locations), Plan 419 (header, goal, constraints, out-of-scope),
+  and `riir-ai/.benchmarks/043_*` (cross-repo dead link). All now annotated
+  "resolved-and-removed 2026-07-09, inconclusive; see Research 398 §7–8". References in Plan 409,
+  Plan 421, and Research 388 were already properly annotated "resolved-and-removed" — no change needed.
 
 ## Out of scope
 
@@ -102,6 +111,9 @@ lowest currently-free number." Same convention, stricter allocation rule.
 ## TL;DR
 
 Issue number `043` was reused 4× across unrelated issues because the noise-reduction rule frees the
-number on removal with no monotonic guard. Fix: allocate issue numbers monotonically from a
-never-decremented high-water mark (recommend a `.issues/.highwater` file per repo), document the rule
-in AGENTS.md, seed at current all-time-high. katgpt-rs all-time-high is 120 as of today.
+number on removal with no monotonic guard. **RESOLVED (2026-07-10):** `.issues/.highwater` files seeded
+in all 5 repos at git-history all-time-high (katgpt-rs=122, riir-ai=427, riir-chain=8,
+riir-neuron-db=9, riir-train=373); numbering-discipline rule documented in all 5 `AGENTS.md` files
+(riir-train's `AGENTS.md` was missing — created); dead `.issues/043` cross-references annotated as
+resolved-and-removed. Per the noise-reduction rule, this resolved issue file will be removed; the
+`.issues/.highwater` file and the AGENTS.md rules are the permanent fix.

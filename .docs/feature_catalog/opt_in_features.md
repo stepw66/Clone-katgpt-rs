@@ -435,7 +435,7 @@ Three entry points serve three operating points:
 
 A typed `CanvasSchema` compiler that lowers a declared region layout + directed topology into a sparse `AttentionMaskSpec` (consumable by AC-Prefix / VortexFlow / any sparse-attention path), a per-position `LossWeightMask`, and a **reachability** primitive proving **exact marginal independence for binary masks** — absent edge ⟹ no influence, by construction. Plus a `transfer_distance` semantic-type compatibility scalar (`1 − cosine` of frozen embeddings, schema-ABI check from paper §2.4 Table 1).
 
-**Modelless by construction** (Plan 419, Research 398, Valdez *Canvas Engineering* July 2026): every primitive is a pure function over index sets + graphs. Zero backprop, zero weight mutation. The compiler ships on **structural / correctness** merits — the reachability guarantee is provable by construction (like the DEC `d∘d=0` identity, Plan 251), NOT on the paper's behavioral headline (1.73× parameter efficiency, cortical R²=0.825), which is **training-dependent** and tracked separately in `.issues/043`.
+**Modelless by construction** (Plan 419, Research 398, Valdez *Canvas Engineering* July 2026): every primitive is a pure function over index sets + graphs. Zero backprop, zero weight mutation. The compiler ships on **structural / correctness** merits — the reachability guarantee is provable by construction (like the DEC `d∘d=0` identity, Plan 251), NOT on the paper's behavioral headline (1.73× parameter efficiency, cortical R²=0.825), which is **training-dependent** (`.issues/043` fusion PoC resolved-and-removed 2026-07-09, inconclusive; see Research 398 §7–8).
 
 **Direction convention (paper §2.2):** `Connection(src, dst)` licenses `src` to query `dst` keys/values; information flows `dst → src`; the information-flow graph `G` has arc `dst → src`; `can_reach(from, to)` therefore reads as "`from` influences `to`". `causal_chain([A,B,C])` emits each region querying its predecessor → info arcs `A → B → C` → `can_reach(A, C, 2) == true` (Plan 419 T3.6).
 
@@ -450,10 +450,10 @@ A typed `CanvasSchema` compiler that lowers a declared region layout + directed 
 | **G5** Perf | `compile_schema` (199-region ICU schema) < 10 ms; `reaches` p50 < 100 ns | ✅ PASS (compile = **1515 ns** (6600× under); reaches p50 = **0 ns**) |
 | **G6** Feature isolation | `canvas_schema` gates all symbols; 0 bytes when disabled | ✅ PASS |
 
-**What the GOAT does NOT claim** (the honesty): behavioral parity with the paper's training-dependent results. Applying a declared-topology mask to a frozen untrained-for-it backbone is a documented 19% loss (paper §5 calibration #2). The modelless primitive ships the *compilation* + the *guarantee*; the *behavioral gain* requires riir-train and is the `.issues/043` fusion PoC.
+**What the GOAT does NOT claim** (the honesty): behavioral parity with the paper's training-dependent results. Applying a declared-topology mask to a frozen untrained-for-it backbone is a documented 19% loss (paper §5 calibration #2). The modelless primitive ships the *compilation* + the *guarantee*; the *behavioral gain* requires riir-train (`.issues/043` fusion PoC resolved-and-removed 2026-07-09, inconclusive).
 
 Module split (AGENTS.md `< 2048` line rule): `canvas/{mod,types,mask,reachability,transfer}.rs`.
 
-🔧 Feature flag: `canvas_schema` — **opt-in** (not in `default`; promotion deferred pending `.issues/043` fusion PoC).
+🔧 Feature flag: `canvas_schema` — **opt-in** (promotion deferred; `.issues/043` fusion PoC resolved inconclusively, constituents already default-on with runtime consumers — see Research 398 §8).
 
 📖 See [`.benchmarks/419_canvas_schema_goat.md`](../../.benchmarks/419_canvas_schema_goat.md) for the full GOAT proof + the direction-convention derivation.
