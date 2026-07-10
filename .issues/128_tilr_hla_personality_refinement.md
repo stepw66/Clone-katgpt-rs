@@ -4,7 +4,7 @@
 > **Date:** 2026-07-10
 > **Type:** feature (consumer integration)
 > **Severity:** MEDIUM — concrete consumer value, but no blocking trigger
-> **Status:** OPEN (deferred — TILR primitive ships DEFAULT-ON, this wires it)
+> **Status:** OPEN — Plan 438 created (riir-ai), T1 investigation complete, phased implementation planned
 
 ## Context
 
@@ -37,14 +37,18 @@ personality states that don't match the calibration data.
 
 ## Tasks
 
-- [ ] **T1** Identify where HLA personality states are updated in riir-engine.
-      Grep for the personality update hot path (likely in `crates/riir-engine/src/`).
+- [x] **T1** Identify where HLA personality states are updated in riir-engine.
+      ✅ `tick_committed_blend` in `committed_blend/mod.rs:406`. `dz_out` is the
+      TILR direction. See Plan 438 for full findings.
 - [ ] **T2** Collect or simulate contrastive differences from freeze/thaw
       snapshots. Document the calibration data source.
+      Planned in Plan 438 Phase 2 (z-snapshot at re-commit).
 - [ ] **T3** Wire `tilr_refine_into` into the update path behind a feature flag.
-      Gate on a riir-engine feature (e.g. `tilr_hla_refinement`).
+      Planned in Plan 438 Phase 1+3 (`tilr_personality_refine` feature +
+      `TilrPersonalityBridge` module).
 - [ ] **T4** Benchmark: verify zero-harm on non-aligned directions, measurable
-      refinement on aligned directions. Gate: no-harm must be bit-identical.
+      refinement on aligned directions.
+      Planned in Plan 438 Phase 3 (GOAT gate).
 - [ ] **T5** If the gain is real and modelless → promote to default-on.
 
 ## Cross-references
@@ -52,3 +56,5 @@ personality states that don't match the calibration data.
 - `katgpt-rs/.plans/425_tilr_invariant_subspace_refinement.md` — COMPLETE, DEFAULT-ON
 - `katgpt-rs/.research/408_*.md` — TILR research note (GOAT verdict)
 - `katgpt-rs/.docs/adaptation/tilr_subspace_family.md` — family overview
+- `riir-ai/.plans/438_tilr_hla_personality_refinement.md` — implementation plan
+- `riir-neuron-db/.plans/317_tilr_consolidation_wiring.md` — sibling wiring (Issue 129, COMPLETE)
