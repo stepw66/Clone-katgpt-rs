@@ -48,13 +48,12 @@
 //! `Q_score = sigmoid(Q_raw)` ∈ (0, 1). This keeps the bandit contribution in
 //! `(-1, 1)` and follows the global "sigmoid not softmax" rule.
 
-use super::blend_context::{CONTEXT_DIM, compute_phi, sigmoid};
+use super::blend_context::{CONTEXT_DIM, sigmoid};
 use super::players::ACTION_COUNT;
-
-/// Re-export for backward compatibility (existing callers import from
-/// `contextual_bandit`).
-pub use compute_phi;
-pub use CONTEXT_DIM;
+#[cfg(test)]
+use super::blend_context::compute_phi;
+#[cfg(test)]
+use super::players::KnownBomb;
 
 /// Default learning rate for online LMS updates.
 pub const DEFAULT_LEARNING_RATE: f32 = 0.01;

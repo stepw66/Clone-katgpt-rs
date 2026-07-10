@@ -1250,10 +1250,14 @@ impl HLPlayer {
             compressed: [false; ACTION_COUNT],
             round_actions: Vec::new(),
             round_rewards: Vec::new(),
-            #[cfg(feature = "contextual_bandit")]
+            #[cfg(any(feature = "contextual_bandit", feature = "binned_blend", feature = "kernel_blend"))]
             round_contexts: Vec::new(),
             #[cfg(feature = "contextual_bandit")]
             contextual_bandit: super::contextual_bandit::ContextualBandit::default(),
+            #[cfg(feature = "binned_blend")]
+            binned_blend: super::blend_estimators::BinnedBlendEstimator::default(),
+            #[cfg(feature = "kernel_blend")]
+            kernel_blend: super::blend_estimators::KernelBlendEstimator::default(),
             last_dir: None,
             #[cfg(feature = "bandit")]
             shared_stats: None,
@@ -1293,10 +1297,14 @@ impl HLPlayer {
             compressed: [false; ACTION_COUNT],
             round_actions: Vec::new(),
             round_rewards: Vec::new(),
-            #[cfg(feature = "contextual_bandit")]
+            #[cfg(any(feature = "contextual_bandit", feature = "binned_blend", feature = "kernel_blend"))]
             round_contexts: Vec::new(),
             #[cfg(feature = "contextual_bandit")]
             contextual_bandit: super::contextual_bandit::ContextualBandit::default(),
+            #[cfg(feature = "binned_blend")]
+            binned_blend: super::blend_estimators::BinnedBlendEstimator::default(),
+            #[cfg(feature = "kernel_blend")]
+            kernel_blend: super::blend_estimators::KernelBlendEstimator::default(),
             last_dir: None,
             #[cfg(feature = "bandit")]
             shared_stats: None,
@@ -1333,10 +1341,14 @@ impl HLPlayer {
             compressed: [false; ACTION_COUNT],
             round_actions: Vec::new(),
             round_rewards: Vec::new(),
-            #[cfg(feature = "contextual_bandit")]
+            #[cfg(any(feature = "contextual_bandit", feature = "binned_blend", feature = "kernel_blend"))]
             round_contexts: Vec::new(),
             #[cfg(feature = "contextual_bandit")]
             contextual_bandit: super::contextual_bandit::ContextualBandit::default(),
+            #[cfg(feature = "binned_blend")]
+            binned_blend: super::blend_estimators::BinnedBlendEstimator::default(),
+            #[cfg(feature = "kernel_blend")]
+            kernel_blend: super::blend_estimators::KernelBlendEstimator::default(),
             last_dir: None,
             shared_stats: Some(stats),
             shared_log,
@@ -1491,6 +1503,36 @@ impl HLPlayer {
                 let combined = base_reward + tick_reward;
                 let idx = action_index(action);
                 self.contextual_bandit.update(idx, &phi, combined);
+            }
+        }
+
+        // Plan 436 / Issue 428 — nonlinear blend estimator updates. Same
+        // pattern as the contextual bandit: iterate this round's (action,
+        // context, reward) triples and update the estimator per-tick.
+        #[cfg(feature = "binned_blend")]
+        {
+            for (i, action) in self.round_actions.iter().enumerate() {
+                let tick_reward = self.round_rewards.get(i).copied().unwrap_or(0.0);
+                let phi = match self.round_contexts.get(i) {
+                    Some(p) => *p,
+                    None => continue,
+                };
+                let combined = base_reward + tick_reward;
+                let idx = action_index(action);
+                self.binned_blend.update(&phi, idx, combined);
+            }
+        }
+        #[cfg(feature = "kernel_blend")]
+        {
+            for (i, action) in self.round_actions.iter().enumerate() {
+                let tick_reward = self.round_rewards.get(i).copied().unwrap_or(0.0);
+                let phi = match self.round_contexts.get(i) {
+                    Some(p) => *p,
+                    None => continue,
+                };
+                let combined = base_reward + tick_reward;
+                let idx = action_index(action);
+                self.kernel_blend.update(&phi, idx, combined);
             }
         }
 
@@ -1653,10 +1695,14 @@ impl HLPlayer {
             compressed: frozen.compressed.map(|c| c != 0),
             round_actions: Vec::new(),
             round_rewards: Vec::new(),
-            #[cfg(feature = "contextual_bandit")]
+            #[cfg(any(feature = "contextual_bandit", feature = "binned_blend", feature = "kernel_blend"))]
             round_contexts: Vec::new(),
             #[cfg(feature = "contextual_bandit")]
             contextual_bandit: super::contextual_bandit::ContextualBandit::default(),
+            #[cfg(feature = "binned_blend")]
+            binned_blend: super::blend_estimators::BinnedBlendEstimator::default(),
+            #[cfg(feature = "kernel_blend")]
+            kernel_blend: super::blend_estimators::KernelBlendEstimator::default(),
             last_dir: None,
             #[cfg(feature = "bandit")]
             shared_stats: None,
@@ -1748,19 +1794,26 @@ impl BomberPlayer for HLPlayer {
         // + centered bandit Q-value blend (Issue 371: re-enabled, weight 2.0).
         let mut scores: [(BomberAction, f32); ACTION_COUNT] = ALL_ACTIONS.map(|a| (a, 0.0));
 
-        // Issue 371 Option 1 (T6): compute the board-state context vector φ(s)
-        // once per tick. When `contextual_bandit` is active, the per-arm Q
-        // lookup is replaced by the linear model Q(a,s) = θ_a^T·φ(s), so the
-        // same action gets different Q-values in safe vs dangerous board
+        // Compute the board-state context vector φ(s) once per tick. Used by all
+        // blend estimators (contextual_bandit, binned_blend, kernel_blend) so
+        // the same action gets different Q-values in safe vs dangerous board
         // states — the principled fix for T3 evidence #3.
-        #[cfg(feature = "contextual_bandit")]
-        let phi = super::contextual_bandit::compute_phi(
+        #[cfg(any(feature = "contextual_bandit", feature = "binned_blend", feature = "kernel_blend"))]
+        let phi = super::blend_context::compute_phi(
             pos,
             grid,
             &self.known_bombs,
             &self.known_powerups,
             nearest_opponent,
         );
+
+        // Plan 436 / Issue 428: compute blend estimator Qs once per tick when
+        // the nonlinear estimators are active. These replace the per-arm
+        // n-armed Q lookup with a context-conditioned Q.
+        #[cfg(feature = "kernel_blend")]
+        let blend_q = self.kernel_blend.predict_all(&phi);
+        #[cfg(all(feature = "binned_blend", not(feature = "kernel_blend")))]
+        let blend_q = self.binned_blend.predict_all(&phi);
 
         for (i, action) in ALL_ACTIONS.iter().enumerate() {
             // Skip compressed (hard-blocked) arms
@@ -1874,19 +1927,31 @@ impl BomberPlayer for HLPlayer {
             // Reward arms with Q > 0.5, penalize Q < 0.5. Unvisited arms are neutral
             // (treated as Q = 0.5) so the bandit doesn't suppress early exploration.
             //
-            // Issue 371 Option 1 (T6): when `contextual_bandit` is active, the
-            // per-arm Q is the sigmoid-bounded linear model output instead of
-            // the n-armed running average. The cold-start gate (visits == 0)
-            // still applies — an arm that has never been pulled in ANY context
-            // contributes 0 (neutral), matching the n-armed behaviour.
-            #[cfg(feature = "contextual_bandit")]
+            // Priority chain (mutually exclusive in practice):
+            //   1. kernel_blend  (Plan 436 / Issue 428) — Nadaraya-Watson
+            //   2. binned_blend  (Plan 436 / Issue 428) — per-bin empirical Q
+            //   3. contextual_bandit (Issue 371 T6) — linear per-arm model
+            //   4. n-armed bandit (default) — context-independent average Q
+            #[cfg(feature = "kernel_blend")]
+            let bandit_term = if !self.kernel_blend.is_cold(i) {
+                (blend_q[i] - 0.5) * 2.0
+            } else {
+                0.0
+            };
+            #[cfg(all(feature = "binned_blend", not(feature = "kernel_blend")))]
+            let bandit_term = if !self.binned_blend.is_cold(i) {
+                (blend_q[i] - 0.5) * 2.0
+            } else {
+                0.0
+            };
+            #[cfg(all(feature = "contextual_bandit", not(feature = "binned_blend"), not(feature = "kernel_blend")))]
             let bandit_term = if !self.contextual_bandit.is_cold(i) {
                 let q = self.contextual_bandit.predict(i, &phi);
                 (q - 0.5) * 2.0
             } else {
                 0.0
             };
-            #[cfg(not(feature = "contextual_bandit"))]
+            #[cfg(not(any(feature = "contextual_bandit", feature = "binned_blend", feature = "kernel_blend")))]
             let bandit_term = if self.arm_visits(i) > 0 {
                 (self.arm_q(i) - 0.5) * 2.0
             } else {
@@ -1976,7 +2041,7 @@ impl BomberPlayer for HLPlayer {
                 self.round_actions.push(action);
                 self.round_rewards
                     .push(shape_tick(action, &self.known_bombs));
-                #[cfg(feature = "contextual_bandit")]
+                #[cfg(any(feature = "contextual_bandit", feature = "binned_blend", feature = "kernel_blend"))]
                 self.round_contexts.push(phi);
                 self.last_dir = Some(action);
                 return action;
@@ -1998,7 +2063,7 @@ impl BomberPlayer for HLPlayer {
 
         self.round_actions.push(best);
         self.round_rewards.push(shape_tick(best, &self.known_bombs));
-        #[cfg(feature = "contextual_bandit")]
+        #[cfg(any(feature = "contextual_bandit", feature = "binned_blend", feature = "kernel_blend"))]
         self.round_contexts.push(phi);
         if matches!(
             best,
@@ -2023,7 +2088,7 @@ impl BomberPlayer for HLPlayer {
         self.known_opponents.clear();
         self.round_actions.clear();
         self.round_rewards.clear();
-        #[cfg(feature = "contextual_bandit")]
+        #[cfg(any(feature = "contextual_bandit", feature = "binned_blend", feature = "kernel_blend"))]
         self.round_contexts.clear();
         self.last_dir = None;
         // NOTE: Q-values, visits, compressed persist across rounds (bandit memory)
