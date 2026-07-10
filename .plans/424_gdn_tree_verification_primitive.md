@@ -4,7 +4,7 @@
 **Research:** [katgpt-rs/.research/407_Trees_from_Marginals_GDN_Tree_Verify.md](../.research/407_Trees_from_Marginals_GDN_Tree_Verify.md)
 **Source paper:** [arXiv:2607.06763](https://arxiv.org/abs/2607.06763) — Oda et al., "Trees from Marginals", §3.4
 **Target:** `katgpt-rs/crates/katgpt-core/src/gdn_tree_verify/` (new module) + Cargo feature `gdn_tree_verify`
-**Status:** Phases 1-3 complete ✅, Phase 5 GOAT gate complete (G1-G4 all PASS) ✅. Phase 4 (multi-head integration, consumer crate) + Phase 6 (DDTree tuning, optional) pending.
+**Status:** Phases 1-3 complete ✅, Phase 5 GOAT gate complete (G1-G4 all PASS) ✅, Phase 4 T4.1-T4.2 complete (multi-head batching + Gdn2State bridge) ✅. T4.3-T4.4 (speculative step integration) + Phase 6 (DDTree tuning, optional) pending.
 
 ---
 
@@ -66,8 +66,8 @@ This fills a confirmed gap: katgpt-rs ships GDN2 (Plan 105, default-on) for the 
 
 ### Tasks
 
-- [ ] **T4.1** Extend `verify_gdn_tree` to handle multiple key heads (H_k) and value heads (H_v). The interaction matrix X is per-key-head; the solve is batched across heads. State layout: `[H_v, d_v, d_k]` (matching GDN2's existing layout per Research 070).
-- [ ] **T4.2** Add a trait or adapter that bridges `GdnTreeVerifier` to the existing `Gdn2State` (Plan 105). The verifier reads S₀ from `Gdn2State` and writes back via `commit_accepted`. No modification to GDN2 itself.
+- [x] **T4.1** Extend `verify_gdn_tree` to handle multiple key heads (H_k) and value heads (H_v). ✅ `GdnMultiHeadParams` + `verify_gdn_tree_multihead` + `commit_accepted_multihead` in `gdn_tree_verify/mod.rs`. Topology shared across heads; scalar α/β shared (paper form, matches `Gdn2GateConfig::Kda`). Per-head α/β callers use the single-head API in a loop. Tests: multi-head matches single-head, matches reference, commit matches sequential.
+- [x] **T4.2** Add a trait or adapter that bridges `GdnTreeVerifier` to the existing `Gdn2State` (Plan 105). ✅ `tree_verify_bridge.rs` in `katgpt-attn/src/gdn2/` (feature `gdn_tree_verify = ["katgpt-core/gdn_tree_verify"]`). `verify_layer` reads S₀ from `Gdn2LayerState.heads[h].s`; `commit_layer_accepted` writes back. No modification to GDN2 kernel. Layout match is exact (both `[d_k × d_v]` row-major). Scalar α/β is exact for `Kda`, approximation for `EraseOnly`/`Full` (caller supplies scalars; bridge does not infer).
 - [ ] **T4.3** Add an integration path in the speculative step (`speculative/step_paged.rs` or `katgpt-forward::step`): when `Config::architecture == QwenDeltaNet` AND `gdn_tree_verify` is enabled, route GDN layers through `verify_gdn_tree` instead of the KV-rollback path. Attention layers continue to use KV-rollback.
 - [ ] **T4.4** Integration test: speculative decode on `Config::qwen_deltanet()` with `gdn_tree_verify` produces the same accepted tokens as without the feature (correctness — the verify is exact, just faster).
 
