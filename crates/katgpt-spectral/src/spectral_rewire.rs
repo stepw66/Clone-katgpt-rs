@@ -43,6 +43,14 @@
 use katgpt_core::simd::simd_dot_f32;
 use katgpt_core::{SvdResultScratch, SvdScratch, thin_svd_into};
 
+/// Maximum number of columns the underlying one-sided Jacobi SVD
+/// (`katgpt_core::thin_svd_into`) supports. Fixed-size `[f32; 64]` /
+/// `[usize; 64]` stack arrays in the Jacobi argsort path cap `n_cols` at 64.
+/// [`spectral_rewire_into`] factors W₀ as `(d_out × d_in)`, so `d_in` is the
+/// capped dimension. Square matrices larger than 64×64 are unsupported until
+/// the SVD substrate is upgraded (Issue 124).
+pub const SVD_MAX_COLS: usize = 64;
+
 // ---------------------------------------------------------------------------
 // SpectralRewireScratch — pre-allocated reusable buffers
 // ---------------------------------------------------------------------------
@@ -164,7 +172,8 @@ pub struct SpectralRewireOutput<'a> {
 ///
 /// # Panics
 ///
-/// Panics if `w0.len()` or `delta.len()` ≠ `d_out * d_in`, or if `rank` is 0.
+/// Panics if `w0.len()` or `delta.len()` ≠ `d_out * d_in`, if `rank` is 0,
+/// or if `d_in > 64` (the one-sided Jacobi SVD column cap — see [`SVD_MAX_COLS`]).
 pub fn spectral_rewire_into<'a>(
     w0: &[f32],
     delta: &[f32],
@@ -187,6 +196,18 @@ pub fn spectral_rewire_into<'a>(
         delta.len()
     );
     assert!(rank >= 1, "spectral_rewire_into: rank must be >= 1, got {rank}");
+    // The underlying one-sided Jacobi SVD (`katgpt_core::thin_svd_into`) uses
+    // fixed-size stack arrays capped at n_cols <= 64. We SVD W₀ as
+    // (d_out × d_in), so d_in is the capped dimension. Square matrices larger
+    // than 64×64 are NOT supported until the SVD substrate is upgraded — see
+    // Issue 124 (spectral_rewire SVD cap). The cap does NOT bind d_out.
+    assert!(
+        d_in <= SVD_MAX_COLS,
+        "spectral_rewire_into: d_in={d_in} exceeds the one-sided Jacobi SVD cap \
+         ({SVD_MAX_COLS} columns). The underlying thin_svd_into uses fixed \
+         [f32; 64] stack arrays. Square matrices >64×64 are unsupported until \
+         the SVD substrate is upgraded (Issue 124)."
+    );
     let r = rank.min(d_out.min(d_in));
 
     scratch.ensure_capacity(d_out, d_in, r);
@@ -199,17 +220,67 @@ pub fn spectral_rewire_into<'a>(
     }
     let svd = &scratch.svd_result;
 
+    // Steps 2–6: shared projection core (SVD-backed accessor closures).
+    project_core(
+        delta,
+        d_out,
+        d_in,
+        r,
+        total,
+        &mut scratch.a_buf,
+        &mut scratch.m_buf,
+        &mut scratch.b_buf,
+        &mut scratch.delta_star_buf,
+        &mut scratch.residual_buf,
+        |j| svd.left_singular_vector(j),
+        |j| svd.right_singular_vector(j),
+    )
+}
+
+/// Shared projection core (steps 2–6 of the SAR algorithm). Takes accessor
+/// closures for the top-r left (`u_col`) and right (`v_col`) singular vectors
+/// of W₀, so the same code serves both the on-the-fly SVD path
+/// ([`spectral_rewire_into`]) and the cached-index path
+/// ([`spectral_rewire_with_index_into`]).
+///
+/// Writes `delta_star_buf`, `m_buf` (rewiring matrix), `residual_buf`, and
+/// returns the borrowed [`SpectralRewireOutput`].
+///
+/// # Safety contract (caller)
+///
+/// `u_col(i)` must return a slice of length `d_out`; `v_col(j)` a slice of
+/// length `d_in`; both for `i, j ∈ 0..r`. Scratch slices must be at least
+/// `r*d_in`, `r*r`, `d_out*r`, `total`, `total` long respectively.
+#[allow(clippy::too_many_arguments)]
+fn project_core<'a, UF, VF>(
+    delta: &[f32],
+    d_out: usize,
+    d_in: usize,
+    r: usize,
+    total: usize,
+    a_buf: &'a mut Vec<f32>,
+    m_buf: &'a mut Vec<f32>,
+    b_buf: &'a mut Vec<f32>,
+    delta_star_buf: &'a mut Vec<f32>,
+    residual_buf: &'a mut Vec<f32>,
+    u_col: UF,
+    v_col: VF,
+) -> SpectralRewireOutput<'a>
+where
+    UF: Fn(usize) -> &'a [f32],
+    VF: Fn(usize) -> &'a [f32],
+{
     // ── Step 2: A = U_rᵀ · ΔW  (r × d_in, row-major in a_buf) ──────────────
     //
     // A[i][j] = Σ_k U[k][i] · ΔW[k][j]
     // For each i: accumulate rank-1 updates over ΔW rows weighted by U column i.
     let a_len = r * d_in;
-    let a_buf = &mut scratch.a_buf[..a_len];
+    let a_buf = &mut a_buf[..a_len];
     for v in a_buf.iter_mut() {
         *v = 0.0;
     }
     for i in 0..r {
-        let u_col_i = svd.left_singular_vector(i); // length d_out, contiguous
+        let u_col_i = u_col(i); // length d_out, contiguous
         let a_row_offset = i * d_in;
         for k in 0..d_out {
             let alpha = u_col_i[k]; // U[k][i]
@@ -235,11 +306,11 @@ pub fn spectral_rewire_into<'a>(
     //
     // M[i][j] = Σ_k A[i][k] · V[k][j] = <A_row_i, V_col_j>
     let m_len = r * r;
-    let m_buf = &mut scratch.m_buf[..m_len];
+    let m_buf = &mut m_buf[..m_len];
     for i in 0..r {
         let a_row_i = &a_buf[i * d_in..(i + 1) * d_in]; // contiguous, length d_in
         for j in 0..r {
-            let v_col_j = svd.right_singular_vector(j); // length d_in, contiguous
+            let v_col_j = v_col(j); // length d_in, contiguous
             m_buf[i * r + j] = simd_dot_f32(a_row_i, v_col_j, d_in);
         }
     }
@@ -249,12 +320,12 @@ pub fn spectral_rewire_into<'a>(
     // B[i][j] = Σ_k U[i][k] · M[k][j]
     // For each i: accumulate rank-1 updates over M rows weighted by U entries.
     let b_len = d_out * r;
-    let b_buf = &mut scratch.b_buf[..b_len];
+    let b_buf = &mut b_buf[..b_len];
     for v in b_buf.iter_mut() {
         *v = 0.0;
     }
     for k in 0..r {
-        let u_col_k = svd.left_singular_vector(k); // length d_out, contiguous
+        let u_col_k = u_col(k); // length d_out, contiguous
         let m_row_k = &m_buf[k * r..(k + 1) * r]; // contiguous, length r
         for i in 0..d_out {
             let beta = u_col_k[i]; // U[i][k]
@@ -278,12 +349,12 @@ pub fn spectral_rewire_into<'a>(
     //
     // ΔW*[i][j] = Σ_k B[i][k] · V[j][k]
     // Rank-1 sum: for each k, add B[:,k] ⊗ V[:,k].
-    let delta_star = &mut scratch.delta_star_buf[..total];
+    let delta_star = &mut delta_star_buf[..total];
     for v in delta_star.iter_mut() {
         *v = 0.0;
     }
     for k in 0..r {
-        let v_col_k = svd.right_singular_vector(k); // length d_in, contiguous
+        let v_col_k = v_col(k); // length d_in, contiguous
         for i in 0..d_out {
             let gamma = b_buf[i * r + k]; // B[i][k]
             let ds_row = &mut delta_star[i * d_in..(i + 1) * d_in]; // contiguous
@@ -303,7 +374,7 @@ pub fn spectral_rewire_into<'a>(
     }
 
     // ── Step 6: residual + on-manifold fraction ───────────────────────────
-    let residual = &mut scratch.residual_buf[..total];
+    let residual = &mut residual_buf[..total];
     let mut norm_delta_sq = 0.0_f32;
     let mut norm_star_sq = 0.0_f32;
     for idx in 0..total {
@@ -364,6 +435,175 @@ pub fn spectral_rewire(
         residual: out.residual.to_vec(),
         on_manifold_fraction: out.on_manifold_fraction,
     }
+}
+
+// ---------------------------------------------------------------------------
+// SpectralRewireIndex — cached base SVD to eliminate SVD from the hot loop
+// ---------------------------------------------------------------------------
+
+/// Pre-computed top-rank SVD of a base matrix `W₀`, for repeated projections
+/// against the same base (Plan 423 open question #2).
+///
+/// [`spectral_rewire_into`] factors `W₀` on EVERY call — the one-sided Jacobi
+/// SVD dominates latency (~ms for a 64×64 base). When many deltas are projected
+/// against the same base (e.g. all LoRA overlays for one layer, all freeze/thaw
+/// snapshots of one shard), build an index ONCE and call
+/// [`spectral_rewire_with_index_into`] per delta. The per-delta cost is then
+/// just the four matmuls (steps 2–5) — typically microseconds.
+///
+/// Stores the top-r left singular vectors (`u_r`, column-major, `d_out × r`)
+/// and right singular vectors (`v_r`, column-major, `d_in × r`) plus singular
+/// values. Building the index still pays the SVD cost once; it is amortized
+/// over all subsequent projections.
+///
+/// # Example
+///
+/// ```
+/// use katgpt_spectral::spectral_rewire::{
+///     SpectralRewireIndex, SpectralRewireScratch, spectral_rewire_with_index_into,
+/// };
+///
+/// let (d_out, d_in, r) = (8, 8, 4);
+/// let w0: Vec<f32> = (0..d_out * d_in).map(|i| (i as f32) * 0.01).collect();
+/// let index = SpectralRewireIndex::new(&w0, d_out, d_in, r);
+///
+/// let mut scratch = SpectralRewireScratch::with_capacity(d_out, d_in, r);
+/// let delta: Vec<f32> = vec![0.05; d_out * d_in];
+/// let out = spectral_rewire_with_index_into(&index, &delta, &mut scratch);
+/// assert_eq!(out.delta_star.len(), d_out * d_in);
+/// assert!(out.on_manifold_fraction >= 0.0);
+/// ```
+pub struct SpectralRewireIndex {
+    /// Top-r left singular vectors (columns of U), column-major flat:
+    /// column `i` lives at `[i * d_out .. (i+1) * d_out]`. Length `r * d_out`.
+    u_r: Vec<f32>,
+    /// Top-r right singular vectors (columns of V), column-major flat:
+    /// column `j` lives at `[j * d_in .. (j+1) * d_in]`. Length `r * d_in`.
+    v_r: Vec<f32>,
+    /// Top-r singular values, descending. Length `r`.
+    singular_values: Vec<f32>,
+    d_out: usize,
+    d_in: usize,
+    rank: usize,
+}
+
+impl SpectralRewireIndex {
+    /// Build an index by SVD-ing `w0` (`d_out × d_in`, row-major) and caching
+    /// its top-`rank` singular vectors. Pays the SVD cost ONCE.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `w0.len() != d_out * d_in`, `rank == 0`, or `d_in > 64`
+    /// (the one-sided Jacobi SVD column cap — see [`SVD_MAX_COLS`]).
+    pub fn new(w0: &[f32], d_out: usize, d_in: usize, rank: usize) -> Self {
+        assert_eq!(
+            w0.len(),
+            d_out * d_in,
+            "SpectralRewireIndex::new: w0.len() {} != d_out*d_in = {d_out}*{d_in}",
+            w0.len()
+        );
+        assert!(rank >= 1, "SpectralRewireIndex::new: rank must be >= 1");
+        assert!(
+            d_in <= SVD_MAX_COLS,
+            "SpectralRewireIndex::new: d_in={d_in} exceeds the SVD cap ({SVD_MAX_COLS})"
+        );
+        let r = rank.min(d_out.min(d_in));
+
+        let mut svd_result = SvdResultScratch::with_capacity(d_out, d_in);
+        let mut svd_work = SvdScratch::with_capacity(d_in, d_out);
+        thin_svd_into(w0, d_out, d_in, &mut svd_result, &mut svd_work);
+
+        let mut u_r = vec![0.0f32; r * d_out];
+        let mut v_r = vec![0.0f32; r * d_in];
+        let mut singular_values = vec![0.0f32; r];
+        for i in 0..r {
+            u_r[i * d_out..(i + 1) * d_out].copy_from_slice(svd_result.left_singular_vector(i));
+            v_r[i * d_in..(i + 1) * d_in].copy_from_slice(svd_result.right_singular_vector(i));
+            singular_values[i] = svd_result.singular_value(i);
+        }
+
+        Self { u_r, v_r, singular_values, d_out, d_in, rank: r }
+    }
+
+    /// The cached rank.
+    #[inline]
+    pub fn rank(&self) -> usize {
+        self.rank
+    }
+
+    /// The `d_out` the index was built for.
+    #[inline]
+    pub fn d_out(&self) -> usize {
+        self.d_out
+    }
+
+    /// The `d_in` the index was built for.
+    #[inline]
+    pub fn d_in(&self) -> usize {
+        self.d_in
+    }
+
+    /// Cached top-r left singular vector `i` (column of U). Length `d_out`.
+    #[inline]
+    pub fn u_col(&self, i: usize) -> &[f32] {
+        &self.u_r[i * self.d_out..(i + 1) * self.d_out]
+    }
+
+    /// Cached top-r right singular vector `j` (column of V). Length `d_in`.
+    #[inline]
+    pub fn v_col(&self, j: usize) -> &[f32] {
+        &self.v_r[j * self.d_in..(j + 1) * self.d_in]
+    }
+
+    /// Cached singular value `i` (descending).
+    #[inline]
+    pub fn singular_value(&self, i: usize) -> f32 {
+        self.singular_values[i]
+    }
+}
+
+/// Project `delta` onto the cached base SVD in `index`, skipping the SVD. The
+/// hot path for repeated projections against the same base — the per-call cost
+/// is just the four matmuls (no Jacobi sweep).
+///
+/// The `delta` shape must match the index's `(d_out, d_in)`; the scratch is
+/// reused for the matmul temporaries.
+///
+/// # Panics
+///
+/// Panics if `delta.len() != index.d_out() * index.d_in()`.
+pub fn spectral_rewire_with_index_into<'a>(
+    index: &'a SpectralRewireIndex,
+    delta: &[f32],
+    scratch: &'a mut SpectralRewireScratch,
+) -> SpectralRewireOutput<'a> {
+    let d_out = index.d_out();
+    let d_in = index.d_in();
+    let r = index.rank();
+    let total = d_out * d_in;
+    assert_eq!(
+        delta.len(),
+        total,
+        "spectral_rewire_with_index_into: delta.len() {} != d_out*d_in = {total}",
+        delta.len()
+    );
+
+    scratch.ensure_capacity(d_out, d_in, r);
+
+    project_core(
+        delta,
+        d_out,
+        d_in,
+        r,
+        total,
+        &mut scratch.a_buf,
+        &mut scratch.m_buf,
+        &mut scratch.b_buf,
+        &mut scratch.delta_star_buf,
+        &mut scratch.residual_buf,
+        |i| index.u_col(i),
+        |j| index.v_col(j),
+    )
 }
 
 // ---------------------------------------------------------------------------
@@ -873,6 +1113,75 @@ mod tests {
         // rank == 0 and wrong-length panic (input validation).
         assert!(std::panic::catch_unwind(|| rewiring_matrix_diagnostics(&[1.0], 0)).is_err());
         assert!(std::panic::catch_unwind(|| rewiring_matrix_diagnostics(&[1.0, 2.0], 2)).is_err());
+    }
+
+    // ── SVD cap guard (Issue 124): d_in > 64 panics with a clear message ──
+
+    #[test]
+    fn svd_cap_guard_panics_for_large_d_in() {
+        // d_in = 65 exceeds the one-sided Jacobi SVD 64-column cap. The guard
+        // must panic with a clear message instead of an opaque OOB deep in
+        // thin_svd_into.
+        let d_out = 8;
+        let d_in = 65; // one over the cap
+        let w0 = vec![0.0_f32; d_out * d_in];
+        let delta = vec![0.0_f32; d_out * d_in];
+        let mut scratch = SpectralRewireScratch::with_capacity(d_out, d_in, 4);
+        let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            spectral_rewire_into(&w0, &delta, d_out, d_in, 4, &mut scratch);
+        }));
+        assert!(res.is_err(), "d_in=65 should panic (SVD cap)");
+        // Verify the guard message mentions the cap.
+        let payload = res.unwrap_err();
+        let msg = payload
+            .downcast_ref::<String>()
+            .map(|s| s.as_str())
+            .or_else(|| payload.downcast_ref::<&'static str>().copied())
+            .unwrap_or("");
+        assert!(
+            msg.contains("SVD") && msg.contains("64"),
+            "panic message should mention the SVD 64-cap, got: {msg}"
+        );
+    }
+
+    // ── SpectralRewireIndex: cached path matches the on-the-fly SVD path ──
+
+    #[test]
+    fn cached_index_matches_svd_path() {
+        let mut rng = make_rng(303);
+        let d_out = 16;
+        let d_in = 12;
+        let r = 5;
+        let w0 = rand_matrix(&mut rng, d_out, d_in);
+        let delta = rand_matrix(&mut rng, d_out, d_in);
+
+        // On-the-fly SVD path.
+        let mut scratch_a = SpectralRewireScratch::with_capacity(d_out, d_in, r);
+        let out_svd = spectral_rewire_into(&w0, &delta, d_out, d_in, r, &mut scratch_a);
+        let ds_svd = out_svd.delta_star.to_vec();
+        let m_svd = out_svd.rewiring_matrix.to_vec();
+        let frac_svd = out_svd.on_manifold_fraction;
+
+        // Cached-index path: build index once, project with it.
+        let index = SpectralRewireIndex::new(&w0, d_out, d_in, r);
+        let mut scratch_b = SpectralRewireScratch::with_capacity(d_out, d_in, r);
+        let out_idx = spectral_rewire_with_index_into(&index, &delta, &mut scratch_b);
+        let ds_idx = out_idx.delta_star.to_vec();
+        let m_idx = out_idx.rewiring_matrix.to_vec();
+        let frac_idx = out_idx.on_manifold_fraction;
+
+        // Both paths use the SAME singular vectors (copied into the index), so
+        // outputs must be bit-identical.
+        assert_eq!(ds_svd, ds_idx, "delta_star must match between paths");
+        assert_eq!(m_svd, m_idx, "rewiring_matrix must match between paths");
+        assert_eq!(frac_svd, frac_idx, "on_manifold_fraction must match");
+
+        // Index metadata.
+        assert_eq!(index.rank(), r);
+        assert_eq!(index.d_out(), d_out);
+        assert_eq!(index.d_in(), d_in);
+        assert_eq!(index.u_col(0).len(), d_out);
+        assert_eq!(index.v_col(0).len(), d_in);
     }
 
     // ── T2.3 (integration): diagnostics on a real spectral_rewire output ─
