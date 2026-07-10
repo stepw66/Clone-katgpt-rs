@@ -87,6 +87,7 @@ impl std::error::Error for SpecializationError {
 }
 
 impl From<ScheduleError> for SpecializationError {
+    #[cold]
     fn from(err: ScheduleError) -> Self {
         Self::Schedule(err)
     }

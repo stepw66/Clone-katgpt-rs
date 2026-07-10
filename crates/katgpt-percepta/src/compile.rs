@@ -101,6 +101,7 @@ impl std::error::Error for CompileError {
 }
 
 impl From<DecodeError> for CompileError {
+    #[cold]
     fn from(err: DecodeError) -> Self {
         Self::DecodeError(err)
     }

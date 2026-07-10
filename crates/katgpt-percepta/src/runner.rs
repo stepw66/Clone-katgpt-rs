@@ -75,18 +75,21 @@ impl std::fmt::Display for RunnerError {
 impl std::error::Error for RunnerError {}
 
 impl From<ScheduleError> for RunnerError {
+    #[cold]
     fn from(e: ScheduleError) -> Self {
         Self::ScheduleError(e)
     }
 }
 
 impl From<EvalError> for RunnerError {
+    #[cold]
     fn from(e: EvalError) -> Self {
         Self::EvalError(e)
     }
 }
 
 impl From<CompileError> for RunnerError {
+    #[cold]
     fn from(e: CompileError) -> Self {
         Self::CompileError(format!("{e}"))
     }
