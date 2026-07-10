@@ -26,7 +26,9 @@
 //! - Latent-to-latent preferred (sigmoid not softmax): N/A (pure summation).
 //! - Freeze/thaw over fine-tuning: YES (no weight mutation).
 //! - Zero allocations in wrapper code: YES (all Vecs come from delegated ops
-//!   or the pre-built coboundary index).
+//!   or the pre-built coboundary index). Exception: [`line_integral`] builds a
+//!   one-shot vertex-pair lookup (HashMap) to turn its O(P×|B₁|) edge scan into
+//!   O(P+|B₁|); see its docs for the trade-off.
 
 use crate::hodge::hodge_decompose;
 use crate::operators::codifferential;
@@ -415,31 +417,44 @@ pub fn line_integral(cx: &CellComplex, edge_field: &CochainField, path: &[u32]) 
     );
 
     let entries = cx.boundary_entries(0);
-    let mut total = 0.0f32;
 
+    // Build a vertex-pair → (edge, sign_for_second_vertex) lookup once, so the
+    // per-window edge scan becomes O(1). The previous loop was O(P×E); this is
+    // O(E) build + O(P) walk = O(E + P). B₁ entries from grid_2d are paired:
+    // (tail, e, −1), (head, e, +1).
+    //
+    // NOTE: this is the one wrapper that allocates (a HashMap). The trade-off
+    // is documented: for large cell complexes and non-trivial paths the
+    // O(P×E)→O(P+|E|) win dominates the one-shot HashMap build. Callers on a
+    // strict zero-alloc budget should pre-build their own lookup and call the
+    // DEC operators directly.
+    let mut edge_lookup: std::collections::HashMap<(usize, usize), (usize, i8)> =
+        std::collections::HashMap::with_capacity(entries.len() / 2);
+    for pair in entries.chunks_exact(2) {
+        let (v0, e0, _s0) = pair[0];
+        let (v1, e1, _s1) = pair[1];
+        debug_assert_eq!(e0, e1, "B₁ entries must be paired by edge index");
+        // Store both directions so a single lookup resolves the edge regardless
+        // of traversal orientation. Value carries the sign of the *second*
+        // vertex in the key, matching the original `sign_b` resolution.
+        edge_lookup.insert((v0, v1), (e0, pair[1].2));
+        edge_lookup.insert((v1, v0), (e0, pair[0].2));
+    }
+
+    let mut total = 0.0f32;
     for window in path.windows(2) {
         let a = window[0] as usize;
         let b = window[1] as usize;
         if a == b {
             continue;
         }
-
-        // B₁ entries from grid_2d are paired: (tail, e, −1), (head, e, +1).
-        // Iterate pairs to find the edge connecting a and b.
-        for pair in entries.chunks_exact(2) {
-            let (v0, e0, _s0) = pair[0];
-            let (v1, e1, _s1) = pair[1];
-            debug_assert_eq!(e0, e1, "B₁ entries must be paired by edge index");
-
-            if (v0 == a && v1 == b) || (v0 == b && v1 == a) {
-                // Found edge e connecting a and b.
-                // Contribution = field[e] · sign(b, e):
-                //   b is head (sign=+1) → traversal along orientation → +field
-                //   b is tail (sign=−1) → traversal against orientation → −field
-                let sign_b = if v0 == b { pair[0].2 } else { pair[1].2 };
-                total += sign_b as f32 * edge_field.scalar(e0);
-                break;
-            }
+        // O(1) edge lookup. Missing key == no connecting edge → contribute 0
+        // (matches the original silent-scan-failure semantics).
+        if let Some(&(e, sign_b)) = edge_lookup.get(&(a, b)) {
+            // Contribution = field[e] · sign(b, e):
+            //   b is head (sign=+1) → traversal along orientation → +field
+            //   b is tail (sign=−1) → traversal against orientation → −field
+            total += sign_b as f32 * edge_field.scalar(e);
         }
     }
 
@@ -492,7 +507,8 @@ pub fn line_integral(cx: &CellComplex, edge_field: &CochainField, path: &[u32]) 
 /// clockwise circulation == −counterclockwise circulation.
 ///
 /// # Complexity
-/// `O(loop_len × |B₁|)` — same as [`line_integral`] (it delegates).
+/// `O(loop_len + |B₁|)` — same as [`line_integral`] (it delegates; the
+/// one-shot vertex-pair lookup build is `O(|B₁|)`).
 ///
 /// # Example
 ///
