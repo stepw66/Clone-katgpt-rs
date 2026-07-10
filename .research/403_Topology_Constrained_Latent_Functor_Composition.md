@@ -212,8 +212,16 @@ are shipped behind `action_faithfulness_drift` (opt-in, default-off).
 is now wired into `cognitive_branch.rs` at the DriftGate call site. The
 `AuditRunner` is stored on `MapInstance` (all 5 construction sites). When empty
 (no probes have run), rate=1.0 → multiplier=1.0 → bit-identical reward.
-Phase 4 T4.2 (real probe scheduling) deferred pending Plan 308 production
-integration.
+**Phase 4 T4.2 (production probe scheduling) shipped 2026-07-10**: new module
+`riir-engine/src/integrity/composition_probe.rs` defines the production
+consumer (`CompositionActivationConsumer`) — behavior =
+`Σ_i w_i · Σ_j direction_{i,j}` (the NPC's cognitive activation). The probe is
+scheduled at audit cadence (every N=64 ticks) in `cognitive_branch.rs`, ahead
+of the drift phase. Dead injections (zero-weight compositions) →
+`input_faithful_rate` drops → drift reward dampened. 11 unit tests + 1
+production integration test all PASS. All primitives shipped; remaining piece
+is empirical production validation (whether the dead-injection failure mode
+occurs in real gameplay).
 
 See: `riir-ai/.benchmarks/430_action_faithfulness_drift.md` for full results.
 
