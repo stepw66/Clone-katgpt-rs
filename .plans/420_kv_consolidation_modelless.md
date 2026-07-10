@@ -39,38 +39,49 @@ The PoC lives in `katgpt-rs/crates/katgpt-core/benches/bench_420_kv_consolidatio
 
 ## Phase 2 — Primitive Skeleton (feature flag, only if Phase 1 passes)
 
+> **PERMANENTLY SHELVED (2026-07-09).** Phase 1 §3.6 PoC refuted the quality-parity
+> claim on the untrained model (T1.4: Δtoken_acc = −0.06pp, ΔNLL = +0.0001;
+> T1.5: zero hyperparameter sensitivity). riir-train Plan 313 independently
+> confirmed the refutation on a TRAINED model (31% accuracy, 0.00pp gain). The
+> paper's quality benefit is inseparable from its TRAINED Cache Processor; the
+> modelless mean-shift does not capture it. No feature flag ships. These tasks
+> are marked `[-]` (shelved) — not done, not proceeding. See `.benchmarks/`
+> and `.research/401` §3.6.
+
 ### Tasks
 
-- [ ] **T2.1** Create `crates/katgpt-core/src/kv_consolidation/mod.rs` with:
+- [-] **T2.1** Create `crates/katgpt-core/src/kv_consolidation/mod.rs` with:
   - `KvConsolidationConfig` struct: `g_max`, `lambda`, `k`, `rsw_len`, `trigger: ConsolidationTrigger` enum (`NewlineToken | SurpriseGate { threshold }`)
   - `KvConsolidator` struct: holds config + scratch buffers (pre-allocated, zero-alloc hot path per AGENTS.md)
   - `consolidate(&mut self, kv_cache: &mut KvCache, attention_weights: &[f32], layer: usize) -> ConsolidationReport`
-- [ ] **T2.2** Implement the consolidation update in `kv_consolidation/ops.rs`:
+- [-] **T2.2** Implement the consolidation update in `kv_consolidation/ops.rs`:
   - `consolidate_recent(values: &mut [f32], step_indices: &[usize], gate: f32)` — mean-shift recent step values toward their centroid
   - `reconsolidate_recalled(values: &mut [f32], recalled_indices: &[usize], attention_mass: &[f32], step_centroid: &[f32], gate: f32)` — mean-shift recalled values toward step centroid, attention-weighted
   - Both: sigmoid gate, only value vectors (keys untouched), zero-allocation (use scratch buffers)
-- [ ] **T2.3** Implement the selection in `kv_consolidation/select.rs`:
+- [-] **T2.3** Implement the selection in `kv_consolidation/select.rs`:
   - `select_topk_by_attention_mass(attention: &[f32], step_indices: &[usize], k: usize) -> Vec<usize>` — top-k prior positions by mean attention from recent step
   - Use a fixed-size max-heap (pre-allocated `[usize; K_MAX]`) — no Vec allocation in hot path
-- [ ] **T2.4** Implement the trigger in `kv_consolidation/trigger.rs`:
+- [-] **T2.4** Implement the trigger in `kv_consolidation/trigger.rs`:
   - `NewlineToken` — fires on `\n` token ID
   - `SurpriseGate` — fires when entropy exceeds threshold (reuse SwiR's block-relative entropy if available, else δ-Mem surprise gate)
-- [ ] **T2.5** Add Cargo feature `kv_consolidation = []` to `crates/katgpt-core/Cargo.toml`. Off by default.
-- [ ] **T2.6** Wire into the KV cache update path: after each token decode, check trigger; if fired, call `consolidate()`. Feature-gated.
+- [-] **T2.5** Add Cargo feature `kv_consolidation = []` to `crates/katgpt-core/Cargo.toml`. Off by default.
+- [-] **T2.6** Wire into the KV cache update path: after each token decode, check trigger; if fired, call `consolidate()`. Feature-gated.
 
 ---
 
 ## Phase 3 — GOAT Gate (benchmark + promote/demote)
 
+> **PERMANENTLY SHELVED** — Phase 2 never proceeds (Phase 1 refuted; see above).
+
 ### Tasks
 
-- [ ] **T3.1** Write `crates/katgpt-core/benches/kv_consolidation_bench.rs`:
+- [-] **T3.1** Write `crates/katgpt-core/benches/kv_consolidation_bench.rs`:
   - G1 (correctness): consolidated cache produces valid attention distribution (no NaN, sums to 1 after softmax)
   - G2 (quality): exact-match accuracy on the Phase 1 toy task with the shipped primitive (must match Phase 1 PoC results within noise)
   - G3 (no-regression): consolidation overhead < 5% of decode time (consolidation is invoked infrequently — once per step boundary, not per token)
   - G4 (alloc-free): consolidation hot path does zero heap allocations (use scratch buffers, verified by counting allocations in a debug build)
-- [ ] **T3.2** Run the GOAT gate. Record results in `.benchmarks/420_kv_consolidation_goat.md`.
-- [ ] **T3.3** Verdict:
+- [-] **T3.2** Run the GOAT gate. Record results in `.benchmarks/420_kv_consolidation_goat.md`.
+- [-] **T3.3** Verdict:
   - All gates pass + Phase 1 showed ≥2pp quality gain → **promote to default** (`kv_consolidation` added to `default` features).
   - G1/G3/G4 pass but G2 (quality) fails or Phase 1 gain < 2pp → **keep opt-in**. Record honest result.
   - G1 fails → **fix or shelve**. Consolidation must not corrupt the cache.
@@ -79,12 +90,14 @@ The PoC lives in `katgpt-rs/crates/katgpt-core/benches/bench_420_kv_consolidatio
 
 ## Phase 4 — Fusion Extensions (optional, after Phase 3 promotion)
 
+> **PERMANENTLY SHELVED** — Phase 3 never proceeds (Phase 2 never proceeds).
+
 ### Tasks
 
-- [ ] **T4.1** F2 (subspace projection): replace mean-shift with PCA-subspace projection of recalled values onto the recent step's principal components. Bench against mean-shift version. Promote if better.
-- [ ] **T4.2** F3 (conformal trigger): replace entropy trigger with conformal-interval-width trigger (Plan 340). Consolidate only when calibrated uncertainty is high. Bench.
-- [ ] **T4.3** Compose with SegmentCheckpoint (Plan 226): checkpoint AFTER consolidation, so checkpoints store the consolidated state. Reduces checkpoint storage redundancy.
-- [ ] **T4.4** Compose with δ-Mem (Plan 053): use δ-Mem's delta-rule as the consolidation update mechanism instead of mean-shift. Tests the revival hypothesis (Research 401 §2.5).
+- [-] **T4.1** F2 (subspace projection): replace mean-shift with PCA-subspace projection of recalled values onto the recent step's principal components. Bench against mean-shift version. Promote if better.
+- [-] **T4.2** F3 (conformal trigger): replace entropy trigger with conformal-interval-width trigger (Plan 340). Consolidate only when calibrated uncertainty is high. Bench.
+- [-] **T4.3** Compose with SegmentCheckpoint (Plan 226): checkpoint AFTER consolidation, so checkpoints store the consolidated state. Reduces checkpoint storage redundancy.
+- [-] **T4.4** Compose with δ-Mem (Plan 053): use δ-Mem's delta-rule as the consolidation update mechanism instead of mean-shift. Tests the revival hypothesis (Research 401 §2.5).
 
 ---
 
