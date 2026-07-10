@@ -133,9 +133,12 @@ Beyond the GOAT gate, Phase 3 drove two improvements to the primitive:
   `SvdScratch`). Arbitrary `d_in` is supported; 128×128 verified in the GOAT
   gate. The `SVD_MAX_COLS` cap in `katgpt-spectral` has been removed.
 - **Issue 123** — real-delta concentration test. The make-or-break for promotion
-  to default. Blocked on a real delta source (freeze/thaw pipeline in
-  riir-neuron-db, or LoRA overlay path in riir-ai, or training deltas from
-  riir-train).
+  to default. **Modelless diagnostics landed** (commit `4ff129db`): the
+  MEASUREMENT is calibrated (mixed-delta test matches theory within 3%) and the
+  SEPARATION mechanism is validated (two-component recovery < 5% rel err).
+  Full validation (concentration on REAL TRAINED deltas) is blocked on
+  riir-train Issue 374 — no trained weight files exist in any repo, and all
+  modelless delta sources produce untrained deltas (which are NOT concentrated).
 - **SIMD optimization** (optional) — the 64×64 index path at ~29µs could likely
   hit the original 10µs target with proper SIMD matmuls. Not blocking; file as
   issue if the 64×64 hot-loop case becomes a real workload.
