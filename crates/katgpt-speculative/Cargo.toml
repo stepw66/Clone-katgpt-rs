@@ -304,3 +304,11 @@ katgpt-pruners = { path = "../katgpt-pruners", features = ["echo_env_predictor"]
 fastrand = "2"  # correlation_budget tests (Issue 003 move from root, which has fastrand as a dep)
 serde_json = "1"  # segment_match IndexedSegment JSON roundtrip tests
 tempfile = "3"  # rt_turbo calibration save/load roundtrip tests
+
+# Plan 424 Phase 6 T6.2 — DDTree deep-argmax acceptance-length benchmark.
+# Synthetic mechanism test: does concentrating budget on the argmax chain at
+# deep draft positions (paper §3.5 / Figure 6 crossover) extend the on-target
+# accepted prefix? Not a perf bench — no criterion dep needed.
+[[bench]]
+name = "bench_424_dd_tree_deep_argmax"
+harness = false
