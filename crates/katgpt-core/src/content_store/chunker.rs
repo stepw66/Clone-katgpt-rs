@@ -267,14 +267,19 @@ impl FastCdcChunker {
         let mut fp: u64 = 0;
         let mut i = start;
 
+        // Safety: all loop bounds below are clamped to `max_end`, which is
+        // `≤ bytes.len()` by construction. `bytes[i]` for `i ∈ [start, max_end)`
+        // is therefore always in-bounds, and `GEAR_TABLE` is indexed by `u8`
+        // (0..256). The `get_unchecked` calls elide the per-byte bounds check
+        // in this hot byte-scanning loop.
         // Phase 0: prime fp, no cuts allowed.
         while i < skip_end {
-            fp = (fp << 1) ^ GEAR_TABLE[bytes[i] as usize];
+            fp = (fp << 1) ^ GEAR_TABLE[*unsafe { bytes.get_unchecked(i) } as usize];
             i += 1;
         }
         // Phase 1: normal mask (stricter → expected chunk ≈ 2^normal_level).
         while i < mid_end {
-            fp = (fp << 1) ^ GEAR_TABLE[bytes[i] as usize];
+            fp = (fp << 1) ^ GEAR_TABLE[*unsafe { bytes.get_unchecked(i) } as usize];
             if (fp & self.normal_mask) == 0 {
                 return i + 1;
             }
@@ -282,7 +287,7 @@ impl FastCdcChunker {
         }
         // Phase 2: looser mask (force a cut before MAX).
         while i < max_end {
-            fp = (fp << 1) ^ GEAR_TABLE[bytes[i] as usize];
+            fp = (fp << 1) ^ GEAR_TABLE[*unsafe { bytes.get_unchecked(i) } as usize];
             if (fp & self.max_mask) == 0 {
                 return i + 1;
             }

@@ -101,18 +101,25 @@ impl JacobianSupportEstimator {
         config: JacobianSupportConfig,
     ) -> Vec<u32> {
         let mut out = Vec::with_capacity(d_hidden);
-        Self::estimate_into(hidden, task_emb, d_hidden, config, &mut out);
+        let mut mag = Vec::with_capacity(d_hidden);
+        Self::estimate_into(hidden, task_emb, d_hidden, config, &mut out, &mut mag);
         out
     }
 
     /// Zero-alloc variant: writes the support into `out` (cleared first).
     /// `out` should be pre-allocated with capacity `d_hidden` for efficiency.
+    ///
+    /// `mag_scratch` is a caller-owned reusable buffer for per-coordinate
+    /// magnitudes; it is cleared and resized to `d_hidden` on each call. Pass
+    /// it in to avoid the per-call `vec![0.0; d_hidden]` allocation on the
+    /// hot path.
     pub fn estimate_into(
         hidden: &[f32],
         task_emb: &[f32],
         d_hidden: usize,
         config: JacobianSupportConfig,
         out: &mut Vec<u32>,
+        mag_scratch: &mut Vec<f32>,
     ) {
         out.clear();
         if d_hidden == 0 || hidden.is_empty() || task_emb.is_empty() {
@@ -127,8 +134,10 @@ impl JacobianSupportEstimator {
         );
         let n_samples = hidden.len() / d_hidden;
         // Per-coordinate accumulated |Jv| magnitude (averaged over samples).
-        // We compute this in-place into a reusable buffer.
-        let mut mag = vec![0.0_f32; d_hidden];
+        // Reuse caller-owned scratch to keep this path allocation-free.
+        mag_scratch.clear();
+        mag_scratch.resize(d_hidden, 0.0_f32);
+        let mag: &mut [f32] = mag_scratch;
 
         // Finite-difference Jv per sample.
         // f(h) = h projected onto task_emb via dot product (modelless readout).
@@ -335,7 +344,13 @@ pub fn enforce_sparsity_bound(support_hat: &mut Vec<u32>, support_true_size: usi
 /// Enforce the sparsity bound using explicit magnitudes. Drops coordinates
 /// with the smallest `|mag[i]|` until `|support_hat| <= support_true_size`.
 ///
-/// `mag[i]` is the magnitude of coordinate `support_hat[i]`.
+/// `mag[i]` is the magnitude of coordinate `support_hat[i]` (indexed by
+/// **position** in `support_hat`, not by coordinate value).
+///
+/// Single-allocation: builds one paired `(coord, |mag|)` buffer, partial-
+/// partitions in O(n) via `select_nth_unstable_by`, then writes the survivors
+/// back into `support_hat` in place. The prior implementation allocated two
+/// Vecs (`idx` + `new_support`) and did a full O(n log n) sort.
 pub fn enforce_sparsity_bound_with_mag(
     support_hat: &mut Vec<u32>,
     mag: &[f32],
@@ -345,18 +360,22 @@ pub fn enforce_sparsity_bound_with_mag(
         return;
     }
     debug_assert_eq!(support_hat.len(), mag.len());
-    // Sort indices by descending magnitude, keep top-`support_true_size`.
-    let mut idx: Vec<usize> = (0..support_hat.len()).collect();
-    idx.sort_unstable_by(|&a, &b| {
-        mag[b]
-            .abs()
-            .partial_cmp(&mag[a].abs())
-            .unwrap_or(std::cmp::Ordering::Equal)
+    let n = support_hat.len();
+    // Pair each coordinate with its magnitude (single allocation).
+    let mut paired: Vec<(u32, f32)> = (0..n).map(|i| (support_hat[i], mag[i].abs())).collect();
+    // O(n) partial partition: everything at index < support_true_size has
+    // magnitude >= the pivot. Comparator orders by descending magnitude.
+    paired.select_nth_unstable_by(support_true_size, |a, b| {
+        b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal)
     });
-    idx.truncate(support_true_size);
-    let mut new_support: Vec<u32> = idx.iter().map(|&i| support_hat[i]).collect();
-    new_support.sort_unstable();
-    *support_hat = new_support;
+    paired.truncate(support_true_size);
+    // Write survivors back into support_hat in place, then restore ascending
+    // coordinate order (callers expect sorted support).
+    support_hat.clear();
+    for (coord, _) in &paired {
+        support_hat.push(*coord);
+    }
+    support_hat.sort_unstable();
 }
 
 // ── Specialist score ────────────────────────────────────────────────────────

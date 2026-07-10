@@ -98,15 +98,19 @@ impl SscDrafter {
         }
 
         let top_k = compute_and_select_top_k(query, summaries, self.k);
-        self.context_summaries = top_k
-            .iter()
-            .filter_map(|&(id, _)| {
-                summaries
-                    .iter()
-                    .find(|&&(sid, _)| sid == id)
-                    .map(|&(_, s)| s.to_vec())
-            })
-            .collect();
+        // Single pass over `summaries`, checking membership in the top-k set
+        // (k ≤ 8, so the inner linear scan is bounded and branch-predictor
+        // friendly). This avoids the prior O(k × N) re-scan that searched
+        // `summaries` from the start for each of the k selected ids.
+        // Order in `context_summaries` is unspecified, which is fine —
+        // `enhance_draft` averages all entries.
+        self.context_summaries.clear();
+        self.context_summaries.reserve(top_k.len());
+        for &(sid, summary) in summaries {
+            if top_k.iter().any(|(id, _)| *id == sid) {
+                self.context_summaries.push(summary.to_vec());
+            }
+        }
     }
 
     /// Enhance draft logits with a small sigmoid bias from segment context.
