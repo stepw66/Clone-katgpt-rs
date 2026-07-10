@@ -21,7 +21,7 @@ pub use katgpt_core::types::QuantizedKVCache;
 /// Extension trait: optional KV-cache compaction.
 ///
 /// Lives in the root crate (not katgpt-types) because it references
-/// `crate::still_kv::CompactionStrategy` / `CompactKVCache`, which are
+/// `katgpt_kv::still_kv::CompactionStrategy` / `CompactKVCache`, which are
 /// feature-gated KV-concrete types. Backends that support compaction
 /// implement this in addition to `QuantizedKVCache`. The default impl
 /// returns `Err` so every cache type is soundly default-impl-able.
@@ -35,8 +35,8 @@ pub trait CompactableKVCache: QuantizedKVCache {
     fn compact_into(
         &mut self,
         _budget: usize,
-        _strategy: crate::still_kv::CompactionStrategy,
-    ) -> Result<crate::still_kv::CompactKVCache, String> {
+        _strategy: katgpt_kv::still_kv::CompactionStrategy,
+    ) -> Result<katgpt_kv::still_kv::CompactKVCache, String> {
         Err("compact_into not supported by this cache type".to_string())
     }
 }
