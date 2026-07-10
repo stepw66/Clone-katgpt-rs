@@ -1845,14 +1845,19 @@ pub fn lower_i64_ops(func: &FuncBody) -> FuncBody {
 ///
 /// Returns a map from unsupported op names to their occurrence count.
 /// Empty map means all instructions are basic.
-pub fn check_basic_only(func: &FuncBody) -> HashMap<String, usize> {
-    let mut bad: HashMap<String, usize> = HashMap::new();
+///
+/// Keys are `&'static str` (zero-alloc): known opcodes use their canonical
+/// name from [`WASM_OP_NAMES`]; opcodes with no canonical name are bucketed
+/// under the static key `"unknown"`. This loses the per-opcode hex distinction
+/// the previous `String`-keyed version produced for unnamed opcodes, but those
+/// are exceptional (any opcode outside the i32-subset name table) and the
+/// function is a diagnostic — the common path (named hard ops like `i32.mul`)
+/// is unaffected.
+pub fn check_basic_only(func: &FuncBody) -> HashMap<&'static str, usize> {
+    let mut bad: HashMap<&'static str, usize> = HashMap::new();
     for ins in &func.instructions {
         if !BASIC_OPS_TABLE[ins.opcode as usize] {
-            let name = WASM_OP_NAMES
-                .get(&ins.opcode)
-                .map(|s| (*s).to_owned())
-                .unwrap_or_else(|| format!("0x{:02x}", ins.opcode));
+            let name: &'static str = WASM_OP_NAMES.get(&ins.opcode).unwrap_or("unknown");
             *bad.entry(name).or_insert(0) += 1;
         }
     }
