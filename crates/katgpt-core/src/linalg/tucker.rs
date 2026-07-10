@@ -113,6 +113,7 @@ pub enum TuckerError {
 }
 
 impl core::fmt::Display for TuckerError {
+    #[cold]
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
             TuckerError::InvalidModeCount { got, max } => {

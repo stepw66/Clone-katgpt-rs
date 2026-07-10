@@ -1983,6 +1983,7 @@ pub enum FitError {
 }
 
 impl core::fmt::Display for FitError {
+    #[cold]
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
             FitError::NoSamples => write!(f, "no training samples accumulated"),
