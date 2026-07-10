@@ -162,12 +162,16 @@ impl BpeTrainer {
 
             let merged = format!("{}{}", pair.0, pair.1);
 
-            // Add merged token to vocabulary
-            if !vocab_to_id.contains_key(&merged) {
-                let id = id_to_vocab.len();
-                vocab_to_id.insert(merged.clone(), id);
-                id_to_vocab.push(merged.clone());
-            }
+            // Add merged token to vocabulary via entry API (single hash lookup
+            // instead of contains_key + insert).
+            let id = *vocab_to_id
+                .entry(merged.clone())
+                .or_insert_with(|| {
+                    let id = id_to_vocab.len();
+                    id_to_vocab.push(merged.clone());
+                    id
+                });
+            let _ = id; // id is already tracked via the merges table below
 
             merges.push(MergeRule {
                 left: pair.0,
