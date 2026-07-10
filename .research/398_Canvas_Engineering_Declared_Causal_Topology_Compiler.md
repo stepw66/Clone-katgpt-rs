@@ -442,6 +442,14 @@ The canvas compiler's constituents are **already DEFAULT-ON with runtime consume
 like DEC `d∘d=0`) until a real runtime path wants declared-topology-as-causal-graph. The steering + DEC
 stack (Plan 426) is the story to show off, not the canvas fusion.
 
+> **Update 2026-07-10 (R403):** the "needs training" conclusion above is a paper-framing
+> artifact (it compiled onto a DiT's attention positions). Research 403 dissolves it by
+> distilling the canvas onto the **latent-functor substrate** (gated functor graph instead of
+> attention mask) — same reachability guarantee, no transformer backbone, no training. The gated
+> graph is R398's first potential runtime consumer. See
+> [`R403`](403_Topology_Constrained_Latent_Functor_Composition.md) and
+> [Issue 122](../.issues/122_canvas_functor_topology_modelless_poc.md) (the FaithfulnessProbe-attributed PoC).
+
 
 ---
 
