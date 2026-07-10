@@ -4,7 +4,7 @@
 **Research:** [408_Trajectory_Invariant_Latent_Refinement.md](../.research/408_Trajectory_Invariant_Latent_Refinement.md)
 **Source paper:** [arXiv:2606.29164](https://arxiv.org/abs/2606.29164) — Malarkkan et al., *TILR: Trajectory-Invariant Latent Refinement*, ICML 2026 Mech Interp Workshop
 **Target:** `katgpt-rs/crates/katgpt-core/src/tilr.rs` (new module) + Cargo feature `tilr_invariant_subspace`
-**Status:** Active — Phase 1 + Phase 2 COMPLETE, all GOAT gates PASS (2026-07-10)
+**Status:** Active — Phase 1 + Phase 2 + Phase 3 COMPLETE, all GOAT gates PASS (2026-07-10). Phase 4 (docs/example) in progress.
 
 **Constraints:**
 - Modelless only — SVD + projection + alignment gate. No training, no gradient descent, no softmax.
@@ -254,7 +254,7 @@ deferred to the commit step (update `default` list in katgpt-core/Cargo.toml).
 
 ---
 
-## Phase 3 — Offline Calibration Helper (optional, P2)
+## Phase 3 — Offline Calibration Helper (optional, P2) ✅ DONE (2026-07-10)
 
 The paper's calibration phase (collect contrastive differences, run SVD, produce
 `U_r`). This is a convenience helper, NOT the core primitive — consumers can use
@@ -262,15 +262,15 @@ Plan 301's `thin_svd_into` directly.
 
 ### Tasks
 
-- [ ] **T3.1** Add `discover_invariant_subspace(differences: &[&[f32]], tau: f32) -> Result<Vec<f32>, TilrError>`:
-      - Stack `differences` (each length `d`) column-wise into `Δ ∈ ℝ^(d×N)`.
+- [x] **T3.1** Add `discover_invariant_subspace(differences: &[&[f32]], tau: f32) -> Result<Vec<f32>, TilrError>`: ✅ DONE (2026-07-10): landed in `tilr.rs`, gated on `#[cfg(feature = "subspace_phase_gate")]` so the core primitive (`tilr_refine_into`) stays zero-`crate::`-dep.
+      - Stack `differences` (each length `d`) into `Δ ∈ ℝ^(N×d)` row-major.
       - Run `thin_svd_into` (Plan 301) on `Δ`.
       - Select `r` = smallest rank retaining `tau` fraction of variance (cumulative `Σ² / total Σ²`).
       - Return the top-`r` right singular vectors flattened (`r × d` row-major).
-- [ ] **T3.2** Unit test: synthetic differences lying in a known 2-d subspace →
-      `discover_invariant_subspace` recovers that subspace (principal angles < 1°).
-- [ ] **T3.3** Document the offline-vs-online split: `discover_invariant_subspace`
-      runs once at calibration; `tilr_refine_into` runs per-step at inference.
+- [x] **T3.2** Unit test: synthetic differences lying in a known 2-d subspace → ✅ DONE (2026-07-10): `t3_2_recovers_known_2d_subspace` passes — N=15 differences in span of two non-axis-aligned orthonormal vectors in ℝ⁶, recovered with proj_norm ≈ 1.0 (principal angle ≈ 0).
+- [x] **T3.3** Document the offline-vs-online split: ✅ DONE (2026-07-10): `discover_invariant_subspace` doc comment has an explicit "Online/offline split (T3.3)" section.
+
+**Phase 3 validation (2026-07-10):** 7 discover tests + 1 recovery test all pass (27/27 tilr tests pass under default features). Added `TilrError::InvalidTau` (=3) and `TilrError::ZeroVariance` (=4) variants for the calibration error paths.
 
 ---
 

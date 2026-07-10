@@ -1639,6 +1639,9 @@ pub mod gdn_tree_verify;
 pub mod tilr;
 #[cfg(feature = "tilr_invariant_subspace")]
 pub use tilr::{TilrError, TilrScratch, check_orthonormal, tilr_refine, tilr_refine_apply, tilr_refine_into};
+// Phase 3 calibration helper needs Plan 301's thin SVD — gated on both features.
+#[cfg(all(feature = "tilr_invariant_subspace", feature = "subspace_phase_gate"))]
+pub use tilr::discover_invariant_subspace;
 
 // Test-only `#[global_allocator]` so `alloc::tests::*` pass when running
 // `cargo test -p katgpt-core --lib`. Downstream consumers (katgpt-rs root,

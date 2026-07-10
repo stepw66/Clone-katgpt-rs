@@ -49,6 +49,13 @@
 
 use crate::simd::simd_dot_f32;
 
+// Phase 3 calibration helper needs Plan 301's thin SVD. Gated separately so the
+// core primitive (tilr_refine_into) stays zero-`crate::`-dep. In the default
+// build, `subspace_phase_gate` is transitively enabled via `tucker_factorization`
+// / `viable_manifold_graph` (both default-on).
+#[cfg(feature = "subspace_phase_gate")]
+use crate::subspace_phase_gate::{SvdResultScratch, SvdScratch, thin_svd_into};
+
 // ── Errors ──────────────────────────────────────────────────────────────────
 
 /// Errors returned by this module's functions.
@@ -67,6 +74,11 @@ pub enum TilrError {
     /// `state`, `direction`, `out`, and basis row-dimension `d` disagree, or
     /// `basis.len() != r * d`.
     DimensionMismatch = 2,
+    /// `tau` is outside `(0.0, 1.0]` (returned by [`discover_invariant_subspace`]).
+    InvalidTau = 3,
+    /// All contrastive differences are zero — no variance to decompose (returned
+    /// by [`discover_invariant_subspace`]).
+    ZeroVariance = 4,
 }
 
 // ── Scratch ─────────────────────────────────────────────────────────────────
@@ -449,6 +461,124 @@ pub fn tilr_refine_apply(
 #[inline]
 fn sqrt_dot(a: &[f32], b: &[f32]) -> f32 {
     simd_dot_f32(a, b, a.len()).sqrt()
+}
+
+// ── Offline calibration (Phase 3, P2) ───────────────────────────────────────
+
+/// Offline calibration: discover the invariant subspace `S_r` from contrastive
+/// differences via truncated SVD.
+///
+/// **Runs ONCE at calibration time**, producing the basis `U_r` consumed by
+/// [`tilr_refine_into`] at inference time. The online/offline split (T3.3):
+/// - **Offline** (this function, once): collect `N` contrastive differences
+///   `δ_t = h_good − h_bad`, stack into `Δ`, run `thin_svd_into` (Plan 301),
+///   select `r` by variance retention.
+/// - **Online** ([`tilr_refine_into`], per step): project the per-instance
+///   direction `d` onto the frozen basis, compute `γ`, apply the gated
+///   correction. `O(d·r)` per step, zero allocation.
+///
+/// # Arguments
+///
+/// - `differences` — `N` contrastive difference vectors, each of length `d`.
+///   All must have the same length.
+/// - `tau` — variance retention threshold ∈ `(0.0, 1.0]`. The rank `r` is the
+///   smallest number of singular values capturing `tau` fraction of the total
+///   variance (`Σ σ_j² / Σ_all σ²`). Paper default: `0.90`.
+///
+/// # Returns
+///
+/// `Ok((basis, r))` where `basis` is `r` orthonormal vectors of length `d`,
+/// flattened row-major (`r × d`), and `r` is the selected rank. Pass `basis`
+/// and `r` directly to [`tilr_refine_into`] / [`check_orthonormal`].
+///
+/// # Errors
+///
+/// - [`TilrError::DimensionMismatch`] — `differences` is empty, any difference
+///   has zero length, or not all differences share the same length.
+/// - [`TilrError::InvalidTau`] — `tau` not in `(0.0, 1.0]`.
+/// - [`TilrError::ZeroVariance`] — all differences are zero (`Σ σ² ≈ 0`).
+///
+/// # Cost
+///
+/// `O(N · d · min(N, d))` for the one-sided Jacobi SVD. Acceptable for a
+/// one-time calibration; NOT for the hot path. The right singular vectors of
+/// `Δ (N×d)` are the d-dimensional invariant directions (equivalently, the
+/// left singular vectors of the transposed `d×N` matrix — the paper's notation).
+///
+/// # Example
+///
+/// ```
+/// use katgpt_core::tilr::discover_invariant_subspace;
+///
+/// // Two differences along e_0 in ℝ⁴ → rank-1 invariant subspace.
+/// let diffs: Vec<&[f32]> = vec![&[2.0, 0.0, 0.0, 0.0], &[3.0, 0.0, 0.0, 0.0]];
+/// let (basis, r) = discover_invariant_subspace(&diffs, 0.95).unwrap();
+/// assert_eq!(r, 1);
+/// assert_eq!(basis.len(), 4); // 1 vector × d=4
+/// ```
+#[cfg(feature = "subspace_phase_gate")]
+pub fn discover_invariant_subspace(
+    differences: &[&[f32]],
+    tau: f32,
+) -> Result<(Vec<f32>, usize), TilrError> {
+    if differences.is_empty() {
+        return Err(TilrError::DimensionMismatch);
+    }
+    if !(0.0 < tau && tau <= 1.0) {
+        return Err(TilrError::InvalidTau);
+    }
+    let d = differences[0].len();
+    if d == 0 {
+        return Err(TilrError::DimensionMismatch);
+    }
+    for diff in differences {
+        if diff.len() != d {
+            return Err(TilrError::DimensionMismatch);
+        }
+    }
+
+    let n = differences.len();
+
+    // Build Δ as N×d row-major (differences as rows). The right singular vectors
+    // of Δ (N×d) are d-dimensional — these span the invariant subspace S_r.
+    let mut delta = Vec::with_capacity(n * d);
+    for diff in differences {
+        delta.extend_from_slice(diff);
+    }
+
+    // Thin SVD: Δ = U Σ Vᵀ. U is N×k, V is d×k (k = min(N, d)).
+    // NOTE: SvdScratch::with_capacity takes (n_cols, m_rows) — swapped vs
+    // SvdResultScratch::with_capacity(m_rows, n_cols).
+    let mut work = SvdScratch::with_capacity(d, n);
+    let mut result = SvdResultScratch::with_capacity(n, d);
+    thin_svd_into(&delta, n, d, &mut result, &mut work);
+
+    // Total variance = Σ σ_j².
+    let sv = result.singular_values();
+    let total_variance: f32 = sv.iter().map(|s| s * s).sum();
+    if total_variance < 1e-30 {
+        return Err(TilrError::ZeroVariance);
+    }
+
+    // Select r = smallest rank retaining tau fraction of cumulative variance.
+    let mut cumul = 0.0f32;
+    let mut r = sv.len();
+    for (j, &s) in sv.iter().enumerate() {
+        cumul += s * s / total_variance;
+        if cumul >= tau {
+            r = j + 1;
+            break;
+        }
+    }
+
+    // Extract top-r right singular vectors (each length d), flatten as r×d
+    // row-major — the format consumed by tilr_refine_into / check_orthonormal.
+    let mut basis = Vec::with_capacity(r * d);
+    for j in 0..r {
+        basis.extend_from_slice(result.right_singular_vector(j));
+    }
+
+    Ok((basis, r))
 }
 
 // ── Tests ───────────────────────────────────────────────────────────────────
@@ -1025,6 +1155,161 @@ mod tests {
         for i in r..d {
             assert!((out[i] - state[i]).abs() < 1e-6);
         }
+    }
+
+    // ── Phase 3: discover_invariant_subspace ──────────────────────────────
+
+    #[cfg(feature = "subspace_phase_gate")]
+    #[test]
+    fn t3_2_recovers_known_2d_subspace() {
+        // Two non-axis-aligned orthonormal vectors in ℝ⁶.
+        let u1_raw = [1.0, 1.0, 1.0, 0.0, 0.0, 0.0]; // ‖u1‖ = √3
+        let u2_raw = [1.0, -1.0, 0.0, 1.0, 1.0, -1.0]; // ‖u2‖ = √5, u1 ⊥ u2
+        let n1 = (3.0f32).sqrt();
+        let n2 = (5.0f32).sqrt();
+        let u1: Vec<f32> = u1_raw.iter().map(|x| x / n1).collect();
+        let u2: Vec<f32> = u2_raw.iter().map(|x| x / n2).collect();
+        let d = 6;
+
+        // Generate N=15 differences: δ_t = a_t·u1 + b_t·u2, all in span(u1, u2).
+        let mut seed: u32 = 42;
+        let lcg = |s: &mut u32| -> f32 {
+            *s = s.wrapping_mul(1664525).wrapping_add(1013904223);
+            ((*s >> 8) as f32) / 16777216.0 - 0.5 // [-0.5, 0.5)
+        };
+        let diffs: Vec<Vec<f32>> = (0..15)
+            .map(|_| {
+                let a = lcg(&mut seed) * 2.0;
+                let b = lcg(&mut seed) * 2.0;
+                (0..d).map(|i| a * u1[i] + b * u2[i]).collect()
+            })
+            .collect();
+        let diff_refs: Vec<&[f32]> = diffs.iter().map(|v| v.as_slice()).collect();
+
+        let (basis, r) = discover_invariant_subspace(&diff_refs, 0.99).unwrap();
+
+        // All variance is in span(u1, u2) → r should be 2.
+        assert_eq!(r, 2, "expected rank-2 subspace, got r={r}");
+        assert_eq!(basis.len(), r * d);
+
+        // The returned basis must be orthonormal.
+        check_orthonormal(&basis, r, d, 1e-4).unwrap();
+
+        // Subspace recovery: each true direction projected onto the recovered
+        // basis should have projection norm ≈ 1 (principal angle ≈ 0).
+        for u_true in [&u1, &u2] {
+            let proj_norm_sq: f32 = (0..r)
+                .map(|j| {
+                    let vj = &basis[j * d..(j + 1) * d];
+                    let dot = simd_dot_f32(u_true, vj, d);
+                    dot * dot
+                })
+                .sum();
+            let proj_norm = proj_norm_sq.sqrt();
+            assert!(
+                (proj_norm - 1.0).abs() < 0.01,
+                "subspace recovery failed: proj_norm = {proj_norm} (expected ≈1.0)"
+            );
+        }
+    }
+
+    #[cfg(feature = "subspace_phase_gate")]
+    #[test]
+    fn discover_rejects_empty_differences() {
+        let err = discover_invariant_subspace(&[], 0.9).unwrap_err();
+        assert_eq!(err, TilrError::DimensionMismatch);
+    }
+
+    #[cfg(feature = "subspace_phase_gate")]
+    #[test]
+    fn discover_rejects_invalid_tau() {
+        let diffs: Vec<&[f32]> = vec![&[1.0, 0.0]];
+        assert_eq!(
+            discover_invariant_subspace(&diffs, 0.0).unwrap_err(),
+            TilrError::InvalidTau
+        );
+        assert_eq!(
+            discover_invariant_subspace(&diffs, 1.5).unwrap_err(),
+            TilrError::InvalidTau
+        );
+        assert_eq!(
+            discover_invariant_subspace(&diffs, -0.1).unwrap_err(),
+            TilrError::InvalidTau
+        );
+    }
+
+    #[cfg(feature = "subspace_phase_gate")]
+    #[test]
+    fn discover_rejects_mismatched_lengths() {
+        let diffs: Vec<&[f32]> = vec![&[1.0, 0.0], &[1.0, 0.0, 0.0]];
+        assert_eq!(
+            discover_invariant_subspace(&diffs, 0.9).unwrap_err(),
+            TilrError::DimensionMismatch
+        );
+    }
+
+    #[cfg(feature = "subspace_phase_gate")]
+    #[test]
+    fn discover_rejects_zero_variance() {
+        let diffs: Vec<&[f32]> = vec![&[0.0, 0.0, 0.0], &[0.0, 0.0, 0.0]];
+        assert_eq!(
+            discover_invariant_subspace(&diffs, 0.9).unwrap_err(),
+            TilrError::ZeroVariance
+        );
+    }
+
+    #[cfg(feature = "subspace_phase_gate")]
+    #[test]
+    fn discover_rank1_collinear_differences() {
+        let diffs: Vec<&[f32]> = vec![&[2.0, 0.0, 0.0], &[3.0, 0.0, 0.0], &[-1.0, 0.0, 0.0]];
+        let (basis, r) = discover_invariant_subspace(&diffs, 0.95).unwrap();
+        assert_eq!(r, 1);
+        let v = &basis[..3];
+        let norm = (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt();
+        assert!((norm - 1.0).abs() < 1e-4, "basis not unit: {norm}");
+        assert!(v[0].abs() > 0.99, "basis not aligned with e_0: {v:?}");
+    }
+
+    #[cfg(feature = "subspace_phase_gate")]
+    #[test]
+    fn discover_tau_controls_rank() {
+        // δ1 = (10, 0, 0), δ2 = (0, 1, 0) → σ₁²=100, σ₂²=1, total=101.
+        // tau=0.90: σ₁²/total = 0.990 ≥ 0.90 → r=1.
+        // tau=0.999: 0.990 < 0.999, 1.0 ≥ 0.999 → r=2.
+        let diffs: Vec<&[f32]> = vec![&[10.0, 0.0, 0.0], &[0.0, 1.0, 0.0]];
+        let (_, r1) = discover_invariant_subspace(&diffs, 0.90).unwrap();
+        assert_eq!(r1, 1, "tau=0.90 should give r=1");
+        let (_, r2) = discover_invariant_subspace(&diffs, 0.999).unwrap();
+        assert_eq!(r2, 2, "tau=0.999 should give r=2");
+    }
+
+    #[cfg(feature = "subspace_phase_gate")]
+    #[test]
+    fn discover_then_refine_round_trip() {
+        // Discover a subspace, then use it with tilr_refine_into.
+        let diffs: Vec<&[f32]> = vec![&[2.0, 0.0, 0.0, 0.0], &[0.0, 3.0, 0.0, 0.0]];
+        let (basis, r) = discover_invariant_subspace(&diffs, 0.95).unwrap();
+        let d = 4;
+        assert_eq!(r, 2);
+        check_orthonormal(&basis, r, d, 1e-4).unwrap();
+
+        // Direction in span(basis) → γ ≈ 1.0 (full correction).
+        let state = [0.1, 0.2, 0.3, 0.4];
+        let direction = [0.5, 0.3, 0.0, 0.0]; // in the e_0-e_1 plane
+        let mut out = [0.0f32; 4];
+        let mut scratch = TilrScratch::with_capacity(d, r);
+        let gamma = tilr_refine_into(
+            &state,
+            &direction,
+            &basis,
+            r,
+            0.5,
+            1e-12,
+            &mut scratch,
+            &mut out,
+        )
+        .unwrap();
+        assert!((gamma - 1.0).abs() < 0.01, "expected γ≈1.0 for in-span direction, got {gamma}");
     }
 
 }
