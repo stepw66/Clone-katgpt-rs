@@ -4,7 +4,7 @@
 **Research:** [katgpt-rs/.research/407_Trees_from_Marginals_GDN_Tree_Verify.md](../.research/407_Trees_from_Marginals_GDN_Tree_Verify.md)
 **Source paper:** [arXiv:2607.06763](https://arxiv.org/abs/2607.06763) — Oda et al., "Trees from Marginals", §3.4
 **Target:** `katgpt-rs/crates/katgpt-core/src/gdn_tree_verify/` (new module) + Cargo feature `gdn_tree_verify`
-**Status:** Phases 1-3 complete ✅, Phase 5 GOAT gate complete (G1-G4 all PASS) ✅, Phase 4 T4.1-T4.4 complete ✅ (multi-head batching + bridge + speculative step integration + integration tests). T4.3b (hybrid Attention+DeltaNet, convention alignment with GDN2 kernel) + Phase 6 (DDTree tuning, optional) pending.
+**Status:** Phases 1-3 complete ✅, Phase 5 GOAT gate complete (G1-G4 all PASS) ✅, Phase 4 T4.1-T4.4 complete ✅ (multi-head batching + bridge + speculative step integration + integration tests). Phase 6 complete ✅ (T6.1 config flag + T6.2 benchmark — negative result, no promotion). T4.3b (hybrid Attention+DeltaNet, convention alignment with GDN2 kernel) pending.
 
 ---
 
@@ -94,8 +94,8 @@ This fills a confirmed gap: katgpt-rs ships GDN2 (Plan 105, default-on) for the 
 
 ### Tasks
 
-- [ ] **T6.1** In `dd_tree.rs`, add a config flag `deep_argmax_threshold: Option<usize>` (default `None`). When set, at tree depth > threshold, use argmax-of-marginal instead of sampling from the full marginal. Based on paper §3.5 / Figure 6 (crossover at draft length 2–4).
-- [ ] **T6.2** Benchmark: does `deep_argmax_threshold = Some(4)` improve mean acceptance length on the existing DDTree benchmark? If yes → document; if no → revert, note as config-dependent.
+- [x] **T6.1** In `dd_tree.rs`, add a config flag `deep_argmax_threshold: Option<usize>` (default `None`). When set, at tree depth > threshold, use argmax-of-marginal instead of sampling from the full marginal. Based on paper §3.5 / Figure 6 (crossover at draft length 2–4). **DONE** — `TreeBuilder::set_deep_argmax_threshold` + `build_dd_tree_deep_argmax` free fn in `katgpt-speculative/src/dd_tree.rs`. 5 tests pass (3 restriction tests + 1 None-parity + 1 builder-vs-fn parity). Default `None` = byte-identical to `build_dd_tree`.
+- [x] **T6.2** Benchmark: does `deep_argmax_threshold = Some(4)` improve mean acceptance length on the existing DDTree benchmark? **NO — negative result.** The paper's §3.5 insight (argmax beats full-marginal sampling at deep positions) does **not transfer to best-first tree building**. Best-first search already prioritizes the argmax path naturally — the threshold only prevents low-priority deep siblings from entering the heap, which barely affects the best path. Multi-budget benchmark (vocab=16, lookahead=8, budgets 16/32/64/128, thresholds None/1/2/4): identical best-path scores at all configs; the only path-length difference is budget=128/threshold=1 (6 vs 5 tokens). Feature stays available (opt-in via builder setter) but is **not promoted** — no modelless gain. The paper's insight applies to *sampling* from the marginal, not to best-first search over the marginal.
 
 ---
 

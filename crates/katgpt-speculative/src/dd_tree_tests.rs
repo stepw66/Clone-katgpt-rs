@@ -647,3 +647,256 @@ fn test_balanced_empty_marginals() {
     let tree = build_dd_tree_balanced(&[], &config, &NoScreeningPruner, false, &[], 2.0, 0.3);
     assert!(tree.is_empty(), "empty marginals should produce empty tree");
 }
+
+// ── Plan 424 Phase 6: deep-argmax threshold (paper §3.5) ─────────
+
+#[test]
+fn test_deep_argmax_none_matches_build_dd_tree() {
+    // None threshold = identical to build_dd_tree (no behavior change).
+    let mut config = Config::draft();
+    config.vocab_size = 8;
+    config.draft_lookahead = 4;
+    config.tree_budget = 32;
+    let marginals: Vec<Vec<f32>> = (0..config.draft_lookahead)
+        .map(|d| {
+            let mut m = vec![0.01; config.vocab_size];
+            m[d % config.vocab_size] = 0.50;
+            m[(d + 1) % config.vocab_size] = 0.30;
+            m[(d + 2) % config.vocab_size] = 0.19;
+            m
+        })
+        .collect();
+    let mv: Vec<&[f32]> = marginals.iter().map(|s| s.as_slice()).collect();
+
+    let tree_normal = build_dd_tree(&mv, &config);
+    let tree_none = build_dd_tree_deep_argmax(&mv, &config, None);
+
+    assert_eq!(tree_normal.len(), tree_none.len(), "None threshold should match build_dd_tree");
+    for (a, b) in tree_normal.iter().zip(tree_none.iter()) {
+        assert_eq!(a.token_idx, b.token_idx, "token mismatch");
+        assert_eq!(a.depth, b.depth, "depth mismatch");
+        assert_eq!(a.score.to_bits(), b.score.to_bits(), "score mismatch (bit-exact)");
+    }
+}
+
+#[test]
+fn test_deep_argmax_restricts_deep_branching() {
+    // Threshold = Some(0): depth > 0 only expands argmax.
+    // Shallow depth (0) still branches normally.
+    let mut config = Config::draft();
+    config.vocab_size = 4;
+    config.draft_lookahead = 4;
+    config.tree_budget = 64;
+
+    let m0: [f32; 4] = [0.40, 0.30, 0.20, 0.10]; // depth 0: branches all
+    let m1: [f32; 4] = [0.45, 0.40, 0.10, 0.05]; // depth 1: argmax = 0
+    let m2: [f32; 4] = [0.10, 0.50, 0.30, 0.10]; // depth 2: argmax = 1
+    let m3: [f32; 4] = [0.20, 0.10, 0.60, 0.10]; // depth 3: argmax = 2
+    let mv: Vec<&[f32]> = vec![&m0, &m1, &m2, &m3];
+
+    let tree = build_dd_tree_deep_argmax(&mv, &config, Some(0));
+
+    // Depth 0 (NOT > threshold 0): multiple tokens expected.
+    let d0: std::collections::HashSet<usize> =
+        tree.iter().filter(|n| n.depth == 0).map(|n| n.token_idx).collect();
+    assert!(d0.len() > 1, "depth 0 should have multiple tokens, got {:?}", d0);
+
+    // Depth 1 (> 0): only argmax token 0.
+    let d1: std::collections::HashSet<usize> =
+        tree.iter().filter(|n| n.depth == 1).map(|n| n.token_idx).collect();
+    assert_eq!(d1.len(), 1, "depth 1 should have exactly one distinct token");
+    assert_eq!(*d1.iter().next().unwrap(), 0, "depth 1 argmax should be token 0");
+
+    // Depth 2 (> 0): only argmax token 1.
+    let d2: std::collections::HashSet<usize> =
+        tree.iter().filter(|n| n.depth == 2).map(|n| n.token_idx).collect();
+    if !d2.is_empty() {
+        assert_eq!(d2.len(), 1, "depth 2 should have exactly one distinct token");
+        assert_eq!(*d2.iter().next().unwrap(), 1, "depth 2 argmax should be token 1");
+    }
+}
+
+#[test]
+fn test_deep_argmax_threshold_2_only_restricts_deep() {
+    // Threshold = Some(2): depths 0, 1, 2 branch normally; depth 3 argmax only.
+    let mut config = Config::draft();
+    config.vocab_size = 4;
+    config.draft_lookahead = 4;
+    config.tree_budget = 128;
+
+    let m0: [f32; 4] = [0.40, 0.30, 0.20, 0.10];
+    let m1: [f32; 4] = [0.45, 0.40, 0.10, 0.05];
+    let m2: [f32; 4] = [0.25, 0.25, 0.25, 0.25]; // uniform → all branch equally
+    let m3: [f32; 4] = [0.10, 0.10, 0.70, 0.10]; // argmax = 2
+    let mv: Vec<&[f32]> = vec![&m0, &m1, &m2, &m3];
+
+    let tree = build_dd_tree_deep_argmax(&mv, &config, Some(2));
+
+    // Depths ≤ 2 (NOT > 2): should have multiple distinct tokens.
+    let d2: std::collections::HashSet<usize> =
+        tree.iter().filter(|n| n.depth == 2).map(|n| n.token_idx).collect();
+    assert!(d2.len() > 1, "depth 2 (≤ threshold) should have multiple tokens, got {:?}", d2);
+
+    // Depth 3 (> 2): only argmax token 2.
+    let d3: std::collections::HashSet<usize> =
+        tree.iter().filter(|n| n.depth == 3).map(|n| n.token_idx).collect();
+    if !d3.is_empty() {
+        assert_eq!(d3.len(), 1, "depth 3 should have one distinct token");
+        assert_eq!(*d3.iter().next().unwrap(), 2, "depth 3 argmax should be token 2");
+    }
+}
+
+// ── Plan 424 Phase 6, T6.2: deep-argmax acceptance benchmark ──────
+//
+// Simulates a factorized drafter whose marginals get increasingly diluted
+// at deep positions (paper §3.5). Measures whether deep_argmax_threshold
+// improves best-path acceptance length (tokens matching ground-truth target).
+//
+// The paper's claim: at deep positions (t > ~4), the marginal averages over
+// many possible prefixes and is diluted. A Dirac delta at the argmax
+// outperforms full-marginal branching because (1) the argmax concentrates on
+// the most-likely path, and (2) tree budget saved by not branching at deep
+// depths goes to better shallow coverage.
+
+/// Find the best (highest-score) root-to-leaf path in a DDTree.
+/// Returns the sequence of token indices along the path.
+fn best_path(tree: &[TreeNode]) -> Vec<usize> {
+    if tree.is_empty() {
+        return Vec::new();
+    }
+    // Tree is sorted by score (best-first). The first node is the root of the
+    // best path. Walk forward collecting the deepest chain from the top node.
+    // Since tree is best-first, find the deepest leaf reachable from node[0].
+    let root = &tree[0];
+    let mut path = vec![root.token_idx];
+    let mut current_path = root.parent_path;
+    let mut current_depth = root.depth;
+
+    loop {
+        current_depth += 1;
+        let target_parent_path = current_path;
+        // Find the highest-score node at current_depth whose ancestor chain
+        // matches (parent_path >> shift matches).
+        let next = tree.iter().find(|n| {
+            if n.depth != current_depth {
+                return false;
+            }
+            // Check if this node's parent_path, shifted right by 16, matches
+            // our current_path (i.e., this node is a child of our path).
+            n.parent_path >> 16 == target_parent_path
+        });
+        match next {
+            Some(n) => {
+                path.push(n.token_idx);
+                current_path = n.parent_path;
+            }
+            None => break,
+        }
+    }
+    path
+}
+
+/// Count how many tokens in the path match the ground-truth target.
+fn acceptance_length(path: &[usize], target: &[usize]) -> usize {
+    path.iter()
+        .zip(target.iter())
+        .take_while(|(a, b)| a == b)
+        .count()
+}
+
+#[test]
+fn test_deep_argmax_acceptance_benchmark() {
+    // Simulates a factorized drafter with sharp shallow marginals and
+    // diluted deep marginals (paper §3.5). Tests whether deep_argmax
+    // improves best-path length / score / acceptance under budget pressure.
+    //
+    // Key design: budget is TIGHT relative to branching factor, so deep
+    // siblings compete with the argmax path for budget. Without deep_argmax,
+    // budget is spread across many deep siblings. With deep_argmax, budget
+    // is concentrated on the argmax chain.
+    let vocab = 16;
+    let lookahead = 8;
+
+    let mut config = Config::draft();
+    config.vocab_size = vocab;
+    config.draft_lookahead = lookahead;
+
+    // Ground-truth target: token d at depth d.
+    let target: Vec<usize> = (0..lookahead).map(|d| d % vocab).collect();
+
+    // Marginals: sharp at shallow depths, diluted at deep depths.
+    // Shallow (d=0-3): 0.55 on true token (sharp).
+    // Deep (d=4-7): 0.20 on true token + uniform noise (diluted — many
+    // siblings have comparable probability).
+    let marginals: Vec<Vec<f32>> = (0..lookahead)
+        .map(|d| {
+            let base_prob = if d < 4 { 0.55 } else { 0.20 };
+            let noise = (1.0 - base_prob) / (vocab - 1) as f32;
+            let mut m = vec![noise; vocab];
+            m[target[d]] = base_prob;
+            m
+        })
+        .collect();
+    let mv: Vec<&[f32]> = marginals.iter().map(|s| s.as_slice()).collect();
+
+    eprintln!("=== Plan 424 T6.2: deep-argmax acceptance benchmark ===");
+    eprintln!("  vocab={}, lookahead={}", vocab, lookahead);
+    eprintln!("  marginals: sharp (0.55) at d<4, diluted (0.20) at d>=4");
+    eprintln!();
+    eprintln!(
+        "  {:<8} {:<14} {:>5} {:>5} {:>5} {:>10}",
+        "budget", "threshold", "size", "plen", "acc", "score"
+    );
+    eprintln!("  {}", "-".repeat(55));
+
+    for &budget in &[16, 32, 64, 128] {
+        config.tree_budget = budget;
+        for threshold in [None, Some(1usize), Some(2), Some(4)] {
+            let tree = build_dd_tree_deep_argmax(&mv, &config, threshold);
+            let path = best_path(&tree);
+            let acc = acceptance_length(&path, &target);
+            let score = tree.first().map(|n| n.score).unwrap_or(f32::NEG_INFINITY);
+            let label = match threshold {
+                None => "None".to_string(),
+                Some(t) => format!("Some({})", t),
+            };
+            eprintln!(
+                "  {:<8} {:<14} {:>5} {:>5} {:>5} {:>10.4}",
+                budget, label, tree.len(), path.len(), acc, score
+            );
+        }
+        eprintln!();
+    }
+
+    // Sanity: all trees should be non-empty for non-trivial budgets.
+    config.tree_budget = 32;
+    let tree = build_dd_tree_deep_argmax(&mv, &config, Some(4));
+    assert!(!tree.is_empty(), "deep_argmax tree should not be empty");
+}
+
+#[test]
+fn test_deep_argmax_builder_setter_matches_free_fn() {
+    // The `TreeBuilder::set_deep_argmax_threshold` setter path must produce
+    // the same tree as the `build_dd_tree_deep_argmax` free function.
+    let mut config = Config::draft();
+    config.vocab_size = 4;
+    config.draft_lookahead = 3;
+    config.tree_budget = 64;
+
+    let m0: [f32; 4] = [0.40, 0.30, 0.20, 0.10];
+    let m1: [f32; 4] = [0.45, 0.40, 0.10, 0.05]; // argmax = 0
+    let m2: [f32; 4] = [0.10, 0.50, 0.30, 0.10]; // argmax = 1
+    let mv: Vec<&[f32]> = vec![&m0, &m1, &m2];
+
+    let mut builder = TreeBuilder::new(&config);
+    builder.set_deep_argmax_threshold(Some(0));
+    let tree_builder = builder.build(&mv, &config, &NoPruner, false).to_vec();
+    let tree_fn = build_dd_tree_deep_argmax(&mv, &config, Some(0));
+
+    assert_eq!(tree_builder.len(), tree_fn.len(), "builder vs free-fn size mismatch");
+    for (a, b) in tree_builder.iter().zip(tree_fn.iter()) {
+        assert_eq!(a.token_idx, b.token_idx);
+        assert_eq!(a.depth, b.depth);
+        assert_eq!(a.parent_path, b.parent_path);
+    }
+}

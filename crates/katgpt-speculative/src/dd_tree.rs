@@ -119,6 +119,27 @@ pub fn build_dd_tree_pruned(
     std::mem::take(&mut builder.tree)
 }
 
+/// DDTree with deep-argmax threshold (Plan 424 Phase 6, paper §3.5).
+///
+/// Like [`build_dd_tree`] but restricts expansion to argmax-of-marginal at
+/// tree depths > `deep_argmax_threshold`. `None` = no restriction (identical
+/// to [`build_dd_tree`]). The paper shows that at deep draft positions (t > ~4),
+/// the factorized marginal is diluted by averaging over many possible prefixes,
+/// and a Dirac delta at the argmax outperforms full-marginal branching.
+///
+/// Crossover occurs around draft length 2–4 (Figure 6); `Some(4)` is the
+/// paper-recommended default when enabled.
+pub fn build_dd_tree_deep_argmax(
+    marginals: &[&[f32]],
+    config: &katgpt_types::Config,
+    deep_argmax_threshold: Option<usize>,
+) -> Vec<TreeNode> {
+    let mut builder = TreeBuilder::new(config);
+    builder.set_deep_argmax_threshold(deep_argmax_threshold);
+    builder.build(marginals, config, &NoPruner, false);
+    std::mem::take(&mut builder.tree)
+}
+
 // ── Lodestar completion-distance pruning (Plan 207, Research 183) ────────
 //
 // The tree builder lives in this crate (it composes the heap walk); the
@@ -905,6 +926,14 @@ pub struct TreeBuilder {
     /// per heap-pop). Entries for `prob <= 0.0` are `0.0` (unused since those
     /// tokens are skipped before the lookup).
     log_marginals: Vec<Vec<f32>>,
+    /// Plan 424 Phase 6 / paper §3.5 Figure 6: when `Some(t)`, tree expansion
+    /// beyond depth `t` uses argmax-of-marginal (single greedy child per node)
+    /// instead of pushing all valid tokens into the heap. Shallow depths keep
+    /// full branching; deep depths go greedy where the draft marginal has
+    /// degraded. Default `None` = full branching everywhere (current behavior).
+    /// The paper observes a draft-length crossover (~2–4) past which argmax
+    /// beats full-marginal on mean acceptance length.
+    deep_argmax_threshold: Option<usize>,
 }
 
 impl TreeBuilder {
@@ -919,7 +948,18 @@ impl TreeBuilder {
             candidates_buf: Vec::with_capacity(config.vocab_size),
             valid_buf: Vec::with_capacity(config.vocab_size),
             log_marginals: Vec::new(),
+            deep_argmax_threshold: None,
         }
+    }
+
+    /// Set the deep-argmax threshold (Plan 424 Phase 6, paper §3.5).
+    /// When set, tree nodes at depth > threshold only expand the
+    /// argmax-of-marginal token, not all valid tokens. Default `None`
+    /// (full branching at all depths).
+    #[inline]
+    pub fn set_deep_argmax_threshold(&mut self, threshold: Option<usize>) -> &mut Self {
+        self.deep_argmax_threshold = threshold;
+        self
     }
 
     /// Pre-compute `ln(prob)` for every token in every marginal depth.
@@ -1245,15 +1285,45 @@ impl TreeBuilder {
                     &mut self.parent_tokens_buf,
                 );
                 let log_m = &self.log_marginals[next_depth];
-                for (i, &prob) in marginals[next_depth].iter().enumerate() {
-                    // NEURO-SYMBOLIC INTERCEPT: prune before adding to heap
-                    if prob > 0.0 && pruner.is_valid(next_depth, i, parent_tokens) {
+                let depth_marginal = marginals[next_depth];
+
+                if self.deep_argmax_threshold.map_or(false, |t| next_depth > t) {
+                    // Plan 424 Phase 6 (paper §3.5): at deep positions the
+                    // marginal is diluted (averages over many possible
+                    // prefixes). Expanding only the argmax token concentrates
+                    // tree budget on the most-likely path, matching the paper's
+                    // finding that argmax-of-marginal outperforms full-marginal
+                    // sampling at draft length > crossover (~2–4).
+                    let mut best_idx = usize::MAX;
+                    let mut best_prob = 0.0f32;
+                    for (i, &prob) in depth_marginal.iter().enumerate() {
+                        if prob > best_prob
+                            && pruner.is_valid(next_depth, i, parent_tokens)
+                        {
+                            best_idx = i;
+                            best_prob = prob;
+                        }
+                    }
+                    if best_idx != usize::MAX {
                         self.heap.push(TreeNode {
-                            score: best.score + log_m[i],
+                            score: best.score + log_m[best_idx],
                             depth: next_depth,
-                            token_idx: i,
-                            parent_path: (best.parent_path << 16) | (i as u128),
+                            token_idx: best_idx,
+                            parent_path: (best.parent_path << 16)
+                                | (best_idx as u128),
                         });
+                    }
+                } else {
+                    for (i, &prob) in depth_marginal.iter().enumerate() {
+                        // NEURO-SYMBOLIC INTERCEPT: prune before adding to heap
+                        if prob > 0.0 && pruner.is_valid(next_depth, i, parent_tokens) {
+                            self.heap.push(TreeNode {
+                                score: best.score + log_m[i],
+                                depth: next_depth,
+                                token_idx: i,
+                                parent_path: (best.parent_path << 16) | (i as u128),
+                            });
+                        }
                     }
                 }
             }
