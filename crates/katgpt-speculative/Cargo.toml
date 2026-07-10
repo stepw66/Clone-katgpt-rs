@@ -34,8 +34,11 @@ fastrand = { version = "2", optional = true }
 # Lock-free HashMap for belief_cache (Plan 386 move from root; belief_drafter feature).
 papaya = { version = "0.2", optional = true }
 # Zero-cast byte slices for belief_drafter save/load + selectivity_router
-# snapshot serialization (Plan 386 move from root).
+# snapshot serialization (Plan 386 move from root). Also used by weaver_runtime
+# for TensorView byte casts in the safetensors test.
 bytemuck = { version = "1", optional = true }
+# safetensors checkpoint loading for the Weaver inference-only adapter (Issue 131).
+safetensors = { version = "0.4", optional = true }
 # Transformer substrate types — TransformerWeights (Plan 389, 2026-07-05).
 # Mandatory because the hosted SpeculativeVerifier trait (verifier_trait.rs)
 # references TransformerWeights in its signature, and root's verifier.rs (which
@@ -292,6 +295,13 @@ corr_budget = []
 # NFCoT FlowBudget — sigmoid-weighted depth allocation (Plan 229 T4).
 # Gates build_dd_tree_screened_flow_budget + TreeBuilder::build_screened_with_depth_budgets.
 nf_flow_budget = []
+
+# Weaver inference-only logit corrector (Issue 131). Loads trained Weaver
+# weights from a safetensors checkpoint, runs the 7-step forward pass, and
+# applies the residual correction to DFlash draft logits over the top-K
+# candidate set. Opt-in — requires a trained checkpoint file to produce
+# non-trivial gain; zero weights produce zero residuals (safe no-op).
+weaver_runtime = ["dep:safetensors", "dep:bytemuck", "dep:blake3"]
 
 [dev-dependencies]
 # katgpt-pruners is a DEV-ONLY dep here (echo_env's GOAT test imports BanditPruner

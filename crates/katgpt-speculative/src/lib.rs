@@ -233,3 +233,11 @@ pub use verifier_trait::SpeculativeVerifier;
 // `katgpt_rs::speculative::parallel_probe::*` paths.
 #[cfg(feature = "parallel_probe")]
 pub mod parallel_probe;
+
+// Weaver inference-only logit corrector (Issue 131). Loads trained Weaver
+// weights from a safetensors checkpoint, runs the 7-step forward pass
+// (conditioning → causal attention → SwiGLU → top-K gather → residual add
+// → renormalize), and applies the residual correction to DFlash draft
+// logits over the top-K candidate set.
+#[cfg(feature = "weaver_runtime")]
+pub mod weaver;
