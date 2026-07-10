@@ -383,6 +383,68 @@ guesswork with causal isolation.
 
 ---
 
+## 8. Cross-repo context — what is default-on, what has consumers, where the showcase lives
+
+> **Why this section exists:** the canvas story's value hinges on whether its *constituents* are already
+> shipped/default-on/showcased. Reconstructing that state required grepping across 5 repos and **missed
+> things** (the `faithfulness_probe` wiring in riir-poc; the Plan 426 cookbook bench). This section
+> captures the verified state inline so the next reader does not re-grep and re-miss. All facts below
+> were grep-verified on 2026-07-10.
+
+### The constituents canvas "unifies" — and their real status
+
+| Constituent | Primitive | Feature / status | Runtime consumer (non-test/bench)? | Showcase |
+|---|---|---|---|---|
+| Region-conditioned steering | `RegionSubspaceField` (Plan 416) | **DEFAULT-ON** in katgpt-core (`region_subspace_steering`) | **YES** — `riir-engine/src/latent_functor/region_subspace_bridge.rs` (`apply_to_zones_batch`) | Plan 426 S3 (measured) |
+| Additive 1D steering | `LatentSteeringVector` (Plan 309) | **DEFAULT-ON** | **YES** — `latent_functor` bridges | Plan 426 S1/S2/S4/S7 |
+| Slerp / norm-preserving | Plan 405 | opt-in→default bridge | `spherical_steering_bridge` | Plan 426 S2 (0.0 drift) |
+| AC-Prefix mask builder | `AcPrefixMask` (Plan 313) | **DEFAULT-ON** (canonical G1 lesson) | riir-engine attention path | `.benchmarks/313_*` |
+| DEC operators | `exterior_derivative`/`codifferential`/`hodge_decompose` | **DEFAULT-ON** (manifold substrate) | DEC consumers in riir-engine | Plan 426 S5/S6 + `.benchmarks/313_*` |
+| Looped attention | `LoopMode::TrainingFree` (Plan 136) | distilled | — | — |
+| Freeze/thaw exchange | `MerkleFrozenEnvelope` / `CommittedFieldBlend` | **DEFAULT-ON** | riir-neuron-db | — |
+
+### canvas_schema's status (the compiler this research distills)
+
+- **Feature flag `canvas_schema`: OPT-IN**, NOT default-on. Plan 419 Phase 1–6 done, G1–G6 PASS.
+  Promotion explicitly **deferred** (Plan 419 Phase 5 decision + §7 here).
+- **Runtime consumers: ZERO.** Only the riir-poc bench `canvas_npc_cognitive_stack_modelless.rs`
+  (the inconclusive Issue 043 PoC). AC-Prefix/VortexFlow wiring is a deferred follow-up (Plan 419 T6.3).
+- Grep-verified: no call to `compile_schema`/`CanvasSchema`/`can_reach`/`reachability_horizon` exists
+  in riir-ai / riir-chain / riir-neuron-db outside tests/benches.
+
+### The flagship showcase (what to point at for "modelless works, here are the numbers")
+
+**`riir-ai/.benchmarks/426_steering_geometry_cookbook.md`** — 7 canonical MMORPG scenarios, head-to-head,
+measured, re-verified 2026-07-10 (numbers reproduce). Quality metrics exact (S1 bit-identical 0.392628,
+S2 norm drift 29.2×, S3 intrinsic dim 2, S6 mass 0.0161); latencies within ±20% variance, ratios stable.
+Two scenarios (S4, S5) honestly contradict the tentative verdict (G-honest flags). Run:
+
+```bash
+CARGO_TARGET_DIR=/tmp/cookbook_426 cargo bench -p riir-poc --bench steering_geometry_cookbook -- --nocapture
+```
+
+Other showcase benches in the same crate (`riir-poc/benches/`): `subspace_swap_goat.rs` (3-way quality
+head-to-head), `jlens_concept_readout_goat.rs` (`DefaultFaithfulnessProbe` precedent — see below).
+
+### The right tool for canvas's behavioral question (don't grep for this)
+
+`FaithfulnessProbe` (Plan 278, `katgpt-core/src/faithfulness/probe.rs`) is the causal-intervention probe
+that should settle the §7 question. **It is already wired into riir-poc** (`Cargo.toml` line 23 feature
+dep) with a precedent bench (`jlens_concept_readout_goat.rs` imports `DefaultFaithfulnessProbe` +
+`faithfulness_profile`, verdict at 0.5 threshold). The canvas PoC lives in the same crate and could have
+followed that pattern; it reinvented a noisy correlational flee metric instead. See §7 for the mapping.
+
+### Bottom line (captured here so it doesn't need re-deriving)
+
+The canvas compiler's constituents are **already DEFAULT-ON with runtime consumers and a measured
+7-scenario showcase**. canvas_schema is the opt-in unification layer with **zero consumers** and an
+**inconclusive behavioral PoC**. It parks as a correctness-class primitive (reachability-by-construction,
+like DEC `d∘d=0`) until a real runtime path wants declared-topology-as-causal-graph. The steering + DEC
+stack (Plan 426) is the story to show off, not the canvas fusion.
+
+
+---
+
 ## TL;DR
 
 Canvas engineering declares a typed schema and compiles it to attention masks + loss weights. The **modelless value** is the compiler + reachability-as-exact-marginal-independence + transfer_distance + schema-mediated latent exchange. The **headline empirical value** (1.73× parameter efficiency, cortical R²=0.825) is training-dependent. Most constituent primitives ship (`region_subspace_bridge`, AC-Prefix, StillPerceiver, `LoopMode::TrainingFree`). **Verdict: GOAT** — the unified `CanvasSchema` compiler is novel and modelless, connects ≥4 pillars, and gives a provable correctness property (reachability by construction); but it is a unifying type-system abstraction, not a new empirical capability class at the modelless level, and the behavioral gain requires riir-train. A fusion PoC (record `riir-ai/.benchmarks/043_*`, §7) could not isolate a canvas-attributable gain from the tuned classifier; the ad-hoc flee metric was the wrong tool and a re-PoC should route through `FaithfulnessProbe` (Plan 278, already wired in riir-poc). Super-GOAT re-evaluation stays open pending that causal-intervention re-PoC. Plan 419 ships the open compiler primitive.
