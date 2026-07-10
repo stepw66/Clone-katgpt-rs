@@ -99,9 +99,3 @@ hippocampal_cache = ["katgpt-core/hippocampal_cache"]
 # chunk selection + katgpt_core::hga::GroupSummaryCache for group selection +
 # katgpt_kv::tiered_kv::TieredKvStore for route-and-fetch.
 hga = ["katgpt-core/hga"]
-# GDN rollback-free tree verify bridge (Plan 424 T4.2). Forwards to
-# katgpt-core/gdn_tree_verify. When active, provides an adapter that bridges
-# `GdnTreeVerifier` to `Gdn2LayerState` — reads S₀ per head, verifies a
-# speculative draft tree without rolling back the recurrent state, and commits
-# the accepted path back. No modification to the GDN2 kernel itself.
-gdn_tree_verify = ["katgpt-core/gdn_tree_verify"]

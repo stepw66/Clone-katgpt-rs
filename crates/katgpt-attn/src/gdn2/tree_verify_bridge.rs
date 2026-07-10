@@ -342,7 +342,8 @@ mod tests {
         let beta = 1.0f32;
 
         // Build a chain tree: 0 → 1 → 2 → 3 (T=4)
-        let t = 4;
+        const T: usize = 4;
+        let t = T;
         let parents = [usize::MAX, 0, 1, 2];
 
         // Random K/V/Q per head per node
@@ -359,7 +360,7 @@ mod tests {
         let queries: Vec<f32> = (0..total_kv).map(|_| next()).collect();
 
         // --- Tree verify path ---
-        let topo = build_topology(&parents, &[alpha; t]);
+        let topo = build_topology(&parents, &[alpha; T]);
         let cache_verify = paper_compatible_cache(&config, alpha);
         let mut verifier = GdnTreeVerifier::new(t, d_k, d_v);
 
@@ -420,7 +421,8 @@ mod tests {
         let n_kv_heads = config.n_kv_head;
         let alpha = 0.9f32;
 
-        let t = 4;
+        const T: usize = 4;
+        let t = T;
         let parents = [usize::MAX, 0, 1, 2];
 
         let mut rng_state = 99u32;
@@ -434,7 +436,7 @@ mod tests {
         let values: Vec<f32> = (0..n_kv_heads * t * d_v).map(|_| next()).collect();
         let queries: Vec<f32> = (0..n_kv_heads * t * d_k).map(|_| next()).collect();
 
-        let topo = build_topology(&parents, &[alpha; t]);
+        let topo = build_topology(&parents, &[alpha; T]);
 
         // --- Sequential reference: replay full chain ---
         let mut seq_s0: Vec<Vec<f32>> = (0..n_kv_heads)
@@ -499,7 +501,8 @@ mod tests {
         // |
         // 3
         let parents = [usize::MAX, 0, 0, 1];
-        let t = 4;
+        const T: usize = 4;
+        let t = T;
 
         let mut rng_state = 77u32;
         let mut next = || {
@@ -512,7 +515,7 @@ mod tests {
         let values: Vec<f32> = (0..n_kv_heads * t * d_v).map(|_| next()).collect();
         let queries: Vec<f32> = (0..n_kv_heads * t * d_k).map(|_| next()).collect();
 
-        let topo = build_topology(&parents, &[alpha; t]);
+        let topo = build_topology(&parents, &[alpha; T]);
         let cache = paper_compatible_cache(&config, alpha);
         let mut verifier = GdnTreeVerifier::new(t, d_k, d_v);
 

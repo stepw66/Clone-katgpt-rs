@@ -313,6 +313,9 @@ pub mod gdn2 {
         Gdn2GateConfig, Gdn2HeadState, Gdn2LayerState, MultiLayerGdn2Cache, gdn2_recurrent_step,
         gdn2_state_readout, gdn2_state_update, l2_normalize, sigmoid,
     };
+    // Plan 424 T4.2: GDN2 cache ↔ tree verify bridge adapter.
+    #[cfg(feature = "gdn_tree_verify")]
+    pub use katgpt_attn::gdn2::tree_verify_bridge;
 }
 // HLA — Higher-order Linear Attention (Plan 057). Substrate (types + kernels)
 // absorbed into katgpt-core::hla (Plan 008 Step 4); composition layer
