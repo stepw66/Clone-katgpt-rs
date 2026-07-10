@@ -13,7 +13,7 @@
 //! Reference: Research 70 — Gated DeltaNet-2: O(1) Decode with Decoupled Erase/Write Gates.
 
 use super::types::Gdn2GateConfig;
-use katgpt_core::simd::{simd_outer_product_acc, simd_scale_inplace};
+use katgpt_core::simd::{simd_outer_product_acc, simd_scale_inplace, simd_sum_sq};
 
 /// Core GDN2 recurrent step: O(d_k × d_v) per token per head.
 ///
@@ -231,7 +231,7 @@ pub fn sigmoid(x: f32) -> f32 {
 /// L2 normalize a vector in-place: x /= ‖x‖₂ + ε.
 #[inline]
 pub fn l2_normalize(x: &mut [f32]) {
-    let norm_sq: f32 = x.iter().map(|&v| v * v).sum();
+    let norm_sq: f32 = simd_sum_sq(x, x.len());
     let inv_norm = 1.0 / (norm_sq.sqrt() + 1e-8);
     simd_scale_inplace(x, inv_norm);
 }

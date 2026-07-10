@@ -158,7 +158,7 @@ impl VortexFlow for MaxPoolBlockScorer {
             let norm_sq = simd_sum_sq(&keys[k_start..k_start + head_dim], head_dim);
             let norm = norm_sq.sqrt();
             norm_sum += norm;
-            norm_sq_sum += norm * norm;
+            norm_sq_sum += norm_sq; // norm*norm == norm_sq (avoid sqrt→square round trip)
         }
 
         let inv = 1.0 / block_size.max(1) as f32;

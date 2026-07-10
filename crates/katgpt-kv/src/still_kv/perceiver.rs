@@ -137,12 +137,14 @@ impl StillPerceiver {
 
         let mut output = vec![0.0f32; t * d];
 
+        // Attention scores reused across heads: [t, big_t]
+        let mut scores = vec![0.0f32; t * big_t];
+
         // Process each head independently.
         for h in 0..num_heads {
             let h_off = h * head_dim;
 
-            // Attention scores for this head: [t, big_t]
-            let mut scores = vec![0.0f32; t * big_t];
+            scores.fill(0.0);
 
             // Compute scores = Q @ K^T * scale
             for qi in 0..t {
@@ -220,11 +222,13 @@ impl StillPerceiver {
         let mut output = vec![0.0f32; t * d];
         // Aggregate attention weights across heads (average)
         let mut agg_weights = vec![0.0f32; t * big_t];
+        // Attention scores reused across heads: [t, big_t]
+        let mut scores = vec![0.0f32; t * big_t];
 
         for h in 0..num_heads {
             let h_off = h * head_dim;
 
-            let mut scores = vec![0.0f32; t * big_t];
+            scores.fill(0.0);
 
             for qi in 0..t {
                 let q_row = qi * d + h_off;
@@ -292,19 +296,20 @@ impl StillPerceiver {
 
         assert_eq!(latents.len(), t * d, "latents shape mismatch");
 
-        // RMSNorm Q, K, V
-        let q_norm = rms_norm(latents, d, cfg.rms_norm_eps);
-        let k_norm = rms_norm(latents, d, cfg.rms_norm_eps);
-        let v_norm = rms_norm(latents, d, cfg.rms_norm_eps);
+        // RMSNorm — Q, K, V are all projections of the same `latents` with no
+        // distinct weight matrices, so a single normalization suffices.
+        let norm = rms_norm(latents, d, cfg.rms_norm_eps);
 
         let mut output = vec![0.0f32; t * d];
+
+        // Attention scores reused across heads: [t, t]
+        let mut scores = vec![0.0f32; t * t];
 
         // Process each head independently.
         for h in 0..num_heads {
             let h_off = h * head_dim;
 
-            // Attention scores for this head: [t, t]
-            let mut scores = vec![0.0f32; t * t];
+            scores.fill(0.0);
 
             // Compute scores = Q @ K^T * scale
             for qi in 0..t {
@@ -313,8 +318,8 @@ impl StillPerceiver {
                 for ki in 0..t {
                     let k_row = ki * d + h_off;
                     let dot = dot_chunk4(
-                        &q_norm[q_row..q_row + head_dim],
-                        &k_norm[k_row..k_row + head_dim],
+                        &norm[q_row..q_row + head_dim],
+                        &norm[k_row..k_row + head_dim],
                     );
                     scores[score_row + ki] = dot * scale;
                 }
@@ -335,7 +340,7 @@ impl StillPerceiver {
                     let v_base = ki * d + h_off;
                     accumulate_chunk4(
                         &mut output[out_base..out_base + head_dim],
-                        &v_norm[v_base..v_base + head_dim],
+                        &norm[v_base..v_base + head_dim],
                         w,
                     );
                 }

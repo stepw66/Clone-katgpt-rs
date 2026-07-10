@@ -123,22 +123,17 @@ impl SscDrafter {
             return;
         }
 
-        // Average context vector across top-k summaries
+        // Small sigmoid bias (0.1 weight) per logit.
+        // Average context computed inline to avoid a temporary Vec allocation.
         let n = self.context_summaries.len() as f32;
-        let avg_context: Vec<f32> = (0..dim)
-            .map(|i| {
-                self.context_summaries
+        for (i, logit) in draft_logits.iter_mut().enumerate() {
+            if i < dim {
+                let avg_i = self.context_summaries
                     .iter()
                     .map(|s| s.get(i).copied().unwrap_or(0.0))
                     .sum::<f32>()
-                    / n
-            })
-            .collect();
-
-        // Small sigmoid bias (0.1 weight) per logit
-        for (i, logit) in draft_logits.iter_mut().enumerate() {
-            if i < dim {
-                let dot = *logit * avg_context[i];
+                    / n;
+                let dot = *logit * avg_i;
                 let bias = 1.0 / (1.0 + (-dot).exp()); // sigmoid
                 *logit += 0.1 * bias;
             }

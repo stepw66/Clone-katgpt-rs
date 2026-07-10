@@ -21,9 +21,15 @@ pub fn compute_gates(query: &[f32], summaries: &[&[f32]]) -> Vec<f32> {
 pub fn top_k_gates(query: &[f32], summaries: &[&[f32]], k: usize) -> Vec<(usize, f32)> {
     let gates = compute_gates(query, summaries);
     let mut indexed: Vec<(usize, f32)> = gates.into_iter().enumerate().collect();
-    // Partial sort: keep top k
-    indexed.sort_by(|a, b| b.1.total_cmp(&a.1));
+    if indexed.len() <= k {
+        indexed.sort_by(|a, b| b.1.total_cmp(&a.1));
+        return indexed;
+    }
+    // O(N) partial partition — everything at indices < k is >= pivot.
+    indexed.select_nth_unstable_by(k - 1, |a, b| b.1.total_cmp(&a.1));
     indexed.truncate(k);
+    // Sort the k survivors descending for deterministic ordering.
+    indexed.sort_by(|a, b| b.1.total_cmp(&a.1));
     indexed
 }
 
