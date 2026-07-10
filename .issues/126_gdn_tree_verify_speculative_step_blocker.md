@@ -40,7 +40,9 @@ runtime).
 public katgpt-rs APIs). The speculative step integration for QwenDeltaNet
 models would happen in riir-ai's deltanet forward module, not in katgpt-rs.
 
-## What IS shipped (T4.2 ✅)
+## What IS shipped
+
+### T4.2 ✅ — Bridge adapter
 
 The bridge adapter (`katgpt-attn/src/gdn2/tree_verify_bridge.rs`) is complete:
 
@@ -53,19 +55,31 @@ The bridge adapter (`katgpt-attn/src/gdn2/tree_verify_bridge.rs`) is complete:
 - 6 tests passing: scalar extraction, paper-compat detection, chain/branching
   verify matches sequential, commit matches sequential
 
-## Recommendation
+### T4.3 ✅ — Pure-GDN2 speculative step (commit `e7cceb53`)
 
-1. **Do NOT attempt T4.3 in katgpt-rs.** The speculative step doesn't handle
-   GDN2 state; building a GDN2-aware speculative decode pipeline is a
-   separate scope.
+`speculative_step_gdn_tree` in `src/speculative/step_gdn_tree.rs` (root crate,
+gated `gdn_tree_verify`) ships a GDN2-aware speculative decode path:
 
-2. **riir-ai consumes the bridge.** When riir-ai's deltanet forward needs
-   speculative decode, it should:
-   - Depend on `katgpt-core` with `gdn_tree_verify` feature
-   - Depend on `katgpt-attn` with `gdn_tree_verify` feature
-   - Call `verify_gdn2_tree_layer` / `commit_gdn2_tree_layer` from its
-     speculative decode path
+- Uses `forward_tree_gdn2` (`katgpt-attn/src/gdn2/tree_forward.rs`) to process
+  all tree nodes in one pass via tree verify
+- p/q rejection sampling along the best path
+- Commits via sequential `forward_gdn2` replay (GDN2 kernel convention)
+- Also ships `build_topology_from_tree_nodes` in `katgpt-core/src/gdn_tree_verify/mod.rs`
+  (DDTree path-encoded nodes → parent-index topology)
+- **Convention note:** tree verify uses paper's decay→read→update with 1/√dₖ
+  scaling; GDN2 kernel uses update-then-read without scaling. `forward_tree_gdn2`
+  applies √dₖ scale correction. The commit path uses the GDN2 kernel convention
+  (sequential replay), keeping subsequent decode steps consistent.
 
-3. **Close this issue** when either (a) a GDN2 speculative decode path is
-   built in riir-ai that uses the bridge, or (b) the QwenDeltaNet config is
-   confirmed not to need tree-verified speculative decode.
+## What remains (riir-ai follow-up)
+
+**T4.3b — Hybrid QwenDeltaNet** (mixed Attention + DeltaNet layers). The
+shipped `speculative_step_gdn_tree` handles pure-GDN2 models. Real
+QwenDeltaNet configs mix attention and delta-rule layers; routing each layer
+type to its respective verifier (KV-rollback for attention, tree-verify for
+GDN) in a single speculative step is a riir-ai concern (QwenDeltaNet forward
+lives in `riir-ai/crates/riir-engine/src/deltanet/forward.rs`).
+
+riir-ai should consume `katgpt_core::gdn_tree_verify` +
+`katgpt_attn::gdn2::tree_verify_bridge` (both public APIs) when it needs
+hybrid speculative decode.
