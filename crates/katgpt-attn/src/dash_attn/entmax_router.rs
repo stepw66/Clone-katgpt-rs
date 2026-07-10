@@ -6,7 +6,9 @@
 
 use katgpt_core::types::DashAttnConfig;
 
-use super::routing::{score_blocks_entmax, score_blocks_entmax_into};
+#[cfg(test)]
+use super::routing::score_blocks_entmax;
+use super::routing::score_blocks_entmax_into;
 use super::vortex_flow::{RoutingDecision, VortexFlow, VortexScratch};
 
 // ---------------------------------------------------------------------------

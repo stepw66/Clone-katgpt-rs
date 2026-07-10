@@ -19,8 +19,14 @@ pub fn compute_gates(query: &[f32], summaries: &[&[f32]]) -> Vec<f32> {
 /// Top-k gates: only keep the k highest gate values.
 /// Returns (segment_index, gate_value) pairs sorted by gate descending.
 pub fn top_k_gates(query: &[f32], summaries: &[&[f32]], k: usize) -> Vec<(usize, f32)> {
-    let gates = compute_gates(query, summaries);
-    let mut indexed: Vec<(usize, f32)> = gates.into_iter().enumerate().collect();
+    // Build indexed (index, gate) pairs directly — avoids the intermediate
+    // `gates: Vec<f32>` allocation that compute_gates + enumerate().collect()
+    // would produce.
+    let mut indexed: Vec<(usize, f32)> = summaries
+        .iter()
+        .enumerate()
+        .map(|(i, s)| (i, sigmoid(dot_product(query, s))))
+        .collect();
     if indexed.len() <= k {
         indexed.sort_by(|a, b| b.1.total_cmp(&a.1));
         return indexed;
