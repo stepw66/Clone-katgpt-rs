@@ -1626,6 +1626,20 @@ pub mod ssd_block;
 #[cfg(feature = "gdn_tree_verify")]
 pub mod gdn_tree_verify;
 
+// TILR — Trajectory-Invariant Latent Refinement (alignment-gated subspace
+// correction). Plan 425, Research 408, arXiv:2606.29164 (ICML 2026 Mech Interp
+// Workshop). The alignment-gated member of the subspace-projection family:
+// projects a contrastive direction onto a frozen SVD basis, modulates the step
+// size by the alignment fraction γ = ‖Πd‖/‖d‖ so that γ→0 bit-recovers the
+// uncorrected input (strict no-harm guarantee). Pure linear algebra — flat
+// &[f32] slices + SIMD dot products, zero `crate::` deps. Consumes a
+// pre-computed SVD basis (Plan 301 thin_svd_into); does not compute it.
+// Opt-in until G1–G4 GOAT gate passes.
+#[cfg(feature = "tilr_invariant_subspace")]
+pub mod tilr;
+#[cfg(feature = "tilr_invariant_subspace")]
+pub use tilr::{TilrError, TilrScratch, check_orthonormal, tilr_refine, tilr_refine_apply, tilr_refine_into};
+
 // Test-only `#[global_allocator]` so `alloc::tests::*` pass when running
 // `cargo test -p katgpt-core --lib`. Downstream consumers (katgpt-rs root,
 // riir-engine, etc.) install their OWN `#[global_allocator]`; this static is

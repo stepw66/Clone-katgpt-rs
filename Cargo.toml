@@ -317,6 +317,7 @@ bandit_mcts = ["game_state"]  # Bandit-guided MCTS rollout policy — NFSP/MCTS 
 hla_attention = []  # Higher-order Linear Attention — O(1) inference cache (Plan 057)
 gdn2_attention = ["katgpt-attn/gdn2_attention", "katgpt-attn/diagonal_gate"]  # Gated DeltaNet-2 recurrent attention — O(1) decode (Plan 105, Research 70). Kernel+types+forward in katgpt-attn (Issue 007 Phase F.4a); root re-exports.
 gdn_tree_verify = ["katgpt-attn/gdn_tree_verify", "katgpt-core/gdn_tree_verify"]  # Plan 424 T4.2: GDN rollback-free tree verify bridge — MultiLayerGdn2Cache ↔ GdnTreeVerifier adapter. Forwards to katgpt-attn (bridge module) + katgpt-core (verify primitive).
+tilr_invariant_subspace = ["katgpt-core/tilr_invariant_subspace"]  # TILR — Trajectory-Invariant Latent Refinement (Plan 425, Research 408, arXiv:2606.29164). Alignment-gated subspace-projected correction with γ→0 strict no-harm guarantee. Pure linear algebra in katgpt-core. Opt-in until G1–G4 GOAT gate passes.
 cumprodsum = []  # Cumprodsum primitive — atomic 1-SS matrix multiplication (Plan 263, Research 231) — always compiled, feature reserved for future SIMD gate
 ssd_block = ["katgpt-core/ssd_block"]  # Dual-mode SSD block decomposition — chunked semiseparable computation (Plan 263, Phase 2, GOAT PASS 33-661x speedup, default-ON). Phase 10 (2026-07-04): module moved to katgpt-core; root forwards.
 ss_pruner = ["katgpt-pruners/ss_pruner"]  # SemiseparablePruner — cumprodsum temporal influence pruning for DDTree (Plan 263, Phase 3, GOAT PASS 25-56% branching reduction, default-ON)
