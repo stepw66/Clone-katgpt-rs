@@ -70,6 +70,7 @@ pub const HLA_DIM: usize = 8;
 
 /// Errors returned by [`LatentSteeringVector::new`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
 pub enum LatentSteeringError {
     /// Direction vector is not unit-norm within the constructor tolerance.
     NotUnitNorm,

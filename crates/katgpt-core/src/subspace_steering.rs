@@ -44,6 +44,7 @@ use blake3::Hasher;
 
 /// Errors returned by [`SubspaceSteeringField::new`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
 pub enum SubspaceSteeringError {
     /// A block row is not unit-norm within `orthonormal_tol`, OR two rows are
     /// not mutually orthogonal within `orthonormal_tol` (off-diagonal of

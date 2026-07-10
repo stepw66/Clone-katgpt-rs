@@ -108,6 +108,7 @@ const NORM_FLOOR: f32 = 1e-12;
 
 /// Errors returned by the Slerp steering entry points.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
 pub enum SlerpError {
     /// `h.len() != mu_t.len()` (or `h_out`, `scratch.unit_h`) — all four must
     /// agree on the channel count.

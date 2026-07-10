@@ -217,6 +217,7 @@ impl ZoneManifoldConfig {
 
 /// Error returned by [`zone_affective_manifold`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
 pub enum ZoneManifoldError {
     /// `crowd_hla.len() != n * d`.
     DimMismatch,

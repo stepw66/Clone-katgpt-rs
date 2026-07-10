@@ -254,6 +254,7 @@ impl FuncAttnScratch {
 
 /// Errors returned by [`funcattn_forward`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
 pub enum FuncAttnError {
     /// Regularized matrix `(1-α)·K̃ᵀK̃ + α·I_d` was not positive definite
     /// even after adding `cholesky_jitter`. Should never trigger for

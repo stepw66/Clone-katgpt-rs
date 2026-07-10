@@ -67,6 +67,7 @@ use crate::simd;
 
 /// Errors returned by [`CrossResolutionBases::new`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
 pub enum CrossResolutionError {
     /// `k > min(d_src, d_dst)` — the basis cannot be column-orthonormal at
     /// this rank because the smaller dimension is shorter than `k`. See

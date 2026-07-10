@@ -63,6 +63,7 @@ use blake3::Hasher;
 
 /// Errors returned by [`RegionSubspaceField::new`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
 pub enum RegionSubspaceError {
     /// A loadings axis is not unit-norm within `orthonormal_tol`, OR two axes
     /// within the same region are not mutually orthogonal (the region's

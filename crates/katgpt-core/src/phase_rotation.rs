@@ -141,6 +141,7 @@ impl PhaseRotationGate {
 
 /// Errors returned by the phase-rotation entry points.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
 pub enum PhaseRotationError {
     /// `a.len() != b.len()` or `out.len() != a.len()` — the two halves and the
     /// output must agree on the channel count.

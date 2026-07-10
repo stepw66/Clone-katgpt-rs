@@ -282,6 +282,7 @@ impl FuncAttnSnapshotStore {
 
 /// Errors from [`FuncAttnSnapshotStore`] operations.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
 pub enum FuncAttnSnapshotStoreError {
     /// The inner `RwLock` is poisoned (a writer panicked).
     Poisoned,

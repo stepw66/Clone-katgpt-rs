@@ -473,6 +473,7 @@ pub struct BeliefDraftToken {
 
 /// Error type for `BeliefDrafter` operations.
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[repr(u8)]
 pub enum BeliefDraftError {
     /// MLP not initialized.
     NotInitialized,

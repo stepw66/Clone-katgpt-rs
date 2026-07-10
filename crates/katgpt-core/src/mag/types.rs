@@ -181,6 +181,7 @@ pub enum TransferMetric {
 
 /// Errors returned by MAG operations.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
 pub enum MagError {
     /// Input slices have mismatched per-sample dimensionality.
     DimMismatch,

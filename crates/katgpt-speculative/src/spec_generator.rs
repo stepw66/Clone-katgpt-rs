@@ -32,6 +32,7 @@ pub struct TokenOutput {
 
 /// Token generator error.
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[repr(u8)]
 pub enum TokenGenError {
     /// No marginals provided.
     NoMarginals,

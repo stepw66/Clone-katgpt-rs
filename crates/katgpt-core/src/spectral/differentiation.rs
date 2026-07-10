@@ -66,6 +66,7 @@ use rustfft::{Fft, FftPlanner, num_complex::Complex};
 
 /// Errors returned by [`spectral_differentiate_into`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
 pub enum SpecDiffError {
     /// `x.len() < 2` — FFT needs at least 2 samples.
     TooFewSamples,
