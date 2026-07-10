@@ -30,6 +30,7 @@ impl<'a, G: ProcedureGraph> PathEnumerator<'a, G> {
     }
 
     /// Access the underlying procedure graph.
+    #[inline]
     pub fn graph(&self) -> &'a G {
         self.graph
     }

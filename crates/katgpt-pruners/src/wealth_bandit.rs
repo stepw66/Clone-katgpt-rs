@@ -195,11 +195,13 @@ impl<P: ScreeningPruner> WealthBanditPruner<P> {
     }
 
     /// Total rebirth events since creation.
+    #[inline]
     pub fn rebirth_count(&self) -> u32 {
         self.rebirth_count
     }
 
     /// Total episodes run.
+    #[inline]
     pub fn episode_count(&self) -> u32 {
         self.episode_count
     }

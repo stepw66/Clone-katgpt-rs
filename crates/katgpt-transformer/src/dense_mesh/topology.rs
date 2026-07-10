@@ -452,6 +452,7 @@ mod tests {
         ) -> DenseHidden {
             input.clone()
         }
+        #[inline]
         fn hidden_dim(&self) -> usize {
             self.hidden_dim
         }

@@ -100,10 +100,12 @@ impl BanditEnv for DecisionPointEnv {
         1.0
     }
 
+    #[inline]
     fn num_arms(&self) -> usize {
         self.num_arms
     }
 
+    #[inline]
     fn optimal_arm(&self) -> usize {
         self.optimal_arm
     }
@@ -360,10 +362,12 @@ impl BanditEnv for GlobalProcedureEnv {
         1.0
     }
 
+    #[inline]
     fn num_arms(&self) -> usize {
         self.num_arms
     }
 
+    #[inline]
     fn optimal_arm(&self) -> usize {
         self.optimal_arm
     }

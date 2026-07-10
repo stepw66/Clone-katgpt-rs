@@ -172,6 +172,7 @@ impl FFTTemplateProposer {
     }
 
     /// Total number of template selections.
+    #[inline]
     pub fn total_pulls(&self) -> u32 {
         self.total_pulls
     }

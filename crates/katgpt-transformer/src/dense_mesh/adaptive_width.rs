@@ -410,9 +410,11 @@ mod tests {
                 false
             }
             fn reset(&mut self) {}
+            #[inline]
             fn hesitation_count(&self) -> u32 {
                 self.hesitation
             }
+            #[inline]
             fn threshold(&self) -> u32 {
                 self.thresh
             }

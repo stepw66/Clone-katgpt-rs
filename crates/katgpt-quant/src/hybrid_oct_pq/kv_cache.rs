@@ -413,6 +413,7 @@ impl HybridOctPqKVCache {
     }
 
     /// Get current position.
+    #[inline]
     pub fn pos(&self) -> usize {
         self.pos
     }
@@ -423,6 +424,7 @@ impl HybridOctPqKVCache {
     }
 
     /// Get KV dimension.
+    #[inline]
     pub fn kv_dim(&self) -> usize {
         self.kv_dim
     }
@@ -449,6 +451,7 @@ impl katgpt_core::types::QuantizedKVCache for HybridOctPqKVCache {
         self.reset();
     }
 
+    #[inline]
     fn pos(&self) -> usize {
         self.pos()
     }

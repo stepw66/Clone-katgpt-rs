@@ -146,10 +146,12 @@ mod leo_head_oracle {
                 }
             }
 
+            #[inline]
             fn goal_count(&self) -> usize {
                 self.goals
             }
 
+            #[inline]
             fn action_count(&self) -> usize {
                 self.actions
             }

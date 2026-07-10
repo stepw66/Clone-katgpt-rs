@@ -604,6 +604,7 @@ impl GraphEvaluator {
     }
 
     /// Get the current position (number of tokens processed).
+    #[inline]
     pub fn position(&self) -> usize {
         self.position
     }

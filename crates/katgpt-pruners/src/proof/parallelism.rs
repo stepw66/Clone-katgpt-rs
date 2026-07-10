@@ -75,11 +75,13 @@ impl ParallelismGuard {
     /// Whether population-based P-UCB sampling should be used.
     ///
     /// Returns the cached decision from construction time.
+    #[inline]
     pub fn should_use_population(&self) -> bool {
         self.population_enabled
     }
 
     /// Number of rayon threads at guard construction time.
+    #[inline]
     pub fn threads(&self) -> usize {
         self.threads
     }
@@ -88,6 +90,7 @@ impl ParallelismGuard {
     ///
     /// Same as [`should_use_population`](Self::should_use_population),
     /// named for ergonomic field-style access.
+    #[inline]
     pub fn population_enabled(&self) -> bool {
         self.population_enabled
     }

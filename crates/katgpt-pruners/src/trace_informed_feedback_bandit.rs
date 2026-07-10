@@ -204,12 +204,15 @@ mod tests {
     }
 
     impl ActiveStateTrace for StubTrace {
+        #[inline]
         fn compression_ratio_mean(&self) -> f32 {
             self.compression_ratio_mean
         }
+        #[inline]
         fn constraint_trend(&self) -> f32 {
             self.constraint_trend
         }
+        #[inline]
         fn hla_arousal(&self) -> f32 {
             self.hla_arousal
         }

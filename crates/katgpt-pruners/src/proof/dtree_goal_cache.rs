@@ -206,6 +206,7 @@ impl DTreeGoalCache {
     }
 
     /// Number of branches processed so far.
+    #[inline]
     pub fn branch_count(&self) -> usize {
         self.branch_count
     }

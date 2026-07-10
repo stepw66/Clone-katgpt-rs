@@ -616,6 +616,7 @@ impl GoHLPlayer {
     }
 
     /// Current exploration rate ε (for inspection).
+    #[inline]
     pub fn epsilon(&self) -> f32 {
         self.epsilon
     }
@@ -866,6 +867,7 @@ impl GoGZeroPlayer {
     }
 
     /// Best template by UCB1 score.
+    #[inline]
     pub fn best_template(&self) -> GoTemplate {
         self.select_template()
     }
@@ -1047,11 +1049,13 @@ impl GoMctsPlayer {
     }
 
     /// Current budget.
+    #[inline]
     pub fn budget(&self) -> usize {
         self.budget
     }
 
     /// Current rollout depth.
+    #[inline]
     pub fn rollout_depth(&self) -> usize {
         self.rollout_depth
     }

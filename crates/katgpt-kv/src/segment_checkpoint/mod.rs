@@ -85,6 +85,7 @@ impl SegmentStore {
     }
 
     /// Get the configured segment size.
+    #[inline]
     pub fn segment_size(&self) -> usize {
         self.segment_size
     }

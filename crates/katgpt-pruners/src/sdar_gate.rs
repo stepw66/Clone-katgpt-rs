@@ -271,6 +271,7 @@ impl SdarLearnedBeta {
     }
 
     /// Current β value.
+    #[inline]
     pub fn beta(&self) -> f32 {
         self.beta
     }

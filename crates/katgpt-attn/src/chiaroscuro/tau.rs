@@ -179,11 +179,13 @@ impl StreamingTauCalibrator {
     }
 
     /// Total number of observations seen (cumulative, not window size).
+    #[inline]
     pub fn count(&self) -> u64 {
         self.total_count
     }
 
     /// Number of samples currently in the window.
+    #[inline]
     pub fn window_len(&self) -> usize {
         self.len
     }

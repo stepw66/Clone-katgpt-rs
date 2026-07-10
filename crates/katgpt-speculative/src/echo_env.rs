@@ -231,6 +231,7 @@ impl PredictionVerifier {
 
     /// Returns the bandit reward based on current prediction accuracy.
     /// Higher accuracy → higher reward → promotion via AbsorbCompress.
+    #[inline]
     pub fn bandit_reward(&self) -> f32 {
         self.accuracy_ema
     }

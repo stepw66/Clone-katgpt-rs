@@ -200,16 +200,19 @@ impl<P: ScreeningPruner> GdsdPruner<P> {
     }
 
     /// Current β (KL regularization).
+    #[inline]
     pub fn beta(&self) -> f32 {
         self.beta
     }
 
     /// Current ψ (guidance coefficient).
+    #[inline]
     pub fn psi(&self) -> f32 {
         self.psi
     }
 
     /// Whether TLC is enabled.
+    #[inline]
     pub fn tlc_enabled(&self) -> bool {
         self.tlc
     }

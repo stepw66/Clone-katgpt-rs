@@ -1463,9 +1463,11 @@ mod heterogeneous_tests {
                 *out_slot = simd_dot_f32(row, x, id);
             }
         }
+        #[inline]
         fn native_dim(&self) -> usize {
             self.native_dim
         }
+        #[inline]
         fn field_id(&self) -> u64 {
             self.id
         }

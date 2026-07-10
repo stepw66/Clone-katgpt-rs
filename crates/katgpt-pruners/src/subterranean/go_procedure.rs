@@ -187,6 +187,7 @@ impl GoProcedure {
     }
 
     /// Board size this procedure was constructed for.
+    #[inline]
     pub fn board_size(&self) -> usize {
         self.board_size
     }
@@ -487,6 +488,7 @@ impl ProcedureGraph for GoProcedure {
         self.nodes.len()
     }
 
+    #[inline]
     fn edge_count(&self) -> usize {
         self.edge_count
     }

@@ -654,6 +654,7 @@ impl KVarNKVCache {
     }
 
     /// Current write position.
+    #[inline]
     pub fn pos(&self) -> usize {
         self.pos
     }
@@ -955,6 +956,7 @@ impl katgpt_core::types::QuantizedKVCache for KVarNKVCache {
         self.reset();
     }
 
+    #[inline]
     fn pos(&self) -> usize {
         self.pos()
     }

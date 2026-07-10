@@ -101,6 +101,7 @@ impl CountMinSketch {
     }
 
     /// Total number of `update()` calls since creation or last reset.
+    #[inline]
     pub fn total_updates(&self) -> u64 {
         self.total_updates
     }

@@ -171,6 +171,7 @@ impl RubricFFTPlayer {
     }
 
     /// Player ID.
+    #[inline]
     pub fn id(&self) -> u8 {
         self.id
     }

@@ -173,6 +173,7 @@ impl<P: ScreeningPruner> FlowPruner<P> {
     }
 
     /// Get lambda value.
+    #[inline]
     pub fn lambda(&self) -> f32 {
         self.lambda
     }

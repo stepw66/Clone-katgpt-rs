@@ -397,6 +397,7 @@ impl DeltaMemoryState {
     }
 
     /// Number of updates performed
+    #[inline]
     pub fn update_count(&self) -> usize {
         self.update_count
     }
@@ -447,16 +448,19 @@ impl DeltaMemoryState {
     }
 
     /// Get the current surprise threshold.
+    #[inline]
     pub fn theta_surprise(&self) -> f32 {
         self.theta_surprise
     }
 
     /// Total writes that reached the gate.
+    #[inline]
     pub fn writes_total(&self) -> u64 {
         self.writes_total
     }
 
     /// Writes suppressed by the gate.
+    #[inline]
     pub fn writes_gated(&self) -> u64 {
         self.writes_gated
     }

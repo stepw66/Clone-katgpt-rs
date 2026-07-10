@@ -623,6 +623,7 @@ impl OpcodeDispatch {
     }
 
     /// Returns whether this dispatch context is in specialized (Futamura) mode.
+    #[inline]
     pub fn is_specialized(&self) -> bool {
         self.specialized
     }

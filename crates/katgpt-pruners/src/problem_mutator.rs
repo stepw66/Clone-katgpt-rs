@@ -201,11 +201,13 @@ impl EvolutionArena {
     }
 
     /// Current round number.
+    #[inline]
     pub fn round(&self) -> u32 {
         self.round
     }
 
     /// Total configs generated so far.
+    #[inline]
     pub fn total_generated(&self) -> u32 {
         self.total_generated
     }

@@ -93,6 +93,7 @@ impl CountSketch {
     }
 
     /// Number of sketch dimensions.
+    #[inline]
     pub fn sketch_dim(&self) -> usize {
         self.sketch_dim
     }

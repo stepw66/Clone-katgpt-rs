@@ -554,10 +554,12 @@ impl SyntheticDecodeBackend {
 }
 
 impl DecodeBackend for SyntheticDecodeBackend {
+    #[inline]
     fn embedding_dim(&self) -> usize {
         self.dim
     }
 
+    #[inline]
     fn vocab_size(&self) -> usize {
         self.vocab
     }

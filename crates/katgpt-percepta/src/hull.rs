@@ -225,6 +225,7 @@ impl HardAttentionHead {
     }
 
     /// Number of inserted key–value pairs.
+    #[inline]
     pub fn size(&self) -> usize {
         self.n
     }

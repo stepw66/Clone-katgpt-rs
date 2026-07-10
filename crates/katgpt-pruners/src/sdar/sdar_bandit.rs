@@ -265,11 +265,13 @@ impl<P: ScreeningPruner> SdarBanditPruner<P> {
     }
 
     /// Whether gate statistics tracking is enabled.
+    #[inline]
     pub fn is_tracking_stats(&self) -> bool {
         self.track_gate_stats
     }
 
     /// Current β (sigmoid sharpness).
+    #[inline]
     pub fn beta(&self) -> f32 {
         self.beta
     }

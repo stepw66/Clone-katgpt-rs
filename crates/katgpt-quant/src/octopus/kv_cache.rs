@@ -371,6 +371,7 @@ impl OctopusKVCache {
     }
 
     /// Current write position.
+    #[inline]
     pub fn pos(&self) -> usize {
         self.pos
     }
@@ -381,6 +382,7 @@ impl OctopusKVCache {
     }
 
     /// Get KV dimension.
+    #[inline]
     pub fn kv_dim(&self) -> usize {
         self.kv_dim
     }
@@ -407,6 +409,7 @@ impl katgpt_core::types::QuantizedKVCache for OctopusKVCache {
         self.reset();
     }
 
+    #[inline]
     fn pos(&self) -> usize {
         self.pos()
     }

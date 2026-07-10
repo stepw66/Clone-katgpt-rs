@@ -313,6 +313,7 @@ impl TemplateProposer {
     }
 
     /// Total proposals generated.
+    #[inline]
     pub fn total_proposals(&self) -> usize {
         self.total_proposals
     }

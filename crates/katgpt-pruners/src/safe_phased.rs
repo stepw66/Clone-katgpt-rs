@@ -115,11 +115,13 @@ impl SafePhasedState {
     }
 
     /// Current aggression phase.
+    #[inline]
     pub fn phase(&self) -> u32 {
         self.phase
     }
 
     /// Current aggression coefficient αₖ.
+    #[inline]
     pub fn alpha(&self) -> f32 {
         self.alpha
     }
@@ -158,36 +160,43 @@ impl SafePhasedState {
     }
 
     /// Current regret budget R̂.
+    #[inline]
     pub fn regret_budget(&self) -> f32 {
         self.regret_budget
     }
 
     /// Current delay slack ξ(D̂ₛ).
+    #[inline]
     pub fn delay_slack(&self) -> f32 {
         self.delay_slack
     }
 
     /// Safe baseline arm index.
+    #[inline]
     pub fn baseline_arm(&self) -> usize {
         self.baseline_arm
     }
 
     /// Total rounds played.
+    #[inline]
     pub fn total_rounds(&self) -> u32 {
         self.total_rounds
     }
 
     /// Cumulative phase gap on arrived data.
+    #[inline]
     pub fn phase_gap(&self) -> f32 {
         self.phase_gap_arrived
     }
 
     /// Current delay estimate D̂ₛ.
+    #[inline]
     pub fn delay_estimate(&self) -> f32 {
         self.delay_estimate
     }
 
     /// Number of arms.
+    #[inline]
     pub fn num_arms(&self) -> usize {
         self.num_arms
     }

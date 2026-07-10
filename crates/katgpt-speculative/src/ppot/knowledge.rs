@@ -246,6 +246,7 @@ impl SessionKnowledge {
     }
 
     /// Number of insights currently in the ring buffer.
+    #[inline]
     pub fn insight_count(&self) -> usize {
         self.count
     }

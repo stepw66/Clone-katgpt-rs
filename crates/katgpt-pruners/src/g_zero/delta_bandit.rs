@@ -208,11 +208,13 @@ impl<P: ScreeningPruner> DeltaBanditPruner<P> {
     }
 
     /// δ floor configuration.
+    #[inline]
     pub fn delta_floor(&self) -> f32 {
         self.delta_floor
     }
 
     /// Trajectory length regularization strength.
+    #[inline]
     pub fn lambda_length(&self) -> f32 {
         self.lambda_length
     }

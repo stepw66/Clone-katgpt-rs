@@ -906,6 +906,7 @@ impl InferenceBackend for GpuBackend {
         Ok(())
     }
 
+    #[inline]
     fn is_compiled(&self) -> bool {
         self.compiled
     }

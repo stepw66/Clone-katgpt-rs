@@ -405,11 +405,13 @@ impl DominoLoraCorrection {
     }
 
     /// Returns the GRU hidden dimension.
+    #[inline]
     pub fn gru_hidden_size(&self) -> usize {
         self.gru_hidden
     }
 
     /// Returns the adapter rank.
+    #[inline]
     pub fn adapter_rank(&self) -> usize {
         self.adapter_rank
     }

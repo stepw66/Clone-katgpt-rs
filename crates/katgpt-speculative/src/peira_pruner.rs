@@ -103,11 +103,13 @@ impl<P: ScreeningPruner> PeiraPruner<P> {
     }
 
     /// Get the current cached alignment score.
+    #[inline]
     pub fn alignment(&self) -> f32 {
         self.alignment
     }
 
     /// Get the modulation exponent.
+    #[inline]
     pub fn alpha(&self) -> f32 {
         self.alpha
     }

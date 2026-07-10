@@ -325,6 +325,7 @@ pub(crate) mod tests {
             if self.has_recent { &self.recent } else { &[] }
         }
 
+        #[inline]
         fn belief_confidence(&self) -> f32 {
             self.confidence
         }

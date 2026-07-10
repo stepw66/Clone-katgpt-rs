@@ -70,6 +70,7 @@ impl CumSum {
     }
 
     /// Number of inserted values.
+    #[inline]
     pub fn len(&self) -> usize {
         self.count
     }

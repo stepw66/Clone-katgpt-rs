@@ -113,6 +113,7 @@ impl<P: ScreeningPruner> EpiplexityScreeningPruner<P> {
     }
 
     /// Get the current alpha blend factor.
+    #[inline]
     pub fn alpha(&self) -> f32 {
         self.alpha
     }

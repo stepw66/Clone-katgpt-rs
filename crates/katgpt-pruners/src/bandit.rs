@@ -782,6 +782,7 @@ impl<P: ScreeningPruner> BanditPruner<P> {
     }
 
     /// Index of the best arm (highest Q-value).
+    #[inline]
     pub fn best_arm(&self) -> usize {
         self.arm_best()
     }
@@ -797,6 +798,7 @@ impl<P: ScreeningPruner> BanditPruner<P> {
     }
 
     /// Total pulls across all arms.
+    #[inline]
     pub fn total_pulls(&self) -> u32 {
         self.arm_total_pulls()
     }
@@ -1235,6 +1237,7 @@ impl BanditEnv for BernoulliEnv {
         self.probs.get(arm).copied().unwrap_or(0.0)
     }
 
+    #[inline]
     fn optimal_reward(&self) -> f32 {
         self.optimal_reward
     }
@@ -1243,6 +1246,7 @@ impl BanditEnv for BernoulliEnv {
         self.probs.len()
     }
 
+    #[inline]
     fn optimal_arm(&self) -> usize {
         self.optimal_arm
     }
@@ -1301,6 +1305,7 @@ impl BanditEnv for GaussianEnv {
         self.means.get(arm).copied().unwrap_or(0.0)
     }
 
+    #[inline]
     fn optimal_reward(&self) -> f32 {
         self.optimal_reward
     }
@@ -1309,6 +1314,7 @@ impl BanditEnv for GaussianEnv {
         self.means.len()
     }
 
+    #[inline]
     fn optimal_arm(&self) -> usize {
         self.optimal_arm
     }

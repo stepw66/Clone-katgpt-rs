@@ -331,11 +331,13 @@ impl<const SQRT_N: usize, const D_K: usize, const D_V: usize> PkmEpisodicStore<S
     }
 
     /// Total write calls (including gate-suppressed no-ops).
+    #[inline]
     pub fn writes_total(&self) -> u64 {
         self.writes_total
     }
 
     /// Writes that actually mutated the value table (gate > 0 after clamp).
+    #[inline]
     pub fn writes_applied(&self) -> u64 {
         self.writes_applied
     }

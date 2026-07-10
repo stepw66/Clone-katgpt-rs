@@ -111,6 +111,7 @@ impl TransformerVocab {
     }
 
     /// Get the stop token ID.
+    #[inline]
     pub fn stop_token_id(&self) -> usize {
         self.stop_token_id
     }

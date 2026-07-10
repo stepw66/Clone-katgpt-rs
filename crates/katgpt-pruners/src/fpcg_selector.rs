@@ -163,11 +163,13 @@ where
     }
 
     /// Number of candidates sampled per step (paper default: 10).
+    #[inline]
     pub fn num_candidates(&self) -> usize {
         self.num_candidates
     }
 
     /// Current steering direction.
+    #[inline]
     pub fn direction(&self) -> SteeringDirection {
         self.direction
     }
@@ -364,6 +366,7 @@ where
     }
 
     /// Current temperature.
+    #[inline]
     pub fn temperature(&self) -> f32 {
         self.temperature
     }

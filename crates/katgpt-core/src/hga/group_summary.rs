@@ -70,11 +70,13 @@ impl GroupSummaryCache {
     }
 
     /// Number of chunks stored.
+    #[inline]
     pub fn n_chunks(&self) -> usize {
         self.n_chunks
     }
 
     /// Number of groups per chunk.
+    #[inline]
     pub fn n_groups_per_chunk(&self) -> usize {
         self.n_groups_per_chunk
     }

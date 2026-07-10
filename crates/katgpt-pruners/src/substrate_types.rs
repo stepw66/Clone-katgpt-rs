@@ -113,6 +113,7 @@ impl SubstrateMask {
     }
 
     /// Get the recovery score.
+    #[inline]
     pub fn recovery_score(&self) -> f32 {
         self.recovery_score
     }
@@ -198,11 +199,13 @@ impl SubstrateMask {
     }
 
     /// Number of layers.
+    #[inline]
     pub fn n_layers(&self) -> usize {
         self.n_layers
     }
 
     /// MLP hidden dimension.
+    #[inline]
     pub fn mlp_hidden(&self) -> usize {
         self.mlp_hidden
     }

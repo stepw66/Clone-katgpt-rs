@@ -81,6 +81,7 @@ impl<P: ScreeningPruner> EntropyBifurcatedPruner<P> {
     }
 
     /// Get the current entropy state.
+    #[inline]
     pub fn state(&self) -> EntropyState {
         self.state
     }

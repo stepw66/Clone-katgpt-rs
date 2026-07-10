@@ -672,6 +672,7 @@ impl RegimeTransitionScheduler {
     }
 
     /// Whether transitions should be deferred to background.
+    #[inline]
     pub fn should_defer(&self) -> bool {
         self.background_enabled
     }

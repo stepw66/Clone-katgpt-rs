@@ -637,6 +637,7 @@ mod tests {
             &mut dz_scratch[..32]
         }
 
+        #[inline]
         fn commitment(&self) -> [u8; 32] {
             self.commitment
         }
@@ -673,6 +674,7 @@ mod tests {
             &mut dz_scratch[..32]
         }
 
+        #[inline]
         fn commitment(&self) -> [u8; 32] {
             self.commitment
         }
@@ -716,6 +718,7 @@ mod tests {
             &mut dz_scratch[..32]
         }
 
+        #[inline]
         fn commitment(&self) -> [u8; 32] {
             self.commitment
         }
@@ -1329,6 +1332,7 @@ mod tests {
                     }
                     &mut dz_scratch[..32]
                 }
+                #[inline]
                 fn commitment(&self) -> [u8; 32] {
                     self.commitment
                 }

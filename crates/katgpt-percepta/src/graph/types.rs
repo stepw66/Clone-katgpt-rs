@@ -141,6 +141,7 @@ impl Expression {
 
     /// Deep copy (clone is sufficient since HashMap owns its data).
     #[must_use]
+    #[inline]
     pub fn copy(&self) -> Self {
         self.clone()
     }

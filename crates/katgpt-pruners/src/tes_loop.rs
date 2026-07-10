@@ -275,6 +275,7 @@ impl<E: BanditEnv + Clone> SimpleTesLoop<E> {
     }
 
     /// Best score across all evaluated nodes.
+    #[inline]
     pub fn best_score(&self) -> f32 {
         self.best_score
     }

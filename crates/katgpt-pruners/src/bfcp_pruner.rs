@@ -102,6 +102,7 @@ impl BFCPPruner {
     }
 
     /// Number of tokens in reject regions — work saved by region-level skip.
+    #[inline]
     pub fn skip_count(&self) -> usize {
         self.skip_count
     }

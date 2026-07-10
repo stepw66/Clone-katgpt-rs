@@ -327,6 +327,7 @@ impl ZipfianCacheHierarchy {
     }
 
     /// Current plasma capacity (for diagnostics).
+    #[inline]
     pub fn plasma_capacity(&self) -> usize {
         self.plasma_capacity
     }

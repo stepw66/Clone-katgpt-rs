@@ -320,6 +320,7 @@ impl SynonymMap {
     }
 
     /// Number of clusters.
+    #[inline]
     pub fn num_clusters(&self) -> usize {
         self.num_clusters
     }

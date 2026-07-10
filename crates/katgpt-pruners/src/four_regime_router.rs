@@ -284,6 +284,7 @@ impl FourRegimeRouter {
     }
 
     /// Total visits across all arms.
+    #[inline]
     pub fn total_visits(&self) -> u64 {
         self.total_visits
     }

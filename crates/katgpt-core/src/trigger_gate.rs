@@ -353,11 +353,13 @@ impl TriggerGate {
     }
 
     /// Whether GPU was reported as available at construction time.
+    #[inline]
     pub fn gpu_available(&self) -> bool {
         self.gpu_available
     }
 
     /// Whether ANE was reported as available at construction time.
+    #[inline]
     pub fn ane_available(&self) -> bool {
         self.ane_available
     }

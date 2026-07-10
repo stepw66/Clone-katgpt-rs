@@ -194,16 +194,19 @@ impl RetrievalProjection {
     // -----------------------------------------------------------------------
 
     /// Number of retrieval heads.
+    #[inline]
     pub fn n_retrieval_heads(&self) -> usize {
         self.n_retrieval_heads
     }
 
     /// Dimension of each attention head.
+    #[inline]
     pub fn head_dim(&self) -> usize {
         self.head_dim
     }
 
     /// Low-dimensional projection size.
+    #[inline]
     pub fn low_dim(&self) -> usize {
         self.low_dim
     }

@@ -138,6 +138,7 @@ impl ThinkingBandit {
         best_arm
     }
 
+    #[inline]
     fn total_pulls(&self) -> u32 {
         self.total_pulls
     }
@@ -368,6 +369,7 @@ impl ThinkingController {
     }
 
     /// Get current trust signal. Returns -1.0 if not set.
+    #[inline]
     pub fn trust_signal(&self) -> f32 {
         self.trust_signal
     }

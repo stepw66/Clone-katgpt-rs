@@ -148,6 +148,7 @@ impl BandConditioningSet {
     }
 
     /// Returns the task index `i` (1-indexed).
+    #[inline]
     pub fn task_index(&self) -> u32 {
         self.task
     }

@@ -209,6 +209,7 @@ impl AdaptiveCoTStopper {
     }
 
     /// Config accessor.
+    #[inline]
     pub fn config(&self) -> AdaptiveCoTConfig {
         self.config
     }

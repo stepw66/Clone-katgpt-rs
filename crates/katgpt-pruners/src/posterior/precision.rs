@@ -157,16 +157,19 @@ impl PrecisionVector {
     }
 
     /// Total number of observations.
+    #[inline]
     pub fn observations(&self) -> u32 {
         self.total_observations
     }
 
     /// Alpha (success count + prior).
+    #[inline]
     pub fn alpha(&self) -> f32 {
         self.alpha
     }
 
     /// Beta (failure count + prior).
+    #[inline]
     pub fn beta(&self) -> f32 {
         self.beta
     }

@@ -219,6 +219,7 @@ impl<P: ScreeningPruner> PosteriorGuidedPruner<P> {
     }
 
     /// Get the domain context.
+    #[inline]
     pub fn context(&self) -> EvidenceContext {
         self.context
     }

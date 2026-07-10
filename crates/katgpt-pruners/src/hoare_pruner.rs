@@ -146,6 +146,7 @@ impl HoarePruner {
     }
 
     /// Number of violations detected so far.
+    #[inline]
     pub fn violations(&self) -> usize {
         self.violations
     }

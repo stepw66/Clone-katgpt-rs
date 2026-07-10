@@ -398,11 +398,13 @@ impl GoReplayWriter {
     }
 
     /// Board size this writer was configured for.
+    #[inline]
     pub fn board_size(&self) -> usize {
         self.board_size
     }
 
     /// Number of samples written so far.
+    #[inline]
     pub fn sample_count(&self) -> u64 {
         self.sample_count
     }

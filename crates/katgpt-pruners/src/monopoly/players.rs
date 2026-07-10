@@ -1115,6 +1115,7 @@ impl HLPlayer {
     }
 
     /// Returns total games played by this player.
+    #[inline]
     pub fn game_count(&self) -> u32 {
         self.game_count
     }

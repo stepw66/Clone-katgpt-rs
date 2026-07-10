@@ -90,6 +90,7 @@ impl GameState for MockCounterState {
         0.0
     }
 
+    #[inline]
     fn tick(&self) -> u32 {
         self.tick
     }

@@ -458,6 +458,7 @@ impl LatentTaskTree {
     /// This is the **initial** commitment — it does NOT reflect runtime Beta
     /// mutations. Use it for freeze/thaw integrity envelopes: snapshot the current
     /// Beta state separately, and verify the frozen topology matches on thaw.
+    #[inline]
     pub fn blake3_root(&self) -> [u8; 32] {
         self.blake3
     }

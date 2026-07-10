@@ -462,6 +462,7 @@ impl ProcedureGraph for BomberProcedure {
         self.nodes.len()
     }
 
+    #[inline]
     fn edge_count(&self) -> usize {
         self.edge_count
     }

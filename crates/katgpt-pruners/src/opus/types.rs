@@ -527,6 +527,7 @@ impl BanditEnv for OpusRedundantEnv {
         self.means.get(arm).copied().unwrap_or(0.0)
     }
 
+    #[inline]
     fn optimal_reward(&self) -> f32 {
         self.optimal_reward
     }
@@ -535,6 +536,7 @@ impl BanditEnv for OpusRedundantEnv {
         self.means.len()
     }
 
+    #[inline]
     fn optimal_arm(&self) -> usize {
         self.optimal_arm
     }

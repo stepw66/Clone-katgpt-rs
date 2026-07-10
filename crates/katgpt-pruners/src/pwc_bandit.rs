@@ -129,11 +129,13 @@ impl RegionBandit {
     }
 
     /// Number of arms.
+    #[inline]
     pub fn arm_count(&self) -> usize {
         self.arm_count
     }
 
     /// Number of regions.
+    #[inline]
     pub fn region_count(&self) -> usize {
         self.region_count
     }

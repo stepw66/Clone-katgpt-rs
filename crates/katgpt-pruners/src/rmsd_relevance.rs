@@ -330,11 +330,13 @@ impl TeacherContinuation {
     }
 
     /// Whether teacher was updated.
+    #[inline]
     pub fn was_updated(&self) -> bool {
         self.teacher_updated
     }
 
     /// Best metric seen.
+    #[inline]
     pub fn best_metric(&self) -> f32 {
         self.best_metric
     }

@@ -75,6 +75,7 @@ impl PathwayTracker {
     }
 
     /// Number of steps recorded.
+    #[inline]
     pub fn steps(&self) -> usize {
         self.steps
     }

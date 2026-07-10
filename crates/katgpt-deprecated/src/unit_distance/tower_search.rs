@@ -292,6 +292,7 @@ impl TowerBandit {
     }
 
     /// Best mean δ found so far.
+    #[inline]
     pub fn best_delta(&self) -> f64 {
         self.best_delta
     }

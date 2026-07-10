@@ -165,6 +165,7 @@ impl GameState for LeducState {
         }
     }
 
+    #[inline]
     fn is_terminal(&self) -> bool {
         self.is_terminal
     }
@@ -179,6 +180,7 @@ impl GameState for LeducState {
         if self.winner == player_id { 1.0 } else { 0.0 }
     }
 
+    #[inline]
     fn tick(&self) -> u32 {
         self.tick
     }

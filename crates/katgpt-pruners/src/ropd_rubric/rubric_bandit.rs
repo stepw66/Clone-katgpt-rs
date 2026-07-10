@@ -352,6 +352,7 @@ impl<P: ScreeningPruner> RubricBanditPruner<P> {
     }
 
     /// Number of criteria per rubric.
+    #[inline]
     pub fn num_criteria(&self) -> usize {
         self.num_criteria
     }

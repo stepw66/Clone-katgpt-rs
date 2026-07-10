@@ -597,11 +597,13 @@ impl CollapseDetector for S2FCollapseDetector {
     }
 
     /// Number of hesitation tokens observed in the current trace.
+    #[inline]
     fn hesitation_count(&self) -> u32 {
         self.count_hesitation()
     }
 
     /// Current collapse threshold τ.
+    #[inline]
     fn threshold(&self) -> u32 {
         self.threshold
     }

@@ -580,6 +580,7 @@ impl GameState for GoState {
         }
     }
 
+    #[inline]
     fn tick(&self) -> u32 {
         self.move_count
     }

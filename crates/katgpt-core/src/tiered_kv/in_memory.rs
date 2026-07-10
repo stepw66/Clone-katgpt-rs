@@ -101,6 +101,7 @@ impl<F: Fn(&[f32], &[usize], usize, usize) -> Vec<f32>> InMemoryTieredKvStore<F>
     }
 
     /// Number of groups per chunk.
+    #[inline]
     pub fn n_groups_per_chunk(&self) -> usize {
         self.n_groups_per_chunk
     }
@@ -131,14 +132,17 @@ impl<F: Fn(&[f32], &[usize], usize, usize) -> Vec<f32>> InMemoryTieredKvStore<F>
 }
 
 impl<F: Fn(&[f32], &[usize], usize, usize) -> Vec<f32>> TieredKvStore for InMemoryTieredKvStore<F> {
+    #[inline]
     fn head_dim(&self) -> usize {
         self.head_dim
     }
 
+    #[inline]
     fn chunk_size(&self) -> usize {
         self.chunk_size
     }
 
+    #[inline]
     fn group_size(&self) -> usize {
         self.group_size
     }

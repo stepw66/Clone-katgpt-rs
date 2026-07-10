@@ -538,6 +538,7 @@ mod tests {
             }
         }
 
+        #[inline]
         fn is_terminal(&self) -> bool {
             self.acted
         }
@@ -588,6 +589,7 @@ mod tests {
             self.cumulative
         }
 
+        #[inline]
         fn tick(&self) -> u32 {
             self.tick
         }

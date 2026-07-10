@@ -131,16 +131,19 @@ impl FeatureHasher {
     }
 
     /// Get the rank dimension.
+    #[inline]
     pub fn rank(&self) -> usize {
         self.rank
     }
 
     /// Get the input feature dimension.
+    #[inline]
     pub fn feature_dim(&self) -> usize {
         self.feature_dim
     }
 
     /// Get the seed used for initialization.
+    #[inline]
     pub fn seed(&self) -> u64 {
         self.seed
     }

@@ -221,6 +221,7 @@ impl GoSdpgPlayer {
     }
 
     /// Current exploration rate ε.
+    #[inline]
     pub fn epsilon(&self) -> f32 {
         self.epsilon
     }

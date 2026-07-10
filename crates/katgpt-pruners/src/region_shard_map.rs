@@ -104,6 +104,7 @@ impl RegionShardMap {
     }
 
     /// Number of configured shards.
+    #[inline]
     pub fn num_shards(&self) -> usize {
         self.num_shards
     }
@@ -178,6 +179,7 @@ impl RegionSharding for RegionShardMap {
         self.rebalance(transitions)
     }
 
+    #[inline]
     fn min_regions_for_shard(&self) -> usize {
         self.min_regions_for_shard()
     }

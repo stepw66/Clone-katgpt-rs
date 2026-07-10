@@ -615,6 +615,7 @@ impl ActionSpaceLog {
 
     /// Peak (maximum) action space size recorded.
     /// O(1) via running peak tracked during record().
+    #[inline]
     pub fn peak_action_space(&self) -> usize {
         self.peak
     }
@@ -1510,9 +1511,11 @@ mod tests_leo {
         fn all_goals_q(&self, _state: &[f32]) -> Vec<f32> {
             vec![0.5; self.goals * self.actions]
         }
+        #[inline]
         fn goal_count(&self) -> usize {
             self.goals
         }
+        #[inline]
         fn action_count(&self) -> usize {
             self.actions
         }

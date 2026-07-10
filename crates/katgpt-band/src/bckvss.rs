@@ -227,6 +227,7 @@ impl BandConditionerSelector {
     }
 
     /// Expose the active config (read-only).
+    #[inline]
     pub fn config(&self) -> BandConditionerSelectorConfig {
         self.cfg
     }

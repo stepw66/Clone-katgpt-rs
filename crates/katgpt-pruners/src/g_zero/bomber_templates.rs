@@ -199,6 +199,7 @@ impl BomberTemplateProposer {
     }
 
     /// Total number of template selections made.
+    #[inline]
     pub fn total_pulls(&self) -> u32 {
         self.total_pulls
     }

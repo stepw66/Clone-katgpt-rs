@@ -110,6 +110,7 @@ impl TrustTracker {
     }
 
     /// Number of recorded samples.
+    #[inline]
     pub fn sample_count(&self) -> usize {
         self.count
     }

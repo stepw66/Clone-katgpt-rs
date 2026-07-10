@@ -183,6 +183,7 @@ impl BeliefRankPruner {
     }
 
     /// Returns `true` if the pruner has observed at least one hidden state.
+    #[inline]
     pub fn is_initialized(&self) -> bool {
         self.initialized
     }

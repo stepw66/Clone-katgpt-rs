@@ -796,6 +796,7 @@ impl PeiraCovariance {
     }
 
     /// Get the number of updates.
+    #[inline]
     pub fn step_count(&self) -> usize {
         self.step_count
     }

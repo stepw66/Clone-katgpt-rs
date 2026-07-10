@@ -86,6 +86,7 @@ impl DecompositionReviewer {
     }
 
     /// Get the minimum novelty threshold.
+    #[inline]
     pub fn min_novelty(&self) -> f32 {
         self.min_novelty
     }

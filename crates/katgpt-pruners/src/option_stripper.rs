@@ -129,6 +129,7 @@ impl<S: ScreeningPruner> OptionStripper<S> {
     }
 
     /// Whether options have been stripped (for introspection).
+    #[inline]
     pub fn is_stripped(&self) -> bool {
         self.options_stripped
     }

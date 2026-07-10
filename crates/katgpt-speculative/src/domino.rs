@@ -93,6 +93,7 @@ impl PrefixCorrectionTable {
     }
 
     /// Vocab size of the correction vectors.
+    #[inline]
     pub fn vocab_size(&self) -> usize {
         self.vocab_size
     }

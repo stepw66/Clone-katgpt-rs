@@ -171,6 +171,7 @@ mod tests {
             }
         }
 
+        #[inline]
         fn is_terminal(&self) -> bool {
             self.acted
         }

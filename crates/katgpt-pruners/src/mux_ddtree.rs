@@ -49,6 +49,7 @@ impl MuxNode {
     }
 
     /// Return the dominant (highest-weight) token ID.
+    #[inline]
     pub fn dominant(&self) -> usize {
         self.dominant
     }

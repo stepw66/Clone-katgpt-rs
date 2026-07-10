@@ -319,6 +319,7 @@ impl ApproximateCaching for BfcpLshCache {
         self.lsh.insert(logits, partition);
     }
 
+    #[inline]
     fn cache_tier_rates(&self) -> (f64, f64, f64) {
         self.hit_rates()
     }

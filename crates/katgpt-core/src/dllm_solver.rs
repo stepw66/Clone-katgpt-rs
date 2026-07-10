@@ -410,6 +410,7 @@ impl SelfCondDraft {
     }
 
     /// Whether the SC buffer is ready for pass 2.
+    #[inline]
     pub fn is_ready(&self) -> bool {
         self.sc_ready
     }

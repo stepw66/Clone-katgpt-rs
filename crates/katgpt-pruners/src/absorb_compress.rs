@@ -265,6 +265,7 @@ impl<P: ScreeningPruner> AbsorbCompressLayer<P> {
     }
 
     /// Total observations absorbed so far.
+    #[inline]
     pub fn total_absorbed(&self) -> usize {
         self.total_absorbed
     }

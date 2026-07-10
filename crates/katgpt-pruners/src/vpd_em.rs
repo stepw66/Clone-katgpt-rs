@@ -481,6 +481,7 @@ impl<P: ScreeningPruner> VpdEmCycle<P> {
     }
 
     /// Number of M-steps completed.
+    #[inline]
     pub fn m_step_count(&self) -> usize {
         self.m_step_count
     }

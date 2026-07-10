@@ -407,6 +407,7 @@ mod tests {
             q
         }
 
+        #[inline]
         fn goal_count(&self) -> usize {
             self.goals
         }

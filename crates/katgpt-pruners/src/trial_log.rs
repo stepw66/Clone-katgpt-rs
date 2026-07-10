@@ -163,6 +163,7 @@ impl TrialLog {
     }
 
     /// Number of records written so far.
+    #[inline]
     pub fn count(&self) -> usize {
         self.count
     }

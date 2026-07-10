@@ -160,6 +160,7 @@ impl AneBackend {
     }
 
     /// Whether weights have been compiled to ANE.
+    #[inline]
     pub fn is_compiled(&self) -> bool {
         self.compiled
     }

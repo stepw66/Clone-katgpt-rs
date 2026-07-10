@@ -90,11 +90,13 @@ impl DreamerPipeline {
     }
 
     /// Current episode counter.
+    #[inline]
     pub fn episode(&self) -> usize {
         self.current_episode
     }
 
     /// Number of consolidations performed so far.
+    #[inline]
     pub fn consolidation_count(&self) -> usize {
         self.consolidation_count
     }

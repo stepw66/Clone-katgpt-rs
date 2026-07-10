@@ -202,6 +202,7 @@ impl FftLoRAPlayer {
     }
 
     /// Returns true if all 6 LoRA adapters loaded successfully.
+    #[inline]
     pub fn lora_active(&self) -> bool {
         self.lora_loaded
     }

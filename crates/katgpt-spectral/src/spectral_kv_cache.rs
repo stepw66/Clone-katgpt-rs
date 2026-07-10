@@ -734,6 +734,7 @@ impl SpectralQuantKVCache {
     }
 
     /// Current write position.
+    #[inline]
     pub fn pos(&self) -> usize {
         self.pos
     }
@@ -744,6 +745,7 @@ impl SpectralQuantKVCache {
     }
 
     /// KV dimension.
+    #[inline]
     pub fn kv_dim(&self) -> usize {
         self.kv_dim
     }
@@ -1052,6 +1054,7 @@ impl katgpt_core::types::QuantizedKVCache for SpectralQuantKVCache {
         self.reset();
     }
 
+    #[inline]
     fn pos(&self) -> usize {
         self.pos()
     }

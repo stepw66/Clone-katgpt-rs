@@ -220,6 +220,7 @@ impl FidelityMatcher {
     }
 
     /// Target perplexity delta.
+    #[inline]
     pub fn target_delta(&self) -> f64 {
         self.target_delta
     }

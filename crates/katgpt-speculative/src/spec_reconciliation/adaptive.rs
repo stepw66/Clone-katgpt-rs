@@ -197,6 +197,7 @@ impl AdaptiveReconciler {
     }
 
     /// Get the current epsilon (exploration rate).
+    #[inline]
     pub fn epsilon(&self) -> f32 {
         self.epsilon
     }

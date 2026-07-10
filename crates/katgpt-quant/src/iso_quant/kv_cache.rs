@@ -376,6 +376,7 @@ impl IsoQuantKVCache {
     }
 
     /// Get current position.
+    #[inline]
     pub fn pos(&self) -> usize {
         self.pos
     }
@@ -386,11 +387,13 @@ impl IsoQuantKVCache {
     }
 
     /// Get KV dimension.
+    #[inline]
     pub fn kv_dim(&self) -> usize {
         self.kv_dim
     }
 
     /// Get rotation mode.
+    #[inline]
     pub fn mode(&self) -> IsoQuantMode {
         self.mode
     }
@@ -417,6 +420,7 @@ impl types::QuantizedKVCache for IsoQuantKVCache {
         self.reset();
     }
 
+    #[inline]
     fn pos(&self) -> usize {
         self.pos()
     }

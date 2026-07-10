@@ -273,11 +273,13 @@ impl<P: ScreeningPruner> MemorySteeredPruner<P> {
     }
 
     /// Get correction mode.
+    #[inline]
     pub fn mode(&self) -> CorrectionMode {
         self.mode
     }
 
     /// Get write granularity.
+    #[inline]
     pub fn write_granularity(&self) -> WriteGranularity {
         self.write_granularity
     }

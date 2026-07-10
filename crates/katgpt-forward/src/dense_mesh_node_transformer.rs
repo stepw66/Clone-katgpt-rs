@@ -151,11 +151,13 @@ impl TransformerNode {
     }
 
     /// The token id used for forward.
+    #[inline]
     pub fn token(&self) -> usize {
         self.token
     }
 
     /// The position used for forward.
+    #[inline]
     pub fn pos(&self) -> usize {
         self.pos
     }

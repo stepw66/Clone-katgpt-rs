@@ -171,6 +171,7 @@ impl<A: Clone> ProbingMatrix<A> {
     }
 
     /// Number of parallel branches (N).
+    #[inline]
     pub fn branch_count(&self) -> usize {
         self.branch_count
     }
@@ -289,11 +290,13 @@ impl<A: Clone + Eq + Hash> ParallelProbeController<A> {
     }
 
     /// Current probe step number.
+    #[inline]
     pub fn probe_step(&self) -> usize {
         self.probe_step
     }
 
     /// Current consensus streak.
+    #[inline]
     pub fn consensus_streak(&self) -> usize {
         self.consensus_streak
     }

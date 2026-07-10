@@ -735,6 +735,7 @@ impl ShardKVCache {
     }
 
     /// Current write position.
+    #[inline]
     pub fn pos(&self) -> usize {
         self.pos
     }
@@ -745,6 +746,7 @@ impl ShardKVCache {
     }
 
     /// KV dimension.
+    #[inline]
     pub fn kv_dim(&self) -> usize {
         self.kv_dim
     }
@@ -799,6 +801,7 @@ impl katgpt_core::types::QuantizedKVCache for ShardKVCache {
     fn reset(&mut self) {
         self.reset();
     }
+    #[inline]
     fn pos(&self) -> usize {
         self.pos()
     }

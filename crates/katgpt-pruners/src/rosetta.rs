@@ -114,6 +114,7 @@ impl<P: ConstraintPruner + ?Sized> RosettaPruner<P> {
     }
 
     /// Get the number of pruners.
+    #[inline]
     pub fn pruner_count(&self) -> usize {
         self.n_pruners
     }
@@ -267,6 +268,7 @@ impl<P: ConstraintPruner + ?Sized> RosettaPruner<P> {
         self.universal_concepts.len()
     }
 
+    #[inline]
     pub fn pruner_count(&self) -> usize {
         self.n_pruners
     }

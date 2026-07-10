@@ -84,6 +84,7 @@ impl MultiLayerKVCache {
     }
 
     /// Get the tracked fill position (highest position written + 1).
+    #[inline]
     pub fn fill_pos(&self) -> usize {
         self.fill_pos
     }
