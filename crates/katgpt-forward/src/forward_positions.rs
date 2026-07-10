@@ -326,7 +326,7 @@ pub fn forward_block_causal_positions(
     tokens: &[usize],
     config: &Config,
     causal_block_size: usize,
-) -> (Vec<Vec<f32>>, Vec<Vec<f32>>) {
+) -> (Vec<f32>, Vec<f32>) {
     let n = config.n_embd;
     let hd = config.head_dim;
     let kvd = kv_dim(config);
@@ -362,9 +362,12 @@ pub fn forward_block_causal_positions(
     }
 
     // Phase B: Block-causal attention
-    // Pre-allocate output buffers upfront (avoid per-position clone)
-    let mut all_logits = vec![vec![0.0f32; config.vocab_size]; seq_len];
-    let mut all_attn_weights = vec![vec![0.0f32; config.n_head * seq_len]; seq_len];
+    // Pre-allocate output buffers upfront (flat row-major for API consistency
+    // with forward_bidirectional_positions and forward_set_causal_positions).
+    let vocab = config.vocab_size;
+    let attn_row_stride = config.n_head * seq_len;
+    let mut all_logits = vec![0.0f32; seq_len * vocab];
+    let mut all_attn_weights = vec![0.0f32; seq_len * attn_row_stride];
 
     // Pre-allocate Phase B scratch buffers (reused across positions)
     let mut q_buf = vec![0.0f32; n];
@@ -400,9 +403,11 @@ pub fn forward_block_causal_positions(
         );
 
         // Pad attn_w to seq_len for consistent output (zero-fill then slice-copy per head)
-        all_attn_weights[p].fill(0.0f32);
+        let attn_base = p * attn_row_stride;
+        all_attn_weights[attn_base..attn_base + attn_row_stride].fill(0.0f32);
         for h in 0..config.n_head {
-            all_attn_weights[p][h * seq_len..h * seq_len + t_n]
+            let dst = attn_base + h * seq_len;
+            all_attn_weights[dst..dst + t_n]
                 .copy_from_slice(&attn_w_buf[h * t_n..h * t_n + t_n]);
         }
 
@@ -415,11 +420,12 @@ pub fn forward_block_causal_positions(
         matmul(&mut x_mlp, &layer.mlp_w2, &hidden, n, config.mlp_hidden);
         simd::simd_add_inplace(&mut x_mlp[..n], &xr2_buf[..n]);
 
+        let logit_base = p * vocab;
         matmul(
-            &mut all_logits[p],
+            &mut all_logits[logit_base..logit_base + vocab],
             &weights.lm_head,
             &x_mlp,
-            config.vocab_size,
+            vocab,
             n,
         );
     }
@@ -472,34 +478,31 @@ mod tests {
         // (block-causal uses SIMD Cephes polynomial exp; set-causal uses scalar
         // f32::exp. The ~1 ULP difference accumulates through the value sum
         // and MLP, producing differences up to ~1e-4 on logit magnitudes ~10.)
-        assert_eq!(logits_bc.len(), logits_sc.len() / config.vocab_size, "logits length mismatch");
+        // Both logits_bc and logits_sc are now FLAT row-major.
         let vocab = config.vocab_size;
+        assert_eq!(logits_bc.len(), logits_sc.len(), "flat logits length mismatch");
+        assert_eq!(logits_bc.len(), tokens.len() * vocab);
         for q in 0..tokens.len() {
-            assert_eq!(
-                logits_bc[q].len(),
-                vocab,
-                "vocab length mismatch"
-            );
             for v in 0..vocab {
+                let l_bc = logits_bc[q * vocab + v];
                 let l_sc = logits_sc[q * vocab + v];
-                let diff = (logits_bc[q][v] - l_sc).abs();
-                let max_abs = logits_bc[q][v].abs().max(l_sc.abs());
+                let diff = (l_bc - l_sc).abs();
+                let max_abs = l_bc.abs().max(l_sc.abs());
                 let rel_tol = (max_abs * 1e-3).max(1e-5);
                 assert!(
                     diff < rel_tol,
-                    "Logit mismatch at q={q}, v={v}: bc={}, sc={}, diff={diff} (rel_tol={rel_tol})",
-                    logits_bc[q][v],
-                    l_sc,
+                    "Logit mismatch at q={q}, v={v}: bc={l_bc}, sc={l_sc}, diff={diff} (rel_tol={rel_tol})",
                 );
             }
         }
 
         // Attention weights must match within exp tolerance.
+        // Both attn_bc and attn_sc are FLAT: [q * (n_head*seq_len) + h*seq_len + t].
         let attn_stride = config.n_head * tokens.len();
         for q in 0..tokens.len() {
             for h in 0..config.n_head {
                 for t in 0..tokens.len() {
-                    let w_bc = attn_bc[q][h * tokens.len() + t];
+                    let w_bc = attn_bc[q * attn_stride + h * tokens.len() + t];
                     let w_sc = attn_sc[q * attn_stride + h * tokens.len() + t];
                     let diff = (w_bc - w_sc).abs();
                     assert!(

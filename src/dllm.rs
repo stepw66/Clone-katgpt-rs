@@ -2217,19 +2217,19 @@ mod tests {
         // Block-causal with block_size=4: positions 0-3 only attend to 0-3
         let (_, attn_bc) = forward_block_causal_positions(&weights, &tokens, &config, 4);
 
-        // Position 0 should only attend to positions 0-3 (first block)
-        let w0 = &attn_bc[0]; // weights for position 0
+        // FLAT layout: attn_bc[q * (n_head*seq_len) + h*seq_len + t]
+        let w0_base = 0; // position 0
         for h in 0..config.n_head {
             // Positions 4-7 should have zero weight for position 0's attention
             for t in 4..8 {
-                let w = w0[h * 8 + t];
+                let w = attn_bc[w0_base + h * 8 + t];
                 assert_eq!(
                     w, 0.0,
                     "Position 0 head {h} should not attend to position {t}: weight={w}"
                 );
             }
             // Positions 0-3 should sum to ~1.0
-            let sum: f32 = (0..4).map(|t| w0[h * 8 + t]).sum();
+            let sum: f32 = (0..4).map(|t| attn_bc[w0_base + h * 8 + t]).sum();
             assert!(
                 (sum - 1.0).abs() < 1e-4,
                 "Position 0 head {h} first block weights should sum to 1.0: {sum}"
@@ -2282,7 +2282,7 @@ mod tests {
                     .max_by(|a, b| a.1.partial_cmp(b.1).unwrap())
                     .map(|(i, _)| i)
                     .unwrap_or(0);
-                let pred_bc = logits_bc[p]
+                let pred_bc = logits_bc[p * vocab..(p + 1) * vocab]
                     .iter()
                     .enumerate()
                     .max_by(|a, b| a.1.partial_cmp(b.1).unwrap())
