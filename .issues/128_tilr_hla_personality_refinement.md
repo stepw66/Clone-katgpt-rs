@@ -4,11 +4,12 @@
 > **Date:** 2026-07-10
 > **Type:** feature (consumer integration)
 > **Severity:** MEDIUM — concrete consumer value, but no blocking trigger
-> **Status:** TWO PARALLEL T1 INVESTIGATIONS — both found valid personality-state
-> targets. Approach A (`PriorityTableBandit::prios`, CGSP curiosity table) is
-> IMPLEMENTED behind `tilr_hla_refinement` (T1–T4 COMPLETE, 9 tests pass).
-> Approach B (`CommittedBlendState::z`, committed-blend HLA) is planned in
-> Plan 438 (all tasks unchecked). See "Two valid targets" below.
+> **Status:** BOTH APPROACHES IMPLEMENTED. Approach A (`PriorityTableBandit::prios`,
+> CGSP curiosity table) COMPLETE behind `tilr_hla_refinement` (T1–T4, 9 tests).
+> Approach B (`CommittedBlendState::z`, committed-blend HLA) COMPLETE behind
+> `tilr_personality_refine` (T1–T4, 11 tests, Plan 438). Both are opt-in;
+> T5 promotion for both deferred pending real-session gain. See "Two valid
+> targets" below.
 
 ## Context
 
@@ -53,15 +54,13 @@ chosen:
 | **Freeze/thaw** | ALREADY wired via `CuriosityPrioritySnapshot.priorities` | needs NEW `z_snapshot` capture at re-commit |
 | **Module** | `cgsp_runtime/tilr_refinement.rs` | `committed_blend/tilr_bridge.rs` (planned) |
 | **Feature** | `tilr_hla_refinement` (= `cgsp_runtime` + `tilr_invariant_subspace` + `subspace_phase_gate`) | `tilr_personality_refine` (planned, = `tilr_invariant_subspace`) |
-| **Status** | T1–T4 COMPLETE, 9 tests pass | all tasks `[ ]` |
+| **Status** | T1–T4 COMPLETE, 9 tests pass | T1–T4 COMPLETE, 11 tests pass |
 
-**Approach A is further along** and needs no new infrastructure (the priority
-table already freeze/thaws via the snapshot). **Approach B targets a state with
-richer runtime semantics** (the committed blend produces the synced emotion
-scalars). The user should decide whether to (1) keep Approach A only, (2) pursue
-Approach B too as a complementary refinement on a different state, or (3)
-consolidate. They do not conflict at the code level (different modules, different
-features, different states).
+**Both approaches are implemented** and independently useful: Approach A refines
+the curiosity allocation (which axes the NPC explores), Approach B refines the
+emotional dynamics (how the HLA vector evolves). They do not conflict at the
+code level (different modules, different features, different states). T5
+promotion for both is deferred pending real-session personality-divergence gain.
 
 ## Tasks (Approach A — `tilr_hla_refinement`)
 
@@ -120,16 +119,25 @@ features, different states).
 - [x] **T1** Identify where HLA personality states are updated in riir-engine.
       ✅ `tick_committed_blend` in `committed_blend/mod.rs:406`. `dz_out` is the
       TILR direction. See Plan 438 for full findings.
-- [ ] **T2** Collect or simulate contrastive differences from freeze/thaw
+- [x] **T2** Collect or simulate contrastive differences from freeze/thaw
       snapshots. Document the calibration data source.
-      Planned in Plan 438 Phase 2 (z-snapshot at re-commit).
-- [ ] **T3** Wire `tilr_refine_into` into the update path behind a feature flag.
-      Planned in Plan 438 Phase 1+3 (`tilr_personality_refine` feature +
-      `TilrPersonalityBridge` module).
-- [ ] **T4** Benchmark: verify zero-harm on non-aligned directions, measurable
+      ✅ `contrastive_z_difference` helper + `build_difference_refs` +
+      `TilrPersonalityBridge::from_differences` (SVD calibration from z-snapshot
+      pairs). Documented in the module-level rustdoc.
+- [x] **T3** Wire `tilr_refine_into` into the update path behind a feature flag.
+      ✅ `tilr_personality_refine` feature + `TilrPersonalityBridge::refine_dz`
+      (post-tick in-place dz refinement, additive model). Module at
+      `committed_blend/tilr_bridge.rs`.
+- [x] **T4** Benchmark: verify zero-harm on non-aligned directions, measurable
       refinement on aligned directions.
-      Planned in Plan 438 Phase 3 (GOAT gate).
-- [ ] **T5** If the gain is real and modelless → promote to default-on.
+      ✅ GOAT G1–G4 PASS (11 tests): G1 no-harm bit-identity (orthogonal + zero
+      dz), G2 alignment-gated refinement (full + partial alignment), G3
+      construction (from_differences round-trip + from_basis orthonormality
+      validation + error rejection), G4 perf smoke (<1µs/call at d=8).
+      50/50 committed_blend tests pass (11 new + 39 pre-existing), 0 regressions.
+- [-] **T5** If the gain is real and modelless → promote to default-on.
+      DEFERRED: G1–G4 pass and the refinement is pure modelless. Promotion
+      requires real-session personality-divergence gain validation.
 
 ## Cross-references
 
