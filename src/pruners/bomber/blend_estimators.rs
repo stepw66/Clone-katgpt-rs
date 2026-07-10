@@ -243,6 +243,67 @@ impl KernelBlendEstimator {
     }
 }
 
+// ── Kernel state sharing (Story 3, Plan 437) ─────────────────────────
+
+/// Plain-old-data snapshot of a `KernelBlendEstimator`'s learned state.
+///
+/// Used to share learned experience between NPCs (Story 3 Cohort C receives
+/// Cohort B's induced strategy). The snapshot is a byte-for-byte copy of the
+/// ring buffer — no pointers, no heap, no allocation.
+///
+/// Size: ~5 KB (128 entries × 40 bytes). Fits a single vessel payload.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct KernelState {
+    /// Ring buffer of observed contexts.
+    pub contexts: [[f32; CONTEXT_DIM]; KERNEL_BUF],
+    /// Which arm was taken for each observation.
+    pub arms: [usize; KERNEL_BUF],
+    /// Observed reward for each entry.
+    pub rewards: [f32; KERNEL_BUF],
+    /// Number of valid entries (≤ KERNEL_BUF).
+    pub count: usize,
+    /// Next write position (ring buffer pointer).
+    pub next: usize,
+}
+
+impl KernelBlendEstimator {
+    /// Export the learned ring-buffer state for sharing between NPCs.
+    ///
+    /// Returns a plain-old-data snapshot. The receiver gets the full learning
+    /// history (up to 128 entries). This is the "induced strategy" that
+    /// Proposal 005's Cohort C receives from Cohort B.
+    ///
+    /// Zero allocation — `KernelState` is stack-only by virtue of fixed-size
+    /// arrays.
+    #[inline]
+    pub fn export_state(&self) -> KernelState {
+        KernelState {
+            contexts: self.contexts,
+            arms: self.arms,
+            rewards: self.rewards,
+            count: self.count,
+            next: self.next,
+        }
+    }
+
+    /// Import a shared ring-buffer state, replacing the current estimator's
+    /// learned state entirely.
+    ///
+    /// This is the "thaw" operation for Cohort C — it receives Cohort B's
+    /// accumulated experience without playing those rounds itself.
+    ///
+    /// `sigma_sq` is preserved from the receiver (not copied from the sender) —
+    /// the bandwidth is an estimator config, not learned state.
+    #[inline]
+    pub fn import_state(&mut self, state: &KernelState) {
+        self.contexts = state.contexts;
+        self.arms = state.arms;
+        self.rewards = state.rewards;
+        self.count = state.count;
+        self.next = state.next;
+    }
+}
+
 // ── Unit tests ───────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -341,5 +402,44 @@ mod tests {
             est.update(&phi, 0, 1.0);
         }
         assert_eq!(est.count, KERNEL_BUF);
+    }
+
+    #[test]
+    fn kernel_export_import_round_trip() {
+        // Story 3 (Plan 437): export/import must produce identical predictions.
+        let mut est = KernelBlendEstimator::default();
+        est.update(&phi_safe(), 0, 1.0);
+        est.update(&phi_danger(), 0, 0.0);
+        est.update(&phi_safe(), 1, 0.7);
+        est.update(&phi_danger(), 2, 0.3);
+
+        let phi_test = [0.0, 0.15, 0.25, 0.3, 0.4, 0.5, 1.0];
+        let q_before = est.predict_all(&phi_test);
+
+        // Export → import into a fresh estimator.
+        let state = est.export_state();
+        let mut est2 = KernelBlendEstimator::default();
+        est2.import_state(&state);
+
+        let q_after = est2.predict_all(&phi_test);
+
+        // Predictions must be identical.
+        for i in 0..ACTION_COUNT {
+            assert_eq!(q_before[i], q_after[i], "arm {i}: prediction changed after round-trip");
+        }
+    }
+
+    #[test]
+    fn kernel_export_state_reflects_learning() {
+        // A fresh estimator exports an empty state; after updates it exports a populated one.
+        let mut est = KernelBlendEstimator::default();
+        let empty = est.export_state();
+        assert_eq!(empty.count, 0);
+
+        est.update(&phi_safe(), 0, 1.0);
+        let populated = est.export_state();
+        assert_eq!(populated.count, 1);
+        assert_eq!(populated.arms[0], 0);
+        assert_eq!(populated.rewards[0], 1.0);
     }
 }

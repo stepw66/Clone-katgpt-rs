@@ -97,7 +97,7 @@ pub use contextual_bandit::{ContextualBandit, DEFAULT_LEARNING_RATE};
 pub use blend_estimators::BinnedBlendEstimator;
 
 #[cfg(feature = "kernel_blend")]
-pub use blend_estimators::KernelBlendEstimator;
+pub use blend_estimators::{KernelBlendEstimator, KernelState};
 
 #[cfg(feature = "bomber-agent")]
 pub use validator_agent::{

@@ -1742,6 +1742,27 @@ impl HLPlayer {
     fn check_safety(&self, action: &BomberAction, grid: &ArenaGrid, pos: GridPos) -> bool {
         is_safe_action(action, grid, pos, &self.known_bombs)
     }
+
+    /// Export the kernel estimator's learned state for sharing between NPCs.
+    ///
+    /// Story 3 (Plan 437): Cohort B exports its kernel state after the learning
+    /// phase. Cohort C imports it to inherit B's accumulated experience
+    /// without playing those rounds itself (sharing substitutes for learning).
+    ///
+    /// Returns `None` if `kernel_blend` is not active.
+    #[cfg(feature = "kernel_blend")]
+    pub fn export_kernel_state(&self) -> Option<super::blend_estimators::KernelState> {
+        Some(self.kernel_blend.export_state())
+    }
+
+    /// Import a shared kernel state, replacing this player's learned state.
+    ///
+    /// Story 3 (Plan 437): Cohort C calls this after receiving Cohort B's
+    /// exported state. The receiver immediately benefits from B's experience.
+    #[cfg(feature = "kernel_blend")]
+    pub fn import_kernel_state(&mut self, state: &super::blend_estimators::KernelState) {
+        self.kernel_blend.import_state(state);
+    }
 }
 
 impl BomberPlayer for HLPlayer {
