@@ -1,8 +1,14 @@
 # release-plz configuration for katgpt-rs
 #
-# Only `katgpt-core` is released (published to crates.io). The root `katgpt-rs`
+# The katgpt-core crate family is published to crates.io. The root `katgpt-rs`
 # crate is a dev/examples/aggregator playground — it is never published, so its
 # version number carries no meaning for any downstream consumer.
+#
+# Publish order (resolved automatically by release-plz from the dependency DAG):
+#   1. katgpt-types, katgpt-dec  (leaf crates — no katgpt-* deps)
+#   2. katgpt-hla, katgpt-micro-belief, katgpt-personality,
+#      katgpt-sleep, katgpt-sense  (depend on katgpt-types)
+#   3. katgpt-core  (depends on all of the above)
 #
 # See README.md §"Releasing & Deploying" for the full dev→deploy workflow.
 
@@ -11,14 +17,47 @@ name = "katgpt-rs"
 release = false  # never version-bump, never tag, never changelog
 publish = false  # match Cargo.toml's publish = false (release-plz validates consistency)
 
+# ── Leaf crates (no katgpt-* dependencies) ────────────────────────────
+
+[[package]]
+name = "katgpt-types"
+git_tag_name = "katgpt-types-v{{version}}"
+
+[[package]]
+name = "katgpt-dec"
+git_tag_name = "katgpt-dec-v{{version}}"
+
+# ── Mid-layer crates (depend on katgpt-types) ─────────────────────────
+
+[[package]]
+name = "katgpt-hla"
+git_tag_name = "katgpt-hla-v{{version}}"
+
+[[package]]
+name = "katgpt-micro-belief"
+git_tag_name = "katgpt-micro-belief-v{{version}}"
+
+[[package]]
+name = "katgpt-personality"
+git_tag_name = "katgpt-personality-v{{version}}"
+
+[[package]]
+name = "katgpt-sleep"
+git_tag_name = "katgpt-sleep-v{{version}}"
+
+[[package]]
+name = "katgpt-sense"
+git_tag_name = "katgpt-sense-v{{version}}"
+
+# ── Top-level crate (depends on all above) ────────────────────────────
+
 [[package]]
 name = "katgpt-core"
 # Use package-prefixed tags to avoid collision with legacy root-crate tags
 # (v0.1.0 "Community engine freeze", v0.2.0 "Release v0.2.0") that predate
 # release-plz. Without this override, release-plz defaults to `v{{version}}`
-# (because only one package is public), finds the legacy `v0.2.0` tag, assumes
-# katgpt-core@0.2.0 was released, then bails with:
+# (because only one package was public initially), finds the legacy `v0.2.0`
+# tag, assumes katgpt-core@0.2.0 was released, then bails with:
 #   "package katgpt-core not found in the registry, but the git tag v0.2.0 exists"
-# With this prefix, release-plz looks for `katgpt-core-v{{version}}` instead,
-# which doesn't exist yet — so katgpt-core is treated as a fresh publish.
+# With this prefix, release-plz looks for `katgpt-core-v{{version}}` instead.
 git_tag_name = "katgpt-core-v{{version}}"

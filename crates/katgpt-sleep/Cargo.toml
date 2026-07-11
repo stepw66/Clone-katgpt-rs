@@ -7,7 +7,7 @@ description = "Sleep-Time Query Anticipator — offline query anticipation subst
 repository = "https://github.com/katopz/katgpt-rs"
 keywords = ["sleep-time", "anticipation", "latent", "inference", "modelless"]
 categories = ["algorithms", "science"]
-publish = false  # only katgpt-core ships to crates.io
+# Published to crates.io (katgpt-core dependency)
 
 [dependencies]
 # katgpt-sleep is a pure substrate leaf — the only katgpt-* dependency is the
@@ -15,7 +15,7 @@ publish = false  # only katgpt-core ships to crates.io
 # hot paths use `simd_dot_f32` + `fast_sigmoid` from katgpt-types; the c'
 # artifact uses `blake3` for the commitment root. No katgpt-core dependency
 # — the whole crate compiles standalone.
-katgpt-types = { path = "../katgpt-types" }
+katgpt-types = { path = "../katgpt-types", version = "0.1.0" }
 blake3 = "1"
 
 [features]

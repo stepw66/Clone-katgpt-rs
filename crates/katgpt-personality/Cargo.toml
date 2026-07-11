@@ -7,7 +7,7 @@ description = "Personality-Weighted Latent Layer Composition — sigmoid-gated N
 repository = "https://github.com/katopz/katgpt-rs"
 keywords = ["personality", "latent", "composition", "moe", "modelless"]
 categories = ["algorithms", "science"]
-publish = false  # only katgpt-core ships to crates.io
+# Published to crates.io (katgpt-core dependency)
 
 [dependencies]
 # katgpt-personality is a pure substrate leaf — the only katgpt-* dependency is
@@ -16,7 +16,7 @@ publish = false  # only katgpt-core ships to crates.io
 # scale-accumulate inner loop; the snapshot uses `blake3` directly for the
 # commitment hash. No katgpt-core dependency — the whole crate compiles
 # standalone.
-katgpt-types = { path = "../katgpt-types" }
+katgpt-types = { path = "../katgpt-types", version = "0.1.0" }
 blake3 = "1"
 serde = { version = "1", features = ["derive"] }
 

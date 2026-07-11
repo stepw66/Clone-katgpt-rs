@@ -2719,9 +2719,11 @@ Unlike `PersonalityWeightedComposition`, which *drifts* continuously under a rew
 
 ## 🚢 Releasing & Deploying
 
-Only **`katgpt-core`** ships to crates.io. The root `katgpt-rs` crate is a
-dev/examples aggregator (`publish = false`) — its version number is never
-bumped, tagged, or consumed by anyone.
+Only the **`katgpt-core` crate family** ships to crates.io: `katgpt-types`,
+`katgpt-dec`, `katgpt-hla`, `katgpt-micro-belief`, `katgpt-personality`,
+`katgpt-sleep`, `katgpt-sense`, and `katgpt-core` itself. The root `katgpt-rs`
+crate is a dev/examples aggregator (`publish = false`) — its version number
+is never bumped, tagged, or consumed by anyone.
 
 ### 🧠 MANCE — Manifold-Aware Concept Erasure (Plan 426, arXiv:2607.03973)
 
@@ -2819,8 +2821,19 @@ Fallback — manually trigger just the CI publish job (from `main`):
    → Actions). Generate a crates.io token with `publish-new` + `publish-update`
    scopes.
 3. **First publish is manual** (crates.io limitation — CI can't publish a
-   brand-new crate name the first time):
+   brand-new crate name the first time). Publish in dependency order so
+   crates.io can resolve the path-dep versions:
    ```sh
+   # Leaf crates first (no katgpt-* deps)
+   cargo publish -p katgpt-types
+   cargo publish -p katgpt-dec
+   # Mid-layer crates (depend on katgpt-types)
+   cargo publish -p katgpt-hla
+   cargo publish -p katgpt-micro-belief
+   cargo publish -p katgpt-personality
+   cargo publish -p katgpt-sleep
+   cargo publish -p katgpt-sense
+   # Top-level crate last
    cargo publish -p katgpt-core
    ```
    After this, release-plz takes over for all subsequent versions.

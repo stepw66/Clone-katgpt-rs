@@ -7,7 +7,7 @@ description = "Higher-order Linear Attention (HLA) substrate — O(1) inference 
 repository = "https://github.com/katopz/katgpt-rs"
 keywords = ["attention", "linear-attention", "hla", "inference", "modelless"]
 categories = ["algorithms", "science"]
-publish = false  # only katgpt-core ships to crates.io
+# Published to crates.io (katgpt-core dependency)
 
 [dependencies]
 # katgpt-hla is a pure substrate leaf — the only katgpt-* dependency is the
@@ -21,7 +21,7 @@ publish = false  # only katgpt-core ships to crates.io
 # needs katgpt-forward (→ katgpt-core), which would create a cycle
 # (katgpt-core → katgpt-hla → katgpt-forward → katgpt-core). The composition
 # layer lives in katgpt-forward instead (Issue 007 Phase F.4b, 2026-07-02).
-katgpt-types = { path = "../katgpt-types" }
+katgpt-types = { path = "../katgpt-types", version = "0.1.0" }
 
 [features]
 # katgpt-hla compiles its entire substrate (types + kernel) unconditionally.
