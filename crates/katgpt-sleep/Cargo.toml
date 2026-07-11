@@ -8,6 +8,7 @@ repository = "https://github.com/katopz/katgpt-rs"
 keywords = ["sleep-time", "anticipation", "latent", "inference", "modelless"]
 categories = ["algorithms", "science"]
 # Published to crates.io (katgpt-core dependency)
+readme = "README.md"
 
 [dependencies]
 # katgpt-sleep is a pure substrate leaf — the only katgpt-* dependency is the

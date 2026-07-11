@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2024"
 license = "MIT"
 description = "KG Latent Octree Sense substrate — octree construction, reconstruction, BAKE precision-gated update, LOD routing, serialization. Spun out of katgpt-core::sense (Issue 007 Phase E Tier 2 #7). Depends only on katgpt-types (the leaf)."
+readme = "README.md"
 repository = "https://github.com/katopz/katgpt-rs"
 keywords = ["inference", "octree", "sense", "lod", "modelless"]
 categories = ["data-structures", "science", "algorithms"]
