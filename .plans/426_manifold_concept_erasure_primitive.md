@@ -5,7 +5,7 @@
 **Source paper:** [arXiv:2607.03973](https://arxiv.org/abs/2607.03973) — Avitan, Goldberg, Elazar, *MANCE: Manifold Aware Concept Erasure*, Jul 2026
 **Code:** [github.com/MatanAvitan/mance](https://github.com/MatanAvitan/mance)
 **Target:** `katgpt-rs/crates/katgpt-core/src/manifold_erasure.rs` (new module) + Cargo feature `manifold_erasure`
-**Status:** Active — Phase 0 (this plan)
+**Status:** ✅ COMPLETE — Phases 1–4 all done, GOAT gate G1–G6 ALL PASS, `manifold_erasure` promoted to default-on. SVD caching optimization in Plan 427 (Issue 132, CLOSED).
 
 ---
 

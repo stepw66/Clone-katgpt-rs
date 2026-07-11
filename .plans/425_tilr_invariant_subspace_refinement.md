@@ -4,7 +4,7 @@
 **Research:** [408_Trajectory_Invariant_Latent_Refinement.md](../.research/408_Trajectory_Invariant_Latent_Refinement.md)
 **Source paper:** [arXiv:2606.29164](https://arxiv.org/abs/2606.29164) — Malarkkan et al., *TILR: Trajectory-Invariant Latent Refinement*, ICML 2026 Mech Interp Workshop
 **Target:** `katgpt-rs/crates/katgpt-core/src/tilr.rs` (new module) + Cargo feature `tilr_invariant_subspace`
-**Status:** Active — Phase 1 + Phase 2 + Phase 3 COMPLETE, all GOAT gates PASS (2026-07-10). Phase 4 (docs/example) in progress.
+**Status:** ✅ COMPLETE — Phase 1 + Phase 2 + Phase 3 + Phase 4 ALL DONE, all GOAT gates PASS (2026-07-10). `tilr_invariant_subspace` promoted to DEFAULT-ON.
 
 **Constraints:**
 - Modelless only — SVD + projection + alignment gate. No training, no gradient descent, no softmax.
