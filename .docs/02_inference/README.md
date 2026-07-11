@@ -28,5 +28,5 @@
 
 ## See also
 
-- [`../orientation/architecture.md`](../orientation/architecture.md) — where each inference primitive plugs into the core pipeline
-- [`../feature_catalog/opt_in_features.md`](../feature_catalog/opt_in_features.md) — the opt-in feature-flag reference
+- [`../01_orientation/architecture.md`](../01_orientation/architecture.md) — where each inference primitive plugs into the core pipeline
+- [`../09_feature_catalog/opt_in_features.md`](../09_feature_catalog/opt_in_features.md) — the opt-in feature-flag reference

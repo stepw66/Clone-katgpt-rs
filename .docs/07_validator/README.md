@@ -13,4 +13,4 @@
 
 ## See also
 
-- [`../game_arenas/sudoku.md`](../game_arenas/sudoku.md) — the arena that drives the Sudoku constraint path
+- [`../06_game_arenas/sudoku.md`](../06_game_arenas/sudoku.md) — the arena that drives the Sudoku constraint path

@@ -1259,7 +1259,7 @@ Wake-time (online, per query, zero-alloc hot path):
 
 **Consumer pattern (riir-ai Plan 341):** the per-NPC runtime supplies (a) a direction-vector catalog (per-NPC-type: shopkeeper zone, quest-giver zone, lore NPC), (b) a concrete `SleepTimeComputeOp` impl (`latent_functor` extraction or `karc_forecast`), and (c) optionally a curiosity-inversion scorer. The open primitive here supplies only the orchestration + types + cost model — no game IP, no chain IP, no shard IP.
 
-**Feature gate:** `sleep_time_anticipation` (opt-in — quality gates G2/G3/G4 require a real predictability-labeled corpus, deferred to riir-ai Plan 341). Examples: [`sleep_time_01_basic.rs`](../../crates/katgpt-core/examples/sleep_time_01_basic.rs) + [`sleep_time_02_curiosity_inversion.rs`](../../crates/katgpt-core/examples/sleep_time_02_curiosity_inversion.rs). See `.docs/memory/sleep_consolidation.md` for the relationship to Plan 154 (state-internalization vs artifact-emission).
+**Feature gate:** `sleep_time_anticipation` (opt-in — quality gates G2/G3/G4 require a real predictability-labeled corpus, deferred to riir-ai Plan 341). Examples: [`sleep_time_01_basic.rs`](../../crates/katgpt-core/examples/sleep_time_01_basic.rs) + [`sleep_time_02_curiosity_inversion.rs`](../../crates/katgpt-core/examples/sleep_time_02_curiosity_inversion.rs). See `.docs/03_memory/sleep_consolidation.md` for the relationship to Plan 154 (state-internalization vs artifact-emission).
 
 ## Spectral Hierarchy (`crates/katgpt-core/src/spectral_hierarchy.rs`, Plan 156, Research 121)
 
@@ -1999,7 +1999,7 @@ Feature gate: `rat_plus_bridge` (opt-in).
 Per-entity implicit state-tracking kernel — small frozen recurrent kernels implementing
 `s_t = f(s_{t-1}, x_t)` over a fixed-size latent belief vector, applied once per
 (entity, tick). The belief vector is latent/local (never synced); a bridge projects it to
-bounded raw scalars that cross the sync boundary. Full reference: `.docs/memory/micro_belief.md`.
+bounded raw scalars that cross the sync boundary. Full reference: `.docs/03_memory/micro_belief.md`.
 
 ```rust
 pub trait MicroRecurrentBeliefState: Send + Sync {

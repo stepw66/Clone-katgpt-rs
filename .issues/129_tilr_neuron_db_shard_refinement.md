@@ -64,5 +64,5 @@ shard-scale latency at 123.0 ns (d=64, r=12), well under the 200 ns target.
 
 - `katgpt-rs/.plans/425_tilr_invariant_subspace_refinement.md` — COMPLETE, DEFAULT-ON
 - `katgpt-rs/.research/408_*.md` — TILR research note (GOAT verdict)
-- `katgpt-rs/.docs/adaptation/tilr_subspace_family.md` — family overview
+- `katgpt-rs/.docs/05_adaptation/tilr_subspace_family.md` — family overview
 - `riir-neuron-db/AGENTS.md` — `can_freeze` gate audit lesson (Plan 002 Phase 5)

@@ -282,7 +282,7 @@ Plan 301's `thin_svd_into` directly.
       subspace doc group exists) or a standalone note cross-referencing Plan 412
       (subspace_steering), Plan 423 (spectral_rewire), Plan 152 (river_valley).
       Frame TILR as the "alignment-gated" member of the subspace-projection family.
-      ✅ DONE (2026-07-10): `.docs/adaptation/tilr_subspace_family.md` — family
+      ✅ DONE (2026-07-10): `.docs/05_adaptation/tilr_subspace_family.md` — family
       table, when-to-use guide, pipeline diagram, no-harm contract, reuse map.
 - [x] **T4.2** Add an example at `katgpt-rs/examples/tilr_demo.rs`: synthetic
       contrastive pair → SVD → γ-gated correction → show (a) no-harm when γ=0,

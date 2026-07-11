@@ -36,4 +36,4 @@
 
 ## See also
 
-- [`../validator/constraint_validator.md`](../validator/constraint_validator.md) — the constraint validation the Sudoku arena exercises
+- [`../07_validator/constraint_validator.md`](../07_validator/constraint_validator.md) — the constraint validation the Sudoku arena exercises

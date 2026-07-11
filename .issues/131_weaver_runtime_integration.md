@@ -24,6 +24,22 @@ correction to DFlash draft logits at decode time. **Blocked until trained
 weights exist** — no code work can start until the 300k completion training
 run produces a `weaver_v1.safetensors` checkpoint with non-trivial gain.
 
+### Why katgpt-rs (not riir-ai)
+
+Per Research 402 §4: katgpt-rs ships the **top-K constrained projection +
+residual-add** as an inference-only adapter (no training). riir-ai wires it
+into its speculative decode pipeline (`forward_qwen_deltanet` path) — that
+is a riir-ai runtime task, separate from this issue.
+
+### The vocabulary-projection efficiency trick
+
+Weaver **never projects to the full vocabulary**. It reads only K=512 rows
+of the vocabulary projection matrix (selected as the DFlash top-K tokens),
+adds its residual logits to the DFlash output logits, and normalizes over
+the candidate set. This avoids the memory-bandwidth bottleneck of a
+standard autoregressive drafter while restoring the conditional coupling
+that independently-predicted marginals destroy.
+
 ## Blocker chain (why this is blocked)
 
 ```
@@ -104,6 +120,28 @@ post-draft logit corrector, between `dflash_predict_with` producing
 **Recommendation:** option 1 (marginal corrector) for the initial integration —
 it's non-invasive and the marginal is what the verifier ultimately consumes.
 
+### Proposed task breakdown (when unblocked)
+
+- **T1: Checkpoint loader** — load `weaver_v1.safetensors` into a runtime
+  `WeaverWeights` struct. The format is defined in
+  `riir-train-engine/src/weaver_train.rs` (`weights_to_safetensors_bytes`).
+  katgpt-rs needs a read-only mirror (duplicate the struct for now — small,
+  ~12 fields; extract to a shared crate later if more consumers appear).
+- **T2: Top-K constrained forward pass** — (1) gather K rows from the vocab
+  embedding using the DFlash top-K token ids; (2) run the single-layer Weaver
+  transformer (conditioning → causal attention → SwiGLU MLP → top-K gather
+  projection); (3) add the Weaver residual logits to the DFlash output logits;
+  (4) renormalize over K candidates (sigmoid, not softmax — per global rule).
+  Mirrors `riir-train-engine/src/weaver.rs::weaver_forward` but inference-only
+  (no backward, no autograd cache).
+- **T3: SpeculativeGenerator adapter** — wrap T1+T2 as a
+  `SpeculativeGenerator` adapter that receives DFlash/DDTree top-K marginals,
+  applies the Weaver correction, and returns corrected logits to the
+  tree-builder / verifier.
+- **T4: Feature gate** — ship behind `weaver_runtime` (opt-in). The adapter
+  loads weights lazily — if no checkpoint is found, it falls back to the
+  uncorrected drafter (zero overhead).
+
 ### Weight loading (freeze/thaw)
 
 Trained weights ship as `weaver_v1.safetensors` with a BLAKE3 manifest
@@ -161,6 +199,16 @@ This is a legitimate riir-train dependency. The modelless mandate
 (AGENTS.md §3.5) does not apply — the modelless path was never the question
 for Weaver (unlike Research 400 / Issue 428, where the modelless path was
 prematurely declared exhausted).
+
+## Non-goals
+
+- **Training** — stays in riir-train. katgpt-rs is inference-only.
+- **GPU fused kernel** — CPU-first for correctness. riir-gpu task if
+  throughput requires it. The top-K projection is `O(K·d)` = 62.5× smaller
+  than a full-vocab projection (K=512 vs 32k vocab), so bandwidth is not
+  the bottleneck — the G3 no-regression gate should hold by construction.
+- **Traversal verification** (paper ref [10]) — separate algorithm, not
+  Weaver.
 
 ## Cross-references
 

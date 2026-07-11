@@ -11,5 +11,5 @@
 
 ## See also
 
-- [`../feature_catalog/opt_in_features.md`](../feature_catalog/opt_in_features.md) — which perf-gated features ship opt-in
+- [`../09_feature_catalog/opt_in_features.md`](../09_feature_catalog/opt_in_features.md) — which perf-gated features ship opt-in
 - [`../../.benchmarks/`](../../) — the GOAT gate benchmark results themselves

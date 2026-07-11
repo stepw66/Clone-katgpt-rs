@@ -119,8 +119,8 @@ far below O(N)).
 
 ## Related
 
-- [`.docs/memory/raven_rsm.md`](raven_rsm.md) — the O(1) routing retriever (different complexity class)
-- [`.docs/memory/engram.md`](engram.md) — the O(1) hash retriever (different complexity class)
+- [`.docs/03_memory/raven_rsm.md`](raven_rsm.md) — the O(1) routing retriever (different complexity class)
+- [`.docs/03_memory/engram.md`](engram.md) — the O(1) hash retriever (different complexity class)
 - Plan: [`.plans/408_Product_Key_Memory_Primitive.md`](../../.plans/408_Product_Key_Memory_Primitive.md)
 - Research: [`.research/387_Fast_Weight_Product_Key_Memory_PKM.md`](../../.research/387_Fast_Weight_Product_Key_Memory_PKM.md)
 - Source paper: [arXiv:2601.00671](https://arxiv.org/abs/2601.00671) — Zhao & Jones, "Fast-weight Product Key Memory", Sakana AI, Feb 2026

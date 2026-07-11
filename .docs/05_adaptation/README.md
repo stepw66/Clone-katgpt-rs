@@ -15,5 +15,5 @@
 
 ## See also
 
-- [`../inference/kv_compression.md`](../inference/kv_compression.md) — the KV-compression research that the spectral-quant technique builds on
-- [`../feature_catalog/opt_in_features.md`](../feature_catalog/opt_in_features.md) — feature gates for the opt-in adaptation techniques
+- [`../02_inference/kv_compression.md`](../02_inference/kv_compression.md) — the KV-compression research that the spectral-quant technique builds on
+- [`../09_feature_catalog/opt_in_features.md`](../09_feature_catalog/opt_in_features.md) — feature gates for the opt-in adaptation techniques

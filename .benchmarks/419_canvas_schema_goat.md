@@ -124,7 +124,7 @@ Cleanup after measurement: `rm -rf /tmp/canvas419`.
 - **Plan 419:** [`katgpt-rs/.plans/419_canvas_schema_compiler.md`](../.plans/419_canvas_schema_compiler.md)
 - **Research 398:** [`katgpt-rs/.research/398_Canvas_Engineering_Declared_Causal_Topology_Compiler.md`](../.research/398_Canvas_Engineering_Declared_Causal_Topology_Compiler.md)
 - **Issue 043 (fusion PoC, behavioral gain):** `.issues/043` (resolved-and-removed 2026-07-09, inconclusive; see Research 398 §7–8)
-- **Feature catalog entry:** [`katgpt-rs/.docs/feature_catalog/opt_in_features.md`](../.docs/feature_catalog/opt_in_features.md) §12
+- **Feature catalog entry:** [`katgpt-rs/.docs/09_feature_catalog/opt_in_features.md`](../.docs/09_feature_catalog/opt_in_features.md) §12
 
 ---
 

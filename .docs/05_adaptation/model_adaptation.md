@@ -523,7 +523,7 @@ pub fn forward_quantized<C: types::QuantizedKVCache>(ctx, weights, cache: &mut C
 | MaxSim error | **18.90%** | 40.54% |
 | Feature flag | `spectral_quant` (default) | `turboquant` (legacy) |
 
-📖 See [`.docs/adaptation/lucebox_techniques.md`](lucebox_techniques.md) for TurboQuant→SpectralQuant migration.
+📖 See [`.docs/05_adaptation/lucebox_techniques.md`](lucebox_techniques.md) for TurboQuant→SpectralQuant migration.
 
 ## Technique 7: ELF SDE Noise Injection
 

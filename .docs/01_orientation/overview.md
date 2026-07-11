@@ -792,19 +792,19 @@ for the full index with fusion maps. Quick map:
 
 | Group | Docs | Topic |
 |---|---|---|
-| [`orientation/`](../orientation/) | `overview.md` | Overview & reference card (this file) |
-| [`orientation/`](../orientation/) | `architecture.md` | Architecture details (forward pass, routers, LoRA) |
-| [`orientation/`](../orientation/) | `paper_feature_comparison.md` | Paper feature comparison |
-| [`inference/`](../inference/) | `speculative_decoding.md` | Speculative decoding deep-dive |
-| [`inference/`](../inference/) | `spechop.md` | SpecHop architecture |
-| [`inference/`](../inference/) | `kv_compression.md` | KV compression alternatives |
-| [`inference/`](../inference/) | `mtp_threshold.md` | MTP threshold guide (Plan 055) |
-| [`inference/`](../inference/) | `progressive_mcgs.md` | Progressive MCGS graph search |
-| [`memory/`](../memory/) | `raven_rsm.md` · `product_key_memory.md` · `engram.md` · `micro_belief.md` · `sense_composition.md` · `sleep_consolidation.md` | Memory primitives |
-| [`calibration/`](../calibration/) | `cce_moderator.md` · `causal_head_importance.md` · `faithfulness_probe.md` · `salience_tri_gate.md` · `universality_class_escape.md` | Calibration, probes, gates |
-| [`adaptation/`](../adaptation/) | `model_adaptation.md` · `lucebox_techniques.md` · `peira_distillation.md` | Model adaptation & distillation |
-| [`game_arenas/`](../game_arenas/) | `sudoku.md` · `heuristic_learning.md` · `bomber_arena.md` · `monopoly_fsm.md` · `fft_arena.md` · `go_arena.md` · `hl_arena_detail.md` · `open_ended_evolution.md` · `bomber_lora_ab.md` | HL game arenas |
-| [`validator/`](../validator/) | `constraint_validator.md` · `percepta.md` | Constraint validator + SynPruner, transformer-VM |
-| [`performance/`](../performance/) | `engineering.md` | Performance engineering & benchmarks |
-| [`feature_catalog/`](../feature_catalog/) | `opt_in_features.md` · `negative_results.md` | Opt-in features, negative results |
-| [`audits/`](../audits/) | `loser_sweep_audit.md` · `claim_rubric_audit.md` · `cross_repo_consolidation_audit.md` | One-off audits |
+| [`orientation/`](../01_orientation/) | `overview.md` | Overview & reference card (this file) |
+| [`orientation/`](../01_orientation/) | `architecture.md` | Architecture details (forward pass, routers, LoRA) |
+| [`orientation/`](../01_orientation/) | `paper_feature_comparison.md` | Paper feature comparison |
+| [`inference/`](../02_inference/) | `speculative_decoding.md` | Speculative decoding deep-dive |
+| [`inference/`](../02_inference/) | `spechop.md` | SpecHop architecture |
+| [`inference/`](../02_inference/) | `kv_compression.md` | KV compression alternatives |
+| [`inference/`](../02_inference/) | `mtp_threshold.md` | MTP threshold guide (Plan 055) |
+| [`inference/`](../02_inference/) | `progressive_mcgs.md` | Progressive MCGS graph search |
+| [`memory/`](../03_memory/) | `raven_rsm.md` · `product_key_memory.md` · `engram.md` · `micro_belief.md` · `sense_composition.md` · `sleep_consolidation.md` | Memory primitives |
+| [`calibration/`](../04_calibration/) | `cce_moderator.md` · `causal_head_importance.md` · `faithfulness_probe.md` · `salience_tri_gate.md` · `universality_class_escape.md` | Calibration, probes, gates |
+| [`adaptation/`](../05_adaptation/) | `model_adaptation.md` · `lucebox_techniques.md` · `peira_distillation.md` | Model adaptation & distillation |
+| [`game_arenas/`](../06_game_arenas/) | `sudoku.md` · `heuristic_learning.md` · `bomber_arena.md` · `monopoly_fsm.md` · `fft_arena.md` · `go_arena.md` · `hl_arena_detail.md` · `open_ended_evolution.md` · `bomber_lora_ab.md` | HL game arenas |
+| [`validator/`](../07_validator/) | `constraint_validator.md` · `percepta.md` | Constraint validator + SynPruner, transformer-VM |
+| [`performance/`](../08_performance/) | `engineering.md` | Performance engineering & benchmarks |
+| [`feature_catalog/`](../09_feature_catalog/) | `opt_in_features.md` · `negative_results.md` | Opt-in features, negative results |
+| [`audits/`](../10_audits/) | `loser_sweep_audit.md` · `claim_rubric_audit.md` · `cross_repo_consolidation_audit.md` | One-off audits |

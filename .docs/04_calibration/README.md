@@ -30,5 +30,5 @@
 
 ## See also
 
-- [`../memory/engram.md`](../memory/engram.md) — the memory primitive that `faithfulness_probe.md` diagnoses
-- [`../audits/claim_rubric_audit.md`](../audits/claim_rubric_audit.md) — audit tying calibration claims to `Claim` fixtures
+- [`../03_memory/engram.md`](../03_memory/engram.md) — the memory primitive that `faithfulness_probe.md` diagnoses
+- [`../10_audits/claim_rubric_audit.md`](../10_audits/claim_rubric_audit.md) — audit tying calibration claims to `Claim` fixtures

@@ -32,5 +32,5 @@
 
 ## See also
 
-- [`../calibration/faithfulness_probe.md`](../calibration/faithfulness_probe.md) — causal diagnostic for *injected* memory
-- [`../orientation/architecture.md`](../orientation/architecture.md) § Sleep-Time Query Anticipator — the artifact-emission sibling of sleep consolidation
+- [`../04_calibration/faithfulness_probe.md`](../04_calibration/faithfulness_probe.md) — causal diagnostic for *injected* memory
+- [`../01_orientation/architecture.md`](../01_orientation/architecture.md) § Sleep-Time Query Anticipator — the artifact-emission sibling of sleep consolidation

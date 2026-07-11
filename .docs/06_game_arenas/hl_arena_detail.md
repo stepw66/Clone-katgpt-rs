@@ -13,7 +13,7 @@ Episode N+k: AbsorbCompress promotes stable low-Q arms to hard blocks
 Round N+m:   Agent writes new validator.rs → compile .wasm → HotSwapPruner.reload() → RegressionSuite
 ```
 
-📖 See [`.docs/game_arenas/heuristic_learning.md`](heuristic_learning.md).
+📖 See [`.docs/06_game_arenas/heuristic_learning.md`](heuristic_learning.md).
 
 ### Inference-Time Review Metrics
 
@@ -96,7 +96,7 @@ Run: `cargo test --features "stepcode" --test bench_stepcode_modelless -- --noca
 
 *\*Plan 076 tournament: Rubric ≈ GZero (8W each), confirming single-axis hypothesis. High FFA draw rate (~80%) limits decisive outcomes. See `.benchmarks/009_arena_integration.md`.*
 
-📖 See [`.docs/game_arenas/bomber_arena.md`](bomber_arena.md). Tournament infrastructure: `bomber_09_rubric_tournament` example.
+📖 See [`.docs/06_game_arenas/bomber_arena.md`](bomber_arena.md). Tournament infrastructure: `bomber_09_rubric_tournament` example.
 
 ## 3. GameState Forward Model — STRATEGA Distillation
 
@@ -186,7 +186,7 @@ Feature gate: `bandit_mcts` (implies `game_state`). Run: `cargo test --release -
 
 4 examples (headless arena, TUI replay, 1000-game proof, benchmark).
 
-📖 See [`.docs/game_arenas/monopoly_fsm.md`](monopoly_fsm.md).
+📖 See [`.docs/06_game_arenas/monopoly_fsm.md`](monopoly_fsm.md).
 
 ## 5. FFT Tactics Arena — TFT Party AI
 
@@ -208,7 +208,7 @@ Final Fantasy Tactics-inspired 4v4 ATB (Active Time Battle) arena with status ef
 **GvG Round-Robin** (250 rounds × 6 matchups): TFT 92.5% > HL 73.0% > Greedy 61.6%. Nash analysis confirms TFT is a dominant strategy.
 
 4 examples (arena, rubric tournament, GvG tournament, A/B benchmark).
-📖 See [`.docs/game_arenas/heuristic_learning.md`](heuristic_learning.md) for full benchmark results.
+📖 See [`.docs/06_game_arenas/heuristic_learning.md`](heuristic_learning.md) for full benchmark results.
 
 ## 6. Go: AutoGo Distillation (Plan 065)
 

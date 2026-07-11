@@ -380,7 +380,7 @@ graph LR
 | **Trigger Gate** | CPU/GPU/ANE tier promotion via QPS/latency/queue monitoring | `inference_router` |
 | **FreqBandit** | Oscillatory spectral bandit — cyclic pattern detection → adaptive speculative decode | `freq_bandit` |
 
-📖 **Full GOAT audit table** with research source, real gain, and replaced feature: See [`.docs/orientation/overview.md`](.docs/orientation/overview.md).
+📖 **Full GOAT audit table** with research source, real gain, and replaced feature: See [`.docs/01_orientation/overview.md`](.docs/01_orientation/overview.md).
 
 ### GOAT-Proved Additions (Plans 225–406+)
 
@@ -472,7 +472,7 @@ Each arena proves: adaptive intelligence (HL/Bandit) > static rules > random.
 | **Go** | Greedy/Validator/HL 100% vs Random 35% | `go` |
 | **NFSP/MCTS Duality** | BanditMCTS 75% vs MCTS 8% — backward signal transforms forward search | `bandit_mcts` |
 
-📖 **Full benchmarks, architecture, API:** [`.docs/game_arenas/hl_arena_detail.md`](.docs/game_arenas/hl_arena_detail.md).
+📖 **Full benchmarks, architecture, API:** [`.docs/06_game_arenas/hl_arena_detail.md`](.docs/06_game_arenas/hl_arena_detail.md).
 
 ## 🧠 Deterministic Validator
 
@@ -492,7 +492,7 @@ Path-Aware:  100 nodes, 100 accumulated-valid (100.0%)
 
 **Arto Inkala "World's Hardest Sudoku"**: 49,559 steps, 7 hull vertices, 7,079.9× compression.
 
-📖 See [`.docs/game_arenas/sudoku.md`](.docs/game_arenas/sudoku.md) and [`.docs/validator/constraint_validator.md`](.docs/validator/constraint_validator.md).
+📖 See [`.docs/06_game_arenas/sudoku.md`](.docs/06_game_arenas/sudoku.md) and [`.docs/07_validator/constraint_validator.md`](.docs/07_validator/constraint_validator.md).
 
 ## 🪦 What Didn't Work
 
@@ -510,7 +510,7 @@ Path-Aware:  100 nodes, 100 accumulated-valid (100.0%)
 | CompressionDrafter (Plan 285) | **GOAT FAILED (2 runs)** | G1 1.50× (<3× target), G2 1077× (>2× target). Beam search structurally loses to template selection at Hot-tier |
 | Alien Sampler (Plan 311) | **GOAT FAILED (2/4)** | G1+G2 FAIL (β phase-transition at β≈0.4 — no β satisfies both motif-collapse and quality-preservation on synthetic NPC scenario). G3 PASS post-rayon (38.42×→4.56×). G4 PASS. Mechanism validated (2× concentration reduction); domain transfer unvalidated |
 
-📖 **Full negative result detail + replaced feature audit:** [`.docs/feature_catalog/negative_results.md`](.docs/feature_catalog/negative_results.md).
+📖 **Full negative result detail + replaced feature audit:** [`.docs/09_feature_catalog/negative_results.md`](.docs/09_feature_catalog/negative_results.md).
 
 ## 🔀 Feature Showcase
 
@@ -997,7 +997,7 @@ Distills MSA-style blockwise sparse scoring into VortexFlow routers. All sub-fea
 
 Fixed-size slot memory with sparse Top-K routing. Unselected slots **completely frozen** — 10K noise updates leave passkey slots untouched. **2.98× faster** than flat attention at pos=8 (62,653 tok/s vs 21,019 tok/s). Opt-in alternative forward path (`forward_raven()`), not in default hot path.
 
-📖 [`.docs/memory/raven_rsm.md`](.docs/memory/raven_rsm.md).
+📖 [`.docs/03_memory/raven_rsm.md`](.docs/03_memory/raven_rsm.md).
 
 ### 🔬 Percepta: Transformer-VM in Rust
 
@@ -1005,7 +1005,7 @@ Rust port of [Percepta's transformer-vm](https://github.com/Percepta-Core/transf
 
 Core trick: Parabolic key encoding k ↦ (2k, −k²) turns argmax into a supporting-point query on the convex hull → O(log N) via ternary search.
 
-📖 [`.docs/validator/percepta.md`](.docs/validator/percepta.md).
+📖 [`.docs/07_validator/percepta.md`](.docs/07_validator/percepta.md).
 
 ### 🧠 Heuristic Learning Infrastructure
 
@@ -1018,7 +1018,7 @@ Episode N+k: AbsorbCompress promotes stable low-Q arms to hard blocks
 
 Key subsystems (default-on or part of `bandit`): Multi-Armed Bandit (UCB1, ε-greedy, Thompson), TrialLog, AbsorbCompress, ReviewMetrics. The runtime hot-swap, mid-layer emotion projection, and session-level OOD wiring live in `riir-ai`.
 
-📖 [`.docs/game_arenas/heuristic_learning.md`](.docs/game_arenas/heuristic_learning.md).
+📖 [`.docs/06_game_arenas/heuristic_learning.md`](.docs/06_game_arenas/heuristic_learning.md).
 
 ### 🎯 G-Zero: Verifier-Free Self-Play
 
@@ -1030,7 +1030,7 @@ Modelless HL Phase 1 — Hint-δ intrinsic reward drives `AbsorbCompress` + `Ban
 
 The model-based Phase 2 (gradient optimization with self-play reward) and the arena players live in `riir-ai` / `riir-train`.
 
-📖 [`.docs/game_arenas/hl_arena_detail.md`](.docs/game_arenas/hl_arena_detail.md) §11.
+📖 [`.docs/06_game_arenas/hl_arena_detail.md`](.docs/06_game_arenas/hl_arena_detail.md) §11.
 
 ### 🧮 Deep Manifold: Fixed-Point Boundary Conditions
 
@@ -1165,7 +1165,7 @@ All generic over `ConsumerContext` associated types (`Memory`, `Behavior`, `Delt
 
 **GOAT status:** G1/G1b (faithful/unfaithful detection ≥99%) ✅ 100%/100% over 400 trials. G2 (IG surrogate Spearman ρ ≥0.8) ✅ ρ=1.0000. G3 (triggered injection skips ≥50% w/ ±2% quality parity) ✅ 50.0% skips, 0.63% quality delta. G8 (zero-overhead off) ✅ 0 symbols in default build. **Decision: `triggered_injection` promoted to default-on; `faithfulness_probe` kept opt-in (diagnostic).**
 
-Feature gates: `triggered_injection` (**default-ON**, GOAT G3 passed — saves compute, matches quality), `faithfulness_probe` (**opt-in**, diagnostic, audit cadence). 📖 Plan: [`.plans/278_faithfulness_probe_modelless.md`](.plans/278_faithfulness_probe_modelless.md), Research: [`.research/244_Self_Evolver_Faithfulness_Cognitive_Integrity.md`](.research/244_Self_Evolver_Faithfulness_Cognitive_Integrity.md), Benchmark: [`.benchmarks/278_faithfulness_probe_goat.md`](.benchmarks/278_faithfulness_probe_goat.md), Docs: [`.docs/calibration/faithfulness_probe.md`](.docs/calibration/faithfulness_probe.md).
+Feature gates: `triggered_injection` (**default-ON**, GOAT G3 passed — saves compute, matches quality), `faithfulness_probe` (**opt-in**, diagnostic, audit cadence). 📖 Plan: [`.plans/278_faithfulness_probe_modelless.md`](.plans/278_faithfulness_probe_modelless.md), Research: [`.research/244_Self_Evolver_Faithfulness_Cognitive_Integrity.md`](.research/244_Self_Evolver_Faithfulness_Cognitive_Integrity.md), Benchmark: [`.benchmarks/278_faithfulness_probe_goat.md`](.benchmarks/278_faithfulness_probe_goat.md), Docs: [`.docs/04_calibration/faithfulness_probe.md`](.docs/04_calibration/faithfulness_probe.md).
 
 > **Unblocks:** riir-ai Plan 308 (Cognitive Integrity Layer runtime integration — HLA `evolve_hla`, NeuronShard, KG Octree, dMoE). The bidirectional fusion with Plan 054 path-hacking stays private in riir-ai.
 
@@ -1175,7 +1175,7 @@ Distills Engels et al. 2026 (arXiv:2606.20560 §5.2, Research 277) into a **tern
 
 **GOAT status:** G1 (6/6 correctness + determinism) ✅. G2 (useful discrimination — SequenceSmear/TokenSmear unfaithfulness ratio ≥2.0×) ✅ **2.11×** on 3000 synthetic trials (k=8, d=16). G3 (latency k=8, d=32 ≤200 ns) ✅ **107.6 ns** on Apple Silicon arm64. **Decision: stays opt-in** — correct, useful, fast, but default-on promotion requires real-workload evidence from riir-ai Plan 308 (T4.3 deferred).
 
-Feature gate: `smear_classifier` (**opt-in**, implies `faithfulness_probe`). 📖 Plan: [`.plans/298_smear_aware_faithfulness_probe.md`](.plans/298_smear_aware_faithfulness_probe.md), Research: [`.research/277_DiffusionGemma_Transparency_Smearing_Faithfulness.md`](.research/277_DiffusionGemma_Transparency_Smearing_Faithfulness.md), Benchmark: [`.benchmarks/298_smear_classifier_goat.md`](.benchmarks/298_smear_classifier_goat.md), Docs: [`.docs/calibration/faithfulness_probe.md`](.docs/calibration/faithfulness_probe.md).
+Feature gate: `smear_classifier` (**opt-in**, implies `faithfulness_probe`). 📖 Plan: [`.plans/298_smear_aware_faithfulness_probe.md`](.plans/298_smear_aware_faithfulness_probe.md), Research: [`.research/277_DiffusionGemma_Transparency_Smearing_Faithfulness.md`](.research/277_DiffusionGemma_Transparency_Smearing_Faithfulness.md), Benchmark: [`.benchmarks/298_smear_classifier_goat.md`](.benchmarks/298_smear_classifier_goat.md), Docs: [`.docs/04_calibration/faithfulness_probe.md`](.docs/04_calibration/faithfulness_probe.md).
 
 ### 🧠 Engram — Hash-Addressed Conditional Pattern Memory (Plan 299)
 
@@ -1205,7 +1205,7 @@ The table is a frozen snapshot populated offline; updates are atomic Arc swaps v
 
 **GOAT status:** G1 (lookup latency) ✅ **48.12 ns/retrieval** (target < 200 ns, 4× headroom). G2 (sigmoid ranking) ✅ **Spearman ρ = 1.0000** (target > 0.95). G4 (table identity) ✅ **0 mismatches / 1000 random tables**. G6 (effective depth, paper §6.1) ⏸️ **DEFERRED** — requires live inference pipeline (LogitLens divergence at layer 5 with Engram vs layer 12 without); runs in riir-ai when the Bomber/Go stack is wired to consume `fuse_into_hidden_state`. G7 (no regressions) ✅ scoped check clean. **Decision: `engram` stays opt-in** — G6 is the load-bearing gate for the Super-GOAT (U-shape scaling), and per the paper itself pure-Engram alone doesn't deliver the hybrid win.
 
-Feature gate: `engram` (**opt-in**, rolls in `unicode-normalization` for NFKC + `papaya` for the plasma-tier LRU). 📖 Plan: [`.plans/299_Engram_Hash_Addressed_Pattern_Memory.md`](.plans/299_Engram_Hash_Addressed_Pattern_Memory.md), Research: [`.research/278_Engram_Conditional_Memory_Latent_Lookup_Fusion.md`](.research/278_Engram_Conditional_Memory_Latent_Lookup_Fusion.md), Benchmark: [`.benchmarks/299_engram_goat.md`](.benchmarks/299_engram_goat.md), Docs: [`.docs/memory/engram.md`](.docs/memory/engram.md). Demo: `cargo run --features engram --example engram_demo`.
+Feature gate: `engram` (**opt-in**, rolls in `unicode-normalization` for NFKC + `papaya` for the plasma-tier LRU). 📖 Plan: [`.plans/299_Engram_Hash_Addressed_Pattern_Memory.md`](.plans/299_Engram_Hash_Addressed_Pattern_Memory.md), Research: [`.research/278_Engram_Conditional_Memory_Latent_Lookup_Fusion.md`](.research/278_Engram_Conditional_Memory_Latent_Lookup_Fusion.md), Benchmark: [`.benchmarks/299_engram_goat.md`](.benchmarks/299_engram_goat.md), Docs: [`.docs/03_memory/engram.md`](.docs/03_memory/engram.md). Demo: `cargo run --features engram --example engram_demo`.
 
 > **Unblocks:** riir-ai Guide 147 (NPC conditional-memory selling-point guide) and the chain-commitment half `riir-chain/.research/007_Engram_LatCal_Commitment_Bridge.md` (filed 2026-07-04). The Super-GOAT (U-shape hybrid Engram+Raven) requires the riir-ai inference wiring + G6 to land.
 
@@ -1226,7 +1226,7 @@ Two scoring functions: `Dot` (`q·k`, magnitude-sensitive) and `Idw` (`−log(ε
 
 **GOAT status:** G1 (latency) ✅ **1670× speedup** at N=10⁶ (PKM p50 17.5µs vs O(N) brute-force p50 29.2ms; target ≥100×). G2 (top-k Jaccard) ✅ **1.0000** vs brute-force (50 queries; Phase 2 unit test 1000-query mean Jaccard ≥0.95). G3 (IDW centroid-ness, advisory) ✅ Dot intra-cluster rate 0.000 vs IDW 1.000. G4 (zero-alloc) ✅ **0 allocations** / 1000 steady-state `query_into` calls. **Decision: `product_key_memory` DEFAULT-ON** (Phase 3, 2026-07-07). Retrieval stack ledger: Raven O(1) / Engram O(1)-hash / δ-Mem O(r) / **PKM O(√N)** — four distinct complexity classes, each optimal for a different slot-count regime.
 
-Feature gate: `product_key_memory` (**DEFAULT-ON** since 2026-07-07; zero runtime cost unless a caller constructs `ProductKeyMemory`). Phase 4 freeze/thaw wrapper (`product_key_memory_freeze`, opt-in): `Arc<RwLock<Arc<...>>>` + BLAKE3 commitment + atomic swap. Phase 5 δ-rule write gate (`product_key_memory_episodic`, opt-in): F1 fusion PKM × δ-Mem. 📖 Plan: [`.plans/408_Product_Key_Memory_Primitive.md`](.plans/408_Product_Key_Memory_Primitive.md), Research: [`.research/387_Fast_Weight_Product_Key_Memory_PKM.md`](.research/387_Fast_Weight_Product_Key_Memory_PKM.md), Benchmark: [`.benchmarks/408_pkm_goat.md`](.benchmarks/408_pkm_goat.md), Docs: [`.docs/memory/product_key_memory.md`](.docs/memory/product_key_memory.md). Demo: `cargo run --example product_key_memory_demo`.
+Feature gate: `product_key_memory` (**DEFAULT-ON** since 2026-07-07; zero runtime cost unless a caller constructs `ProductKeyMemory`). Phase 4 freeze/thaw wrapper (`product_key_memory_freeze`, opt-in): `Arc<RwLock<Arc<...>>>` + BLAKE3 commitment + atomic swap. Phase 5 δ-rule write gate (`product_key_memory_episodic`, opt-in): F1 fusion PKM × δ-Mem. 📖 Plan: [`.plans/408_Product_Key_Memory_Primitive.md`](.plans/408_Product_Key_Memory_Primitive.md), Research: [`.research/387_Fast_Weight_Product_Key_Memory_PKM.md`](.research/387_Fast_Weight_Product_Key_Memory_PKM.md), Benchmark: [`.benchmarks/408_pkm_goat.md`](.benchmarks/408_pkm_goat.md), Docs: [`.docs/03_memory/product_key_memory.md`](.docs/03_memory/product_key_memory.md). Demo: `cargo run --example product_key_memory_demo`.
 
 > **Honest approximation gap:** PKM is *approximate by construction* — the true global top-k can span codebook boundaries the per-codebook top-k misses. On random tables the gap is zero (G2=1.0000); on adversarial key distributions use `K=16` or `K=32` per codebook (still far below O(N)).
 
@@ -1648,7 +1648,7 @@ The output IS the rubric — but executable. Research notes can `cargo test` the
 
 **GOAT gate (Plan 307 T3.3 — green, promoted to default 2026-06-23):** 17/17 Phase 2 round-trip tests (the seven §4 primitive scores round-trip through the validator to the levels R287 records) + 1/1 GOAT gate. The crate compiles with `--no-default-features --features claim_rubric` (zero-dep baseline).
 
-Feature gate: `claim_rubric` (**DEFAULT-ON** since Plan 307 T3.3, 2026-06-23). Zero runtime cost unless a probe/steering primitive explicitly invokes `ClaimValidator::grade`; promotion enforces the rubric at CI time per R287 §2.3. 📖 Plan: [`.plans/307_claim_rubric_runtime.md`](.plans/307_claim_rubric_runtime.md), Research: [`.research/287_Probe_Steering_Claim_Evidence_Ladder_Fusion_With_267.md`](.research/287_Probe_Steering_Claim_Evidence_Ladder_Fusion_With_267.md), Paper: [arXiv:2606.07612](https://arxiv.org/abs/2606.07612), Docs: [`.docs/audits/claim_rubric_audit.md`](.docs/audits/claim_rubric_audit.md).
+Feature gate: `claim_rubric` (**DEFAULT-ON** since Plan 307 T3.3, 2026-06-23). Zero runtime cost unless a probe/steering primitive explicitly invokes `ClaimValidator::grade`; promotion enforces the rubric at CI time per R287 §2.3. 📖 Plan: [`.plans/307_claim_rubric_runtime.md`](.plans/307_claim_rubric_runtime.md), Research: [`.research/287_Probe_Steering_Claim_Evidence_Ladder_Fusion_With_267.md`](.research/287_Probe_Steering_Claim_Evidence_Ladder_Fusion_With_267.md), Paper: [arXiv:2606.07612](https://arxiv.org/abs/2606.07612), Docs: [`.docs/10_audits/claim_rubric_audit.md`](.docs/10_audits/claim_rubric_audit.md).
 
 ---
 
@@ -2250,7 +2250,7 @@ Default: **Hybrid OCT+PQ** (OCTOPUS triplet encoding + PlanarQuant 2D Givens rot
 | PlanarQuant | 2D Givens | 256 | 0.034 | 0 samples |
 | TurboQuant | Random | 16,384 | 0.034 | 0 samples |
 
-📖 **Full comparison tables, benchmarks, code examples:** [`.docs/inference/kv_compression.md`](.docs/inference/kv_compression.md).
+📖 **Full comparison tables, benchmarks, code examples:** [`.docs/02_inference/kv_compression.md`](.docs/02_inference/kv_compression.md).
 
 ## 🔀 Opt-In & Gated Features
 
@@ -2313,7 +2313,7 @@ Default: **Hybrid OCT+PQ** (OCTOPUS triplet encoding + PlanarQuant 2D Givens rot
 | **SSMax** (`ssmax_temperature`) | Length-aware log-N attention temperature: multiplicative pre-attention logit rescale `s̃ = s_L · log(N) · s` canceling the `(N−1)` dilution in `α_gold ≈ 1/(1 + (N−1)·N^{−s·Δ})` (Plan 411, arxiv 2607.01538). Default `s_L = 1.0` is truly modelless; `Adaptive` mode ships `s_L = 1/Δ` analytically. Composes with sigmoid parallax + SDPA + sink-aware; NOT funcattn (no (n,n) matrix). | **DEFAULT-ON** (Plan 411 Phase 5, 2026-07-07) — G1+G2+G3+G4+G5 ALL PASS. G1 argmax preserved at N∈{64,1k,10k,100k}; G2 cosine recall 0.25→0.97; G3 56ns<1µs; G4 0 allocs; G5 N=64 bit-identical. **Zero runtime cost unless invoked**: `ParallaxConfig.ssmax` defaults `None` → no-op → `ssmax_none_is_bit_identical_to_base` test verifies zero default-behavior change. |
 | **GoldShare** (`gold_share_probe`) | Content-specific output-fraction diagnostic `‖a^G_L‖ / ‖a_L‖` — detects when a layer's attention output has been rewritten from gold-content to aggregate-noise at comparable magnitude (Plan 411, arxiv 2607.01538). Complements `effective_rank` (content-agnostic) and `stable_rank_update` (per-sink). Joint reading with `sink_classify`: Broadcast + low gold_share = "broadcast that failed." | Opt-in diagnostic — G2+G4 PASS (gold_share range 0.94 vs effective_rank 0.00 across the dilution sweep; 0 allocs). Stays opt-in until a downstream consumer depends on it. |
 
-📖 **Full detail for ALL opt-in features + complete feature flag reference:** [`.docs/feature_catalog/opt_in_features.md`](.docs/feature_catalog/opt_in_features.md) and [`Cargo.toml`](Cargo.toml).
+📖 **Full detail for ALL opt-in features + complete feature flag reference:** [`.docs/09_feature_catalog/opt_in_features.md`](.docs/09_feature_catalog/opt_in_features.md) and [`Cargo.toml`](Cargo.toml).
 
 ## 🛠️ Getting Started
 
@@ -2337,7 +2337,7 @@ cargo clippy --all-targets --all-features --quiet   # Lint
 
 **373 feature flags** with **155 default-on** (all GOAT-proved). Default features include: `sparse_mlp`, `domain_latent`, `ppot`, `bandit`, `bt_rank`, `spectral_quant`, `hybrid_oct_pq`, `elf_sde`, `cna_steering`, `deep_manifold`, `federation`, `gdn2_attention`, `dash_attn`, `lt2_looped`, `kv_share`, `kvarn`, `belief_drafter`, `bfcf_lfu_shard`, `mux_latent_context`, `collapse_aware_thinking`, `slod`, `schema_centroid`, `union_bound_confidence`, `pathway_tracker`, `federation_composer`, **`posterior_evolution`**, **`spectral_pruner`**, **`breakeven_routing`**, **`substrate_gate`**, **`regime_transition`**, `rcd_residual`, `lattice_operad`, `spec_pruner`, `caddtree_budget`, `ssd_block`, `ss_pruner`, `dendritic_gate`, `sparse_task_vector`, `off_principal_retrieval`, `spectral_rank`, `module_energy_route`, `gauge_invariant`, `chiaroscuro`, `attn_match`, **`manifold_power_iter_router`** (Plan 279 GOAT 9/9), **`triggered_injection`** (Plan 278 G3 PASS), **`temporal_deriv`** (Plan 277 4/4 fusions PASS), **`self_advantage_gate`** (Plan 283 GOAT 4/4 PASS), **`clr`** (Plan 284), **`personality_composition`** (Plan 297 G4+G5 PASS), **`cce_moderator`** (Plan 295+300 GOAT), **`complexity_prior_sampler`** (Plan 305 Phase 2 GOAT), **`salience_tri_gate`** (Plan 303 Phase 5 GOAT), **`claim_rubric`** (Plan 307 T3.3 GOAT 17/17), **`depth_invariance`** (Plan 306 T7.4 GOAT), **`cross_resolution_transport`** (Plan 310 Phase 4 GOAT), **`latent_field_steering`** (Plan 309 Phase 4 GOAT), **`viable_manifold_graph`** (Plan 312 Phase 5 GOAT post-CSR), **`ac_prefix`** (Plan 313 GOAT via §3.5 modelless unblock), **`tropical_algebra`** (Plan 337 Super-GOAT), **`temp_loss_fingerprint`** (Plan 341), **`zone_density_routing`** (Plan 351), **`set_attention`** (Plan 354), **`heat_kernel_trajectory`** (Plan 359), **`qmc_sampling`** (Plan 367), **`manifold_bandit`** (Plan 370), **`mean_field_regime`** (Plan 371), **`velocity_field_ensemble`** (Plan 376), **`local_branch_routing`** (Plan 377), **`ane_roofline`** (Plan 379), **`step_attribution_qualifier`** (Plan 381), **`spherical_steering`** (Plan 405), **`renoise_ce`** (Plan 406), and 74 more.
 
-📖 **Full feature flag table (373 flags):** [`.docs/feature_catalog/opt_in_features.md`](.docs/feature_catalog/opt_in_features.md) and [`Cargo.toml`](Cargo.toml).
+📖 **Full feature flag table (373 flags):** [`.docs/09_feature_catalog/opt_in_features.md`](.docs/09_feature_catalog/opt_in_features.md) and [`Cargo.toml`](Cargo.toml).
 
 ### 🧠 PersonalityWeightedComposition — Sigmoid-Gated Latent Layer Composition (Plan 297, Research 276)
 
@@ -2664,54 +2664,54 @@ benches/                 38 Criterion benchmarks
 Docs are grouped into numbered folders by primitive class — see
 [`.docs/README.md`](.docs/README.md) for the full index with fusion maps.
 
-**Orientation** — [overview](.docs/orientation/overview.md) ·
-[architecture](.docs/orientation/architecture.md) ·
-[paper feature comparison](.docs/orientation/paper_feature_comparison.md)
+**Orientation** — [overview](.docs/01_orientation/overview.md) ·
+[architecture](.docs/01_orientation/architecture.md) ·
+[paper feature comparison](.docs/01_orientation/paper_feature_comparison.md)
 
-**Inference** — [speculative decoding](.docs/inference/speculative_decoding.md) ·
-[SpecHop](.docs/inference/spechop.md) ·
-[KV compression](.docs/inference/kv_compression.md) ·
-[MTP threshold guide](.docs/inference/mtp_threshold.md) ·
-[Progressive MCGS](.docs/inference/progressive_mcgs.md)
+**Inference** — [speculative decoding](.docs/02_inference/speculative_decoding.md) ·
+[SpecHop](.docs/02_inference/spechop.md) ·
+[KV compression](.docs/02_inference/kv_compression.md) ·
+[MTP threshold guide](.docs/02_inference/mtp_threshold.md) ·
+[Progressive MCGS](.docs/02_inference/progressive_mcgs.md)
 
-**Memory** — [Raven RSM](.docs/memory/raven_rsm.md) ·
-[Product Key Memory (PKM, DEFAULT-ON)](.docs/memory/product_key_memory.md) ·
-[Engram](.docs/memory/engram.md) ·
-[MicroRecurrentBeliefState](.docs/memory/micro_belief.md) ·
-[NPC Sense Composition](.docs/memory/sense_composition.md) ·
-[Sleep consolidation](.docs/memory/sleep_consolidation.md)
+**Memory** — [Raven RSM](.docs/03_memory/raven_rsm.md) ·
+[Product Key Memory (PKM, DEFAULT-ON)](.docs/03_memory/product_key_memory.md) ·
+[Engram](.docs/03_memory/engram.md) ·
+[MicroRecurrentBeliefState](.docs/03_memory/micro_belief.md) ·
+[NPC Sense Composition](.docs/03_memory/sense_composition.md) ·
+[Sleep consolidation](.docs/03_memory/sleep_consolidation.md)
 
-**Calibration** — [CCE moderator](.docs/calibration/cce_moderator.md) ·
-[Causal head-importance](.docs/calibration/causal_head_importance.md) ·
-[Faithfulness probe](.docs/calibration/faithfulness_probe.md) ·
-[Salience Tri-Gate](.docs/calibration/salience_tri_gate.md) ·
-[sigmoid-not-softmax universality-class escape](.docs/calibration/universality_class_escape.md)
+**Calibration** — [CCE moderator](.docs/04_calibration/cce_moderator.md) ·
+[Causal head-importance](.docs/04_calibration/causal_head_importance.md) ·
+[Faithfulness probe](.docs/04_calibration/faithfulness_probe.md) ·
+[Salience Tri-Gate](.docs/04_calibration/salience_tri_gate.md) ·
+[sigmoid-not-softmax universality-class escape](.docs/04_calibration/universality_class_escape.md)
 
-**Adaptation** — [model adaptation](.docs/adaptation/model_adaptation.md) ·
-[Lucebox techniques](.docs/adaptation/lucebox_techniques.md) ·
-[PEIRA distillation](.docs/adaptation/peira_distillation.md)
+**Adaptation** — [model adaptation](.docs/05_adaptation/model_adaptation.md) ·
+[Lucebox techniques](.docs/05_adaptation/lucebox_techniques.md) ·
+[PEIRA distillation](.docs/05_adaptation/peira_distillation.md)
 
-**Game Arenas** — [Sudoku](.docs/game_arenas/sudoku.md) ·
-[HL infrastructure](.docs/game_arenas/heuristic_learning.md) ·
-[Bomberman arena](.docs/game_arenas/bomber_arena.md) ·
-[Bomber LoRA A/B](.docs/game_arenas/bomber_lora_ab.md) ·
-[Monopoly FSM](.docs/game_arenas/monopoly_fsm.md) ·
-[FFT Tactics Arena](.docs/game_arenas/fft_arena.md) ·
-[Go arena](.docs/game_arenas/go_arena.md) ·
-[open-ended evolution](.docs/game_arenas/open_ended_evolution.md) ·
-[HL & arena detail](.docs/game_arenas/hl_arena_detail.md)
+**Game Arenas** — [Sudoku](.docs/06_game_arenas/sudoku.md) ·
+[HL infrastructure](.docs/06_game_arenas/heuristic_learning.md) ·
+[Bomberman arena](.docs/06_game_arenas/bomber_arena.md) ·
+[Bomber LoRA A/B](.docs/06_game_arenas/bomber_lora_ab.md) ·
+[Monopoly FSM](.docs/06_game_arenas/monopoly_fsm.md) ·
+[FFT Tactics Arena](.docs/06_game_arenas/fft_arena.md) ·
+[Go arena](.docs/06_game_arenas/go_arena.md) ·
+[open-ended evolution](.docs/06_game_arenas/open_ended_evolution.md) ·
+[HL & arena detail](.docs/06_game_arenas/hl_arena_detail.md)
 
-**Validator** — [constraint validator](.docs/validator/constraint_validator.md) ·
-[Percepta transformer-VM](.docs/validator/percepta.md)
+**Validator** — [constraint validator](.docs/07_validator/constraint_validator.md) ·
+[Percepta transformer-VM](.docs/07_validator/percepta.md)
 
-**Performance** — [throughput tables & SIMD](.docs/performance/engineering.md)
+**Performance** — [throughput tables & SIMD](.docs/08_performance/engineering.md)
 
-**Feature Catalog** — [opt-in features](.docs/feature_catalog/opt_in_features.md) ·
-[negative results](.docs/feature_catalog/negative_results.md)
+**Feature Catalog** — [opt-in features](.docs/09_feature_catalog/opt_in_features.md) ·
+[negative results](.docs/09_feature_catalog/negative_results.md)
 
-**Audits** — [loser-sweep audit](.docs/audits/loser_sweep_audit.md) ·
-[claim rubric audit](.docs/audits/claim_rubric_audit.md) ·
-[cross-repo consolidation audit](.docs/audits/cross_repo_consolidation_audit.md)
+**Audits** — [loser-sweep audit](.docs/10_audits/loser_sweep_audit.md) ·
+[claim rubric audit](.docs/10_audits/claim_rubric_audit.md) ·
+[cross-repo consolidation audit](.docs/10_audits/cross_repo_consolidation_audit.md)
 
 - [210+ examples grouped by category](examples/README.md)
 - [DEC Operators & Cubical Topology](.plans/251_dec_operators_cell_complex.md)
@@ -2742,7 +2742,7 @@ Docs are grouped into numbered folders by primitive class — see
 - [Spherical Geodesic Steering](.plans/405_spherical_steering_geodesic_primitive.md)
 - [Renoise-CE Self-Verifier](.plans/406_renoise_ce_self_verifier.md)
 - [Proposal 003 — src/ consolidation master (Phases 0–12)](.proposals/003_src_consolidation_master.md)
-- [Sigmoid-not-Softmax: The Universality-Class Escape (Research 315, Liu & Gore 2606.25008)](.docs/calibration/universality_class_escape.md)
+- [Sigmoid-not-Softmax: The Universality-Class Escape (Research 315, Liu & Gore 2606.25008)](.docs/04_calibration/universality_class_escape.md)
 
 ## 📜 References
 

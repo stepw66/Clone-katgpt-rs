@@ -71,7 +71,7 @@ point because there is no `s` being incrementally updated and no `η`.
 - Issue 130 is **closed**. No code changes to `reestimation.rs`.
 - The TILR consumer-wiring value is captured by Issue 128 (committed_blend HLA
   path, Plan 438) and Issue 129 (neuron-db shard refinement).
-- The TILR family doc (`.docs/adaptation/tilr_subspace_family.md`) has been
+- The TILR family doc (`.docs/05_adaptation/tilr_subspace_family.md`) has been
   updated to reflect this resolution.
 
 ## Tasks
@@ -92,6 +92,6 @@ point because there is no `s` being incrementally updated and no `η`.
 
 - `katgpt-rs/.plans/425_tilr_invariant_subspace_refinement.md` — COMPLETE, DEFAULT-ON
 - `katgpt-rs/.research/408_*.md` — TILR research note (GOAT verdict)
-- `katgpt-rs/.docs/adaptation/tilr_subspace_family.md` — family overview (updated)
+- `katgpt-rs/.docs/05_adaptation/tilr_subspace_family.md` — family overview (updated)
 - `katgpt-rs/.issues/128_tilr_hla_personality_refinement.md` — the actual TILR consumer wiring (committed_blend HLA path)
 - `riir-ai/.plans/438_tilr_hla_personality_refinement.md` — Plan 438 (committed_blend TILR bridge)
