@@ -7,10 +7,10 @@ description = "KG Latent Octree Sense substrate — octree construction, reconst
 repository = "https://github.com/katopz/katgpt-rs"
 keywords = ["inference", "octree", "sense", "lod", "modelless"]
 categories = ["data-structures", "science", "algorithms"]
-publish = false  # only katgpt-core ships to crates.io
+# Published to crates.io (katgpt-core dependency)
 
 [dependencies]
-katgpt-types = { path = "../katgpt-types" }
+katgpt-types = { path = "../katgpt-types", version = "0.1.0" }
 blake3 = "1"
 fastrand = "2"
 # papaya is needed by schema_centroid + bake_precision (BakePrecisionStore,
