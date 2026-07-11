@@ -2764,7 +2764,7 @@ next version:
 
 | Prefix | Effect on `katgpt-core` version |
 |---|---|
-| `feat:` | minor bump (`0.2.0` → `0.2.1`) |
+| `feat:` | minor bump (`0.2.0` → `0.3.0`) |
 | `fix:` | patch bump (`0.2.0` → `0.2.1`) |
 | `feat!:` / `BREAKING CHANGE:` | major bump (`0.2.0` → `1.0.0`) |
 | `docs:`, `chore:`, `refactor:`, `test:` | no bump |
@@ -2773,15 +2773,12 @@ release-plz also runs `cargo-semver-checks`, so a silent API break (removed
 public fn, changed signature) forces a major bump regardless of the commit
 message.
 
-### Auto release (CI)
+### Release pipeline
 
-Every push to `develop` or `main` triggers `.github/workflows/release-plz.yml`:
-
-- **`develop` push** → opens/updates a "Prepare release" PR with the bumped
-  `katgpt-core` version + generated `CHANGELOG.md`. The PR auto-updates as you
-  keep committing.
-- **`main` push** → publishes unpublished `katgpt-core` versions to crates.io,
-  pushes the `katgpt-core-vX.Y.Z` tag, and creates the GitHub Release.
+The release-plz workflow (`.github/workflows/release-plz.yml`) fires **only on
+manual `workflow_dispatch`** — pushes to `develop` or `main` do nothing on
+their own. `scripts/release.sh` is the sole entry point; it triggers the
+dispatch, waits for it, and orchestrates the branch promotion.
 
 ### Ship it (`scripts/release.sh`)
 
@@ -2792,13 +2789,19 @@ One command does everything — no manual PR review, no manual merge:
 ```
 
 From `develop`, this:
-1. Finds the open release-plz PR (auto-created by CI on your last develop push)
-2. Merges it into `develop` (merge commit)
-3. Promotes `develop` → `main` (fast-forward)
-4. CI auto-publishes `katgpt-core` to crates.io on the `main` push
+1. Triggers release-plz `release-pr` dispatch (if no release PR is already
+   open) and waits for it to create the "Prepare release" PR with the bumped
+   `katgpt-core` version + generated `CHANGELOG.md`.
+2. Merges that PR into `develop` (merge commit, never squash).
+3. Promotes `develop` → `main` (`--no-ff` merge).
+4. Explicitly triggers the release-plz `release` dispatch on `main` (the push
+   alone does NOT publish) and waits for `cargo publish` + tag + GitHub
+   Release.
+5. Syncs `main` back into `develop` (fast-forward) so the two branches don't
+   diverge across releases.
 
-If there's no open release PR (nothing version-worthy since the last release),
-the script exits cleanly.
+If there's no open release PR and release-plz finds nothing version-worthy
+since the last release, the script exits cleanly.
 
 Prerequisites (one-time): `brew install gh && gh auth login`.
 
