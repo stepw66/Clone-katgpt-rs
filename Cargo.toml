@@ -4,9 +4,9 @@ resolver = "3"
 
 [package]
 name = "katgpt-rs"
-version = "0.2.0"
+version = "0.2.1"
 edition = "2024"
-publish = false  # dev/examples aggregator — never published. Only katgpt-core ships to crates.io.
+publish = false  # dev/examples aggregator — never published. The katgpt-core crate family ships to crates.io.
 
 [dependencies]
 katgpt-core = { path = "crates/katgpt-core" }
