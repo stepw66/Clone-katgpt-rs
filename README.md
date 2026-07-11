@@ -102,11 +102,12 @@ Additional core traits in `katgpt-core/src/traits.rs`: `DominoPruner`, `Completi
 
 ### Crate Dependency DAG
 
-The workspace has **27 in-tree crates** (plus the root) organized in four
-layers: shared leaves, `katgpt-core` (traits + cognitive kernels), domain
-stacks, and the root crate (`katgpt-rs`) which is the feature-aggregation
-surface that wires every domain crate into the transformer runtime via
-`ForwardContext`. See `.proposals/003_src_consolidation_master.md` for the
+The workspace has **27 in-tree crates** (plus the root) organized in three
+layers: shared leaves (depend on `katgpt-types` or nothing), `katgpt-core`
+(traits + cognitive kernels, depends on leaves), domain stacks (depend on
+`katgpt-core` + other domain crates), and the root crate (`katgpt-rs`) which
+is the feature-aggregation surface that wires every domain crate into the
+transformer runtime via `ForwardContext`. See `.proposals/003_src_consolidation_master.md` for the
 full Phase 0–12 consolidation history. Phase 12 (Plans 378–404) completed
 the substrate-extraction sweep; Issue 121 (2026-07-09) collapsed the last
 6 shim folders into inline `pub mod` blocks. Only training code + benchmark
@@ -114,22 +115,22 @@ tooling + `ForwardContext` glue remain permanently root-resident.
 
 ```mermaid
 graph TD
-    subgraph Leaves["Leaves (no katgpt deps)"]
+    subgraph Leaves["Leaves (depend on katgpt-types or nothing)"]
         types["katgpt-types<br/>(Config, Rng, SIMD)"]
         hla["katgpt-hla<br/>(HLA substrate)"]
         tokenizer["katgpt-tokenizer<br/>(BPE, ConvexTok)"]
         dec["katgpt-dec<br/>(DEC operators)"]
+        microbelief["katgpt-micro-belief<br/>(BeliefKernel, BoMSampler)"]
+        personality["katgpt-personality<br/>(sigmoid composition)"]
+        sense["katgpt-sense<br/>(NPC sense composition)"]
+        sleep["katgpt-sleep<br/>(consolidation)"]
         validator["katgpt-validator<br/>(partial parser, syn pruner)"]
-        percepta["katgpt-percepta<br/>(transformer-VM)"]
+        percepta["katgpt-percepta<br/>(transformer-VM, zero katgpt deps)"]
         proofcert["katgpt-proof-cert<br/>(GOAT proof certificates)"]
         deprecated["katgpt-deprecated<br/>(exiled losers)"]
     end
     subgraph Core["Core layer"]
         core["katgpt-core<br/>(traits, attention primitives, cognitive kernels)"]
-        microbelief["katgpt-micro-belief<br/>(BeliefKernel, BoMSampler)"]
-        personality["katgpt-personality<br/>(sigmoid composition)"]
-        sense["katgpt-sense<br/>(NPC sense composition)"]
-        sleep["katgpt-sleep<br/>(consolidation)"]
     end
     subgraph Domain["Domain stacks"]
         transformer["katgpt-transformer<br/>(weights, packing, mbu, tf_loop, swir, dense_mesh)"]
@@ -150,29 +151,56 @@ graph TD
     root["katgpt-rs (root)<br/>(runtime, feature surface)"]
 
     hla --> types
+    dec --> types
+    microbelief --> types
+    personality --> types
+    sense --> types
+    sleep --> types
+    validator --> types
     core --> types
     core --> hla
-    microbelief --> core
-    personality --> core
-    sense --> core
-    sleep --> core
+    core --> dec
+    core --> microbelief
+    core --> personality
+    core --> sense
+    core --> sleep
     transformer --> core
+    forward --> core
+    forward --> hla
+    forward --> pruners
+    forward --> spec
     forward --> transformer
+    forward --> types
     quant --> core
+    quant --> transformer
     spectral --> core
     spectral --> transformer
+    spectral --> types
     attn --> core
-    attn -.optional.-> spectral
+    attn --> forward
+    attn --> kv
+    attn --> pruners
+    attn --> spectral
+    attn --> transformer
     attnmatch --> core
+    attnmatch --> kv
     kv --> core
     kv --> spectral
+    kv --> types
     spec --> core
+    spec --> kv
+    spec --> pruners
+    spec --> transformer
+    spec --> types
     pruners --> core
-    pruners --> transformer
+    pruners --> percepta
     pruners --> spec
+    pruners --> transformer
+    pruners --> types
     band --> core
     sparse --> core
-    sparse -.optional.-> band
+    sparse --> band
+    sparse --> spectral
     claim --> core
     ruliology --> core
     ruliology --> pruners
@@ -180,8 +208,7 @@ graph TD
     backend --> transformer
     backend --> types
     validator --> core
-    validator -.dev.-> tokenizer
-    percepta --> core
+    validator --> tokenizer
     deprecated --> core
     root --> core
     root --> transformer
@@ -211,6 +238,10 @@ graph TD
 
 **Dependency rules:**
 - Arrows point from consumer → dependency. Dashed = optional feature-gated dep.
+- **Leaf crates** depend on `katgpt-types` (or nothing, for `katgpt-percepta`
+  and `katgpt-proof-cert`). `katgpt-core` consumes the leaf substrate crates
+  (`katgpt-hla`, `katgpt-dec`, `katgpt-micro-belief`, `katgpt-personality`,
+  `katgpt-sense`, `katgpt-sleep`) and re-exports them as `katgpt_core::*`.
 - `katgpt-core` attention primitives (`attention`, `parallax_attn`, `set_attention`,
   `funcattn`) live in core and are NOT in `katgpt-attn` — they can't move up
   without inverting the DAG.
@@ -218,6 +249,9 @@ graph TD
   `katgpt_core::hla`. The root's `pub mod hla { ... }` in `lib.rs` is pure
   composition glue (Issue 121 collapsed the `src/hla/` folder into an inline
   module).
+- `katgpt-forward` is the top-tier domain crate — it depends on `katgpt-core`,
+  `katgpt-transformer`, `katgpt-pruners`, `katgpt-speculative`, `katgpt-hla`,
+  and `katgpt-types`. `katgpt-attn` and `katgpt-backend` depend on `forward`.
 - Phase 11 (Plans 378–382, 2026-07-04) added 5 new domain crates
   (`katgpt-band`, `katgpt-validator`, `katgpt-sparse`, `katgpt-claim`,
   `katgpt-ruliology`) plus `katgpt-backend` (Issue 413, 2026-07-08) and
@@ -232,7 +266,7 @@ graph TD
 
 ## 🔄 E2E Inference Flow — Default GOAT Stack
 
-The default production stack has **155 GOAT-proved default-on features** (373 total flags), but they don't all run on every token. The architecture uses **layered gating** — most features are bandit-driven, Option-gated, or compile-time-only.
+The default production stack has **152 GOAT-proved default-on features** (378 total flags), but they don't all run on every token. The architecture uses **layered gating** — most features are bandit-driven, Option-gated, or compile-time-only.
 
 ```mermaid
 flowchart TD
@@ -2813,7 +2847,11 @@ crates/  (27 in-tree crates — see Proposal 003 for the full Phase 0–12 histo
   katgpt-hla/          Leaf: HLA substrate (kernel + types) — O(1) inference cache
   katgpt-tokenizer/    Leaf: BPE tokenizer + ConvexTok LP vocabulary optimizer
   katgpt-dec/          Leaf: Discrete Exterior Calculus operators
-  katgpt-percepta/     Leaf: Percepta transformer-VM (2D convex hull attention + WASM)
+  katgpt-percepta/     Leaf: Percepta transformer-VM (2D convex hull attention + WASM, zero katgpt deps)
+  katgpt-micro-belief/ Leaf: BeliefKernel trait + Attractor/Leaky family + BoMSampler (depends on katgpt-types only)
+  katgpt-personality/  Leaf: PersonalityWeightedComposition (Plan 297, depends on katgpt-types only)
+  katgpt-sense/        Leaf: Sense Composition modules (Plan 221, depends on katgpt-types only)
+  katgpt-sleep/        Leaf: Sleep-time consolidation primitives (depends on katgpt-types only)
   katgpt-validator/    Leaf: PartialParser + SynPruner — two-tier syntax pruner (Phase 11)
   katgpt-proof-cert/   Leaf: Hierarchical GOAT proof certificates (Plan 145, Phase 12 extraction)
   katgpt-deprecated/   Leaf: exiled losers (Phase 3a) — feedback, unit_distance, alien_sampler
@@ -2833,10 +2871,6 @@ crates/  (27 in-tree crates — see Proposal 003 for the full Phase 0–12 histo
     cce/                CCE moderator (Phase 10) · salience/ (Phase 10) · trigger_gate.rs (Phase 10)
     closure/            closure mining (Phase 7 re-route) · cumprodsum.rs / ssd_block.rs (Phase 10)
     ...                 108 modules total — see `crates/katgpt-core/src/lib.rs`
-  katgpt-micro-belief/  BeliefKernel trait + Attractor/Leaky family + BoMSampler
-  katgpt-personality/   PersonalityWeightedComposition (Plan 297)
-  katgpt-sense/         Sense Composition modules (Plan 221)
-  katgpt-sleep/         Sleep-time consolidation primitives
 
   katgpt-transformer/   Weights, KVCache packing, mbu, tf_loop, swir/, dense_mesh/ (Phase 9)
   katgpt-forward/       ForwardContext top-tier crate (Issue 007 Phase F)
