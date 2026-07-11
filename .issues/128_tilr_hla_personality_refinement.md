@@ -8,9 +8,10 @@
 > CGSP curiosity table) COMPLETE behind `tilr_hla_refinement` (T1–T4, 9 tests).
 > Approach B (`CommittedBlendState::z`, committed-blend HLA) COMPLETE behind
 > `tilr_personality_refine` (T1–T4, 11 tests, Plan 438). Both are opt-in.
-> T5: synthetic personality-divergence benchmarks PASS for Approach B (2 tests,
-> 2026-07-11) — mechanism proven; final default-on promotion still pending
-> real-session gain validation. See "T5 status" below.
+> T5: synthetic personality-divergence benchmarks PASS for BOTH approaches
+> (Approach A: 2 tests, Approach B: 2 tests, 2026-07-11) — mechanism proven;
+> final default-on promotion still pending real-session gain validation.
+> See "T5 status" below.
 
 ## Context
 
@@ -55,13 +56,15 @@ chosen:
 | **Freeze/thaw** | ALREADY wired via `CuriosityPrioritySnapshot.priorities` | needs NEW `z_snapshot` capture at re-commit |
 | **Module** | `cgsp_runtime/tilr_refinement.rs` | `committed_blend/tilr_bridge.rs` (planned) |
 | **Feature** | `tilr_hla_refinement` (= `cgsp_runtime` + `tilr_invariant_subspace` + `subspace_phase_gate`) | `tilr_personality_refine` (planned, = `tilr_invariant_subspace`) |
-| **Status** | T1–T4 COMPLETE, 9 tests pass | T1–T4 COMPLETE, 11 tests pass |
+| **Status** | T1–T4 COMPLETE, 11 tests pass (9 G1-G4 + 2 T5 synthetic) | T1–T4 COMPLETE, 13 tests pass (11 G1-G4 + 2 T5 synthetic) |
 
 **Both approaches are implemented** and independently useful: Approach A refines
 the curiosity allocation (which axes the NPC explores), Approach B refines the
 emotional dynamics (how the HLA vector evolves). They do not conflict at the
 code level (different modules, different features, different states). T5
-promotion for both is deferred pending real-session personality-divergence gain.
+synthetic personality-divergence benchmarks PASS for both (2026-07-11) —
+mechanism proven. Final default-on promotion for both is deferred pending
+real-session personality-divergence gain.
 
 ## Tasks (Approach A — `tilr_hla_refinement`)
 
@@ -105,15 +108,29 @@ promotion for both is deferred pending real-session personality-divergence gain.
       `cargo check -p riir-engine --features tilr_hla_refinement --lib` clean.
       Feature isolation confirmed (default check clean, module properly gated).
 - [-] **T5** If the gain is real and modelless → promote to default-on.
-      DEFERRED: G1–G4 pass and the refinement is pure modelless linear algebra,
-      but promotion to DEFAULT-ON needs a real-session personality-divergence
-      gain (does TILR refinement measurably improve NPC personality coherence
-      / curiosity-axis distribution over a long game session?). The feature is
-      safe to ship opt-in — the no-harm contract means enabling it can never
-      corrupt personalities that don't match the calibration. A real-game
-      benchmark (epoch-snapshot calibration + personality-divergence measurement
-      vs no-refinement baseline) is the promotion gate; tracked as a riir-ai
-      follow-up.
+      **PARTIAL PROGRESS** (2026-07-11): Synthetic personality-divergence
+      benchmarks PASS — mechanism proven on the CGSP priority table.
+      - `t5_priority_subspace_amplification_gain`: single-NPC 50-cycle
+        trajectory showing TILR amplifies axis-0 (calibrated curiosity axis)
+        priority over the reward-driven baseline. The baseline rewards axis 2
+        (so axis 2 dominates), but TILR refinement toward axis 0 systematically
+        biases curiosity allocation upward on axis 0.
+      - `t5_two_npc_priority_divergence_gain`: two-NPC divergence showing TILR
+        amplifies cross-NPC priority divergence. Two NPCs with different
+        contrastive directions (axis 0 vs axis 1) start identical and receive
+        the same rewards — without TILR they stay identical (div=0); with TILR
+        their priority tables diverge, with NPC A higher on axis 0 and NPC B
+        higher on axis 1.
+      Both tests pass under `--features tilr_hla_refinement`. 11/11
+      tilr_refinement tests pass (9 G1-G4 + 2 T5), 0 regressions. Release-mode
+      G4 perf smoke passes (debug-mode G4 is a timing flake at 1759ns vs 1000ns
+      budget — release passes cleanly).
+      **REMAINING for default-on promotion**: real-session validation that the
+      calibrated subspace (from contrastive priority-snapshot differences at
+      epoch boundaries) captures meaningful curiosity directions in production
+      game sessions. The synthetic benchmark proves the amplification mechanism;
+      the real-session benchmark confirms the calibration is semantically valid.
+      Analogous to Approach B's T5 status (same TILR primitive, different state).
 
 ## Tasks (Approach B — Plan 438, `committed_blend::z`)
 
@@ -159,6 +176,18 @@ promotion for both is deferred pending real-session personality-divergence gain.
       via `f_pi(z)` in production game sessions. The TILR bridge can be
       constructed and calibrated from real re-commit event z-snapshots.
       See `riir-ai/.plans/439_committed_blend_riir_games_dispatch.md`.
+      **TILR REFINEMENT DISPATCH LANDED** (Plan 440, 2026-07-11): the TILR
+      `refine_dz` call is now wired into the production `tick_committed_blend`
+      sub-phase (Phase 2e-cb-tilr), gated on `tilr_personality_refine`. NPCs
+      with a calibrated `TilrPersonalityBridge` (set via `set_tilr_bridge`)
+      now get the additive correction `dz += η_base·γ·d_proj` applied to their
+      committed-blend dz BEFORE integration — in the production game tick.
+      The no-harm contract holds (orthogonal dz → γ=0 → bit-identical
+      pass-through). The only remaining piece for T5 promotion is the
+      cold-path calibration harness (z-snapshot ring buffer at re-commit
+      events → `from_differences` SVD → `set_tilr_bridge`), which is a
+      game-session-layer concern, not an engine concern.
+      See `riir-ai/.plans/440_tilr_bridge_committed_blend_dispatch_wiring.md`.
 
 ## Cross-references
 
