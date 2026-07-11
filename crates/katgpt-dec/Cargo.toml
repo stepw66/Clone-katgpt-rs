@@ -1,9 +1,10 @@
 [package]
 name = "katgpt-dec"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
 license = "MIT"
 description = "Discrete Exterior Calculus substrate — exterior derivative, codifferential, Hodge Laplacian/decomposition, Stokes calculus, lattice utility. Pure math, no app semantics."
+readme = "README.md"
 repository = "https://github.com/katopz/katgpt-rs"
 keywords = ["dec", "stokes", "hodge", "exterior-calculus", "cochains"]
 categories = ["mathematics", "science"]
