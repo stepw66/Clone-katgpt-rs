@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.1](https://github.com/katopz/katgpt-rs/compare/katgpt-core-v0.3.0...katgpt-core-v0.3.1) - 2026-07-11
+
+### Other
+
+- updated the following local packages: katgpt-dec, katgpt-types, katgpt-hla, katgpt-micro-belief, katgpt-personality, katgpt-sense, katgpt-sleep
+
 ## [0.3.0](https://github.com/katopz/katgpt-rs/compare/katgpt-core-v0.2.0...katgpt-core-v0.3.0) - 2026-07-11
 
 ### Added
