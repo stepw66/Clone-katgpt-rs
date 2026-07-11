@@ -145,7 +145,29 @@ G3 was originally 38.42× (FAIL) but closed to 4.56× via rayon NPC-parallelizat
 
 📖 Plan: [`.plans/311_alien_sampler_primitive.md`](../../.plans/311_alien_sampler_primitive.md), Benchmark: [`.benchmarks/311_alien_sampler_goat.md`](../../.benchmarks/311_alien_sampler_goat.md), Research: [`.research/293_Alien_Science_Coherence_Availability_Frontier.md`](../../.research/293_Alien_Science_Coherence_Availability_Frontier.md)
 
-## 6. Replaced / Fell Behind / No Gain (Full Audit)
+## 7. Modelless KV Cache Consolidation (Plan 420) — QUALITY GAIN REFUTED
+
+Distills [Bottlenecked Transformers (arXiv:2505.16950)](https://arxiv.org/abs/2505.16950) into a modelless KV cache consolidation primitive that periodically rewrites KV value vectors in-place at surprise-triggered step boundaries, using a deterministic sigmoid-gated mean-shift toward the recent step's value centroid. The IB argument: autoregressive training makes the KV cache minimally compressive of input (high I(X;Z)); periodic consolidation reduces I(X;Z) while preserving I(Z;Y).
+
+### §3.6 Defend-Wrong PoC — QUALITY GAIN REFUTED
+
+| Competitor | Token Acc | NLL |
+|---|---|---|
+| Baseline (vanilla KV) | 0.0133 | 7.8628 |
+| Modelless consolidation | 0.0133 (−0.06pp) | 7.8629 (+0.0001) |
+| Random-rewrite control | 0.0133 | 7.8633 (+0.0005) |
+
+**Verdict:** Consolidation ≈ baseline (Δtoken_acc = −0.06pp, ΔNLL = +0.0001). Consolidation ≈ random-rewrite (ΔNLL = +0.0005). The modelless mean-shift has **no effect** on an untrained model — as expected (the IB argument requires a trained model whose KV cache carries learned extraneous detail).
+
+**Hyperparameter sweep:** zero sensitivity to `g_max ∈ {0.1, 0.3, 0.5}`, `k ∈ {16, 32, 64}` — all configs produce identical token_acc (0.0133) and near-identical NLL (7.8627–7.8630).
+
+**riir-train confirmation:** riir-train Plan 313 independently confirmed the refutation on a **TRAINED** model (31% accuracy, 0.00pp gain). The paper's quality benefit is inseparable from its TRAINED Cache Processor; the modelless mean-shift does not capture it.
+
+**No feature flag ships.** Phases 2–4 permanently shelved. The PoC bench (`bench_420_kv_consolidation_poc.rs`) is retained as the negative-result record.
+
+📖 Plan: [`.plans/420_kv_consolidation_modelless.md`](../../.plans/420_kv_consolidation_modelless.md), Research: [`.research/401_Bottlenecked_Transformer_KV_Cache_Consolidation.md`](../../.research/401_Bottlenecked_Transformer_KV_Cache_Consolidation.md)
+
+## 8. Replaced / Fell Behind / No Gain (Full Audit)
 
 | Feature | Source | Verdict | Why |
 |---------|--------|---------|-----|
@@ -166,3 +188,4 @@ G3 was originally 38.42× (FAIL) but closed to 4.56× via rayon NPC-parallelizat
 | **MPNS** (`multi_precision_npc`) | riir-ai Plan 252 T5 | **Negative arena result — NO GOAT** | 12/12 unit tests pass, but arena proves zero quantization robustness advantage. React weights collapse to all -1.0 (ternary kills gradient diversity). Dream weights quantize to identity (same magnitude). Root cause: simplified SGD (`loss * sigmoid(w)`) insufficient. Needs STE + adaptive optimizer. |
 | **Alien Sampler** (`alien_sampler`) | Plan 311 Coherence × Availability | **GOAT FAILED 2/4** | G1+G2 fail (β phase-transition at β≈0.4, no β satisfies both motif-collapse and quality). G3 PASS post-rayon (4.56×). G4 PASS. Mechanism validated (2× concentration reduction); domain transfer to synthetic NPC populations unvalidated. Module retained opt-in for paper reproduction. |
 | **AC-Prefix** (`ac_prefix`) | Plan 313 Arbitrary-Conditional Prefix | **GOAT PARTIAL — original G1 FAILED** | G1-original (paper equivalence to iterative-MLM at 1e-4) FAILED at 7.5e-4 on untrained micro-GPT. Subagent reformulated G1 to buffer-bit-identicality (PASS) and promoted; **reverted to opt-in on 2026-06-24 audit** (plan decision tree says "G1 ✗ → STOP", not "redefine and promote"). G2/G3/G4 PASS (27.258× speedup, 0 mismatches, 0 allocs). Primitive correct as modelless mask builder; paper's equivalence claim needs riir-train LoRA validation (Issue 003). |
+| **KV Consolidation** | Plan 420 Bottlenecked Transformers | **QUALITY GAIN REFUTED** | §3.6 PoC: Δtoken_acc = −0.06pp, ΔNLL = +0.0001; zero hyperparameter sensitivity. riir-train Plan 313 confirmed on TRAINED model (31% accuracy, 0.00pp gain). Paper's quality benefit is inseparable from TRAINED Cache Processor; modelless mean-shift is inert. No feature flag ships. |

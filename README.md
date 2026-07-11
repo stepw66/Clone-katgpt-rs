@@ -1,6 +1,6 @@
 # KatGPT-RS
 
-A **GOAT-proved** neuro-symbolic micro-Transformer with speculative decoding, constraint pruning, and **373 feature flags (155 default-on, all GOAT-proved)** — built in Rust. Pure algorithms, zero side effects, MIT licensed.
+A **GOAT-proved** neuro-symbolic micro-Transformer with speculative decoding, constraint pruning, and **378 feature flags (152 default-on, all GOAT-proved)** — built in Rust. Pure algorithms, zero side effects, MIT licensed.
 
 Inspired by [Andrej Karpathy's microgpt](https://karpathy.github.io/2026/02/12/microgpt/).
 
@@ -36,6 +36,10 @@ Inspired by [Andrej Karpathy's microgpt](https://karpathy.github.io/2026/02/12/m
 | **QMC Belief Sampling** | **G1–G6 ALL PASS** (Lattice/Stratified/Sobol drop-in for iid) | QuasiMoTTo QMC uniform sources in K-rollout paths (Plan 367, DEFAULT-ON) |
 | **Zone Density Routing** | **+41.54% routing**, **99.1% cache hit**, 0 stale reads | Density-aware zone routing + papaya LRU cache (Plan 351, DEFAULT-ON) |
 | **Tropical (max,+) Algebra** | **0.96× of simd_matvec** (NEON); 3/3 fusion gates PASS | Worst-case/bottleneck aggregation via tropical semiring (Plan 337, Super-GOAT) |
+| **Cross-Resolution SIMD Encode** | **11–15× faster encode** at production scales (target was 1.5×) | Transposed basis layout + `simd_matmul_rows` replaces strided gather-dot (Plan 417) |
+| **GDN Tree Verification** | **7.09× at T=128** (matches paper B200 GPU on CPU SIMD) | Rollback-free tree verify for delta-rule speculative trees via masked triangular solve (Plan 424) |
+| **MANCE SVD Caching** | **~5× loop speedup** (skip ~9 of 10 SVDs in 10-round loop) | Tangent basis reuse keyed on k-NN neighbor indices (Plan 427) |
+| **Newton-Schulz Blocked Matmul** | **1.37× faster** NS inv-sqrt r=64; per LoRA-Muon step 595µs→432µs | Rank-K blocked matmul eliminates per-dot call overhead (Plan 421) |
 
 ## 🏗️ Architecture
 
@@ -382,7 +386,7 @@ graph LR
 
 📖 **Full GOAT audit table** with research source, real gain, and replaced feature: See [`.docs/01_orientation/overview.md`](.docs/01_orientation/overview.md).
 
-### GOAT-Proved Additions (Plans 225–406+)
+### GOAT-Proved Additions (Plans 225–427+)
 
 | Feature | Plan | GOAT | Key Gain |
 |---------|------|------|----------|
@@ -457,6 +461,11 @@ graph LR
 | **Spherical Geodesic Steering** (`spherical_steering`) | 405 | G1–G5 ✅ | Geodesic Slerp rotation of latent vector toward unit-norm target + vMF confidence gate; norm-preserving on S^{d-1} (arxiv 2602.08169). Phase 5 (F1 fusion) deferred. Default-on. |
 | **Renoise-CE Self-Verifier** (`renoise_ce`) | 406 | G1/G2/G4/G5 ✅ | Perturb-completed-output + re-resolve + measure-drift self-verifier, operator-agnostic, no labels/verifier head (arxiv 2606.29150). G1 renoise=**1.000** vs plurality=0.000 (100pp); G2 CLR fusion **+30.5pp** (6× target); G4 0 allocs, G5 36µs. Default-on. |
 | **Sheaf-ADMM Coordination** (`sheaf_admm`) | 407 | G1–G6 ✅ | Three-state primal/consensus/dual ADMM on a cellular sheaf (arxiv 2605.31005, ICML 2026). G1 DEC identity `‖F x‖∞=3.26e-8`, G4 **1.808 µs** (K=100, d_v=8, d_e=5, T=5), G5 zero-alloc, G6 bit-exact determinism. Generic math operator — the private consumer runtime (riir-ai Plan 394 `sheaf_coordination`) is **default-on** as of 2026-07-07 (Super-GOAT: G7–G11 all PASS — collective inference, emergent divergence, forensic tamper-evidence). Default-on in `katgpt-dec`. |
+| **Region-Conditioned Subspace Field** (`region_subspace_steering`) | 416 | G1–G5 ✅ | MFA local-geometry steering — K regions × per-region centroid + per-region R-dim subspace (arxiv 2602.02464). Two-mode steering: centroid interpolation + local subspace offset. K=1 degenerate parity with Plan 412 bit-identical (0/800 mismatches). 943ns/call. Default-on. |
+| **Cross-Resolution SIMD Encode** | 417 | G1–G5 ✅ | Pure perf: transposed basis layout + `simd_matmul_rows` replaces strided gather-dot. **11–15× faster encode** at production scales (target was 1.5×). No new flag — optimization on DEFAULT-ON `cross_resolution_transport`. |
+| **Newton-Schulz Blocked Matmul** | 421 | G1–G5 ✅ | Pure perf: rank-K blocked matmul eliminates per-dot call overhead in NS inv-sqrt (LoRA-Muon Plan 270). `ns_inv_sqrt_psd_into` r=64: 297µs→216µs (**1.37×**); per LoRA-Muon step: 595µs→432µs. No new flag — optimization on DEFAULT-ON `newton_schulz`. |
+| **TILR** (`tilr_invariant_subspace`) | 425 | G1–G4 ✅ | Trajectory-Invariant Latent Refinement — alignment-gated subspace-projected correction with bit-identical γ→0 no-harm contract. 24.7ns/call HLA scale, 0 allocs. Default-on. |
+| **MANCE SVD Caching** | 427 | G1–G5 ✅ | Pure perf: cache tangent basis `{B,σ}` keyed on k-NN neighbor indices. ~5× loop speedup (skip ~9 of 10 SVDs). No new flag — optimization on DEFAULT-ON `manifold_erasure` (Plan 426). |
 
 **GOAT failures / negative results this session (kept opt-in, documented):** Plan 397 HGA (Hierarchical Global Attention, G2-proxy FAIL 2/12 vs DashAttention — same failure mode as MSA R225); Plan 374 ReMax (`argmax_a EI_m = argmax_a q` theorem — no modelless exploration, exploration → riir-train); Plan 375 Factorized Action (G2b+G3 FAIL — trained GateNetwork + VQ-VAE needed).
 
@@ -509,6 +518,7 @@ Path-Aware:  100 nodes, 100 accumulated-valid (100.0%)
 | ManifoldPruner (Plan 234) | **NO GOAT** | G1 FAIL: sigmoid(x)>0.5 ⟺ x>0, identical to binary at 0.5 cutoff |
 | CompressionDrafter (Plan 285) | **GOAT FAILED (2 runs)** | G1 1.50× (<3× target), G2 1077× (>2× target). Beam search structurally loses to template selection at Hot-tier |
 | Alien Sampler (Plan 311) | **GOAT FAILED (2/4)** | G1+G2 FAIL (β phase-transition at β≈0.4 — no β satisfies both motif-collapse and quality-preservation on synthetic NPC scenario). G3 PASS post-rayon (38.42×→4.56×). G4 PASS. Mechanism validated (2× concentration reduction); domain transfer unvalidated |
+| KV Consolidation (Plan 420) | **QUALITY GAIN REFUTED** | §3.6 PoC: Δtoken_acc = −0.06pp, ΔNLL = +0.0001; zero hyperparameter sensitivity. riir-train Plan 313 confirmed on TRAINED model (31% accuracy, 0.00pp gain). Paper's quality benefit is inseparable from TRAINED Cache Processor; modelless mean-shift is inert. No feature flag ships. |
 
 📖 **Full negative result detail + replaced feature audit:** [`.docs/09_feature_catalog/negative_results.md`](.docs/09_feature_catalog/negative_results.md).
 
@@ -2238,6 +2248,212 @@ Feature gate: `mag_mining` (**DEFAULT-ON** since Phase 2 GOAT PASS 2026-07-09). 
 
 ---
 
+### 🔄 Multi-scale V-cycle on Cell Complexes (Plan 413)
+
+Fills the multi-scale composition gap the shipped single-complex DEC operators (`exterior_derivative`, `codifferential`, `hodge_laplacian`, `hodge_decompose`) always had: those handle one resolution level; this composes two (fine → coarse → fine). The `htno_v_cycle` primitive restricts a fine vertex cochain to a coarse complex, applies a caller-supplied coarse operator, then prolongates back — the classic multigrid V-cycle pattern on DEC cochains.
+
+**GOAT gate:** G1 (commutativity) `dₖKc ∘ Rₖ = Rₖ₊₁ ∘ dₖK` verified on induced sub-complexes; G2 (perf) restrict/prolongate strictly cheaper than rebuilding the complex at coarse resolution; G3 (no-regression) `cargo check` with/without feature clean; G4 (alloc-free) `htno_v_cycle_into` allocates zero bytes beyond pre-allocated scratch.
+
+Feature gate: `htno_v_cycle` (opt-in, in `katgpt-dec`). Forwarded through `katgpt_core::dec::htno_v_cycle`. 📖 Plan: [`.plans/413_multiscale_v_cycle_primitive.md`](.plans/413_multiscale_v_cycle_primitive.md).
+
+---
+
+### 🧠 HLA Committed-Belief π-Sensitivity Probe (Plan 414)
+
+A modelless diagnostic that perturbs the committed `π` weights of a `CommittedFieldBlend`, re-evaluates the blend map, and measures output drift against an on-the-fly theoretical **π-sensitivity Lipschitz bound** (`L_π = max_j (1/τ)·σ_j·(1−σ_j)·‖f_j(z)‖`). A bound violation flags a numerics bug in the committed blend (wrong sigmoid, wrong Lipschitz reporting, FMA accumulation drift). This is the F4 fusion follow-up from Plan 406 (renoise-CE self-verifier).
+
+**Key design correction:** the cached `CommittedFieldBlend::lipschitz_bound` computes the **z-sensitivity** bound, not the π-sensitivity bound. The F4 probe computes its own on-the-fly π-bound using the actual `‖f_j(z)‖`, not the reported Lipschitz constant — so it catches bugs even when a field under-reports its Lipschitz constant.
+
+| Gate | Target | Result | Verdict |
+|------|--------|--------|---------|
+| **G1** | Lipschitz bound holds | 1000/1000 random configs, 0 violations | ✅ PASS |
+| **G2** | Bug detection (NaN → reject) | NaN in π → `accepted=false` | ✅ PASS |
+| **G3** | No regression | 13/13 existing tests pass with/without feature | ✅ PASS |
+| **G4** | Zero-alloc hot path | 0 allocs/1000 calls (fixed `[f32; N]`, `[f32; D]`, `[f32; 8]`) | ✅ PASS |
+| **G5** | Latency | p50 = 3.042µs (target <5µs, 1.6× headroom) | ✅ PASS |
+
+Feature gate: `hla_committed_belief_probe` (opt-in — diagnostic primitive, no runtime consumer yet). DRY refactor extracts `apply_blended_with_pi` free function shared by production + probe. 📖 Plan: [`.plans/414_hla_committed_belief_lipschitz_probe.md`](.plans/414_hla_committed_belief_lipschitz_probe.md).
+
+---
+
+### 📊 Within-Class Effective Rank — Class-Conditioned Collapse Diagnostic (Plan 415)
+
+The GOAT-distilled fusion of two shipped halves that have never been combined: `effective_rank` (entropy-based effective rank, class-agnostic) + `within_class_adjacency` / `between_class_adjacency` (class-conditioning machinery from `latent_functor/quality_gate.rs`). The paper (arXiv:2412.19419 §5.3.1) claims this specific combination — effective rank applied to the within-class residual covariance — is novel. Fills the gap where the class-agnostic `effective_rank` cannot distinguish "between-class variance dominates, within-class collapsed" from "all variance is healthy and isotropic".
+
+**Key insight:** effective rank is scale-invariant — tiny-but-isotropic within-class variance still gives high rank; the low-rank signal requires rank-deficient within-class structure, not just small-magnitude variance.
+
+| Gate | Target | Result | Verdict |
+|------|--------|--------|---------|
+| **G1** | `r_WC ∈ [1, min(d, n−C)]`, monotone in within-class variance | 3 tests pass (isotropic high, rank-1 collapses to 1, monotone) | ✅ PASS |
+| **G2** | Non-redundancy vs global `effective_rank` (load-bearing) | within ≈ 0, global ≈ 3, disagreement > 1.5 | ✅ PASS |
+| **G3** | No regression | 1385 tests pass | ✅ PASS |
+| **G4** | Latency | within-class = 232µs, global = 479µs (0.485× — within-class is FASTER) | ✅ PASS |
+
+Feature gate: inherits `sink_aware_attn` (same gate as sibling `effective_rank`). Stays opt-in. 📖 Plan: [`.plans/415_within_class_effective_rank.md`](.plans/415_within_class_effective_rank.md).
+
+---
+
+### 🌐 Region-Conditioned Subspace Field — MFA Local-Geometry Steering (Plan 416, arXiv:2602.02464)
+
+The **region-conditioned generalization of `SubspaceSteeringField` (Plan 412)**. Plan 412 carries a single k-dim orthonormal block that applies globally. This plan generalizes it to **K regions, each with its own centroid μ_k AND its own local R-dim subspace (factor-analyzer loadings W_k)** — the MFA structure from arXiv:2602.02464. At the degenerate limit (`K=1, μ_1=0, W_1=I_R`), it reduces to Plan 412 bit-identically — making this a strict superset.
+
+At `K≥2`, it enables **two-mode local-geometry steering**: move toward a region (centroid interpolation) OR walk within the current region (local subspace offset), with per-region sigmoid membership gates selecting which regions are active.
+
+| Gate | Target | Result | Verdict |
+|------|--------|--------|---------|
+| **G1** | K=1 degenerate parity with Plan 412 (bit-identical) | 0 mismatches / 800 comparisons (100 offsets × D=8) | ✅ PASS |
+| **G2** | K≥2 two-mode steering produces distinct region/local effects | 6/6 distinct centroid pairs + 6/6 distinct local pairs | ✅ PASS |
+| **G3** | Zero-alloc by construction | all fixed-size arrays | ✅ PASS |
+| **G4** | Latency | 100k calls 94ms (943ns/call, K=8 D=8 R=2) | ✅ PASS |
+| **G5** | Determinism | commitment + decompose + reconstruct bit-identical | ✅ PASS |
+
+Feature gate: `region_subspace_steering` (**DEFAULT-ON** since Phase 5, 2026-07-09). Coexists with Plan 412 — each occupies a distinct steering niche. 📖 Plan: [`.plans/416_region_subspace_field_primitive.md`](.plans/416_region_subspace_field_primitive.md), Research: [`.research/396_MFA_Region_Conditioned_Factor_Analyzer.md`](.research/396_MFA_Region_Conditioned_Factor_Analyzer.md), Paper: [arXiv:2602.02464](https://arxiv.org/abs/2602.02464).
+
+---
+
+### ⚡ Cross-Resolution SIMD Encode — Transposed Basis Layout (Plan 417)
+
+Pure perf optimization: cache a transposed basis `phi_src_t: (k, d_src)` in `CrossResolutionBases::new` (cold path), rewrite `project_to_spectral_into` to call `simd_matmul_rows` (contiguous SIMD dots) instead of the current strided gather-dot. The pre-417 comment said "the gather is unavoidable; LLVM auto-unrolls the short inner loop well" — it was wrong by an order of magnitude.
+
+**11–15× faster encode at every production scale** (target was 1.5×):
+
+| `(d_src, k)` | Baseline (ns) | Candidate (ns) | Speedup |
+|---|---|---|---|
+| `(16, 8)` | 157.1 | 38.8 | **4.05×** |
+| `(64, 8)` | 458.6 | 31.4 | **14.59×** |
+| `(64, 16)` | 540.4 | 49.2 | **10.99×** |
+| `(256, 8)` | 1336.3 | 100.1 | **13.36×** |
+| `(256, 16)` | 2696.7 | 197.4 | **13.66×** |
+| `(256, 64)` | 10650.4 | 781.1 | **13.64×** |
+
+No new feature flag — pure perf optimization on the already DEFAULT-ON `cross_resolution_transport` primitive. GOAT gate is promote-or-revert, not promote-or-flag. G1 ≤1e-6 tolerance (transpose is exact; residual diff is FMA-vs-accumulate rounding, max 5.4e-7). 📖 Plan: [`.plans/417_cross_resolution_simd_encode_transpose.md`](.plans/417_cross_resolution_simd_encode_transpose.md).
+
+---
+
+### 🧩 Canvas Schema Compiler — Declared Causal Topology for Attention Masks (Plan 419, canvas-engineering.pdf)
+
+A typed `CanvasSchema` compiler that lowers a declared region layout + directed topology into a sparse `AttentionMaskSpec` (consumable by AC-Prefix / VortexFlow), a per-position `LossWeightMask`, and a **reachability** primitive proving **exact marginal independence for binary masks** — absent edge ⟹ no influence, by construction. Plus a `transfer_distance` semantic-type compatibility scalar.
+
+**The modelless half** of canvas engineering: the compiler + reachability guarantee is a *correctness* primitive (absent edge = exact marginal independence by construction), like the DEC `d∘d=0` identity. The paper's behavioral gain (1.73× parameter efficiency) is **training-dependent** → riir-train.
+
+| Gate | Target | Result | Verdict |
+|------|--------|--------|---------|
+| **G1** | Reachability soundness (LOAD-BEARING) | absent edge ⟹ `can_reach == false` ∀ horizons | ✅ PASS |
+| **G2** | Horizon bound | `can_reach(A,C,1)=false`, `can_reach(A,C,2)=true` | ✅ PASS |
+| **G3** | No regression | `--all-features` + `--no-default-features` clean | ✅ PASS |
+| **G4** | Alloc-free hot path | 0 allocs/1000 reaches | ✅ PASS |
+| **G5** | Perf | `compile_schema` (199-region ICU) = 1515ns (6600× under 10ms); `reaches` p50 = 0ns | ✅ PASS |
+| **G6** | Feature isolation | `canvas_schema` gates all symbols | ✅ PASS |
+
+Feature gate: `canvas_schema` (opt-in — promotion deferred; `.issues/043` fusion PoC resolved inconclusively). 📖 Plan: [`.plans/419_canvas_schema_compiler.md`](.plans/419_canvas_schema_compiler.md), Research: [`.research/398_Canvas_Engineering_Declared_Causal_Topology_Compiler.md`](.research/398_Canvas_Engineering_Declared_Causal_Topology_Compiler.md), Benchmark: [`.benchmarks/419_canvas_schema_goat.md`](.benchmarks/419_canvas_schema_goat.md).
+
+---
+
+### ⚡ Newton-Schulz Blocked Matmul — Eliminate Per-Dot Call Overhead (Plan 421)
+
+Pure perf optimization on the Newton-Schulz inv-sqrt path (used by LoRA-Muon gauge-invariant composition, Plan 270). Replaces the `r²`-individual-`simd_dot_f32`-calls matmul with a rank-K blocking approach that reuses each A-row load across 8 output columns. At r=64, each `simd_dot_f32` call pays function-call overhead + 4× `vdupq_n_f32` register init + horizontal reduction — the per-call overhead dominated.
+
+| Op | r | Before | After | Speedup |
+|---|---|---|---|---|
+| `ns_inv_sqrt_psd_into` | 64 | 297µs | 216µs | **1.37×** |
+| `newton_schulz5_into` | 64×64 | 144µs | 110µs | **1.31×** |
+| `ns_inv_sqrt_psd_into` | 32 | 51µs | 37µs | **1.39×** |
+| Per LoRA-Muon step (2× r=64) | — | 595µs | 432µs | **1.38×** |
+
+No new feature flag — pure perf optimization on the already DEFAULT-ON `newton_schulz` feature. The `blocked_dot8` kernel is numerically safe for NS inv-sqrt on rank-deficient PSD matrices provided the tail (columns not divisible by 8) uses `simd_dot_f32`. 11 rank-deficient safety tests guard this path. 📖 Plan: [`.plans/421_newton_schulz_blocked_matmul.md`](.plans/421_newton_schulz_blocked_matmul.md).
+
+---
+
+### 📍 Cochain Point Sampler — Continuous Field Queries with Local-Coordinate Conditioning (Plan 422, arXiv:2506.22899)
+
+The one genuinely-unshipped piece distilled from Cells2Pixels (SIGGRAPH 2026): a **continuous intra-primitive cochain field sampler** that answers "what is the cochain value at continuous point `p` inside cell `Ω`?" with local-coordinate conditioning. This is the modelless LPPN *input* computation — the Whitney/de-Rham reconstruction that turns a discrete `CochainField` into a continuously-queryable field. `htno_v_cycle::prolongate` scatters to fine *vertices*; this primitive answers "threat at (3.7, 5.2)".
+
+Ships quad (2D grid, bilinear λ-weights) and triangle (mesh, barycentric sort + CDF remap) samplers with local-coordinate augmentation (`sin/cos` harmonics for quad, barycentric sort-CDF for tri).
+
+| Gate | Target | Result | Verdict |
+|------|--------|--------|---------|
+| **G1** | Linear-precision exactness (linear field → exact value at interior points) | 1250 points, all < 1e-5 | ✅ PASS |
+| **G2** | Partition-of-unity (Σλ = 1, λ ≥ 0 inside primitive) | both quad + tri | ✅ PASS |
+| **G3** | C⁰ continuity across primitive boundaries | sincos boundary + barycentric permutation invariance → 0 diff | ✅ PASS |
+| **G4** | Zero-alloc steady state | 0 allocs on both `*_into` paths | ✅ PASS |
+| **G5** | Latency | 11.2 ns/call on 64×64 grid (8.8× under 100ns target) | ✅ PASS |
+
+Feature gate: `cochain_point_sampler` (opt-in, in `katgpt-dec`). 📖 Plan: [`.plans/422_cochain_point_sampler_primitive.md`](.plans/422_cochain_point_sampler_primitive.md), Research: [`.research/404_Cells2Pixels_Resolution_Decoupled_NCA.md`](.research/404_Cells2Pixels_Resolution_Decoupled_NCA.md), Paper: [arXiv:2506.22899](https://arxiv.org/abs/2506.22899).
+
+---
+
+### 🔧 Spectral Rewiring — Weight Delta Purification via Base SVD Projection (Plan 423)
+
+The modelless SAR kernel: project a weight delta onto the base matrix's SVD subspace, extract the compact rewiring matrix M, reconstruct the purified on-manifold delta ΔW*. Reuses `thin_svd_into` from `subspace_phase_gate`. The SVD + projection machinery is correct, zero-alloc, deterministic, and fast via the cached-index hot path.
+
+**Stays opt-in** because the spectral concentration assumption (G1b) is unvalidated without real training deltas — a generic delta is NOT concentrated (0.12–0.18). Promotion to default is blocked on Issue 123 (real-delta test). The SVD 64-col cap (Issue 124) blocks 128×128/512×512. The cached-index path (`SpectralRewireIndex`) is the recommended hot-loop API.
+
+| Gate | Target | Result | Verdict |
+|------|--------|--------|---------|
+| **G1a** | SVD recovery | recovery ~8e-6 | ✅ PASS |
+| **G1b** | Spectral concentration at NPC-scale | 0.12–0.18 (generic delta NOT concentrated) | ❌ UNVALIDATED |
+| **G3** | Determinism | bit-identical for fixed input | ✅ PASS |
+| **G4** | Zero-alloc | 0 allocs | ✅ PASS |
+| **G5** | Latency | 0.41µs NPC-scale (cached-index hot path) | ✅ PASS |
+
+Feature gate: `spectral_rewire` (opt-in — blocked on Issue 123 real-delta validation). 📖 Plan: [`.plans/423_spectral_rewire_primitive.md`](.plans/423_spectral_rewire_primitive.md).
+
+---
+
+### 🌳 GDN Rollback-Free Tree Verification — Masked Triangular Solve for Delta-Rule Speculative Trees (Plan 424, arXiv:2607.06763)
+
+Ship a modelless primitive that verifies speculative draft trees against GDN (Gated DeltaNet) recurrent layers **without rolling back the recurrent state**. The algorithm (paper §3.4) extends the chunked delta-rule recurrence to tree-structured drafts via a partial order (ancestor relation), reducing verification to a masked triangular solve `(I + X)U = βV` followed by an ancestor-masked output read. The committed state is never speculatively written — a single commit pass replays the delta-rule along the accepted path.
+
+Fills a confirmed gap: katgpt-rs ships GDN2 (Plan 105, default-on) and KV-cache snapshot/rollback tree verification for attention models (Plan 012), but has **no tree verification for GDN/delta-rule recurrent layers**. Includes multi-head batching + QwenDeltaNet hybrid integration (attention layers use per-branch sequential KV-rollback; DeltaNet layers use tree verify).
+
+**Chain tree speedup matches paper's B200 GPU numbers on CPU SIMD**:
+
+| Tree size T | Speedup | Paper B200 |
+|---|---|---|
+| T=16 | **1.93×** | 1.5× |
+| T=32 | **2.79×** | 2.7× |
+| T=64 | **4.66×** | 4.6× |
+| T=128 | **7.09×** | 7.1× |
+
+Feature gate: `gdn_tree_verify` (opt-in — only relevant for `QwenDeltaNet` / GDN-layer configs). Complement to Plan 012's attention verify, not a replacement. 📖 Plan: [`.plans/424_gdn_tree_verification_primitive.md`](.plans/424_gdn_tree_verification_primitive.md), Research: [`.research/407_Trees_from_Marginals_GDN_Tree_Verify.md`](.research/407_Trees_from_Marginals_GDN_Tree_Verify.md), Benchmark: [`.benchmarks/424_gdn_tree_verify_goat.md`](.benchmarks/424_gdn_tree_verify_goat.md), Paper: [arXiv:2607.06763](https://arxiv.org/abs/2607.06763).
+
+---
+
+### 🧬 TILR — Trajectory-Invariant Latent Refinement (Plan 425)
+
+Ship `tilr_refine_into(state, direction, basis, r, eta_base, scratch, out)` — a zero-alloc alignment-gated subspace-projected correction with a **bit-identical `γ→0` no-harm contract**. When the alignment ratio γ between a correction direction and the state is zero, the refined output is bit-identical to the input (no harm). When γ=1, the full correction is applied. This is the modelless alignment-gated member of the steering family — Plan 412 is the ungated member; they coexist.
+
+Reuses Plan 301 SVD, Plan 152 γ-ratio logic, Plan 412 steering patterns. Not UQ-bearing (deterministic linear-algebra correction — no conformal floor needed).
+
+| Gate | Target | Result | Verdict |
+|------|--------|--------|---------|
+| **G1** | γ→0 bit-recovers input; γ=1 full correction; ranking preserved; gamma monotone | T2.1–T2.5 unit tests | ✅ PASS |
+| **G2** | <50 ns/call HLA scale, <200 ns/call shard scale, <3% overhead | 24.7 / 123.0 ns | ✅ PASS |
+| **G3** | All katgpt-core tests pass with + without feature | 1445/1426 tests | ✅ PASS |
+| **G4** | Zero heap alloc on `tilr_refine_into` hot path | 0 allocs/100 calls | ✅ PASS |
+
+Feature gate: `tilr_invariant_subspace` (**DEFAULT-ON** since GOAT gate PASS 2026-07-10). Consumer wiring (riir-ai HLA, riir-neuron-db shards) deferred to follow-up issues. 📖 Plan: [`.plans/425_tilr_invariant_subspace_refinement.md`](.plans/425_tilr_invariant_subspace_refinement.md).
+
+---
+
+### 🚀 MANCE SVD Caching — Tangent Basis Reuse Across Loop Rounds (Plan 427)
+
+Pure perf optimization on the MANCE manifold-aware concept erasure primitive (Plan 426). Cache the tangent basis `{B, σ}` keyed on k-NN neighbor indices. Skip the one-sided Jacobi SVD when the neighbor set hasn't changed across iterative loop rounds. The trust-bounded step (ε=0.1) moves x at most 10% of r_i per step, so the neighbor set is largely stable across loop rounds.
+
+**Cache validity is both necessary and sufficient:** same neighbor indices → same B/σ, bit-identical (B/σ depend only on neighbor positions, not x). The movement-threshold condition from the original issue is mathematically redundant and omitted by design.
+
+| Gate | Target | Result | Verdict |
+|------|--------|--------|---------|
+| **G1** | Cached results match uncached within f32 epsilon | bit-identical when cache valid | ✅ PASS |
+| **G2** | Cached loop latency < 50% of uncached | ~5× loop speedup (skip ~9 of 10 SVDs in 10-round loop) | ✅ PASS |
+| **G3** | Existing MANCE tests pass unchanged | all pass | ✅ PASS |
+| **G4** | 0 allocs over 100 steady-state cached loop calls | 0 allocs | ✅ PASS |
+| **G5** | Modelless | pure structural state, no training | ✅ PASS |
+
+No new feature flag — perf optimization on the already DEFAULT-ON `manifold_erasure` feature. New API: `ManceTangentCache` + `manifold_erasure_step_cached_into` + `manifold_erasure_loop_cached_into`. 📖 Plan: [`.plans/427_mance_svd_caching.md`](.plans/427_mance_svd_caching.md).
+
+---
+
 ## 🔧 KV Compression
 
 Default: **Hybrid OCT+PQ** (OCTOPUS triplet encoding + PlanarQuant 2D Givens rotation). Best MSE + 64× fewer rotation FMAs.
@@ -2312,6 +2528,13 @@ Default: **Hybrid OCT+PQ** (OCTOPUS triplet encoding + PlanarQuant 2D Givens rot
 | **Factorized Action Abstraction** (`factorized_action`) | `EffectCodebook` + state-aware FiLM-gated factorized action latent (k-means codebook, sigmoid relevance gate) (Plan 375, arxiv 2606.30544). | 🪦 GOAT partial-FAIL — G1 PASS (4.9× over monolithic), G2a PASS (63% distractor suppression); **G2b FAIL** (gate at parity with mean) + **G3 FAIL** (k-means overfits source) → trained VQ-VAE + GateNetwork needed (riir-train). |
 | **SSMax** (`ssmax_temperature`) | Length-aware log-N attention temperature: multiplicative pre-attention logit rescale `s̃ = s_L · log(N) · s` canceling the `(N−1)` dilution in `α_gold ≈ 1/(1 + (N−1)·N^{−s·Δ})` (Plan 411, arxiv 2607.01538). Default `s_L = 1.0` is truly modelless; `Adaptive` mode ships `s_L = 1/Δ` analytically. Composes with sigmoid parallax + SDPA + sink-aware; NOT funcattn (no (n,n) matrix). | **DEFAULT-ON** (Plan 411 Phase 5, 2026-07-07) — G1+G2+G3+G4+G5 ALL PASS. G1 argmax preserved at N∈{64,1k,10k,100k}; G2 cosine recall 0.25→0.97; G3 56ns<1µs; G4 0 allocs; G5 N=64 bit-identical. **Zero runtime cost unless invoked**: `ParallaxConfig.ssmax` defaults `None` → no-op → `ssmax_none_is_bit_identical_to_base` test verifies zero default-behavior change. |
 | **GoldShare** (`gold_share_probe`) | Content-specific output-fraction diagnostic `‖a^G_L‖ / ‖a_L‖` — detects when a layer's attention output has been rewritten from gold-content to aggregate-noise at comparable magnitude (Plan 411, arxiv 2607.01538). Complements `effective_rank` (content-agnostic) and `stable_rank_update` (per-sink). Joint reading with `sink_classify`: Broadcast + low gold_share = "broadcast that failed." | Opt-in diagnostic — G2+G4 PASS (gold_share range 0.94 vs effective_rank 0.00 across the dilution sweep; 0 allocs). Stays opt-in until a downstream consumer depends on it. |
+| **Multi-scale V-cycle** (`htno_v_cycle`) | DEC multigrid V-cycle: restrict → coarse_op → prolongate on cell complexes (Plan 413). Fills the multi-scale composition gap in the shipped single-complex DEC operators. G1 commutativity `dₖKc ∘ Rₖ = Rₖ₊₁ ∘ dₖK`; G4 zero-alloc `htno_v_cycle_into`. | Opt-in (in `katgpt-dec`) — substrate-completeness primitive. |
+| **HLA π-Sensitivity Probe** (`hla_committed_belief_probe`) | Perturbs committed `π` weights, re-evaluates blend, checks drift vs on-the-fly π-Lipschitz bound (Plan 414, F4 follow-up from Plan 406). G1 1000/1000 configs 0 violations; G4 0 allocs; G5 p50=3.042µs. | Opt-in — diagnostic/self-verifier, no runtime consumer yet. |
+| **Within-Class Effective Rank** | Class-conditioned collapse diagnostic — effective rank of within-class residual covariance (Plan 415, arXiv:2412.19419). G2 non-redundancy vs global `effective_rank` proven (within≈0, global≈3). Inherits `sink_aware_attn` gate. | Opt-in — stays alongside sibling `effective_rank`. |
+| **Canvas Schema Compiler** (`canvas_schema`) | Declared causal topology compiler → sparse `AttentionMaskSpec` + `LossWeightMask` + reachability-by-construction (Plan 419, canvas-engineering.pdf). G1–G6 ALL PASS (reachability soundness, 1515ns compile, 0ns reaches). | Opt-in — promotion deferred; `.issues/043` fusion PoC inconclusive. |
+| **Cochain Point Sampler** (`cochain_point_sampler`) | Continuous field queries with local-coordinate conditioning — Whitney/de-Rham reconstruction from discrete `CochainField` to continuously-queryable field (Plan 422, arXiv:2506.22899). G5 11.2ns/call. | Opt-in (in `katgpt-dec`) — substrate-completeness primitive. |
+| **Spectral Rewiring** (`spectral_rewire`) | Weight delta purification via base SVD projection — SAR kernel extracting compact rewiring matrix M + purified ΔW* (Plan 423). G1a recovery ~8e-6; G5 0.41µs NPC-scale. | Opt-in — G1b spectral concentration unvalidated without real training deltas (Issue 123). |
+| **GDN Tree Verification** (`gdn_tree_verify`) | Rollback-free tree verification for delta-rule speculative trees via masked triangular solve (Plan 424, arXiv:2607.06763). Chain speedup 7.09× at T=128 (matches paper B200 GPU on CPU). G4 0 allocs. | Opt-in — only relevant for `QwenDeltaNet` / GDN-layer configs. |
 
 📖 **Full detail for ALL opt-in features + complete feature flag reference:** [`.docs/09_feature_catalog/opt_in_features.md`](.docs/09_feature_catalog/opt_in_features.md) and [`Cargo.toml`](Cargo.toml).
 

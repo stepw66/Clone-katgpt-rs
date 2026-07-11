@@ -457,3 +457,122 @@ Module split (AGENTS.md `< 2048` line rule): `canvas/{mod,types,mask,reachabilit
 🔧 Feature flag: `canvas_schema` — **opt-in** (promotion deferred; `.issues/043` fusion PoC resolved inconclusively, constituents already default-on with runtime consumers — see Research 398 §8).
 
 📖 See [`.benchmarks/419_canvas_schema_goat.md`](../../.benchmarks/419_canvas_schema_goat.md) for the full GOAT proof + the direction-convention derivation.
+
+## 13. Multi-scale V-cycle on Cell Complexes (Plan 413)
+
+Fills the multi-scale composition gap in the shipped single-complex DEC operators (`exterior_derivative`, `codifferential`, `hodge_laplacian`, `hodge_decompose`). Those handle one resolution level; `htno_v_cycle` composes two (fine → coarse → fine): restrict a fine vertex cochain to a coarse complex, apply a caller-supplied coarse operator, prolongate back — the classic multigrid V-cycle on DEC cochains.
+
+**GOAT gate:** G1 (commutativity) `dₖKc ∘ Rₖ = Rₖ₊₁ ∘ dₖK` verified on induced sub-complexes; G2 (perf) restrict/prolongate cheaper than rebuilding the complex; G3 (no-regression) clean with/without feature; G4 (alloc-free) `htno_v_cycle_into` zero bytes beyond pre-allocated scratch.
+
+The 2×2 aggregation coarsening is documented as **non-commuting** (its coarse edges are long-range, not fine edges) — the V-cycle still provides coarse smoothing, but it is a smoother, not a d-commuting transfer.
+
+🔧 Feature flag: `htno_v_cycle` — **opt-in** (in `katgpt-dec`). Forwarded through `katgpt_core::dec::htno_v_cycle`.
+
+📖 Plan: [`.plans/413_multiscale_v_cycle_primitive.md`](../../.plans/413_multiscale_v_cycle_primitive.md)
+
+## 14. HLA Committed-Belief π-Sensitivity Probe (Plan 414)
+
+A modelless diagnostic that perturbs the committed `π` weights of a `CommittedFieldBlend`, re-evaluates the blend map, and measures output drift against an on-the-fly theoretical **π-sensitivity Lipschitz bound** (`L_π = max_j (1/τ)·σ_j·(1−σ_j)·‖f_j(z)‖`). A bound violation flags a numerics bug in the committed blend.
+
+**Key design correction:** the cached `CommittedFieldBlend::lipschitz_bound` computes the **z-sensitivity** bound, not the π-sensitivity bound. The F4 probe computes its own on-the-fly π-bound using the actual `‖f_j(z)‖` — so it catches bugs even when a field under-reports its Lipschitz constant.
+
+| Gate | Target | Result | Verdict |
+|------|--------|--------|---------|
+| **G1** | Lipschitz bound holds | 1000/1000 random configs, 0 violations | ✅ PASS |
+| **G2** | Bug detection (NaN → reject) | NaN in π → `accepted=false` | ✅ PASS |
+| **G3** | No regression | 13/13 existing tests pass | ✅ PASS |
+| **G4** | Zero-alloc hot path | 0 allocs/1000 calls | ✅ PASS |
+| **G5** | Latency | p50 = 3.042µs (target <5µs) | ✅ PASS |
+
+DRY refactor extracts `apply_blended_with_pi` free function shared by production + probe.
+
+🔧 Feature flag: `hla_committed_belief_probe` — **opt-in** (diagnostic/self-verifier, no runtime consumer yet). F4 fusion follow-up from Plan 406 (renoise-CE).
+
+📖 Plan: [`.plans/414_hla_committed_belief_lipschitz_probe.md`](../../.plans/414_hla_committed_belief_lipschitz_probe.md)
+
+## 15. Within-Class Effective Rank (Plan 415)
+
+Class-conditioned collapse diagnostic: the entropy-based effective rank of the **within-class residual** covariance matrix (arXiv:2412.19419 §5.3.1). Fusion of two shipped halves never combined: `effective_rank` (class-agnostic) + `within_class_adjacency` / `between_class_adjacency` (class-conditioning from `latent_functor/quality_gate.rs`).
+
+Fills the gap where the class-agnostic `effective_rank` cannot distinguish "between-class variance dominates, within-class collapsed" from "all variance is healthy and isotropic". The existing Dirichlet-energy quality gate measures *separation* (between > within) but not *within-class subspace health*.
+
+**Key insight:** effective rank is scale-invariant — tiny-but-isotropic within-class variance still gives high rank; the low-rank signal requires rank-deficient within-class structure, not just small-magnitude variance.
+
+| Gate | Target | Result | Verdict |
+|------|--------|--------|---------|
+| **G1** | `r_WC ∈ [1, min(d, n−C)]`, monotone | 3 tests pass | ✅ PASS |
+| **G2** | Non-redundancy vs global `effective_rank` (load-bearing) | within ≈ 0, global ≈ 3 | ✅ PASS |
+| **G3** | No regression | 1385 tests pass | ✅ PASS |
+| **G4** | Latency | within-class 232µs (0.485× of global) | ✅ PASS |
+
+Not UQ-bearing, not Super-GOAT (Q2 fails — better diagnostic for existing class, not new class).
+
+🔧 Feature flag: inherits `sink_aware_attn` (same gate as sibling `effective_rank`). **Opt-in** — stays alongside its sibling.
+
+📖 Plan: [`.plans/415_within_class_effective_rank.md`](../../.plans/415_within_class_effective_rank.md)
+
+## 16. Cochain Point Sampler (Plan 422)
+
+Continuous intra-primitive cochain field sampler that answers "what is the cochain value at continuous point `p` inside cell `Ω`?" with local-coordinate conditioning. The modelless LPPN *input* computation — Whitney/de-Rham reconstruction turning a discrete `CochainField` into a continuously-queryable field.
+
+Ships quad (2D grid, bilinear λ-weights) and triangle (mesh, barycentric sort + CDF remap) samplers with local-coordinate augmentation (`sin/cos` harmonics for quad, barycentric sort-CDF for tri). The barycentric sort enforces C⁰ continuity across triangle edges (vertices listed in arbitrary order per face).
+
+| Gate | Target | Result | Verdict |
+|------|--------|--------|---------|
+| **G1** | Linear-precision exactness | 1250 points, all < 1e-5 | ✅ PASS |
+| **G2** | Partition-of-unity (Σλ = 1, λ ≥ 0) | both quad + tri | ✅ PASS |
+| **G3** | C⁰ continuity across boundaries | 0 diff | ✅ PASS |
+| **G4** | Zero-alloc steady state | 0 allocs on `*_into` paths | ✅ PASS |
+| **G5** | Latency | 11.2 ns/call on 64×64 grid | ✅ PASS |
+
+🔧 Feature flag: `cochain_point_sampler` — **opt-in** (in `katgpt-dec`). Gain-tier — substrate-completeness primitive, not a default-path improvement.
+
+📖 Plan: [`.plans/422_cochain_point_sampler_primitive.md`](../../.plans/422_cochain_point_sampler_primitive.md), Research: [`.research/404_Cells2Pixels_Resolution_Decoupled_NCA.md`](../../.research/404_Cells2Pixels_Resolution_Decoupled_NCA.md), Paper: [arXiv:2506.22899](https://arxiv.org/abs/2506.22899)
+
+## 17. Spectral Rewiring (Plan 423)
+
+The modelless SAR kernel: project a weight delta onto the base matrix's SVD subspace, extract the compact rewiring matrix M, reconstruct the purified on-manifold delta ΔW*. Reuses `thin_svd_into` from `subspace_phase_gate` (Plan 301).
+
+**Stays opt-in** because the spectral concentration assumption (G1b) is unvalidated without real training deltas — a generic delta is NOT concentrated (0.12–0.18). Promotion to default is blocked on Issue 123 (real-delta test). The SVD 64-col cap (Issue 124) blocks 128×128/512×512. The cached-index path (`SpectralRewireIndex`) is the recommended hot-loop API.
+
+| Gate | Target | Result | Verdict |
+|------|--------|--------|---------|
+| **G1a** | SVD recovery | ~8e-6 | ✅ PASS |
+| **G1b** | Spectral concentration at NPC-scale | 0.12–0.18 (NOT concentrated) | ❌ UNVALIDATED |
+| **G3** | Determinism | bit-identical | ✅ PASS |
+| **G4** | Zero-alloc | 0 allocs | ✅ PASS |
+| **G5** | Latency | 0.41µs NPC-scale (cached-index) | ✅ PASS |
+
+Cross-repo applications (freeze/thaw purification, spectral LoRA, spectral TIES) are noted as follow-ups but NOT implemented in this plan.
+
+🔧 Feature flag: `spectral_rewire` — **opt-in** (blocked on Issue 123 real-delta validation).
+
+📖 Plan: [`.plans/423_spectral_rewire_primitive.md`](../../.plans/423_spectral_rewire_primitive.md)
+
+## 18. GDN Rollback-Free Tree Verification (Plan 424)
+
+Verifies speculative draft trees against GDN (Gated DeltaNet) recurrent layers **without rolling back the recurrent state**. The algorithm (arXiv:2607.06763 §3.4) extends the chunked delta-rule recurrence to tree-structured drafts via a partial order (ancestor relation), reducing verification to a masked triangular solve `(I + X)U = βV` followed by an ancestor-masked output read.
+
+Fills a confirmed gap: katgpt-rs ships GDN2 (Plan 105, default-on) and KV-cache snapshot/rollback tree verification for attention models (Plan 012), but has **no tree verification for GDN/delta-rule recurrent layers**. Includes multi-head batching + QwenDeltaNet hybrid integration (attention layers use per-branch sequential KV-rollback; DeltaNet layers use tree verify).
+
+**Chain tree speedup matches paper's B200 GPU numbers on CPU SIMD**:
+
+| Tree size T | Speedup | Paper B200 |
+|---|---|---|
+| T=16 | **1.93×** | 1.5× |
+| T=32 | **2.79×** | 2.7× |
+| T=64 | **4.66×** | 4.6× |
+| T=128 | **7.09×** | 7.1× |
+
+| Gate | Target | Result | Verdict |
+|------|--------|--------|---------|
+| **G1** | Bit-exact vs per-branch sequential verify | within 1e-3 (f32 accumulation) | ✅ PASS |
+| **G2** | ≥2× faster at T=32, ≥4× at T=64 | 2.79× / 4.66× / 7.09× | ✅ PASS |
+| **G3** | No regression | 1429 tests pass | ✅ PASS |
+| **G4** | Alloc-free hot path | 0 allocs steady-state | ✅ PASS |
+
+Phase 6 (DDTree argmax-of-marginal tuning) produced a **negative result** — the paper's §3.5 insight does not transfer to best-first tree building (best-first search already prioritizes the argmax path naturally).
+
+🔧 Feature flag: `gdn_tree_verify` — **opt-in** (complement to Plan 012's attention verify; only relevant for `QwenDeltaNet` / GDN-layer configs).
+
+📖 Plan: [`.plans/424_gdn_tree_verification_primitive.md`](../../.plans/424_gdn_tree_verification_primitive.md), Research: [`.research/407_Trees_from_Marginals_GDN_Tree_Verify.md`](../../.research/407_Trees_from_Marginals_GDN_Tree_Verify.md), Benchmark: [`.benchmarks/424_gdn_tree_verify_goat.md`](../../.benchmarks/424_gdn_tree_verify_goat.md), Paper: [arXiv:2607.06763](https://arxiv.org/abs/2607.06763)
