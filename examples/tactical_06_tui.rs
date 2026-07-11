@@ -160,7 +160,7 @@ impl<'a> StrategicPruner<'a> {
         parent_tokens: &[usize],
         start_state: &GameState,
     ) -> Option<GameState> {
-        let mut state = start_state.clone();
+        let mut state = *start_state;
         for &token_idx in parent_tokens {
             let target = self.targets.get(token_idx)?;
             let target_pos = target.pos(
@@ -379,7 +379,7 @@ fn solve(pruner: &TacticalPruner) -> Solution {
     let mut st = pruner.initial_state();
     for &action in &flat_actions {
         st = pruner.apply_action(&st, action).unwrap();
-        states.push(st.clone());
+        states.push(st);
     }
 
     Solution {

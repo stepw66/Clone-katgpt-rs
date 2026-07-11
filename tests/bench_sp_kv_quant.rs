@@ -84,7 +84,7 @@ fn setup(
     let block_size = config.block_size;
 
     let tq_cache = TurboQuantKVCache::new(config, 3, 3); // 3-bit key+value (default)
-    let cache = SpKvQuantCache::new(sp_config.clone(), tq_cache, n_layers, block_size);
+    let cache = SpKvQuantCache::new(sp_config, tq_cache, n_layers, block_size);
 
     let predictors = SpKvPredictors::new(
         n_layers,
@@ -244,7 +244,7 @@ fn test_fusion_hard_gate_masks_pruned() {
     let n_layers = config.n_layer;
     let block_size = config.block_size;
     let tq_cache = TurboQuantKVCache::new(&config, 3, 3); // 3-bit key+value (default)
-    let mut cache = SpKvQuantCache::new(sp_config.clone(), tq_cache, n_layers, block_size);
+    let mut cache = SpKvQuantCache::new(sp_config, tq_cache, n_layers, block_size);
 
     // Manually set utilities and retained for layer 0
     // Simulate being at pos=10: positions 9..=10 are in window (window=1).

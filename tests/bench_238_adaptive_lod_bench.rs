@@ -168,7 +168,7 @@ fn bench_fixed_vs_adaptive_niah() {
             {
                 adaptive_total += 1;
                 let config = fixed_config(CompressionRatio::X8); // base ratio for adaptive
-                let buf = LatentContextBuffer::new_adaptive(&tokens, config, slod.clone());
+                let buf = LatentContextBuffer::new_adaptive(&tokens, config, slod);
                 let ctx = buf.context();
                 let found = select_segments_to_expand(ctx, &needle, top_k);
                 let needle_found = !found.is_empty();
@@ -250,7 +250,7 @@ fn bench_adaptive_compression_ratio_distribution() {
     };
     let window_size = config.window_size;
 
-    let buf = LatentContextBuffer::new_adaptive(&tokens, config, slod.clone());
+    let buf = LatentContextBuffer::new_adaptive(&tokens, config, slod);
     let _ctx = buf.context();
 
     println!();

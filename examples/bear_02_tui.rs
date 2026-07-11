@@ -176,7 +176,7 @@ impl App {
         let mut state = pruner.initial_state();
         for &action in &solution {
             state = pruner.apply_action(&state, action).unwrap();
-            states.push(state.clone());
+            states.push(state);
         }
 
         // Verify final state

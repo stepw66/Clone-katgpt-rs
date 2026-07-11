@@ -183,7 +183,7 @@ fn g4_throughput_sustained() {
 #[test]
 fn g5_blake3_tamper_detection() {
     let patch = LatentPatch::new(42, [0.5f32; 8]);
-    let mut tampered = patch.clone();
+    let mut tampered = patch;
 
     // Corrupt 1 bit in commitment
     tampered.commitment[0] ^= 1;

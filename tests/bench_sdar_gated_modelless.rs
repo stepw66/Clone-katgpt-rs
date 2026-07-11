@@ -35,8 +35,8 @@ fn bench_sdar_gated_overhead() {
     // This measures the delegation overhead of the SDAR wrapper.
 
     let config = CompressConfig::new(50, 0.1, 5, 1000);
-    let baseline_absorb = AbsorbCompressLayer::new(NoScreeningPruner, num_arms, config.clone());
-    let inner_absorb = AbsorbCompressLayer::new(NoScreeningPruner, num_arms, config.clone());
+    let baseline_absorb = AbsorbCompressLayer::new(NoScreeningPruner, num_arms, config);
+    let inner_absorb = AbsorbCompressLayer::new(NoScreeningPruner, num_arms, config);
     let sdar_absorb =
         SdarGatedAbsorbCompress::new(inner_absorb, num_arms, SdarAbsorbConfig::default());
 
@@ -152,7 +152,7 @@ fn bench_sdar_gated_overhead() {
     // ── Cold path: SdarGatedAbsorbCompress::observe() vs AbsorbCompressLayer::absorb() ─
 
     let config2 = CompressConfig::new(50, 0.1, 5, 1000);
-    let mut scalar_absorb = AbsorbCompressLayer::new(NoScreeningPruner, num_arms, config2.clone());
+    let mut scalar_absorb = AbsorbCompressLayer::new(NoScreeningPruner, num_arms, config2);
     let inner_absorb2 = AbsorbCompressLayer::new(NoScreeningPruner, num_arms, config2);
     let mut sdar_absorb =
         SdarGatedAbsorbCompress::new(inner_absorb2, num_arms, SdarAbsorbConfig::default());
@@ -300,7 +300,7 @@ fn bench_sdar_gated_throughput() {
     // ── SdarGatedAbsorbCompress::observe() throughput ─────────────
 
     let config = CompressConfig::new(50, 0.1, 5, 1000);
-    let inner_absorb = AbsorbCompressLayer::new(NoScreeningPruner, num_arms, config.clone());
+    let inner_absorb = AbsorbCompressLayer::new(NoScreeningPruner, num_arms, config);
     let mut sdar_absorb =
         SdarGatedAbsorbCompress::new(inner_absorb, num_arms, SdarAbsorbConfig::default());
 
@@ -592,7 +592,7 @@ fn bench_sdar_gated_absorb_promotion() {
     // ── Baseline: Hard threshold absorb ───────────────────────────
 
     let config = CompressConfig::new(10, 0.05, 3, 100);
-    let mut scalar_layer = AbsorbCompressLayer::new(NoScreeningPruner, num_arms, config.clone());
+    let mut scalar_layer = AbsorbCompressLayer::new(NoScreeningPruner, num_arms, config);
 
     let start = Instant::now();
     for i in 0..observations {
@@ -611,7 +611,7 @@ fn bench_sdar_gated_absorb_promotion() {
 
     // ── SDAR soft gate at β=1.0 (soft) ───────────────────────────
 
-    let inner1 = AbsorbCompressLayer::new(NoScreeningPruner, num_arms, config.clone());
+    let inner1 = AbsorbCompressLayer::new(NoScreeningPruner, num_arms, config);
     let sdar_config1 = SdarAbsorbConfig::soft().with_promotion_stats();
     let mut sdar_soft = SdarGatedAbsorbCompress::new(inner1, num_arms, sdar_config1);
 
@@ -662,7 +662,7 @@ fn bench_sdar_gated_absorb_promotion() {
 
     // ── SDAR soft gate at β=5.0 (paper-validated optimum) ────────
 
-    let inner2 = AbsorbCompressLayer::new(NoScreeningPruner, num_arms, config.clone());
+    let inner2 = AbsorbCompressLayer::new(NoScreeningPruner, num_arms, config);
     let sdar_config2 = SdarAbsorbConfig::new(5.0).with_promotion_stats();
     let mut sdar_optimal = SdarGatedAbsorbCompress::new(inner2, num_arms, sdar_config2);
 
@@ -712,7 +712,7 @@ fn bench_sdar_gated_absorb_promotion() {
 
     // ── SDAR soft gate at β=10.0 (near-binary) ───────────────────
 
-    let inner3 = AbsorbCompressLayer::new(NoScreeningPruner, num_arms, config.clone());
+    let inner3 = AbsorbCompressLayer::new(NoScreeningPruner, num_arms, config);
     let sdar_config3 = SdarAbsorbConfig::aggressive().with_promotion_stats();
     let mut sdar_aggressive = SdarGatedAbsorbCompress::new(inner3, num_arms, sdar_config3);
 

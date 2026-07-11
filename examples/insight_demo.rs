@@ -112,9 +112,9 @@ fn main() {
 
     // Stable: constant rewards → absorption eligible
     for _ in 0..5 {
-        cal.record_reward(key_stable.clone(), 0.85);
+        cal.record_reward(key_stable, 0.85);
     }
-    if let Some(s) = cal.bandit_update(key_stable.clone(), 0.85) {
+    if let Some(s) = cal.bandit_update(key_stable, 0.85) {
         println!(
             "  Stable: {:.4} → {:.4} (Δ={:.4})",
             s.old_value, s.new_value, s.reward_delta
@@ -124,7 +124,7 @@ fn main() {
 
     // Noisy: alternating rewards → high variance blocks absorption
     for i in 0..6 {
-        cal.record_reward(key_noisy.clone(), if i % 2 == 0 { 0.1 } else { 0.9 });
+        cal.record_reward(key_noisy, if i % 2 == 0 { 0.1 } else { 0.9 });
     }
     println!(
         "  Noisy absorption:    {} (variance blocks)",

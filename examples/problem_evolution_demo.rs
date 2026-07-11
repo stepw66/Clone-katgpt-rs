@@ -45,7 +45,7 @@ fn main() {
 
     // ── BomberConfigMutator: 3 cycles × 5 rounds ─────────────────
     let mut bomber_arena = EvolutionArena::new(
-        base.clone(),
+        base,
         Box::new(BomberConfigMutator),
         5, // max_rounds_per_cycle
     );
@@ -85,7 +85,7 @@ fn main() {
         board_sizes: vec![9, 13, 19],
     };
 
-    let mut go_arena = EvolutionArena::new(go_base.clone(), Box::new(go_mutator), 10);
+    let mut go_arena = EvolutionArena::new(go_base, Box::new(go_mutator), 10);
 
     let mut all_go_configs: Vec<GameConfig> = Vec::new();
     for round in 1..=5 {
