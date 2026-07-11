@@ -9,9 +9,11 @@
 > Approach B (`CommittedBlendState::z`, committed-blend HLA) COMPLETE behind
 > `tilr_personality_refine` (T1–T4, 11 tests, Plan 438). Both are opt-in.
 > T5: synthetic personality-divergence benchmarks PASS for BOTH approaches
-> (Approach A: 2 tests, Approach B: 2 tests, 2026-07-11) — mechanism proven;
-> final default-on promotion still pending real-session gain validation.
-> See "T5 status" below.
+> (Approach A: 2 tests, Approach B: 2 tests, 2026-07-11) — mechanism proven.
+> Approach A calibration harness + dispatch function landed (2026-07-11):
+> `TilrCalibrationBuffer` (cold-path ring buffer) + `tick_with_tilr` (engine-
+> level dispatch). End-to-end pipeline test PASS. Final default-on promotion
+> still pending real-session gain validation. See "T5 status" below.
 
 ## Context
 
@@ -56,7 +58,7 @@ chosen:
 | **Freeze/thaw** | ALREADY wired via `CuriosityPrioritySnapshot.priorities` | needs NEW `z_snapshot` capture at re-commit |
 | **Module** | `cgsp_runtime/tilr_refinement.rs` | `committed_blend/tilr_bridge.rs` (planned) |
 | **Feature** | `tilr_hla_refinement` (= `cgsp_runtime` + `tilr_invariant_subspace` + `subspace_phase_gate`) | `tilr_personality_refine` (planned, = `tilr_invariant_subspace`) |
-| **Status** | T1–T4 COMPLETE, 11 tests pass (9 G1-G4 + 2 T5 synthetic) | T1–T4 COMPLETE, 13 tests pass (11 G1-G4 + 2 T5 synthetic) |
+| **Status** | T1–T4 COMPLETE, 12 tests pass (9 G1-G4 + 2 T5 + 1 T5-e2e) + 8 calibration buffer tests; calibration harness + dispatch landed | T1–T4 COMPLETE, 13 tests pass (11 G1-G4 + 2 T5) |
 
 **Both approaches are implemented** and independently useful: Approach A refines
 the curiosity allocation (which axes the NPC explores), Approach B refines the
@@ -121,16 +123,38 @@ real-session personality-divergence gain.
         the same rewards — without TILR they stay identical (div=0); with TILR
         their priority tables diverge, with NPC A higher on axis 0 and NPC B
         higher on axis 1.
-      Both tests pass under `--features tilr_hla_refinement`. 11/11
-      tilr_refinement tests pass (9 G1-G4 + 2 T5), 0 regressions. Release-mode
-      G4 perf smoke passes (debug-mode G4 is a timing flake at 1759ns vs 1000ns
-      budget — release passes cleanly).
+      - `t5e2e_calibration_buffer_pipeline`: end-to-end pipeline test using
+        `TilrCalibrationBuffer` to collect snapshot pairs from simulated epoch
+        boundaries, calibrate the TILR basis via SVD, and verify the gain over
+        the reward-driven baseline. Proves the full pipeline: epoch snapshots →
+        buffer.push → try_calibrate → refine_apply.
+      **CALIBRATION HARNESS LANDED** (2026-07-11):
+      - `TilrCalibrationBuffer` (new module `cgsp_runtime/tilr_calibration.rs`):
+        cold-path FIFO ring buffer that accumulates `(good, bad)`
+        `CuriosityPrioritySnapshot` pairs at epoch boundaries and calibrates an
+        `HlaTilrState` via `calibrate_from_snapshots` when enough pairs are
+        collected. 8 unit tests (push, eviction, is_ready, try_calibrate,
+        rank-1/rank-2 basis, clear, default).
+      - `tick_with_tilr` (new free function in `tilr_refinement.rs`): engine-
+        level dispatch wiring — calls `NpcCgspRuntime::tick` (absorb +
+        renormalize) then `HlaTilrState::refine_apply` on the live priority
+        table. Returns `(TickReport, γ)`. The no-harm contract holds (orthogonal
+        direction → γ=0 → bit-identical priorities).
+      Both are gated on `tilr_hla_refinement` and re-exported from
+      `cgsp_runtime`.
+      12/12 tilr_refinement tests pass (9 G1-G4 + 2 T5 + 1 T5-e2e), 8/8
+      tilr_calibration tests pass, 0 regressions. Release-mode G4 perf smoke
+      passes (debug-mode G4 is a timing flake at 1759ns vs 1000ns budget —
+      release passes cleanly). 13/13 Approach B tests pass (no regression).
       **REMAINING for default-on promotion**: real-session validation that the
       calibrated subspace (from contrastive priority-snapshot differences at
       epoch boundaries) captures meaningful curiosity directions in production
-      game sessions. The synthetic benchmark proves the amplification mechanism;
-      the real-session benchmark confirms the calibration is semantically valid.
-      Analogous to Approach B's T5 status (same TILR primitive, different state).
+      game sessions. The calibration harness + dispatch function are now
+      available for game-session-layer wiring — the game tick calls
+      `tick_with_tilr` and the epoch-boundary handler pushes to
+      `TilrCalibrationBuffer`. The synthetic + end-to-end benchmarks prove the
+      mechanism; the real-session benchmark confirms the calibration is
+      semantically valid.
 
 ## Tasks (Approach B — Plan 438, `committed_blend::z`)
 
