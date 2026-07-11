@@ -167,13 +167,21 @@ capture for Approach B).
       13/13 tilr_refinement tests pass (9 G1-G4 + 2 T5 + 1 T5-e2e + 1 T5-real).
       **REMAINING for default-on promotion**: The real-session validation
       proves the calibration buffer → `tick_with_tilr` pipeline produces a
-      meaningful gain on the real `NpcCgspRuntime`. The CGSP runtime is not
-      yet wired into the production game tick (behind `cgsp_pulse_bridge`
-      feature, pending Plan 299 Phase 4 GOAT gate — separate concern from
-      Issue 128). Promotion to default-on is blocked on that wiring landing
-      + a production game-session benchmark confirming the calibration is
-      semantically valid on real game rewards (not just synthetic reward
-      vectors).
+      meaningful gain on the real `NpcCgspRuntime`. The CGSP runtime is now
+      wired into the production game tick (Plan 441, 2026-07-11):
+      - `CgspDotSolver` (production modelless solver) in `civ/cgsp_solver.rs`.
+      - `npc_cgsp_runtimes` Vec on `MapInstance` (lockstep with `npcs`).
+      - `MapInstance::ensure_cgsp_state(npc_idx)` opts an NPC in.
+      - `tick_cgsp_curiosity` sub-phase (Phase 2e-cgsp) in `map_tick/cgsp_curiosity.rs`.
+      - `SimEventKind::CgspTick` for observability.
+      - 4 integration tests pass: runtime ticks, priority evolves, personality
+        diverges, no-runtime no-event.
+      Gated on `cgsp_runtime` feature in riir-games (default-off). The
+      runtime is NOT yet promoted to default-on — that requires a Plan 299
+      GOAT gate review confirming the production game-loop integration
+      validates the channel-level results on real game data. Once `cgsp_runtime`
+      is promoted to default-on in riir-games, `tilr_hla_refinement` can be
+      promoted to default-on as well (it depends on `cgsp_runtime`).
 
 ## Tasks (Approach B — Plan 438, `committed_blend::z`)
 
