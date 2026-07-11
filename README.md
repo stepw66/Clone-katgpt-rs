@@ -2466,6 +2466,39 @@ Only **`katgpt-core`** ships to crates.io. The root `katgpt-rs` crate is a
 dev/examples aggregator (`publish = false`) — its version number is never
 bumped, tagged, or consumed by anyone.
 
+### 🧠 MANCE — Manifold-Aware Concept Erasure (Plan 426, arXiv:2607.03973)
+
+Surgical direction removal from latent state: given `x`, an erasure direction `u` (the concept to remove), and natural reference representations `X⁽⁰⁾` (the manifold), computes `x̃ = x - λ·<x, û>·û` where `û` is the gradient projected onto the local tangent space, spectrally weighted by local singular values, and `λ` is bounded by a per-sample local-radius trust region.
+
+**GOAT G1–G6 ALL PASS** — 93.9% target-energy reduction (10-round loop), bit-identical no-harm (zero gradient / orthogonal gradient), trust region bound verified, 0 allocs/100 calls, modelless (k-NN + SVD + dot-product projections). Default-on.
+
+```mermaid
+flowchart LR
+    subgraph Input
+        X["latent x (d)"]
+        G["gradient u (d)"]
+        P["natural pool X⁰ (N×d)"]
+    end
+    subgraph Step1["1. k-NN retrieval"]
+        K["k nearest neighbors"]
+    end
+    subgraph Step2["2. Local tangent SVD"]
+        B["basis B (d×r)"]
+        S["singular values σ (r)"]
+    end
+    subgraph Step3["3. Spectral weighting"]
+        D["û = B·diag(σ^α)·Bᵀu / norm"]
+    end
+    subgraph Step4["4. Trust-bounded step"]
+        OUT["x̃ = x - λ·<x,û>·û"]
+    end
+    X --> Step1 --> Step2 --> Step3 --> Step4
+    G --> Step3
+    P --> Step1
+```
+
+The probe is a **consumer concern** — the primitive consumes a pre-computed erasure direction (from MAG, CNA, or HLA EmotionDirections) and does not train a probe.
+
 ### Dev workflow
 
 All work happens on **`develop`** (no feature branches). Use [conventional

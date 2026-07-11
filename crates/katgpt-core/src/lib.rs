@@ -1643,6 +1643,20 @@ pub use tilr::{TilrError, TilrScratch, check_orthonormal, tilr_refine, tilr_refi
 #[cfg(all(feature = "tilr_invariant_subspace", feature = "subspace_phase_gate"))]
 pub use tilr::discover_invariant_subspace;
 
+// Plan 426: MANCE — Manifold-Aware Concept Erasure. Local tangent + spectral
+// weighting + trust-bounded erasure. Pure modelless linear algebra (k-NN +
+// thin SVD + dot-product projections). Gated on subspace_phase_gate for the
+// local tangent SVD (Plan 301 thin_svd_into).
+#[cfg(all(feature = "manifold_erasure", feature = "subspace_phase_gate"))]
+pub mod manifold_erasure;
+#[cfg(all(feature = "manifold_erasure", feature = "subspace_phase_gate"))]
+pub use manifold_erasure::{
+    ManceConfig, ManceError, ManceScratch, ManceStepInfo,
+    covmatch_second_moment_into, leace_first_moment_into,
+    mance_plus_plus_step_into, mance_plus_step_into,
+    manifold_erasure_loop_into, manifold_erasure_step, manifold_erasure_step_into,
+};
+
 // Test-only `#[global_allocator]` so `alloc::tests::*` pass when running
 // `cargo test -p katgpt-core --lib`. Downstream consumers (katgpt-rs root,
 // riir-engine, etc.) install their OWN `#[global_allocator]`; this static is

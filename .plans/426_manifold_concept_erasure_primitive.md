@@ -32,20 +32,20 @@ This is the **local, spectrally-weighted, trust-bounded erasure** member of the 
 
 ### Tasks
 
-- [ ] **T1.1** Create `crates/katgpt-core/src/manifold_erasure.rs` module (feature-gated under `manifold_erasure` in `katgpt-core/Cargo.toml`).
-- [ ] **T1.2** Define types:
+- [x] **T1.1** Create `crates/katgpt-core/src/manifold_erasure.rs` module (feature-gated under `manifold_erasure` in `katgpt-core/Cargo.toml`).
+- [x] **T1.2** Define types:
   - `ManceConfig { epsilon: f32, lambda_max: f32, alpha: f32, k: usize, r: usize }` — all dimensionless, defaults `epsilon=0.1, lambda_max=64.0, alpha=1.0, k=8, r=8`.
   - `ManceScratch` — pre-allocated scratch buffers: `neighbor_distances: Vec<f32>`, `centered_neighbors: Vec<f32>` (k×d), `tangent_basis: Vec<f32>` (d×r), `singular_values: Vec<f32>` (r), `projection_coords: Vec<f32>` (r), `tangent_direction: Vec<f32>` (d), `mean_neighbor: Vec<f32>` (d). `with_capacity(d, k, r)` constructor.
   - `ManceStepInfo { lambda: f32, displacement: f32, local_radius: f32, alignment: f32 }` — diagnostic output (step size, actual displacement, neighborhood radius, gradient-tangent alignment).
   - `ManceError` — `#[repr(u8)]` enum: `DimensionMismatch=0`, `InsufficientNeighbors=1`, `ZeroGradient=2`, `InvalidConfig=3`.
-- [ ] **T1.3** Implement `knn_distances_into(x, natural_pool, k, scratch) -> &[f32]` — compute L2 distances from `x` to all natural representations, select k smallest. O(N·d) for N natural points. Use `simd_dot_f32` for distance computation. Write k indices + distances into scratch.
-- [ ] **T1.4** Implement `estimate_local_tangent_into(x, natural_neighbors, r, scratch) -> (&[f32], &[f32])` — mean-center k neighbors → form S_i (k×d) → SVD via `thin_svd_into` (Plan 301) → keep top-r right singular vectors as tangent basis B (d×r) + singular values σ (r). The neighborhood is drawn from the FIXED natural pool but queried at x's CURRENT position (per MANCE §3.2).
-- [ ] **T1.5** Implement `tangent_erasure_direction_into(x, gradient, basis, sigma, alpha, scratch) -> &[f32]` — normalize gradient `u = ∇f/||∇f||`, project `c = Bᵀu` (r dot products), spectrally weight `d = B·diag(σ^α)·c` (r weighted sums), normalize `û = d/||d||`. Write into scratch.
-- [ ] **T1.6** Implement `local_radius_step(x, direction, natural_neighbors, epsilon, lambda_max) -> f32` — compute `r_i = mean(||x_j - x||)` over k neighbors, compute `<x, û>`, return `λ = min(λ_max, ε·r_i / <x, û>)`. Handle `<x, û> ≈ 0` → λ=0 (no-harm: direction orthogonal to x).
-- [ ] **T1.7** Implement `manifold_erasure_step_into(x, gradient, natural_pool, config, scratch, out) -> ManceStepInfo` — orchestrate T1.3→T1.6, apply `out = x - λ·<x, û>·û`. Zero-alloc (all scratch reused).
-- [ ] **T1.8** Implement `manifold_erasure_step` (allocating convenience wrapper for non-hot paths).
-- [ ] **T1.9** Wire module into `crates/katgpt-core/src/lib.rs` behind `#[cfg(feature = "manifold_erasure")]`. Add feature gate to `katgpt-core/Cargo.toml` (deps: `katgpt-types` for SIMD, `subspace_phase_gate` for SVD — both already in katgpt-core). Forward in root `katgpt-rs/Cargo.toml`.
-- [ ] **T1.10** Unit tests:
+- [x] **T1.3** Implement `knn_distances_into(x, natural_pool, k, scratch) -> &[f32]` — compute L2 distances from `x` to all natural representations, select k smallest. O(N·d) for N natural points. Use `simd_dot_f32` for distance computation. Write k indices + distances into scratch.
+- [x] **T1.4** Implement `estimate_local_tangent_into(x, natural_neighbors, r, scratch) -> (&[f32], &[f32])` — mean-center k neighbors → form S_i (k×d) → SVD via `thin_svd_into` (Plan 301) → keep top-r right singular vectors as tangent basis B (d×r) + singular values σ (r). The neighborhood is drawn from the FIXED natural pool but queried at x's CURRENT position (per MANCE §3.2).
+- [x] **T1.5** Implement `tangent_erasure_direction_into(x, gradient, basis, sigma, alpha, scratch) -> &[f32]` — normalize gradient `u = ∇f/||∇f||`, project `c = Bᵀu` (r dot products), spectrally weight `d = B·diag(σ^α)·c` (r weighted sums), normalize `û = d/||d||`. Write into scratch.
+- [x] **T1.6** Implement `local_radius_step(x, direction, natural_neighbors, epsilon, lambda_max) -> f32` — compute `r_i = mean(||x_j - x||)` over k neighbors, compute `<x, û>`, return `λ = min(λ_max, ε·r_i / <x, û>)`. Handle `<x, û> ≈ 0` → λ=0 (no-harm: direction orthogonal to x).
+- [x] **T1.7** Implement `manifold_erasure_step_into(x, gradient, natural_pool, config, scratch, out) -> ManceStepInfo` — orchestrate T1.3→T1.6, apply `out = x - λ·<x, û>·û`. Zero-alloc (all scratch reused).
+- [x] **T1.8** Implement `manifold_erasure_step` (allocating convenience wrapper for non-hot paths).
+- [x] **T1.9** Wire module into `crates/katgpt-core/src/lib.rs` behind `#[cfg(feature = "manifold_erasure")]`. Add feature gate to `katgpt-core/Cargo.toml` (deps: `katgpt-types` for SIMD, `subspace_phase_gate` for SVD — both already in katgpt-core). Forward in root `katgpt-rs/Cargo.toml`.
+- [x] **T1.10** Unit tests:
   - `knn_returns_correct_neighbors` — known distances, verify k smallest selected.
   - `tangent_basis_orthonormal` — verify BᵀB ≈ I_r.
   - `spectral_weighting_prioritizes_high_sigma` — verify high-σ axes get more mass.
@@ -62,11 +62,11 @@ This is the **local, spectrally-weighted, trust-bounded erasure** member of the 
 
 ### Tasks
 
-- [ ] **T2.1** Implement `manifold_erasure_loop_into(x, gradient_fn, natural_pool, config, n_rounds, scratch, out)` — iterative application of `manifold_erasure_step_into` for `n_rounds` rounds. The `gradient_fn` is a closure that provides the erasure direction at each round (the caller's probe — MAG/CNA/EmotionDirections). This is the modelless analog of MANCE's iterative loop with probe refit — the caller re-mines the direction between rounds if desired.
-- [ ] **T2.2** Implement `leace_first_moment_into(x, class_mean_pos, class_mean_neg, scratch, out)` — rank-1 closed-form erasure: project out the class-mean difference direction. `out = x - (<x, d_mean>/||d_mean||²)·d_mean` where `d_mean = μ₊ - μ₋`. This is MANCE+'s LEACE preprocessing.
-- [ ] **T2.3** Implement `covmatch_second_moment_into(x, delta_sigma_top2_eigvecs, scratch, out)` — rank-2 closed-form erasure: project out the top-2 eigenvectors of ΔΣ = Σ₊ - Σ₋. Orthonormalize with mean direction via QR. This is MANCE++'s CovMatch preprocessing.
-- [ ] **T2.4** Implement `mance_plus_step_into` (LEACE + loop) and `mance_plus_plus_step_into` (LEACE + CovMatch + loop) — the composed variants.
-- [ ] **T2.5** Unit tests for preprocessing:
+- [x] **T2.1** Implement `manifold_erasure_loop_into(x, gradient_fn, natural_pool, config, n_rounds, scratch, out)` — iterative application of `manifold_erasure_step_into` for `n_rounds` rounds. The `gradient_fn` is a closure that provides the erasure direction at each round (the caller's probe — MAG/CNA/EmotionDirections). This is the modelless analog of MANCE's iterative loop with probe refit — the caller re-mines the direction between rounds if desired.
+- [x] **T2.2** Implement `leace_first_moment_into(x, class_mean_pos, class_mean_neg, scratch, out)` — rank-1 closed-form erasure: project out the class-mean difference direction. `out = x - (<x, d_mean>/||d_mean||²)·d_mean` where `d_mean = μ₊ - μ₋`. This is MANCE+'s LEACE preprocessing.
+- [x] **T2.3** Implement `covmatch_second_moment_into(x, delta_sigma_top2_eigvecs, scratch, out)` — rank-2 closed-form erasure: project out the top-2 eigenvectors of ΔΣ = Σ₊ - Σ₋. Orthonormalize with mean direction via QR. This is MANCE++'s CovMatch preprocessing.
+- [x] **T2.4** Implement `mance_plus_step_into` (LEACE + loop) and `mance_plus_plus_step_into` (LEACE + CovMatch + loop) — the composed variants.
+- [x] **T2.5** Unit tests for preprocessing:
   - `leace_removes_class_mean_difference` — after LEACE, `<x̃, d_mean> ≈ 0`.
   - `covmatch_removes_covariance_asymmetry` — after CovMatch, class-conditional variance asymmetry reduced.
   - `preprocessing_preserves_orthogonal_directions` — directions ⊥ the erased directions are unchanged.
@@ -79,7 +79,7 @@ This is the **local, spectrally-weighted, trust-bounded erasure** member of the 
 
 ### Tasks
 
-- [ ] **T3.1** `benches/bench_426_manifold_erasure_goat.rs` — GOAT gate:
+- [x] **T3.1** `benches/bench_426_manifold_erasure_goat.rs` — GOAT gate:
   - **G1 (correctness):**
     - G1a — erasure reduces target-direction energy: `|<x̃, u>| < |<x, u>|` by ≥50% after 1 step (synthetic data, known direction).
     - G1b — preserves orthogonal directions: for directions `v ⊥ tangent basis`, `|<x̃, v> - <x, v>| < 1e-6` (bit-identical preservation).
@@ -95,8 +95,8 @@ This is the **local, spectrally-weighted, trust-bounded erasure** member of the 
   - **G4 (alloc-free):** `manifold_erasure_step_into` allocates 0 bytes over 100 steady-state calls (CountingAllocator). Companion gate verifies the 0-alloc result is non-degenerate.
   - **G5 (modelless):** `manifold_erasure = []` deps in Cargo.toml (only `katgpt-types` for SIMD, `subspace_phase_gate` for SVD — both already in katgpt-core). No `riir_train`/`riir_gpu`.
   - **G6 (ablation — the AmbCE++ control):** compare MANCE step vs unconstrained erasure (same λ, no tangent projection). Verify MANCE preserves more orthogonal energy than unconstrained on synthetic data where the gradient has off-manifold components.
-- [ ] **T3.2** If G1–G6 all pass → promote `manifold_erasure` to root `default` in `katgpt-rs/Cargo.toml` + `katgpt-core/Cargo.toml`.
-- [ ] **T3.3** Record benchmark in `katgpt-rs/.benchmarks/426_manifold_erasure_goat.md`.
+- [x] **T3.2** If G1–G6 all pass → promote `manifold_erasure` to root `default` in `katgpt-rs/Cargo.toml` + `katgpt-core/Cargo.toml`.
+- [x] **T3.3** Record benchmark in `katgpt-rs/.benchmarks/426_manifold_erasure_goat.md`.
 
 **Phase 3 exit:** all gates PASS; feature promoted to default-on with pure modelless gain. OR: if G2/G6 fail, keep opt-in and document why.
 
@@ -106,9 +106,9 @@ This is the **local, spectrally-weighted, trust-bounded erasure** member of the 
 
 ### Tasks
 
-- [ ] **T4.1** Example: `examples/manifold_erasure_demo.rs` — synthetic 8-d latent state, 50 natural reference points, erase a concept direction. Show: (a) target alignment drops, (b) orthogonal directions preserved, (c) displacement within trust region. Compare MANCE vs unconstrained erasure (the AmbCE++ ablation).
-- [ ] **T4.2** Add module-level rustdoc with the MANCE algorithm summary, the family table, and the probe-replacement note.
-- [ ] **T4.3** Update `katgpt-rs/README.md` Feature Showcase section with a MANCE entry.
+- [x] **T4.1** Example: `examples/manifold_erasure_demo.rs` — synthetic 8-d latent state, 50 natural reference points, erase a concept direction. Show: (a) target alignment drops, (b) orthogonal directions preserved, (c) displacement within trust region. Compare MANCE vs unconstrained erasure (the AmbCE++ ablation).
+- [x] **T4.2** Add module-level rustdoc with the MANCE algorithm summary, the family table, and the probe-replacement note.
+- [x] **T4.3** Update `katgpt-rs/README.md` Feature Showcase section with a MANCE entry.
 
 ---
 
