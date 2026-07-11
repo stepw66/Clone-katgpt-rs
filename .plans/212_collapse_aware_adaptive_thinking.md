@@ -1,6 +1,6 @@
 # Plan 212: Collapse-Aware Adaptive Thinking (CAAB)
 
-**Status:** IN PROGRESS (T7 GOAT Tests ✅)
+**Status:** ✅ COMPLETE — all 30 tasks done, T7 GOAT Tests ✅, `collapse_aware_thinking` ON BY DEFAULT (gain proven, zero perf hurt)
 **Research:** katgpt-rs/.research/187_S2F_Slow_to_Fast_Adaptive_Reasoning.md
 **Feature Gate:** `collapse_aware_thinking` — **ON BY DEFAULT** (gain proven, zero perf hurt)
 **Depends On:** Plan 204 (SelectivityRouter), Plan 194 (ThinkingController)

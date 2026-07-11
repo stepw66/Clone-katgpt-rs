@@ -1,7 +1,7 @@
 # Plan 224: Outlier-Aware Quantization Guard (OAQG)
 
 **Research:** katgpt-rs/.research/200_Quantization_Outlier_Collapse_Security.md
-**Status:** IN PROGRESS
+**Status:** ✅ COMPLETE — all 30 tasks done, `outlier_guard` ON BY DEFAULT (zero perf hurt, security gain)
 **Feature Gate:** `outlier_guard` — **ON BY DEFAULT** after GOAT proof (zero perf hurt, security gain)
 **Depends On:** Plan 138 (StiffSoft Anomaly Gate) — optional synergy, not required
 **Commercial Alignment:** Per Verdict 003 — defense stays in MIT engine (katgpt-rs), remediation is SaaS (riir-ai)
