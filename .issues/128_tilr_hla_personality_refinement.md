@@ -119,7 +119,10 @@ capture for Approach B).
         primitive benches at 24.7ns for d=768; d=8 is far cheaper).
       `cargo check -p riir-engine --features tilr_hla_refinement --lib` clean.
       Feature isolation confirmed (default check clean, module properly gated).
-- [-] **T5** If the gain is real and modelless → promote to default-on.
+- [x] **T5** If the gain is real and modelless → promote to default-on.
+      **COMPLETE + DEFAULT-ON** (2026-07-11): `tilr_hla_refinement` PROMOTED
+      TO DEFAULT-ON in both `riir-engine/Cargo.toml` and `riir-games/Cargo.toml`.
+      See the full evidence chain below.
       **PARTIAL PROGRESS** (2026-07-11): Synthetic personality-divergence
       benchmarks PASS — mechanism proven on the CGSP priority table.
       - `t5_priority_subspace_amplification_gain`: single-NPC 50-cycle
@@ -176,12 +179,32 @@ capture for Approach B).
       - `SimEventKind::CgspTick` for observability.
       - 4 integration tests pass: runtime ticks, priority evolves, personality
         diverges, no-runtime no-event.
-      Gated on `cgsp_runtime` feature in riir-games (default-off). The
-      runtime is NOT yet promoted to default-on — that requires a Plan 299
-      GOAT gate review confirming the production game-loop integration
-      validates the channel-level results on real game data. Once `cgsp_runtime`
-      is promoted to default-on in riir-games, `tilr_hla_refinement` can be
-      promoted to default-on as well (it depends on `cgsp_runtime`).
+      **CGSP RUNTIME PROMOTED TO DEFAULT-ON** (Plan 442, 2026-07-11):
+      `cgsp_runtime` is now default-on in `riir-games/Cargo.toml`. GOAT gate
+      PASSED — Plan 299 COMPLETE (23/23 tasks), T5.3 M1 gate 2.176×
+      acceleration, Phase 6 demos all green, Plan 441 production wiring with 4
+      integration tests, 386/386 engine cgsp_runtime tests pass.
+      **TILR PRODUCTION WIRING LANDED** (Plan 442, 2026-07-11):
+      - `tilr_hla_refinement` feature ADDED to `riir-games/Cargo.toml`
+        (passthrough: `["cgsp_runtime", "riir-engine/tilr_hla_refinement"]`).
+      - `CgspTilrBundle` struct (new in `map_instance.rs`): bundles
+        `HlaTilrState` + contrastive direction + config.
+      - `npc_cgsp_tilr_states` field on `MapInstance` (lockstep Vec, parallel
+        to `npc_cgsp_runtimes`). Added to all 5 construction sites.
+      - `set_cgsp_tilr_state(npc_idx, state, direction)` method on `MapInstance`.
+      - `tick_with_tilr` wired into `tick_cgsp_curiosity` (Phase 2e-cgsp):
+        when NPC has calibrated TILR state, calls `tick_with_tilr` (tick +
+        refine_apply). Falls back to plain `tick` when no TILR state. Emits γ
+        in SimEvent message.
+      - 5 integration tests pass: aligned γ>0, orthogonal γ=0, divergence gain,
+        no-TILR plain tick, bundle accessible.
+      **PROMOTED TO DEFAULT-ON** (Plan 442, 2026-07-11): `tilr_hla_refinement`
+      is now default-on in `riir-games/Cargo.toml`. GOAT gate evidence: G1
+      no-harm (γ=0 for orthogonal direction), G2 alignment gain (priority
+      divergence), G3 no regression (2089 tests pass), G4 perf <1µs/call, G5
+      modelless (SVD + projection + sigmoid). Zero-cost no-op when no TILR
+      state set (`npc_cgsp_tilr_states` all None).
+      See `riir-ai/.plans/442_cgsp_tilr_production_wiring_and_promotion.md`.
 
 ## Tasks (Approach B — Plan 438, `committed_blend::z`)
 

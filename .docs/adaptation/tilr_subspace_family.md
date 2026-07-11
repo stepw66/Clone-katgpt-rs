@@ -103,9 +103,15 @@ Consumer integration status:
   DEFAULT-ON** (2026-07-11): re-commit event wiring landed
   (`recommit_on_major_emotion` trigger in Phase 2e-cb-recommit, emits
   `SimEvent::PersonalityRecommit` on extreme emotion states). GOAT G1-G5 all
-  PASS. Zero-cost no-op when no bridge set. Approach A (`tilr_hla_refinement`)
-  remains opt-in — blocked on CGSP runtime production game-tick wiring
-  (Plan 299 Phase 4 GOAT gate, separate concern from Issue 128).
+  PASS. Zero-cost no-op when no bridge set. **Approach A PROMOTED TO
+  DEFAULT-ON** (Plan 442, 2026-07-11): `cgsp_runtime` promoted to default-on
+  in riir-games (GOAT gate PASSED — Plan 299 COMPLETE, T5.3 M1 gate 2.176×
+  acceleration, Phase 6 demos all green, Plan 441 production wiring). `tilr_hla_refinement`
+  feature added to riir-games (passthrough to `riir-engine/tilr_hla_refinement`).
+  `tick_with_tilr` wired into `tick_cgsp_curiosity` (Phase 2e-cgsp) — calls
+  `tick_with_tilr` when NPC has calibrated `HlaTilrState`, falls back to plain
+  `tick` otherwise. 5 integration tests pass. GOAT G1-G5 all PASS. Zero-cost
+  no-op when no TILR state set.
 - **Issue 129** — riir-neuron-db freeze/thaw shard refinement. **T1–T4 COMPLETE**.
   T5 deferred.
 - **Issue 130** — riir-ai `reestimation.rs` γ-gated step size. **RESOLVED —
