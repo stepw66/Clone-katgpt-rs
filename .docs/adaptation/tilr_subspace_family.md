@@ -94,9 +94,14 @@ Consumer integration status:
   HLA vector via `tilr_personality_refine` / Plan 438). **Engine-level
   calibration harness + dispatch COMPLETE for both approaches** (2026-07-11):
   Approach A ships `TilrCalibrationBuffer` + `tick_with_tilr`; Approach B ships
-  `TilrPersonalityCalibrationBuffer` (Plan 440 follow-up). T5 promotion deferred
-  — needs real-session personality-divergence gain data (game-session-layer
-  wiring in riir-games).
+  `TilrPersonalityCalibrationBuffer` (Plan 440 follow-up). **Real-session T5
+  validation landed for both** (2026-07-11): Approach A
+  `t5_real_session_calibration_buffer_with_runtime` (real `NpcCgspRuntime` +
+  buffer + `tick_with_tilr`); Approach B
+  `tilr_real_session_calibration_buffer_pipeline` (real `MapInstance` + buffer
+  + `set_tilr_bridge` + production dispatch). T5 promotion blocked on production
+  game-session wiring (CGSP runtime into game tick for Approach A; re-commit
+  event capture for Approach B).
 - **Issue 129** — riir-neuron-db freeze/thaw shard refinement. **T1–T4 COMPLETE**.
   T5 deferred.
 - **Issue 130** — riir-ai `reestimation.rs` γ-gated step size. **RESOLVED —

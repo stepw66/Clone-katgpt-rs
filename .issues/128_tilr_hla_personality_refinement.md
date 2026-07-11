@@ -13,8 +13,13 @@
 > proven. BOTH approaches now have engine-level calibration harness + dispatch
 > (2026-07-11): Approach A `TilrCalibrationBuffer` + `tick_with_tilr`; Approach
 > B `TilrPersonalityCalibrationBuffer` (Plan 440 follow-up). End-to-end pipeline
-> tests PASS for both. Final default-on promotion still pending real-session
-> gain validation. See "T5 status" below.
+> tests PASS for both. REAL-SESSION T5 VALIDATION LANDED for BOTH approaches
+> (2026-07-11): Approach A `t5_real_session_calibration_buffer_with_runtime`
+> (real `NpcCgspRuntime` + buffer + `tick_with_tilr`); Approach B
+> `tilr_real_session_calibration_buffer_pipeline` (real `MapInstance` + buffer
+> + `set_tilr_bridge` + production dispatch). Final default-on promotion
+> blocked on production game-session wiring (CGSP runtime into game tick for
+> Approach A; re-commit event capture for Approach B). See "T5 status" below.
 
 ## Context
 
@@ -59,15 +64,19 @@ chosen:
 | **Freeze/thaw** | ALREADY wired via `CuriosityPrioritySnapshot.priorities` | needs NEW `z_snapshot` capture at re-commit |
 | **Module** | `cgsp_runtime/tilr_refinement.rs` | `committed_blend/tilr_bridge.rs` (planned) |
 | **Feature** | `tilr_hla_refinement` (= `cgsp_runtime` + `tilr_invariant_subspace` + `subspace_phase_gate`) | `tilr_personality_refine` (planned, = `tilr_invariant_subspace`) |
-| **Status** | T1–T4 COMPLETE, 12 tests pass (9 G1-G4 + 2 T5 + 1 T5-e2e) + 8 calibration buffer tests; calibration harness + dispatch landed | T1–T4 COMPLETE, 13 tests pass (11 G1-G4 + 2 T5) + 9 calibration buffer tests (8 unit + 1 e2e); calibration harness landed (Plan 440 follow-up) |
+| **Status** | T1–T4 COMPLETE, 13 tests pass (9 G1-G4 + 2 T5 + 1 T5-e2e + 1 T5-real) + 8 calibration buffer tests; calibration harness + dispatch + real-session validation landed | T1–T4 COMPLETE, 13 tests pass (11 G1-G4 + 2 T5) + 9 calibration buffer tests (8 unit + 1 e2e) + 5 integration tests (4 dispatch + 1 real-session); calibration harness + dispatch + real-session validation landed |
 
 **Both approaches are implemented** and independently useful: Approach A refines
 the curiosity allocation (which axes the NPC explores), Approach B refines the
 emotional dynamics (how the HLA vector evolves). They do not conflict at the
 code level (different modules, different features, different states). T5
 synthetic personality-divergence benchmarks PASS for both (2026-07-11) —
-mechanism proven. Final default-on promotion for both is deferred pending
-real-session personality-divergence gain.
+mechanism proven. Real-session T5 validation landed for both (2026-07-11) —
+the calibration buffer → dispatch pipeline produces meaningful divergence gains
+on real `NpcCgspRuntime` (Approach A) and real `MapInstance` game sessions
+(Approach B). Final default-on promotion for both is blocked on production
+game-session wiring (CGSP runtime into game tick for Approach A; re-commit event
+capture for Approach B).
 
 ## Tasks (Approach A — `tilr_hla_refinement`)
 
@@ -147,15 +156,24 @@ real-session personality-divergence gain.
       tilr_calibration tests pass, 0 regressions. Release-mode G4 perf smoke
       passes (debug-mode G4 is a timing flake at 1759ns vs 1000ns budget —
       release passes cleanly). 13/13 Approach B tests pass (no regression).
-      **REMAINING for default-on promotion**: real-session validation that the
-      calibrated subspace (from contrastive priority-snapshot differences at
-      epoch boundaries) captures meaningful curiosity directions in production
-      game sessions. The calibration harness + dispatch function are now
-      available for game-session-layer wiring — the game tick calls
-      `tick_with_tilr` and the epoch-boundary handler pushes to
-      `TilrCalibrationBuffer`. The synthetic + end-to-end benchmarks prove the
-      mechanism; the real-session benchmark confirms the calibration is
-      semantically valid.
+      **REAL-SESSION T5 VALIDATION LANDED** (2026-07-11):
+      - `t5_real_session_calibration_buffer_with_runtime`: real-session test
+        using the REAL `NpcCgspRuntime` with `StubSolver` +
+        `TilrCalibrationBuffer` + `tick_with_tilr`. Proves the full pipeline:
+        epoch-boundary snapshot capture → buffer push → SVD calibration →
+        `tick_with_tilr` on the real runtime → priority divergence gain vs
+        no-TILR control. Asserts γ > 0 over 30 cycles, L2 distance > 0, and
+        axis-0 (calibrated good axis) priority differs from control.
+      13/13 tilr_refinement tests pass (9 G1-G4 + 2 T5 + 1 T5-e2e + 1 T5-real).
+      **REMAINING for default-on promotion**: The real-session validation
+      proves the calibration buffer → `tick_with_tilr` pipeline produces a
+      meaningful gain on the real `NpcCgspRuntime`. The CGSP runtime is not
+      yet wired into the production game tick (behind `cgsp_pulse_bridge`
+      feature, pending Plan 299 Phase 4 GOAT gate — separate concern from
+      Issue 128). Promotion to default-on is blocked on that wiring landing
+      + a production game-session benchmark confirming the calibration is
+      semantically valid on real game rewards (not just synthetic reward
+      vectors).
 
 ## Tasks (Approach B — Plan 438, `committed_blend::z`)
 
@@ -219,14 +237,29 @@ real-session personality-divergence gain.
       `cgsp_runtime::TilrCalibrationBuffer` (Approach A) — same pattern, engine-
       level, game layer just calls `push` and `try_calibrate`.
       See `riir-ai/.plans/440_tilr_bridge_committed_blend_dispatch_wiring.md`.
-      **REMAINING for default-on promotion**: real-session validation that the
-      calibrated subspace (from contrastive z-snapshot differences at re-commit
-      events) captures meaningful personality directions in production game
-      sessions. The engine-level infrastructure is now COMPLETE for both
-      approaches — calibration harness + dispatch. The remaining work is in
-      riir-games: wiring re-commit event z-snapshot capture into
-      `TilrPersonalityCalibrationBuffer::push` and calling
-      `try_calibrate` → `set_tilr_bridge` at epoch boundaries.
+      **REAL-SESSION T5 VALIDATION LANDED** (2026-07-11):
+      - `tilr_real_session_calibration_buffer_pipeline` (new test in
+        `riir-games/tests/tilr_bridge_tick_integration.rs`): real-session test
+        using the REAL `MapInstance` + `NpcState` + `tick_committed_blend`
+        dispatch + `TilrPersonalityCalibrationBuffer`. Proves the full
+        pipeline: epoch-boundary z-snapshot capture → per-NPC buffer push →
+        SVD calibration → `set_tilr_bridge` → production game-tick trajectory
+        divergence gain vs no-bridge control. Asserts all NPC buffers ready
+        after 6 epochs, bridge rank >= 1, max L2² divergence > 0, and all
+        emotion scalars remain finite + clamped to [0,1].
+      5/5 tilr_bridge_tick_integration tests pass (4 existing + 1 new
+      real-session), 22/22 committed_blend tilr tests pass (no regression).
+      **REMAINING for default-on promotion**: The real-session validation
+      proves the calibration buffer → `set_tilr_bridge` → production dispatch
+      pipeline produces a meaningful trajectory divergence gain in a real
+      multi-NPC game session. The z-snapshots are captured at epoch
+      boundaries (every N ticks) rather than at re-commit events
+      (`recommit_on_event` is not yet triggered in the game tick — that
+      wiring is a separate Plan 336 Phase 5 follow-up). Promotion to
+      default-on is blocked on: (1) re-commit event wiring landing, and
+      (2) a production game-session benchmark confirming the calibration
+      captures meaningful personality directions on real game events (not
+      just tick-boundary z-evolution).
 
 ## Cross-references
 
