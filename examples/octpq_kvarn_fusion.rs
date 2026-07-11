@@ -220,7 +220,7 @@ fn find_convergence_iter(
     for k in 1..=config.iterations {
         let partial_config = VarNormConfig {
             iterations: k,
-            ..config.clone()
+            ..*config
         };
         let mut partial_tile = original.to_vec();
         katgpt_kv::kvarn::variance_normalize(&mut partial_tile, rows, cols, &partial_config);

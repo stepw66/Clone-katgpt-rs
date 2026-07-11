@@ -230,7 +230,7 @@ impl<'a> StrategicPruner<'a> {
         parent_tokens: &[usize],
         start_state: &DungeonState,
     ) -> Option<DungeonState> {
-        let mut state = start_state.clone();
+        let mut state = *start_state;
         for &token_idx in parent_tokens {
             let target = self.targets.get(token_idx)?;
             let target_pos = target.pos(
@@ -414,7 +414,7 @@ impl App {
             let mut state = pruner.initial_state();
             for &action in &solution {
                 state = pruner.apply_action(&state, action).unwrap();
-                states.push(state.clone());
+                states.push(state);
             }
         }
         Self {

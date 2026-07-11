@@ -40,8 +40,8 @@ fn bench_ropd_rubric_overhead() {
     // This measures the delegation overhead of the rubric wrapper.
 
     let config = CompressConfig::new(50, 0.1, 5, 1000);
-    let baseline_absorb = AbsorbCompressLayer::new(NoScreeningPruner, num_arms, config.clone());
-    let inner_absorb = AbsorbCompressLayer::new(NoScreeningPruner, num_arms, config.clone());
+    let baseline_absorb = AbsorbCompressLayer::new(NoScreeningPruner, num_arms, config);
+    let inner_absorb = AbsorbCompressLayer::new(NoScreeningPruner, num_arms, config);
     let rubric_absorb =
         RubricGatedAbsorbCompress::new(inner_absorb, num_arms, RubricGatedConfig::default());
 
@@ -112,8 +112,8 @@ fn bench_ropd_rubric_overhead() {
     // ── Cold path: observe_rubric() vs absorb() ──────────────────
 
     let config = CompressConfig::new(50, 0.1, 5, 1000);
-    let mut scalar_absorb = AbsorbCompressLayer::new(NoScreeningPruner, num_arms, config.clone());
-    let inner_for_rubric = AbsorbCompressLayer::new(NoScreeningPruner, num_arms, config.clone());
+    let mut scalar_absorb = AbsorbCompressLayer::new(NoScreeningPruner, num_arms, config);
+    let inner_for_rubric = AbsorbCompressLayer::new(NoScreeningPruner, num_arms, config);
     let mut rubric_absorb =
         RubricGatedAbsorbCompress::new(inner_for_rubric, num_arms, RubricGatedConfig::default());
 
@@ -275,7 +275,7 @@ fn bench_ropd_rubric_throughput() {
     let references = vec![ref_rubric.clone(), ref_rubric.clone()];
 
     let config = CompressConfig::new(50, 0.1, 5, 1000);
-    let inner = AbsorbCompressLayer::new(NoScreeningPruner, num_arms, config.clone());
+    let inner = AbsorbCompressLayer::new(NoScreeningPruner, num_arms, config);
     let mut layer = RubricGatedAbsorbCompress::new(inner, num_arms, RubricGatedConfig::default());
 
     let mut rng = Rng::new(42);
@@ -319,7 +319,7 @@ fn bench_ropd_rubric_throughput() {
     let ref_rubric_generic = RubricVector::perfect(generic_weights.clone(), 1);
     let references_generic = vec![ref_rubric_generic.clone(), ref_rubric_generic.clone()];
 
-    let inner2 = AbsorbCompressLayer::new(NoScreeningPruner, num_arms, config.clone());
+    let inner2 = AbsorbCompressLayer::new(NoScreeningPruner, num_arms, config);
     let mut layer2 = RubricGatedAbsorbCompress::new(inner2, num_arms, RubricGatedConfig::default());
 
     let mut rng = Rng::new(42);
@@ -642,7 +642,7 @@ fn bench_ropd_rubric_absorb_quality() {
     // ── Scalar AbsorbCompressLayer ────────────────────────────────
 
     let config = CompressConfig::new(10, 0.05, 3, 100);
-    let mut scalar_layer = AbsorbCompressLayer::new(NoScreeningPruner, num_arms, config.clone());
+    let mut scalar_layer = AbsorbCompressLayer::new(NoScreeningPruner, num_arms, config);
 
     let start = Instant::now();
     for i in 0..observations {

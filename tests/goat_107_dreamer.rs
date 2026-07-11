@@ -352,7 +352,7 @@ fn proof_4_snapshot_alignment() {
     ];
 
     for (i, config) in configs.iter().enumerate() {
-        let scheduler = DreamerScheduler::new(config.clone());
+        let scheduler = DreamerScheduler::new(*config);
         let region = scheduler.select_region(&arms, 10);
 
         let n_idx = region.arm_indices.len();
@@ -531,7 +531,7 @@ fn proof_6_coverage() {
     ];
 
     for (ci, (config, q_values)) in configs_and_thresholds.iter().enumerate() {
-        let consolidator = DreamerConsolidator::new(config.clone());
+        let consolidator = DreamerConsolidator::new(*config);
         let n = q_values.len();
         let region = WorkingRegion {
             arm_indices: (0..n).collect(),

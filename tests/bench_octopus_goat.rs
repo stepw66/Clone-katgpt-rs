@@ -216,7 +216,7 @@ fn goat_octopus_joint_vs_simple_rounding() {
         // Joint rounding
         let cfg_joint = OctopusConfig {
             use_joint_rounding: true,
-            ..cfg_simple.clone()
+            ..cfg_simple
         };
         let mut cache_joint = OctopusKVCache::with_config(&cfg_joint);
 

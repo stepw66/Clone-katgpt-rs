@@ -356,7 +356,7 @@ fn main() {
         max_seq_len: bench_seq_len,
         bits: bench_bits,
         tile_size,
-        var_norm: config.clone(),
+        var_norm: config,
         hadamard: false,
         #[cfg(feature = "targeted_precision")]
         precision_budget: None,
@@ -436,7 +436,7 @@ fn main() {
         max_seq_len: bench_seq_len,
         bits: bench_bits,
         tile_size,
-        var_norm: config.clone(),
+        var_norm: config,
         hadamard: true,
         #[cfg(feature = "targeted_precision")]
         precision_budget: None,

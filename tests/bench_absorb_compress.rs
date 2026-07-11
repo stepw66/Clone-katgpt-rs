@@ -48,7 +48,7 @@ fn bench_absorb_compress_overhead() {
     // ── With AbsorbCompress ───────────────────────────────────────
 
     let config = CompressConfig::new(50, 0.1, 5, 1000);
-    let mut absorb = AbsorbCompressLayer::new(NoScreeningPruner, num_arms, config.clone());
+    let mut absorb = AbsorbCompressLayer::new(NoScreeningPruner, num_arms, config);
     let mut rng = Rng::new(42);
 
     // Warmup
@@ -76,7 +76,7 @@ fn bench_absorb_compress_overhead() {
     // ── relevance() overhead ──────────────────────────────────────
 
     let baseline_pruner = NoScreeningPruner;
-    let absorb_pruner = AbsorbCompressLayer::new(NoScreeningPruner, num_arms, config.clone());
+    let absorb_pruner = AbsorbCompressLayer::new(NoScreeningPruner, num_arms, config);
 
     // Warmup
     for i in 0..warmup {

@@ -253,7 +253,7 @@ fn bench_spectralquant_waterfill_vs_uniform() {
     // v2: water-fill
     let sq_config_v2 = SpectralQuantKVCacheConfig {
         use_water_fill: true,
-        ..sq_config_v1.clone()
+        ..sq_config_v1
     };
 
     let mut rng = Rng::new(42);

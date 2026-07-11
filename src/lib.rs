@@ -179,6 +179,10 @@ pub mod hla {
     };
 }
 
+// ── CompressionDrafter re-export (Plan 285, gated) ───────────────────────
+#[cfg(feature = "compression_drafter")]
+pub use katgpt_core::compression_drafter;
+
 // ── Inference Router (genuine root module) ─────────────────────────────────
 pub mod inference_router;
 

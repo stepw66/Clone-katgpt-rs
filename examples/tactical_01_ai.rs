@@ -127,7 +127,7 @@ impl<'a> StrategicPruner<'a> {
         parent_tokens: &[usize],
         start_state: &GameState,
     ) -> Option<GameState> {
-        let mut state = start_state.clone();
+        let mut state = *start_state;
 
         for &token_idx in parent_tokens {
             let target = self.targets.get(token_idx)?;

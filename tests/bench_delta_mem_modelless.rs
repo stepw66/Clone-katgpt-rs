@@ -407,7 +407,7 @@ fn test_phase3_interference_measurement() {
         rank: 8,
         ..Default::default()
     };
-    let mut single = DeltaMemoryState::new(config.clone());
+    let mut single = DeltaMemoryState::new(config);
     let mut multi = MultiDomainMemory::new(config);
     let hasher = FeatureHasher::new(8, 3, 42);
 

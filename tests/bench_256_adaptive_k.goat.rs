@@ -347,7 +347,7 @@ fn bench_adaptive_k_vs_fixed_k() {
         populate_cache(&fixed_router, &mut fixed_cache, n_blocks);
 
         let adapt_router =
-            AdaptiveKRouter::new(BlockTopKRouter::new(true), adaptive_config.clone());
+            AdaptiveKRouter::new(BlockTopKRouter::new(true), adaptive_config);
         let mut adapt_cache = adapt_router.cache_new(n_blocks, HEAD_DIM);
         populate_cache(&adapt_router, &mut adapt_cache, n_blocks);
 
