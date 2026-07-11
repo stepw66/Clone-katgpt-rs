@@ -4,22 +4,26 @@
 > **Date:** 2026-07-10
 > **Type:** feature (consumer integration)
 > **Severity:** MEDIUM — concrete consumer value, but no blocking trigger
-> **Status:** BOTH APPROACHES IMPLEMENTED. Approach A (`PriorityTableBandit::prios`,
-> CGSP curiosity table) COMPLETE behind `tilr_hla_refinement` (T1–T4, 9 tests).
+> **Status:** BOTH APPROACHES COMPLETE + DEFAULT-ON (2026-07-11). Approach A
+> (`PriorityTableBandit::prios`, CGSP curiosity table) COMPLETE behind
+> `tilr_hla_refinement` — **DEFAULT-ON** in riir-games (Plan 442, 2026-07-11).
 > Approach B (`CommittedBlendState::z`, committed-blend HLA) COMPLETE behind
-> `tilr_personality_refine` (T1–T4, 11 tests, Plan 438). Both are opt-in.
+> `tilr_personality_refine` — **DEFAULT-ON** in riir-games + riir-engine (Plan 442).
 > T5: synthetic personality-divergence benchmarks PASS for BOTH approaches
 > (Approach A: 2 tests + 1 e2e, Approach B: 2 tests, 2026-07-11) — mechanism
-> proven. BOTH approaches now have engine-level calibration harness + dispatch
-> (2026-07-11): Approach A `TilrCalibrationBuffer` + `tick_with_tilr`; Approach
-> B `TilrPersonalityCalibrationBuffer` (Plan 440 follow-up). End-to-end pipeline
+> proven. BOTH approaches have engine-level calibration harness + dispatch
+> (2026-07-11): Approach A `TilrCalibrationBuffer` + `tick_with_tilr` (auto-
+> calibration in production tick via Plan 443); Approach B
+> `TilrPersonalityCalibrationBuffer` (Plan 440 follow-up). End-to-end pipeline
 > tests PASS for both. REAL-SESSION T5 VALIDATION LANDED for BOTH approaches
 > (2026-07-11): Approach A `t5_real_session_calibration_buffer_with_runtime`
 > (real `NpcCgspRuntime` + buffer + `tick_with_tilr`); Approach B
 > `tilr_real_session_calibration_buffer_pipeline` (real `MapInstance` + buffer
-> + `set_tilr_bridge` + production dispatch). Final default-on promotion
-> blocked on production game-session wiring (CGSP runtime into game tick for
-> Approach A; re-commit event capture for Approach B). See "T5 status" below.
+> + `set_tilr_bridge` + production dispatch). Production game-session wiring
+> RESOLVED: CGSP runtime wired into game tick (Phase 2e-cgsp, Plan 441);
+> `tick_with_tilr` called from `tick_cgsp_curiosity` when NPC has calibrated
+> `HlaTilrState` (Plan 442); auto-calibration from `TilrCalibrationBuffer`
+> in production tick (Plan 443). See "T5 status" below.
 
 ## Context
 
@@ -356,6 +360,6 @@ capture for Approach B).
 
 - `katgpt-rs/.plans/425_tilr_invariant_subspace_refinement.md` — COMPLETE, DEFAULT-ON
 - `katgpt-rs/.research/408_*.md` — TILR research note (GOAT verdict)
-- `katgpt-rs/.docs/adaptation/tilr_subspace_family.md` — family overview
+- `katgpt-rs/.docs/05_adaptation/tilr_subspace_family.md` — family overview
 - `riir-ai/.plans/438_tilr_hla_personality_refinement.md` — implementation plan
 - `riir-neuron-db/.plans/317_tilr_consolidation_wiring.md` — sibling wiring (Issue 129, COMPLETE)
