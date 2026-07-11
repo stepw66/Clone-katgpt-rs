@@ -91,8 +91,12 @@ Consumer integration status:
 
 - **Issue 128** — riir-ai HLA no-harm personality refinement. **T1–T4 COMPLETE**
   (two approaches: CGSP priority table via `tilr_hla_refinement`, committed_blend
-  HLA vector via `tilr_personality_refine` / Plan 438). T5 promotion deferred —
-  needs real-session personality-divergence gain data.
+  HLA vector via `tilr_personality_refine` / Plan 438). **Engine-level
+  calibration harness + dispatch COMPLETE for both approaches** (2026-07-11):
+  Approach A ships `TilrCalibrationBuffer` + `tick_with_tilr`; Approach B ships
+  `TilrPersonalityCalibrationBuffer` (Plan 440 follow-up). T5 promotion deferred
+  — needs real-session personality-divergence gain data (game-session-layer
+  wiring in riir-games).
 - **Issue 129** — riir-neuron-db freeze/thaw shard refinement. **T1–T4 COMPLETE**.
   T5 deferred.
 - **Issue 130** — riir-ai `reestimation.rs` γ-gated step size. **RESOLVED —
