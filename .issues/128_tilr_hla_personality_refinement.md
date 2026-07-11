@@ -9,11 +9,12 @@
 > Approach B (`CommittedBlendState::z`, committed-blend HLA) COMPLETE behind
 > `tilr_personality_refine` (T1–T4, 11 tests, Plan 438). Both are opt-in.
 > T5: synthetic personality-divergence benchmarks PASS for BOTH approaches
-> (Approach A: 2 tests, Approach B: 2 tests, 2026-07-11) — mechanism proven.
-> Approach A calibration harness + dispatch function landed (2026-07-11):
-> `TilrCalibrationBuffer` (cold-path ring buffer) + `tick_with_tilr` (engine-
-> level dispatch). End-to-end pipeline test PASS. Final default-on promotion
-> still pending real-session gain validation. See "T5 status" below.
+> (Approach A: 2 tests + 1 e2e, Approach B: 2 tests, 2026-07-11) — mechanism
+> proven. BOTH approaches now have engine-level calibration harness + dispatch
+> (2026-07-11): Approach A `TilrCalibrationBuffer` + `tick_with_tilr`; Approach
+> B `TilrPersonalityCalibrationBuffer` (Plan 440 follow-up). End-to-end pipeline
+> tests PASS for both. Final default-on promotion still pending real-session
+> gain validation. See "T5 status" below.
 
 ## Context
 
@@ -58,7 +59,7 @@ chosen:
 | **Freeze/thaw** | ALREADY wired via `CuriosityPrioritySnapshot.priorities` | needs NEW `z_snapshot` capture at re-commit |
 | **Module** | `cgsp_runtime/tilr_refinement.rs` | `committed_blend/tilr_bridge.rs` (planned) |
 | **Feature** | `tilr_hla_refinement` (= `cgsp_runtime` + `tilr_invariant_subspace` + `subspace_phase_gate`) | `tilr_personality_refine` (planned, = `tilr_invariant_subspace`) |
-| **Status** | T1–T4 COMPLETE, 12 tests pass (9 G1-G4 + 2 T5 + 1 T5-e2e) + 8 calibration buffer tests; calibration harness + dispatch landed | T1–T4 COMPLETE, 13 tests pass (11 G1-G4 + 2 T5) |
+| **Status** | T1–T4 COMPLETE, 12 tests pass (9 G1-G4 + 2 T5 + 1 T5-e2e) + 8 calibration buffer tests; calibration harness + dispatch landed | T1–T4 COMPLETE, 13 tests pass (11 G1-G4 + 2 T5) + 9 calibration buffer tests (8 unit + 1 e2e); calibration harness landed (Plan 440 follow-up) |
 
 **Both approaches are implemented** and independently useful: Approach A refines
 the curiosity allocation (which axes the NPC explores), Approach B refines the
@@ -207,11 +208,25 @@ real-session personality-divergence gain.
       now get the additive correction `dz += η_base·γ·d_proj` applied to their
       committed-blend dz BEFORE integration — in the production game tick.
       The no-harm contract holds (orthogonal dz → γ=0 → bit-identical
-      pass-through). The only remaining piece for T5 promotion is the
-      cold-path calibration harness (z-snapshot ring buffer at re-commit
-      events → `from_differences` SVD → `set_tilr_bridge`), which is a
-      game-session-layer concern, not an engine concern.
+      pass-through).
+      **CALIBRATION HARNESS LANDED** (2026-07-11): `TilrPersonalityCalibrationBuffer`
+      (new module `committed_blend/tilr_calibration.rs`): cold-path FIFO ring
+      buffer that accumulates `(z_before, z_after)` HLA z-snapshot pairs at
+      re-commit events and calibrates a `TilrPersonalityBridge` via
+      `from_differences` SVD when enough pairs are collected. 9 tests (8 unit +
+      1 end-to-end pipeline). Gated on `tilr_personality_refine` and
+      re-exported from `committed_blend`. This is the Approach B sibling of
+      `cgsp_runtime::TilrCalibrationBuffer` (Approach A) — same pattern, engine-
+      level, game layer just calls `push` and `try_calibrate`.
       See `riir-ai/.plans/440_tilr_bridge_committed_blend_dispatch_wiring.md`.
+      **REMAINING for default-on promotion**: real-session validation that the
+      calibrated subspace (from contrastive z-snapshot differences at re-commit
+      events) captures meaningful personality directions in production game
+      sessions. The engine-level infrastructure is now COMPLETE for both
+      approaches — calibration harness + dispatch. The remaining work is in
+      riir-games: wiring re-commit event z-snapshot capture into
+      `TilrPersonalityCalibrationBuffer::push` and calling
+      `try_calibrate` → `set_tilr_bridge` at epoch boundaries.
 
 ## Cross-references
 
