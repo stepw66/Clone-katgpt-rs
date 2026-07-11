@@ -212,6 +212,125 @@ impl ManceScratch {
     }
 }
 
+// ─── Tangent cache (Issue 132) ───────────────────────────────────────────────
+
+/// Pre-allocated cache for MANCE tangent basis reuse (Issue 132).
+///
+/// The tangent basis `B` and singular values `σ` depend **only on the k-NN
+/// neighbor positions** (rows of the natural pool), not on the query point `x`.
+/// When the neighbor set is stable across iterative loop rounds (which it
+/// usually is — the trust-bounded step moves x at most ε·r_i = 10% of the
+/// local radius per round), the SVD can be skipped entirely.
+///
+/// Cache validity is determined by comparing the current k-NN neighbor
+/// indices with the cached set. If any index differs, the cache is invalid
+/// and the SVD must be recomputed. This is both necessary and sufficient:
+/// same indices → same neighbor positions → same centered matrix → same SVD.
+/// The k-NN function sorts indices by index after selection (Plan 427),
+/// ensuring the same neighbor set always produces the same ordering.
+///
+/// The movement-threshold condition proposed in Issue 132 (recompute if
+/// `‖x - x_cached‖ > 0.5·r_i`) is mathematically redundant: if indices match,
+/// B/σ are identical regardless of x's position. Omitted by design.
+///
+/// # Allocation
+///
+/// Pre-allocate once with [`ManceTangentCache::with_capacity`] for the largest
+/// `(d, k, r)` you will use. The hot path (cached step) does only
+/// `slice::copy_from_slice` — zero allocations.
+pub struct ManceTangentCache {
+    /// Cached neighbor indices (k entries, sorted by index for deterministic comparison).
+    neighbor_indices: Vec<usize>,
+    /// Cached tangent basis B (d×r, column-major). Copied to scratch on hit.
+    tangent_basis: Vec<f32>,
+    /// Cached singular values σ (r entries, descending). Copied to scratch on hit.
+    singular_values: Vec<f32>,
+    /// Whether the cache has been populated at least once.
+    valid: bool,
+    /// The d dimension this cache is sized for.
+    d: usize,
+    /// The k dimension this cache is sized for.
+    k: usize,
+    /// The r dimension this cache is sized for.
+    r: usize,
+    /// Debug: number of cache hits (for benchmark diagnostics).
+    #[cfg(feature = "manifold_erasure")]
+    pub cache_hits: u64,
+    /// Debug: number of cache misses (for benchmark diagnostics).
+    #[cfg(feature = "manifold_erasure")]
+    pub cache_misses: u64,
+}
+
+impl ManceTangentCache {
+    /// Allocate a cache sized for dimension `d`, `k` neighbors, and `r`
+    /// tangent basis components.
+    pub fn with_capacity(d: usize, k: usize, r: usize) -> Self {
+        Self {
+            neighbor_indices: vec![0; k],
+            tangent_basis: vec![0.0; d * r],
+            singular_values: vec![0.0; r],
+            valid: false,
+            d,
+            k,
+            r,
+            #[cfg(feature = "manifold_erasure")]
+            cache_hits: 0,
+            #[cfg(feature = "manifold_erasure")]
+            cache_misses: 0,
+        }
+    }
+
+    /// Check whether the cache is valid for the given neighbor indices.
+    ///
+    /// Returns `true` if the cache has been populated AND all k indices match.
+    /// The k-NN function sorts indices by index after selection (since Plan 427),
+    /// so the same neighbor set always produces the same ordering — a simple
+    /// slice equality suffices.
+    #[inline]
+    fn is_valid_for(&self, indices: &[usize]) -> bool {
+        if !self.valid {
+            return false;
+        }
+        let k = indices.len().min(self.k);
+        self.neighbor_indices[..k] == indices[..k]
+    }
+
+    /// Update the cache with fresh tangent data from scratch buffers.
+    ///
+    /// Copies neighbor indices, tangent basis, and singular values from the
+    /// provided slices into the cache's internal buffers.
+    #[inline]
+    fn update(
+        &mut self,
+        indices: &[usize],
+        basis: &[f32],
+        sigma: &[f32],
+    ) {
+        let k = indices.len().min(self.k);
+        let d_r = basis.len().min(self.d * self.r);
+        let r = sigma.len().min(self.r);
+        self.neighbor_indices[..k].copy_from_slice(&indices[..k]);
+        self.tangent_basis[..d_r].copy_from_slice(&basis[..d_r]);
+        self.singular_values[..r].copy_from_slice(&sigma[..r]);
+        self.valid = true;
+    }
+
+    /// Copy cached tangent data into scratch buffers (cache hit path).
+    #[inline]
+    fn copy_to(&self, basis: &mut [f32], sigma: &mut [f32]) {
+        let d_r = basis.len().min(self.d * self.r);
+        let r = sigma.len().min(self.r);
+        basis[..d_r].copy_from_slice(&self.tangent_basis[..d_r]);
+        sigma[..r].copy_from_slice(&self.singular_values[..r]);
+    }
+
+    /// Reset the cache to invalid state. Useful when the natural pool changes.
+    #[inline]
+    pub fn invalidate(&mut self) {
+        self.valid = false;
+    }
+}
+
 // ─── Core functions ──────────────────────────────────────────────────────────
 
 /// T1.3 — Compute L2 distances from `x` to all natural representations, select
@@ -306,6 +425,25 @@ fn knn_distances_into<'s>(
     // Convert squared distances to L2 distances.
     for i in 0..k {
         dists[i] = dists[i].sqrt();
+    }
+
+    // Sort by index (insertion sort — k is tiny, typically 8-16).
+    // This ensures deterministic row ordering for the SVD: the same neighbor
+    // set always produces the same centered-matrix row order, which makes the
+    // SVD output reproducible and enables bit-identical tangent caching
+    // (Issue 132). Without this, the max-heap replacement strategy can return
+    // the same neighbor set in different orders across calls.
+    for i in 1..k {
+        let idx_key = idxs[i];
+        let dist_key = dists[i];
+        let mut j = i;
+        while j > 0 && idxs[j - 1] > idx_key {
+            idxs[j] = idxs[j - 1];
+            dists[j] = dists[j - 1];
+            j -= 1;
+        }
+        idxs[j] = idx_key;
+        dists[j] = dist_key;
     }
 
     Ok(&neighbor_distances[..k])
@@ -683,6 +821,159 @@ pub fn manifold_erasure_step(
     Ok((out, info))
 }
 
+/// T1.7c — Cached MANCE erasure step (Issue 132).
+///
+/// Identical to [`manifold_erasure_step_into`] but skips the tangent SVD when
+/// the k-NN neighbor set hasn't changed since the last call (cache hit).
+///
+/// The cache stores the tangent basis `B` and singular values `σ` keyed on
+/// neighbor indices. On a cache hit, only `O(d·r)` copying is needed instead
+/// of `O(k·d·min(k,d))` for the SVD. The k-NN retrieval still runs every call
+/// (needed for fresh `r_i` distances).
+///
+/// # Correctness
+///
+/// Results are **bit-identical** to [`manifold_erasure_step_into`] when the
+/// cache is valid: same B/σ (same neighbor positions) + same r_i (fresh k-NN
+/// distances) → same direction → same step.
+///
+/// # Allocation
+///
+/// Zero allocations on the hot path. The cache is pre-allocated via
+/// [`ManceTangentCache::with_capacity`].
+#[cfg(feature = "subspace_phase_gate")]
+pub fn manifold_erasure_step_cached_into(
+    x: &[f32],
+    gradient: &[f32],
+    natural_pool: &[f32],
+    n: usize,
+    config: &ManceConfig,
+    scratch: &mut ManceScratch,
+    cache: &mut ManceTangentCache,
+    out: &mut [f32],
+) -> Result<ManceStepInfo, ManceError> {
+    let d = x.len();
+    config.validate()?;
+
+    if gradient.len() != d || out.len() != d || natural_pool.len() != n * d {
+        return Err(ManceError::DimensionMismatch);
+    }
+    if n < config.k {
+        return Err(ManceError::InsufficientNeighbors);
+    }
+
+    let k = config.k.min(scratch.k);
+    let r = config.r.min(scratch.r);
+
+    // Check for zero gradient early.
+    let grad_norm_sq = simd_dot_f32(gradient, gradient, d);
+    if grad_norm_sq < 1e-24 {
+        out.copy_from_slice(x);
+        return Ok(ManceStepInfo {
+            lambda: 0.0,
+            displacement: 0.0,
+            local_radius: 0.0,
+            alignment: 0.0,
+        });
+    }
+
+    // T1.3: k-NN retrieval (always — needed for fresh r_i distances).
+    let distances = knn_distances_into(
+        x,
+        natural_pool,
+        n,
+        d,
+        k,
+        &mut scratch.neighbor_distances,
+        &mut scratch.neighbor_indices,
+    )?;
+
+    // Cache check: skip SVD if neighbor indices match.
+    let cache_hit = cache.is_valid_for(&scratch.neighbor_indices[..k]);
+    if cache_hit {
+        #[cfg(feature = "manifold_erasure")]
+        { cache.cache_hits += 1; }
+        // Reuse cached B/σ — copy into scratch.
+        cache.copy_to(&mut scratch.tangent_basis, &mut scratch.singular_values);
+    } else {
+        #[cfg(feature = "manifold_erasure")]
+        { cache.cache_misses += 1; }
+        // Cache miss — recompute tangent basis via SVD.
+        estimate_local_tangent_into(
+            natural_pool,
+            &scratch.neighbor_indices[..k],
+            d,
+            r,
+            &mut scratch.centered_neighbors,
+            &mut scratch.mean_neighbor,
+            &mut scratch.tangent_basis,
+            &mut scratch.singular_values,
+            &mut scratch.svd_result,
+            &mut scratch.svd_work,
+        )?;
+        // Update cache with fresh tangent data.
+        cache.update(
+            &scratch.neighbor_indices[..k],
+            &scratch.tangent_basis,
+            &scratch.singular_values,
+        );
+    }
+
+    // T1.5: spectrally-weighted erasure direction.
+    let alignment = tangent_erasure_direction_into(
+        gradient,
+        &scratch.tangent_basis,
+        &scratch.singular_values,
+        config.alpha,
+        d,
+        r,
+        &mut scratch.projection_coords,
+        &mut scratch.tangent_direction,
+    );
+
+    // Check for orthogonal direction (no-harm).
+    if alignment < 1e-12 {
+        out.copy_from_slice(x);
+        let r_i = if distances.is_empty() {
+            0.0
+        } else {
+            distances.iter().sum::<f32>() / distances.len() as f32
+        };
+        return Ok(ManceStepInfo {
+            lambda: 0.0,
+            displacement: 0.0,
+            local_radius: r_i,
+            alignment: 0.0,
+        });
+    }
+
+    // T1.6: trust-bounded step size.
+    let direction = &scratch.tangent_direction;
+    let lambda = local_radius_step(x, direction, distances, config.epsilon, config.lambda_max, d);
+
+    // Apply: out = x - λ · <x, û> · û
+    let x_proj = simd_dot_f32(x, direction, d);
+    let scale = lambda * x_proj;
+    for i in 0..d {
+        out[i] = x[i] - scale * direction[i];
+    }
+
+    // Diagnostics.
+    let displacement = scale.abs() * simd_dot_f32(direction, direction, d).sqrt();
+    let r_i = if distances.is_empty() {
+        0.0
+    } else {
+        distances.iter().sum::<f32>() / distances.len() as f32
+    };
+
+    Ok(ManceStepInfo {
+        lambda,
+        displacement,
+        local_radius: r_i,
+        alignment,
+    })
+}
+
 // ─── Phase 2: Iterative loop + closed-form preprocessing ─────────────────────
 
 /// T2.1 — Iterative MANCE erasure loop (zero-alloc hot path).
@@ -729,6 +1020,74 @@ where
             n,
             config,
             scratch,
+            out, // in-place: out is both input and output
+        )?;
+        infos.push(info);
+
+        // Early termination: if lambda is 0, further rounds won't help.
+        if info.lambda == 0.0 {
+            break;
+        }
+    }
+
+    Ok(infos)
+}
+
+/// T2.1c — Cached iterative MANCE erasure loop (Issue 132).
+///
+/// Identical to [`manifold_erasure_loop_into`] but uses a [`ManceTangentCache`]
+/// to skip the tangent SVD when the k-NN neighbor set is stable across rounds.
+///
+/// For a 10-round loop where neighbors don't change (the common case with
+/// ε=0.1 trust region), this skips ~9 of 10 SVDs.
+///
+/// # Correctness
+///
+/// Results are **bit-identical** to [`manifold_erasure_loop_into`]: the cache
+/// only skips the SVD when the neighbor set is identical, in which case B/σ
+/// are the same. All other computations (k-NN, spectral weighting, trust region)
+/// use fresh values every round.
+///
+/// # Allocation
+///
+/// The per-round `grad_buf` and `current` allocations match the uncached
+/// loop's pattern. The SVD-skip (the optimization) adds zero allocations.
+#[cfg(feature = "subspace_phase_gate")]
+pub fn manifold_erasure_loop_cached_into<F>(
+    x: &[f32],
+    mut gradient_fn: F,
+    natural_pool: &[f32],
+    n: usize,
+    config: &ManceConfig,
+    n_rounds: usize,
+    scratch: &mut ManceScratch,
+    cache: &mut ManceTangentCache,
+    out: &mut [f32],
+) -> Result<Vec<ManceStepInfo>, ManceError>
+where
+    F: FnMut(&[f32], &mut [f32]),
+{
+    let d = x.len();
+    if out.len() != d {
+        return Err(ManceError::DimensionMismatch);
+    }
+    out.copy_from_slice(x);
+
+    let mut grad_buf = vec![0.0f32; d];
+    let mut infos = Vec::with_capacity(n_rounds);
+
+    for _ in 0..n_rounds {
+        gradient_fn(out, &mut grad_buf);
+        // Copy out to a temp to avoid aliasing &out and &mut out.
+        let current = out.to_vec();
+        let info = manifold_erasure_step_cached_into(
+            &current,
+            &grad_buf,
+            natural_pool,
+            n,
+            config,
+            scratch,
+            cache,
             out, // in-place: out is both input and output
         )?;
         infos.push(info);
@@ -1261,5 +1620,184 @@ mod tests {
         assert!((out[1] - 0.7).abs() < 1e-5, "e2 preserved: {}", out[1]);
         assert!((out[2] - (-0.3)).abs() < 1e-5, "e3 preserved: {}", out[2]);
         assert!((out[3] - 0.4).abs() < 1e-5, "e4 preserved: {}", out[3]);
+    }
+
+    // Issue 132: Tangent cache tests
+
+    /// Cached step produces bit-identical results to uncached step.
+    #[test]
+    fn cached_step_matches_uncached() {
+        let d = 8;
+        let n = 50;
+        let config = ManceConfig::default();
+        let pool = make_pool(n, d, 42);
+        let x = vec![0.5; d];
+        let gradient = vec![1.0, 0.5, -0.3, 0.8, -0.1, 0.4, 0.2, -0.6];
+
+        // Uncached step.
+        let mut scratch_u = ManceScratch::with_capacity(d, config.k, config.r);
+        let mut out_uncached = vec![0.0; d];
+        let info_u = manifold_erasure_step_into(
+            &x, &gradient, &pool, n, &config, &mut scratch_u, &mut out_uncached,
+        ).unwrap();
+
+        // Cached step (first call — cache miss, same as uncached).
+        let mut scratch_c = ManceScratch::with_capacity(d, config.k, config.r);
+        let mut cache = ManceTangentCache::with_capacity(d, config.k, config.r);
+        let mut out_cached = vec![0.0; d];
+        let info_c = manifold_erasure_step_cached_into(
+            &x, &gradient, &pool, n, &config, &mut scratch_c, &mut cache, &mut out_cached,
+        ).unwrap();
+
+        // Results must be bit-identical.
+        assert_eq!(out_uncached, out_cached, "Cached step output must match uncached");
+        assert_eq!(info_u.lambda, info_c.lambda, "lambda must match");
+        assert_eq!(info_u.displacement, info_c.displacement, "displacement must match");
+        assert_eq!(info_u.local_radius, info_c.local_radius, "local_radius must match");
+        assert_eq!(info_u.alignment, info_c.alignment, "alignment must match");
+    }
+
+    /// Cached step with cache hit (same x) produces identical results.
+    #[test]
+    fn cached_step_cache_hit_same_result() {
+        let d = 8;
+        let n = 50;
+        let config = ManceConfig::default();
+        let pool = make_pool(n, d, 42);
+        let x = vec![0.5; d];
+        let gradient = vec![1.0; d];
+
+        let mut scratch = ManceScratch::with_capacity(d, config.k, config.r);
+        let mut cache = ManceTangentCache::with_capacity(d, config.k, config.r);
+        let mut out1 = vec![0.0; d];
+        let mut out2 = vec![0.0; d];
+
+        // First call — cache miss, populates cache.
+        let info1 = manifold_erasure_step_cached_into(
+            &x, &gradient, &pool, n, &config, &mut scratch, &mut cache, &mut out1,
+        ).unwrap();
+
+        // Second call with same x — cache hit, should produce identical result.
+        let info2 = manifold_erasure_step_cached_into(
+            &x, &gradient, &pool, n, &config, &mut scratch, &mut cache, &mut out2,
+        ).unwrap();
+
+        assert_eq!(out1, out2, "Cache hit must produce identical output");
+        assert_eq!(info1.lambda, info2.lambda);
+        assert_eq!(info1.alignment, info2.alignment);
+    }
+
+    /// Cached loop produces bit-identical results to uncached loop.
+    #[test]
+    fn cached_loop_matches_uncached() {
+        let d = 8;
+        let n = 50;
+        let config = ManceConfig::default();
+        let pool = make_pool(n, d, 42);
+        let x = vec![0.5; d];
+        let gradient = vec![1.0, 0.5, -0.3, 0.8, -0.1, 0.4, 0.2, -0.6];
+
+        let grad_ref = &gradient;
+        let gf = move |_state: &[f32], buf: &mut [f32]| {
+            buf.copy_from_slice(grad_ref);
+        };
+
+        // Uncached loop.
+        let mut scratch_u = ManceScratch::with_capacity(d, config.k, config.r);
+        let mut out_uncached = vec![0.0; d];
+        let infos_u = manifold_erasure_loop_into(
+            &x, gf, &pool, n, &config, 10, &mut scratch_u, &mut out_uncached,
+        ).unwrap();
+
+        // Cached loop.
+        let grad_ref2 = &gradient;
+        let gf2 = move |_state: &[f32], buf: &mut [f32]| {
+            buf.copy_from_slice(grad_ref2);
+        };
+        let mut scratch_c = ManceScratch::with_capacity(d, config.k, config.r);
+        let mut cache = ManceTangentCache::with_capacity(d, config.k, config.r);
+        let mut out_cached = vec![0.0; d];
+        let infos_c = manifold_erasure_loop_cached_into(
+            &x, gf2, &pool, n, &config, 10, &mut scratch_c, &mut cache, &mut out_cached,
+        ).unwrap();
+
+        // Results must be bit-identical.
+        assert_eq!(out_uncached, out_cached, "Cached loop output must match uncached");
+        assert_eq!(infos_u.len(), infos_c.len(), "Round count must match");
+        for (i, (iu, ic)) in infos_u.iter().zip(infos_c.iter()).enumerate() {
+            assert_eq!(iu.lambda, ic.lambda, "Round {} lambda mismatch", i);
+            assert_eq!(iu.displacement, ic.displacement, "Round {} displacement mismatch", i);
+            assert_eq!(iu.local_radius, ic.local_radius, "Round {} local_radius mismatch", i);
+            assert_eq!(iu.alignment, ic.alignment, "Round {} alignment mismatch", i);
+        }
+    }
+
+    /// Cache invalidation: when x moves far enough that neighbors change,
+    /// the cache is invalidated and recomputed.
+    #[test]
+    fn cache_invalidation_when_neighbors_change() {
+        let d = 4;
+        let n = 20;
+        let config = ManceConfig { k: 4, r: 2, ..Default::default() };
+        // Pool with points spread across [-1, 1] in each dim.
+        let pool = make_pool(n, d, 999);
+
+        let mut scratch = ManceScratch::with_capacity(d, config.k, config.r);
+        let mut cache = ManceTangentCache::with_capacity(d, config.k, config.r);
+        let gradient = vec![1.0; d];
+        let mut out = vec![0.0; d];
+
+        // Step 1: x near origin.
+        let x1 = vec![0.0; d];
+        let info1 = manifold_erasure_step_cached_into(
+            &x1, &gradient, &pool, n, &config, &mut scratch, &mut cache, &mut out,
+        ).unwrap();
+        assert!(!cache.valid == false, "Cache should be valid after first step");
+
+        // Step 2: same x — cache hit, same result.
+        let mut out2 = vec![0.0; d];
+        let info2 = manifold_erasure_step_cached_into(
+            &x1, &gradient, &pool, n, &config, &mut scratch, &mut cache, &mut out2,
+        ).unwrap();
+        assert_eq!(out, out2, "Same x should produce same output");
+        assert_eq!(info1.lambda, info2.lambda);
+
+        // Step 3: x moved far — neighbors likely change, cache should still work.
+        // (Even if cache is invalidated, the result must be correct.)
+        let x3 = vec![0.9, -0.9, 0.9, -0.9];
+        let mut out3 = vec![0.0; d];
+        let _info3 = manifold_erasure_step_cached_into(
+            &x3, &gradient, &pool, n, &config, &mut scratch, &mut cache, &mut out3,
+        ).unwrap();
+
+        // Verify: uncached step with x3 should match cached step.
+        let mut scratch_u = ManceScratch::with_capacity(d, config.k, config.r);
+        let mut out_uncached = vec![0.0; d];
+        manifold_erasure_step_into(
+            &x3, &gradient, &pool, n, &config, &mut scratch_u, &mut out_uncached,
+        ).unwrap();
+        assert_eq!(out3, out_uncached, "Cached step after invalidation must match uncached");
+    }
+
+    /// Cache invalidate() resets to invalid state.
+    #[test]
+    fn cache_invalidate_resets() {
+        let d = 8;
+        let k = 8;
+        let r = 8;
+        let mut cache = ManceTangentCache::with_capacity(d, k, r);
+        assert!(!cache.valid, "New cache should be invalid");
+
+        // Populate with sorted indices (k-NN always returns sorted indices).
+        cache.update(&[0, 1, 2, 3, 4, 5, 6, 7], &vec![1.0; d * r], &vec![1.0; r]);
+        assert!(cache.valid, "Cache should be valid after update");
+        assert!(cache.is_valid_for(&[0, 1, 2, 3, 4, 5, 6, 7]));
+        // Different set — should be invalid.
+        assert!(!cache.is_valid_for(&[1, 2, 3, 4, 5, 6, 7, 8]));
+
+        // Invalidate.
+        cache.invalidate();
+        assert!(!cache.valid, "Cache should be invalid after invalidate()");
+        assert!(!cache.is_valid_for(&[0, 1, 2, 3, 4, 5, 6, 7]), "Invalidated cache should not be valid");
     }
 }

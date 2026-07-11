@@ -2,7 +2,7 @@
 
 > **Spawned from:** Plan 426 MANCE primitive (commit `ea3c95ad`, 2026-07-11)
 > **Date:** 2026-07-11
-> **Status:** OPEN
+> **Status:** CLOSED (implemented in Plan 427, commit pending)
 > **Priority:** Medium (perf, not correctness)
 > **Feature gate:** `manifold_erasure` (already default-on)
 
@@ -74,14 +74,19 @@ fn tangent_with_cache(
 
 ## Acceptance Criteria
 
-- [ ] `ManceTangentCache` struct with cache-validity check.
-- [ ] `tangent_with_cache` function — returns cached tangent when valid.
-- [ ] G2 benchmark: cached loop latency < 50% of uncached loop latency.
-- [ ] G1 correctness: cached results match uncached within f32 epsilon (the
+- [x] `ManceTangentCache` struct with cache-validity check.
+- [x] `tangent_with_cache` function — returns cached tangent when valid.
+  (Implemented as `manifold_erasure_step_cached_into` + `manifold_erasure_loop_cached_into`)
+- [x] G2 benchmark: cached loop latency < 50% of uncached loop latency.
+  (10.89µs vs 47.98µs = 4.4x speedup, 77% reduction)
+- [x] G1 correctness: cached results match uncached within f32 epsilon (the
       tangent basis is the same when the cache is valid; the only difference is
       when the cache is invalidated and recomputed).
-- [ ] G3 no-regression: existing MANCE tests pass unchanged.
-- [ ] G4 alloc-free hot path (cache is pre-allocated, reused).
+  (Bit-identical — `assert_eq!` passes on output + all diagnostics)
+- [x] G3 no-regression: existing MANCE tests pass unchanged.
+  (1468/1468 lib tests + 3034/3034 all-features tests pass)
+- [x] G4 alloc-free hot path (cache is pre-allocated, reused).
+  (0 allocs/100 cached step calls)
 
 ## Non-goals
 

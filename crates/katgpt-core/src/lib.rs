@@ -1651,10 +1651,12 @@ pub use tilr::discover_invariant_subspace;
 pub mod manifold_erasure;
 #[cfg(all(feature = "manifold_erasure", feature = "subspace_phase_gate"))]
 pub use manifold_erasure::{
-    ManceConfig, ManceError, ManceScratch, ManceStepInfo,
+    ManceConfig, ManceError, ManceScratch, ManceStepInfo, ManceTangentCache,
     covmatch_second_moment_into, leace_first_moment_into,
     mance_plus_plus_step_into, mance_plus_step_into,
-    manifold_erasure_loop_into, manifold_erasure_step, manifold_erasure_step_into,
+    manifold_erasure_loop_cached_into, manifold_erasure_loop_into,
+    manifold_erasure_step, manifold_erasure_step_cached_into,
+    manifold_erasure_step_into,
 };
 
 // Test-only `#[global_allocator]` so `alloc::tests::*` pass when running
