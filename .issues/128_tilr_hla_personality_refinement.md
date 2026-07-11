@@ -330,6 +330,27 @@ capture for Approach B).
       **NOTE**: `committed_personality_runtime` was already default-on (Plan
       336 Phase 7 T7.1, promoted 2026-06-26). The previous session's blocker
       list incorrectly listed it as blocked.
+      **AUTO-CALIBRATION PRODUCTION WIRING LANDED** (Plan 444, 2026-07-11):
+      The `TilrPersonalityCalibrationBuffer` is now wired into the production
+      `tick_committed_blend` sub-phase. The host calls
+      `enable_committed_blend_tilr_auto_calibration(npc_idx, capture_interval)`
+      once, and the production tick automatically:
+      1. Captures the 8-dim HLA z-vector every `capture_interval` ticks (cold
+         path — hot path is a single `u64` increment + compare).
+      2. Pushes `(prev_z, curr_z)` temporal transition pairs into the
+         `TilrPersonalityCalibrationBuffer` (no good/bad labeling — the SVD
+         on drift directions is the signal).
+      3. When the buffer reaches `min_pairs` (default 4) AND no bridge has
+         been set manually, auto-calibrates a `TilrPersonalityBridge` via
+         SVD and calls `set_tilr_bridge` internally.
+      4. Emits `SimEvent::PersonalityRecommit` with
+         `"npc={} tilr auto-calibrated r={rank}"`.
+      5. Subsequent ticks use `bridge.refine_dz` (the existing Plan 440
+         wiring).
+      Never overwrites a manually-set bridge. 5/5
+      `committed_blend_tilr_auto_calibration` tests pass, 7/7
+      `tilr_bridge_tick_integration` tests pass (no regression).
+      See `riir-ai/.plans/444_committed_blend_tilr_auto_calibration_production_wiring.md`.
 
 ## Cross-references
 
