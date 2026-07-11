@@ -423,8 +423,8 @@ fn knn_distances_into<'s>(
     }
 
     // Convert squared distances to L2 distances.
-    for i in 0..k {
-        dists[i] = dists[i].sqrt();
+    for d in dists[..k].iter_mut() {
+        *d = d.sqrt();
     }
 
     // Sort by index (insertion sort — k is tiny, typically 8-16).
@@ -458,6 +458,7 @@ fn knn_distances_into<'s>(
 /// - `tangent_basis` is `d×r` column-major (column j = j-th right singular vector)
 /// - `singular_values` is length `r` (descending)
 #[cfg(feature = "subspace_phase_gate")]
+#[allow(clippy::too_many_arguments)] // buffer-passing API: natural_pool, neighbor_indices, d, r, + 5 output slices
 fn estimate_local_tangent_into(
     natural_pool: &[f32],
     neighbor_indices: &[usize],
@@ -545,6 +546,7 @@ fn estimate_local_tangent_into(
 /// the direction is set to all-zeros and alignment = 0.0. The caller should
 /// check alignment and skip the step (λ=0).
 #[cfg(feature = "subspace_phase_gate")]
+#[allow(clippy::too_many_arguments)] // buffer-passing API: gradient, basis, sigma, 2 scalars, 2 output slices
 pub fn tangent_erasure_direction_into(
     gradient: &[f32],
     basis: &[f32],     // d×r, column-major
@@ -842,6 +844,7 @@ pub fn manifold_erasure_step(
 /// Zero allocations on the hot path. The cache is pre-allocated via
 /// [`ManceTangentCache::with_capacity`].
 #[cfg(feature = "subspace_phase_gate")]
+#[allow(clippy::too_many_arguments)] // buffer-passing API: x, gradient, pool, 2 scalars/config, scratch, cache, out
 pub fn manifold_erasure_step_cached_into(
     x: &[f32],
     gradient: &[f32],
@@ -987,6 +990,7 @@ pub fn manifold_erasure_step_cached_into(
 /// receives the current state. If the caller wants a static direction (no
 /// refit), pass a closure that ignores its input.
 #[cfg(feature = "subspace_phase_gate")]
+#[allow(clippy::too_many_arguments)] // buffer-passing API: x, gradient_fn, pool, n, config, n_rounds, scratch, out
 pub fn manifold_erasure_loop_into<F>(
     x: &[f32],
     mut gradient_fn: F,
@@ -1053,6 +1057,7 @@ where
 /// The per-round `grad_buf` and `current` allocations match the uncached
 /// loop's pattern. The SVD-skip (the optimization) adds zero allocations.
 #[cfg(feature = "subspace_phase_gate")]
+#[allow(clippy::too_many_arguments)] // buffer-passing API: x, gradient_fn, pool, n, config, n_rounds, scratch, cache, out
 pub fn manifold_erasure_loop_cached_into<F>(
     x: &[f32],
     mut gradient_fn: F,
@@ -1213,6 +1218,7 @@ pub fn covmatch_second_moment_into(
 /// First applies LEACE rank-1 erasure, then runs the MANCE iterative loop
 /// on the preprocessed state.
 #[cfg(feature = "subspace_phase_gate")]
+#[allow(clippy::too_many_arguments)] // buffer-passing API: x, 2 class means, gradient_fn, pool, n, config, n_rounds, scratch, out
 pub fn mance_plus_step_into<F>(
     x: &[f32],
     class_mean_pos: &[f32],
@@ -1247,6 +1253,7 @@ where
 /// First applies LEACE rank-1 erasure, then CovMatch rank-2 erasure,
 /// then runs the MANCE iterative loop on the doubly-preprocessed state.
 #[cfg(feature = "subspace_phase_gate")]
+#[allow(clippy::too_many_arguments)] // buffer-passing API: x, 2 class means, eigvecs, gradient_fn, pool, n, config, n_rounds, scratch, out
 pub fn mance_plus_plus_step_into<F>(
     x: &[f32],
     class_mean_pos: &[f32],

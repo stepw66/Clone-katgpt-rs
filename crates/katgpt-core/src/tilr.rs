@@ -255,6 +255,7 @@ pub fn check_orthonormal(basis: &[f32], r: usize, d: usize, tol: f32) -> Result<
 /// assert!((out[0] - 0.35).abs() < 1e-5);
 /// ```
 #[inline]
+#[allow(clippy::too_many_arguments)] // buffer-passing API: each arg is a distinct input/output slice or scalar
 pub fn tilr_refine_into(
     state: &[f32],
     direction: &[f32],
@@ -290,9 +291,7 @@ pub fn tilr_refine_into(
     // O(r · d) — reconstruct from coefficients. Written as outer SAXPY loop
     // for auto-vectorization on the inner d-loop.
     let d_proj = &mut scratch.d_proj[..d];
-    for i in 0..d {
-        d_proj[i] = 0.0;
-    }
+    d_proj.fill(0.0);
     for k in 0..r {
         let c = coeffs[k];
         let row = &basis[k * d..(k + 1) * d];
@@ -429,9 +428,7 @@ pub fn tilr_refine_apply(
         coeffs[k] = simd_dot_f32(&basis[k * d..(k + 1) * d], direction, d);
     }
     let d_proj = &mut scratch.d_proj[..d];
-    for i in 0..d {
-        d_proj[i] = 0.0;
-    }
+    d_proj.fill(0.0);
     for k in 0..r {
         let c = coeffs[k];
         let row = &basis[k * d..(k + 1) * d];

@@ -1347,7 +1347,7 @@ pub fn compare_reconstruction(modules: &[SenseModule], hla: [f32; 8]) -> Reconst
         passive,
         active,
         steps: state.step() as u32,
-        evidence: state.evidence().clone(),
+        evidence: *state.evidence(),
         hla_delta,
     }
 }

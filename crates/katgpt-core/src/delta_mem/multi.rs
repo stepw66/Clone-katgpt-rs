@@ -84,7 +84,7 @@ impl MultiDomainMemory {
         if !self.states.contains_key(domain) {
             self.states.insert(
                 domain.to_string(),
-                DeltaMemoryState::new(self.config.clone()),
+                DeltaMemoryState::new(self.config),
             );
         }
     }
