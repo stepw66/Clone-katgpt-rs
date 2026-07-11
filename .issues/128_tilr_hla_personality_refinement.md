@@ -205,6 +205,21 @@ capture for Approach B).
       modelless (SVD + projection + sigmoid). Zero-cost no-op when no TILR
       state set (`npc_cgsp_tilr_states` all None).
       See `riir-ai/.plans/442_cgsp_tilr_production_wiring_and_promotion.md`.
+      **AUTO-CALIBRATION PRODUCTION WIRING LANDED** (Plan 443, 2026-07-11):
+      The `TilrCalibrationBuffer` is now wired into the production game tick.
+      The host no longer needs to calibrate offline — the tick auto-calibrates:
+      - `CgspTilrCalibration` struct (new in `map_instance.rs`): holds
+        `TilrCalibrationBuffer` + temporal-contrast state.
+      - `npc_cgsp_tilr_calibrations` field on `MapInstance` (lockstep Vec).
+      - `enable_cgsp_tilr_auto_calibration(npc_idx, capture_interval)` method.
+      - `tick_cgsp_curiosity` auto-calibrates: captures priority snapshots
+        every `capture_interval` ticks, labels via entropy-based temporal
+        contrast (higher entropy = "good"), pushes to buffer, calibrates when
+        ready, and calls `set_cgsp_tilr_state` internally. Never overwrites a
+        manual state.
+      - 5 integration tests pass: auto-calibration produces state, emits γ,
+        manual state preserved, insufficient pairs no-op, field accessible.
+      See `riir-ai/.plans/443_cgsp_tilr_auto_calibration_production_wiring.md`.
 
 ## Tasks (Approach B — Plan 438, `committed_blend::z`)
 
