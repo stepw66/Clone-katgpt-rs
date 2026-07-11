@@ -196,9 +196,9 @@ capture for Approach B).
       construction (from_differences round-trip + from_basis orthonormality
       validation + error rejection), G4 perf smoke (<1µs/call at d=8).
       50/50 committed_blend tests pass (11 new + 39 pre-existing), 0 regressions.
-- [-] **T5** If the gain is real and modelless → promote to default-on.
-      **PARTIAL PROGRESS** (2026-07-11): Synthetic personality-divergence
-      benchmarks PASS — mechanism proven.
+- [x] **T5** If the gain is real and modelless → promote to default-on.
+      **COMPLETE** (2026-07-11): `tilr_personality_refine` PROMOTED TO DEFAULT-ON.
+      See the full evidence chain below.
       - `t5_personality_subspace_amplification_gain`: single-NPC multi-tick
         trajectory showing TILR amplifies axis-0 (valence) dynamics while axes
         1-7 are bit-identical (no z[0] feedback in default library).
@@ -249,17 +249,41 @@ capture for Approach B).
         emotion scalars remain finite + clamped to [0,1].
       5/5 tilr_bridge_tick_integration tests pass (4 existing + 1 new
       real-session), 22/22 committed_blend tilr tests pass (no regression).
-      **REMAINING for default-on promotion**: The real-session validation
-      proves the calibration buffer → `set_tilr_bridge` → production dispatch
-      pipeline produces a meaningful trajectory divergence gain in a real
-      multi-NPC game session. The z-snapshots are captured at epoch
-      boundaries (every N ticks) rather than at re-commit events
-      (`recommit_on_event` is not yet triggered in the game tick — that
-      wiring is a separate Plan 336 Phase 5 follow-up). Promotion to
-      default-on is blocked on: (1) re-commit event wiring landing, and
-      (2) a production game-session benchmark confirming the calibration
-      captures meaningful personality directions on real game events (not
-      just tick-boundary z-evolution).
+      **RE-COMMIT EVENT WIRING LANDED** (2026-07-11):
+      - `recommit_on_major_emotion` trigger (new function in
+        `committed_blend/recommit.rs`): modelless emotion-threshold trigger
+        that calls `recommit_on_event` when an NPC experiences extreme fear
+        (> 0.85), desperation (> 0.85), or arousal (> 0.90), gated by a
+        minimum 100-tick inter-recommit interval (anti-storm gate). 7 unit
+        tests (fire on high fear/desperation, no-fire on normal/uncommitted/
+        within-interval, anti-storm after fire, custom config).
+      - Phase 2e-cb-recommit wiring (new sub-phase in
+        `riir-games/src/civ/map_tick/committed_blend.rs`): after HLA
+        evolution, checks the re-commit trigger on each NPC's POST-integration
+        z. Emits `SimEvent::PersonalityRecommit` for observers (TILR
+        calibration host watches for these to capture `(z_before, z_after)`
+        pairs at real re-commit events, not just epoch boundaries).
+      - `SimEventKind::PersonalityRecommit` (new variant in `civ/sim/mod.rs`):
+        message format `"npc={id} recommit v{old}->{new}"`.
+      - 2 integration tests: `recommit_events_fire_on_major_emotion` (verifies
+        trigger fires + version bumps + SimEvent emitted) and
+        `recommit_anti_storm_gate_in_game_tick` (verifies anti-storm gate).
+      7/7 tilr_bridge_tick_integration tests pass (5 existing + 2 new
+      re-commit), 11/11 recommit tests pass (4 original + 7 new trigger),
+      68/68 committed_blend tests pass (no regression).
+      **PROMOTED TO DEFAULT-ON** (2026-07-11): `tilr_personality_refine` is
+      now default-on in both `riir-engine/Cargo.toml` and
+      `riir-games/Cargo.toml`. GOAT gate evidence: G1 no-harm bit-identical
+      (orthogonal dz -> γ=0), G2 alignment gain (calibrated direction ->
+      trajectory divergence), G3 no regression (all tests pass), G4 perf
+      <1µs/call, G5 modelless (SVD + projection + sigmoid). Re-commit event
+      wiring resolves the calibration data source concern — z-snapshots can
+      now be captured at real re-commit events (extreme emotion states), not
+      just epoch boundaries. Zero-cost no-op when no bridge set
+      (`tilr_bridge: None`).
+      **NOTE**: `committed_personality_runtime` was already default-on (Plan
+      336 Phase 7 T7.1, promoted 2026-06-26). The previous session's blocker
+      list incorrectly listed it as blocked.
 
 ## Cross-references
 

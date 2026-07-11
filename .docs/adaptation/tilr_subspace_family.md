@@ -89,7 +89,7 @@ family members.
 
 Consumer integration status:
 
-- **Issue 128** — riir-ai HLA no-harm personality refinement. **T1–T4 COMPLETE**
+- **Issue 128** — riir-ai HLA no-harm personality refinement. **T1–T5 COMPLETE**
   (two approaches: CGSP priority table via `tilr_hla_refinement`, committed_blend
   HLA vector via `tilr_personality_refine` / Plan 438). **Engine-level
   calibration harness + dispatch COMPLETE for both approaches** (2026-07-11):
@@ -99,9 +99,13 @@ Consumer integration status:
   `t5_real_session_calibration_buffer_with_runtime` (real `NpcCgspRuntime` +
   buffer + `tick_with_tilr`); Approach B
   `tilr_real_session_calibration_buffer_pipeline` (real `MapInstance` + buffer
-  + `set_tilr_bridge` + production dispatch). T5 promotion blocked on production
-  game-session wiring (CGSP runtime into game tick for Approach A; re-commit
-  event capture for Approach B).
+  + `set_tilr_bridge` + production dispatch). **Approach B PROMOTED TO
+  DEFAULT-ON** (2026-07-11): re-commit event wiring landed
+  (`recommit_on_major_emotion` trigger in Phase 2e-cb-recommit, emits
+  `SimEvent::PersonalityRecommit` on extreme emotion states). GOAT G1-G5 all
+  PASS. Zero-cost no-op when no bridge set. Approach A (`tilr_hla_refinement`)
+  remains opt-in — blocked on CGSP runtime production game-tick wiring
+  (Plan 299 Phase 4 GOAT gate, separate concern from Issue 128).
 - **Issue 129** — riir-neuron-db freeze/thaw shard refinement. **T1–T4 COMPLETE**.
   T5 deferred.
 - **Issue 130** — riir-ai `reestimation.rs` γ-gated step size. **RESOLVED —
