@@ -392,9 +392,9 @@ pub fn weaver_forward(weights: &WeaverWeights, input: &WeaverInput) -> WeaverOut
                 }
             }
             let mut sum_e = 0.0;
-            for kj in 0..=qi {
-                scores[kj] = (scores[kj] - max_s).exp();
-                sum_e += scores[kj];
+            for s in scores[..=qi].iter_mut() {
+                *s = (*s - max_s).exp();
+                sum_e += *s;
             }
             let inv_sum = 1.0 / sum_e;
             let out_row = &mut attn_out[qi * h + ho..qi * h + ho + head_dim];
@@ -472,9 +472,9 @@ pub fn weaver_forward(weights: &WeaverWeights, input: &WeaverInput) -> WeaverOut
 
         // Softmax over K candidates.
         let mut max_c = f32::NEG_INFINITY;
-        for ki in 0..k {
-            if corrected_logits[di][ki] > max_c {
-                max_c = corrected_logits[di][ki];
+        for cl in corrected_logits[di][..k].iter() {
+            if *cl > max_c {
+                max_c = *cl;
             }
         }
         let mut sum_e = 0.0;
@@ -484,8 +484,8 @@ pub fn weaver_forward(weights: &WeaverWeights, input: &WeaverInput) -> WeaverOut
             sum_e += e;
         }
         let inv_sum = 1.0 / sum_e;
-        for ki in 0..k {
-            corrected_probs[di][ki] *= inv_sum;
+        for cp in corrected_probs[di][..k].iter_mut() {
+            *cp *= inv_sum;
         }
     }
 
@@ -505,9 +505,7 @@ pub fn weaver_forward(weights: &WeaverWeights, input: &WeaverInput) -> WeaverOut
 /// The weight matrix is `[in_dim, out_dim]` row-major.
 #[inline]
 fn matmul_vec(input: &[f32], weight: &[f32], in_dim: usize, out_dim: usize, output: &mut [f32]) {
-    for j in 0..out_dim {
-        output[j] = 0.0;
-    }
+    output[..out_dim].fill(0.0);
     for i in 0..in_dim {
         let xi = input[i];
         let row = &weight[i * out_dim..(i + 1) * out_dim];

@@ -761,7 +761,7 @@ pub fn run_gzero_selfplay(
 
     let mut proposer_a = GoTemplateProposer::new();
     let mut proposer_b = GoTemplateProposer::new();
-    let mut absorb_compress = GoDeltaGatedAbsorbCompress::new(config.delta_config.clone());
+    let mut absorb_compress = GoDeltaGatedAbsorbCompress::new(config.delta_config);
 
     let mut legal_buf: Vec<(usize, usize)> =
         Vec::with_capacity(config.board_size * config.board_size);

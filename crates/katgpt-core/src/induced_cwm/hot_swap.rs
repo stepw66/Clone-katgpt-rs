@@ -196,10 +196,9 @@ impl<K: InducedCwmKernel + Send + Sync> InducedCwmSlot<K> {
         // critical section is just `*guard = Some(...)` (a Vec push at
         // worst, depending on `K`'s move semantics). Microseconds.
         let mut guard = self.inner.write().expect("InducedCwmSlot lock poisoned");
-        // Clone the commitment into the slot — we return the original to
-        // the caller. CwmCommitment is small (32 + 8 + 8 = 48 bytes), so the
-        // clone is cheaper than restructuring the API to return a borrow.
-        *guard = Some((kernel, commitment.clone()));
+        // Copy the commitment into the slot — we return the original to
+        // the caller. CwmCommitment is Copy (32 + 8 + 8 = 48 bytes).
+        *guard = Some((kernel, commitment));
         commitment
     }
 
@@ -220,7 +219,7 @@ impl<K: InducedCwmKernel + Send + Sync> InducedCwmSlot<K> {
     /// the write lock). This is unrecoverable — the slot is corrupt.
     pub fn current(&self) -> Option<(K, CwmCommitment)> {
         let guard = self.inner.read().expect("InducedCwmSlot lock poisoned");
-        guard.as_ref().map(|(k, c)| (k.clone(), c.clone()))
+        guard.as_ref().map(|(k, c)| (k.clone(), *c))
     }
 
     /// Cheap accessor for the current kernel's BLAKE3 commitment hash.
@@ -240,7 +239,7 @@ impl<K: InducedCwmKernel + Send + Sync> InducedCwmSlot<K> {
     /// the kernel itself.
     pub fn current_commitment(&self) -> Option<CwmCommitment> {
         let guard = self.inner.read().expect("InducedCwmSlot lock poisoned");
-        guard.as_ref().map(|(_, c)| c.clone())
+        guard.as_ref().map(|(_, c)| *c)
     }
 
     /// Cheap accessor for the current kernel's version counter.

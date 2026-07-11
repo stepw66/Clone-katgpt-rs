@@ -319,8 +319,8 @@ pub fn sample_cochain_at_point_quad_into(
     let verts = quad_vertex_indices(fx, fy, w);
     let lam = lambda_bilinear(u_x, u_y);
 
-    for d in 0..dim {
-        out[d] = lam[0] * field.data[verts[0] * dim + d]
+    for (d, out_d) in out[..dim].iter_mut().enumerate() {
+        *out_d = lam[0] * field.data[verts[0] * dim + d]
             + lam[1] * field.data[verts[1] * dim + d]
             + lam[2] * field.data[verts[2] * dim + d]
             + lam[3] * field.data[verts[3] * dim + d];
@@ -472,8 +472,8 @@ pub fn sample_cochain_at_point_tri_into(
 
     let lam = barycentric_2d([px, py], tri_positions[0], tri_positions[1], tri_positions[2]);
 
-    for d in 0..dim {
-        out[d] = lam[0] * field.data[tri_indices[0] * dim + d]
+    for (d, out_d) in out[..dim].iter_mut().enumerate() {
+        *out_d = lam[0] * field.data[tri_indices[0] * dim + d]
             + lam[1] * field.data[tri_indices[1] * dim + d]
             + lam[2] * field.data[tri_indices[2] * dim + d];
     }

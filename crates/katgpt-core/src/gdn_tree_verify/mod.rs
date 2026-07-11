@@ -113,7 +113,7 @@ pub fn build_topology(parents: &[usize], alphas: &[f32]) -> TreeTopology {
     assert_eq!(parents.len(), alphas.len());
     let n = parents.len();
     assert!(n > 0, "tree must have at least one node");
-    let n_words = (n + 63) / 64;
+    let n_words = n.div_ceil(64);
 
     // ── Topological sort: BFS from root ──
     let mut topo_order = Vec::with_capacity(n);
@@ -311,8 +311,7 @@ fn forward_sub(
     for i in 0..t {
         let x_row = &x[i * t..i * t + t];
         let u_i = i * d_v;
-        for j in 0..i {
-            let xij = x_row[j];
+        for (j, &xij) in x_row[..i].iter().enumerate() {
             if xij != 0.0 {
                 let u_j = j * d_v;
                 for d in 0..d_v {
@@ -592,9 +591,10 @@ pub fn commit_accepted_multihead(
     d_v: usize,
 ) {
     let t = topo.n_nodes;
-    for head in 0..params.n_kv_heads {
+    debug_assert_eq!(s0_per_head.len(), params.n_kv_heads);
+    for (head, s0) in s0_per_head.iter_mut().enumerate() {
         let hp = params.head_params(head, t, d_k, d_v);
-        commit_accepted(topo, accepted_leaf, &hp, s0_per_head[head], d_k, d_v);
+        commit_accepted(topo, accepted_leaf, &hp, s0, d_k, d_v);
     }
 }
 

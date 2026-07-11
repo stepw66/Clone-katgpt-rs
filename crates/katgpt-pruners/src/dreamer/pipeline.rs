@@ -76,8 +76,8 @@ impl DreamerPipeline {
             factor: config.decay_factor,
         };
         Self {
-            scheduler: DreamerScheduler::new(config.clone()),
-            consolidator: DreamerConsolidator::new(config.clone()),
+            scheduler: DreamerScheduler::new(config),
+            consolidator: DreamerConsolidator::new(config),
             decay: MemoryDecay::new(decay_policy),
             counterfactual: CounterfactualEstimator::new(
                 config.dropout_fraction,

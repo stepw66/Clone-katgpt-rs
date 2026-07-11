@@ -291,7 +291,7 @@ impl<P: ScreeningPruner> WealthBanditPruner<P> {
     /// Returns the number of arms rebirthed.
     pub fn rebirth_bankrupt_arms(&mut self, rng: &mut Rng) -> u32 {
         let richest = self.richest_arm();
-        let parent = self.arms[richest].clone();
+        let parent = self.arms[richest];
 
         let sigma = self.config.rebirth_sigma;
         let initial = self.config.initial_wealth;

@@ -139,6 +139,7 @@ fn build_betas(layer: &Gdn2LayerState, t: usize) -> Vec<f32> {
 ///
 /// # Exactness
 /// See the [module docs](self) for when verification is exact vs approximate.
+#[allow(clippy::too_many_arguments)] // public API: verifier + topo + cache + layer_idx + QKV + config
 pub fn verify_gdn2_tree_layer(
     verifier: &mut GdnTreeVerifier,
     topo: &TreeTopology,
@@ -186,6 +187,7 @@ pub fn verify_gdn2_tree_layer(
 /// * `keys` / `values` / `queries` — Same per-node QKV as passed to
 ///   [`verify_gdn2_tree_layer`].
 /// * `config` — Model config.
+#[allow(clippy::too_many_arguments)] // public API: topo + leaf + cache + layer_idx + QKV + config
 pub fn commit_gdn2_tree_layer(
     topo: &TreeTopology,
     accepted_leaf: usize,

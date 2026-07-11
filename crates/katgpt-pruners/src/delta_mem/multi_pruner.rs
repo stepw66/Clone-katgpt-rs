@@ -78,7 +78,7 @@ impl<P: ScreeningPruner> MultiDomainMemoryPruner<P> {
             let inner = (self.inner_factory)();
             MemorySteeredPruner::new(
                 inner,
-                self.default_config.clone(),
+                self.default_config,
                 self.default_alpha,
                 self.default_mode,
                 self.default_granularity,

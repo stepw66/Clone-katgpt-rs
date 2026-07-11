@@ -193,7 +193,7 @@ impl SpKvCache {
             layers: (0..n_layer)
                 .map(|_| SpKvLayerCache::new(block_size, kv_dim))
                 .collect(),
-            config: config.clone(),
+            config: *config,
         }
     }
 

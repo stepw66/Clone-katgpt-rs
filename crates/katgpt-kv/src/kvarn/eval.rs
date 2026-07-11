@@ -70,7 +70,7 @@ pub fn pseudo_decode_eval(
         max_seq_len: max_seq,
         bits,
         tile_size,
-        var_norm: config.clone(),
+        var_norm: *config,
         hadamard: false,
         #[cfg(feature = "static_cal_tables")]
         static_cal: None,

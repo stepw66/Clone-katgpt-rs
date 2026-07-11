@@ -379,7 +379,7 @@ impl ChunkerConfig {
     /// Construct a [`FastCdcChunker`] from this config.
     #[must_use]
     pub fn fast_cdc_chunker(&self) -> FastCdcChunker {
-        FastCdcChunker::with_config(self.clone())
+        FastCdcChunker::with_config(*self)
     }
 }
 

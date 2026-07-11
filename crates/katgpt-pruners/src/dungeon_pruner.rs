@@ -351,7 +351,7 @@ impl DungeonPruner {
     ///
     /// Returns `None` if the action is impossible.
     pub fn apply_action(&self, state: &DungeonState, action: usize) -> Option<DungeonState> {
-        let mut next = state.clone();
+        let mut next = *state;
 
         match action {
             0..=3 => self.apply_move(&mut next, action)?,

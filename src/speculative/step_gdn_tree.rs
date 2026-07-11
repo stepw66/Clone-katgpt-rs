@@ -101,7 +101,7 @@ pub fn speculative_step_gdn_tree(
         .and_then(|l| l.decay_alpha.first().copied())
         .unwrap_or(0.99);
 
-    let (topo, token_ids) = build_topology_from_tree_nodes(&tree, alpha);
+    let (topo, token_ids) = build_topology_from_tree_nodes(tree, alpha);
     let t = topo.n_nodes;
 
     // 4. Forward all tree nodes through the target GDN2 model (read-only verify)
@@ -118,7 +118,7 @@ pub fn speculative_step_gdn_tree(
 
     // 5. Find the best path (highest-scoring root → leaf) and apply p/q rejection
     // For simplicity, we extract paths and try them in order (same as rollback_with).
-    let paths = katgpt_forward::step::extract_ddtree_paths(&tree);
+    let paths = katgpt_forward::step::extract_ddtree_paths(tree);
 
     if paths.is_empty() {
         // Fallback: sample from the root node's logits

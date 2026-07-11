@@ -185,14 +185,14 @@ impl EvolutionArena {
 
         self.pending
             .pop_front()
-            .unwrap_or_else(|| self.base_config.clone())
+            .unwrap_or(self.base_config)
     }
 
     /// Refill the pending queue with mutated configs + base config (control).
     fn refill(&mut self) {
         let mutants = self.mutator.mutate(&self.base_config);
         // Push base config first as control
-        self.pending.push_back(self.base_config.clone());
+        self.pending.push_back(self.base_config);
         // Then all mutated variants
         for mutant in &mutants {
             self.pending
@@ -215,7 +215,7 @@ impl EvolutionArena {
 
 /// Apply a `MutantConfig` delta to a base `GameConfig`, producing a concrete config.
 fn apply_mutation(base: &GameConfig, mutant: &MutantConfig) -> GameConfig {
-    let mut config = base.clone();
+    let mut config = *base;
     match mutant.mutation_kind {
         MutationKind::GoalReweight => {
             config.survival_weight =

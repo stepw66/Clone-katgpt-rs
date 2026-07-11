@@ -842,7 +842,7 @@ pub fn run_autoresearch(config: &AutoResearchConfig, rng: &mut Rng) -> AutoResea
     });
 
     let (best_config, best_win_rate) = match best_arm {
-        Some(arm) => (arm.config.clone(), arm.mean_reward()),
+        Some(arm) => (arm.config, arm.mean_reward()),
         None => (GoResearchConfig::default(), 0.0),
     };
 

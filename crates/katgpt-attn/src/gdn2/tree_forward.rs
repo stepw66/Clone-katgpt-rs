@@ -112,6 +112,7 @@ pub fn forward_tree_gdn2(
     let mut x = vec![0.0f32; t * n];
 
     // ── 1. Embed all tree nodes ──
+    #[allow(clippy::needless_range_loop)] // k indexes depths, topo_order, and x (unsafe get_unchecked_mut)
     for k in 0..t {
         let orig = topo.topo_order[k];
         let token = token_ids[orig];

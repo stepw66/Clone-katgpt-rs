@@ -456,7 +456,7 @@ pub fn decompose_layer_channels(
     vocab_size: usize,
     config: &VocabChannelConfig,
 ) -> Vec<Vec<usize>> {
-    let decomposer = VocabChannelDecomposer::new(config.clone());
+    let decomposer = VocabChannelDecomposer::new(*config);
     let mut result = Vec::with_capacity(mlp_hidden);
 
     for neuron_idx in 0..mlp_hidden {

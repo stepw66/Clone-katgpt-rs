@@ -192,7 +192,7 @@ impl TacticalPruner {
     /// Applies a single action (0:Up, 1:Down, 2:Left, 3:Right, 4:Attack) to the state.
     /// Returns `None` if the move is physically or logically impossible.
     pub fn apply_action(&self, state: &GameState, action: usize) -> Option<GameState> {
-        let mut next = state.clone();
+        let mut next = *state;
 
         match action {
             0..=3 => {

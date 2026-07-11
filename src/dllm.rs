@@ -127,7 +127,7 @@ impl AdaptiveNoiseSchedule {
 
         let step_trackers = current_ratios
             .iter()
-            .map(|&ratio| VarianceMinimizer::with_param(config.clone(), ratio))
+            .map(|&ratio| VarianceMinimizer::with_param(config, ratio))
             .collect();
 
         Self {
@@ -194,7 +194,7 @@ impl AdaptiveNoiseSchedule {
         self.step_trackers = self
             .current_ratios
             .iter()
-            .map(|&ratio| VarianceMinimizer::with_param(config.clone(), ratio))
+            .map(|&ratio| VarianceMinimizer::with_param(config, ratio))
             .collect();
 
         self.adaptations = 0;

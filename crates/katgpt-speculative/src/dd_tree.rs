@@ -1287,7 +1287,7 @@ impl TreeBuilder {
                 let log_m = &self.log_marginals[next_depth];
                 let depth_marginal = marginals[next_depth];
 
-                if self.deep_argmax_threshold.map_or(false, |t| next_depth > t) {
+                if self.deep_argmax_threshold.is_some_and(|t| next_depth > t) {
                     // Plan 424 Phase 6 (paper §3.5): at deep positions the
                     // marginal is diluted (averages over many possible
                     // prefixes). Expanding only the argmax token concentrates

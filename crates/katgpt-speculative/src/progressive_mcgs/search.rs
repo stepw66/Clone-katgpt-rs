@@ -212,7 +212,7 @@ impl<N: Clone> ProgressiveMcgsSearch<N> {
             graph: ProgressiveMcgs::new(config.max_nodes, config.max_refs_per_node),
             scheduler,
             gate,
-            config: config.clone(),
+            config,
             n_branches,
             branch_selection_counts: vec![0u32; n_branches as usize],
             step_count: 0,

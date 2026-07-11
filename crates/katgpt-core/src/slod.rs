@@ -501,7 +501,7 @@ impl SlodOperator {
             eigenvalues,
             eigenvectors,
             boundaries,
-            config: config.clone(),
+            config: *config,
         }
     }
 }

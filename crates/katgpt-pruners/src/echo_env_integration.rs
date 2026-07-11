@@ -107,9 +107,9 @@ where
         _vocab_size: usize,
         config: EnvPredictorConfig,
     ) -> Self {
-        let predictor = EnvPredictorPruner::new(forward_model, feature_dim, config.clone());
-        let verifier = PredictionVerifier::new(config.clone());
-        let gate = PredictionConsistencyGate::new(config.clone());
+        let predictor = EnvPredictorPruner::new(forward_model, feature_dim, config);
+        let verifier = PredictionVerifier::new(config);
+        let gate = PredictionConsistencyGate::new(config);
 
         Self {
             predictor,

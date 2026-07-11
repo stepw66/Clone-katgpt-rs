@@ -216,7 +216,7 @@ fn bench_absorb_compress() -> Vec<BenchResult> {
 
     // ── absorb() throughput ──
     let mut ac: AbsorbCompressLayer<NoScreeningPruner> =
-        AbsorbCompressLayer::new(NoScreeningPruner, num_arms, compress_config.clone());
+        AbsorbCompressLayer::new(NoScreeningPruner, num_arms, compress_config);
 
     for _ in 0..warmup {
         let arm = (rng.next() as usize) % num_arms;

@@ -72,7 +72,7 @@ impl<'a, C: ConstraintPruner, S: ScreeningPruner> FederationComposer<'a, C, S> {
             .filter(|&t| self.constraint.is_valid(depth, t, parent_token))
             .collect();
         let c1 = ResidualCheck::new(n, valid.len());
-        checks.push(c1.clone());
+        checks.push(c1);
         if c1.should_terminate(self.residual_threshold) && valid.len() == n {
             return (valid, checks);
         }
@@ -84,7 +84,7 @@ impl<'a, C: ConstraintPruner, S: ScreeningPruner> FederationComposer<'a, C, S> {
             .filter(|&t| self.screening.relevance(depth, t, parent_token) > 0.5)
             .collect();
         let c2 = ResidualCheck::new(valid.len(), relevant.len());
-        checks.push(c2.clone());
+        checks.push(c2);
         if c2.should_terminate(self.residual_threshold) && relevant.len() == valid.len() {
             return (relevant, checks);
         }

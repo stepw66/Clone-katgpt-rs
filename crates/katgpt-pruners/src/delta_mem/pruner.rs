@@ -140,7 +140,7 @@ impl<P: ScreeningPruner> MemorySteeredPruner<P> {
                 self.memory.write(&s.key_buf, &s.val_buf);
             }
             WriteGranularity::Segment => {
-                self.pending.push((ctx.clone(), outcome.clone()));
+                self.pending.push((*ctx, *outcome));
             }
         }
     }
@@ -237,7 +237,7 @@ impl<P: ScreeningPruner> MemorySteeredPruner<P> {
                 self.memory.write(key_buf, val_buf);
             }
             WriteGranularity::Segment => {
-                self.pending.push((ctx.clone(), outcome.clone()));
+                self.pending.push((*ctx, *outcome));
             }
         }
     }
