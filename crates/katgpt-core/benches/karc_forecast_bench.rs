@@ -18,9 +18,9 @@ fn make_fitted_forecaster<const D: usize, const M: usize, const K: usize>(
             let t = i as f32 * 0.05;
             let mut row = [0.0f32; 32];
             let n = D.min(32);
-            for d in 0..n {
+            for (d, row_d) in row.iter_mut().enumerate().take(n) {
                 let freq = 0.3 + 0.2 * d as f32;
-                row[d] = (freq * t).sin() + 0.5 * ((freq + 1.0) * t).cos();
+                *row_d = (freq * t).sin() + 0.5 * ((freq + 1.0) * t).cos();
             }
             row[..D].to_vec()
         })
@@ -61,22 +61,30 @@ fn bench_forecast(c: &mut Criterion) {
     // G2 target config: D=8, M=8, K=4 → d_h = 256.
     let (mut f_hla, seed_hla) = make_fitted_forecaster::<8, 8, 4>(FourierBasis::new(4.0), 500);
     let mut out_hla = [0.0f32; 8];
-    group.bench_with_input(BenchmarkId::new("D8_M8_K4_dh256", "hla"), &seed_hla, |b, seed| {
-        b.iter(|| {
-            let ok = f_hla.forecast_into(black_box(seed), black_box(&mut out_hla));
-            black_box(ok);
-        });
-    });
+    group.bench_with_input(
+        BenchmarkId::new("D8_M8_K4_dh256", "hla"),
+        &seed_hla,
+        |b, seed| {
+            b.iter(|| {
+                let ok = f_hla.forecast_into(black_box(seed), black_box(&mut out_hla));
+                black_box(ok);
+            });
+        },
+    );
 
     // Smaller config for scaling reference: D=3, M=8, K=4 → d_h = 96 (double-scroll).
     let (mut f_ds, seed_ds) = make_fitted_forecaster::<3, 8, 4>(FourierBasis::new(4.0), 500);
     let mut out_ds = [0.0f32; 3];
-    group.bench_with_input(BenchmarkId::new("D3_M8_K4_dh96", "double_scroll"), &seed_ds, |b, seed| {
-        b.iter(|| {
-            let ok = f_ds.forecast_into(black_box(seed), black_box(&mut out_ds));
-            black_box(ok);
-        });
-    });
+    group.bench_with_input(
+        BenchmarkId::new("D3_M8_K4_dh96", "double_scroll"),
+        &seed_ds,
+        |b, seed| {
+            b.iter(|| {
+                let ok = f_ds.forecast_into(black_box(seed), black_box(&mut out_ds));
+                black_box(ok);
+            });
+        },
+    );
 
     group.finish();
 }

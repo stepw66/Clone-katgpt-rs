@@ -11,7 +11,7 @@
 
 #![cfg(feature = "mux_latent_wire")]
 
-use katgpt_rs::mux_latent::{
+use katgpt_core::mux_latent::{
     CompressionRatio, LatentPatch, LatentPatchBatch, LatentPatcher, LatentSegment, MortonCode,
     MuxLatentConfig, MuxLatentEncoder, OctreeLod, PatchRejection, TernaryDir, TernaryValue,
     octree_leaf_to_patch_weights, patch_weights_to_octree_leaf,
@@ -32,7 +32,7 @@ fn test_config() -> MuxLatentConfig {
 }
 
 /// Encode 256 sequential tokens at X8 → 32 latent slots.
-fn encode_256_tokens() -> (MuxLatentEncoder, katgpt_rs::mux_latent::CompressedContext) {
+fn encode_256_tokens() -> (MuxLatentEncoder, katgpt_core::mux_latent::CompressedContext) {
     let encoder = MuxLatentEncoder::new(test_config());
     let tokens: Vec<u32> = (0..256).collect();
     let ctx = encoder.encode(&tokens);
@@ -41,7 +41,7 @@ fn encode_256_tokens() -> (MuxLatentEncoder, katgpt_rs::mux_latent::CompressedCo
 
 /// Extract weights from a compressed segment by segment_id.
 fn get_weights(
-    ctx: &katgpt_rs::mux_latent::CompressedContext,
+    ctx: &katgpt_core::mux_latent::CompressedContext,
     segment_id: u32,
 ) -> Option<Vec<f32>> {
     ctx.segments.iter().find_map(|s| match s {
@@ -481,11 +481,11 @@ fn test_octree_bridge_mixed_groups() {
     );
 
     // Groups 1-7: all Zero → 0.0
-    for g in 1..8 {
+    for (g, w) in weights.iter().enumerate().take(8).skip(1) {
         assert!(
-            (weights[g] - 0.0).abs() < f32::EPSILON,
+            (w - 0.0).abs() < f32::EPSILON,
             "Group {g} should be 0.0, got {}",
-            weights[g]
+            w
         );
     }
 

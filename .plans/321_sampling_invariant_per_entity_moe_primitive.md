@@ -175,7 +175,7 @@ G2 gate tests this directly: simulate an entity with dense observations vs spars
 
 - [x] **T3.1** Implement `lipschitz_bound()` on `CommittedFieldBlend` — returns `max_k { sigmoid(pi_k/tau) · L_k }` per FAME Lemma 1. This is the **deterministic safety bound** of the committed personality — a closed-form quantity that can be LatCal-committed.
 - [x] **T3.2** Test: `lipschitz_bound_matches_max_gate_times_lk` — blend of bounded fields (LinearField L=|scale|) produces bounded `lipschitz_bound`; verified `≈ sigmoid(10/1)·5.0` for pi=pi_max, L_max=5. PASS.
-- [ ] **T3.3** Document the LatCal commitment story: the K-weight vector `pi` + the lipschitz bound cross the sync boundary as K+1 raw scalars; the archetype field definitions stay library-side (referenced by hash). *(Deferred to riir-chain R003.)*
+- [-] **T3.3** Document the LatCal commitment story: the K-weight vector `pi` + the lipschitz bound cross the sync boundary as K+1 raw scalars; the archetype field definitions stay library-side (referenced by hash). *(Deferred to riir-chain R003.)*
 
 ---
 

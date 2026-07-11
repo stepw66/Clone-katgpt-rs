@@ -57,7 +57,7 @@ cargo test --features bandit,bomber -- bench_035_hl_regularization_goat
 
 ## Related
 
-- Plan 135: `.docs/09_heuristic-learning.md` → Patch Regularization Principles
+- Plan 135: `.docs/06_game_arenas/heuristic_learning.md` → Patch Regularization Principles
 - Research 096 D1: Six regularization criteria
 - `AbsorbCompressLayer`: `src/pruners/absorb_compress.rs`
 - Benchmark 034: `.benchmarks/034_sr2am_configurator_goat.md`

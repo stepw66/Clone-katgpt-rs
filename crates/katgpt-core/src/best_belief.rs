@@ -115,9 +115,9 @@ static LUT: std::sync::OnceLock<LutTable> = std::sync::OnceLock::new();
 fn build_lut() -> LutTable {
     let mut table = [[[0.0_f32; LUT_F]; LUT_S]; 5];
     for (e, &eps) in LUT_EPS.iter().enumerate() {
-        for s in 0..LUT_S {
-            for f in 0..LUT_F {
-                table[e][s][f] = best_belief_score_cf(s as u32, f as u32, eps);
+        for (s, table_s) in table[e].iter_mut().enumerate().take(LUT_S) {
+            for (f, table_sf) in table_s.iter_mut().enumerate().take(LUT_F) {
+                *table_sf = best_belief_score_cf(s as u32, f as u32, eps);
             }
         }
     }
@@ -222,7 +222,10 @@ pub(crate) fn best_belief_score_cf(successes: u32, failures: u32, epsilon: f32) 
     if successes == 0 && failures == 0 {
         return epsilon.clamp(EPS_MIN, 1.0 - EPS_MIN);
     }
-    debug_assert!(epsilon > 0.0 && epsilon < 1.0, "epsilon range handled by caller");
+    debug_assert!(
+        epsilon > 0.0 && epsilon < 1.0,
+        "epsilon range handled by caller"
+    );
 
     let eps = epsilon;
     let a: f32 = 1.0 + successes as f32;
@@ -303,15 +306,16 @@ pub fn select_best_belief(
 
     // Incumbent tie preference: if the incumbent is in range and its score
     // ties the winner, return the incumbent to avoid churn.
-    if let Some(inc) = incumbent_idx {
-        if inc < candidates.len() && inc != best_idx {
-            let inc_score = best_belief_score(candidates[inc].0, candidates[inc].1, epsilon);
-            // Tie = within ULP-level tolerance. f32 equality is fine here
-            // because the same deterministic computation produces the same
-            // bits; but use <= best_score to be robust to any reordering.
-            if inc_score >= best_score {
-                return inc;
-            }
+    if let Some(inc) = incumbent_idx
+        && inc < candidates.len()
+        && inc != best_idx
+    {
+        let inc_score = best_belief_score(candidates[inc].0, candidates[inc].1, epsilon);
+        // Tie = within ULP-level tolerance. f32 equality is fine here
+        // because the same deterministic computation produces the same
+        // bits; but use <= best_score to be robust to any reordering.
+        if inc_score >= best_score {
+            return inc;
         }
     }
 
@@ -356,14 +360,14 @@ fn lbeta(a: f32, b: f32) -> f32 {
 fn ln_gamma(x: f64) -> f64 {
     const G: f64 = 7.0;
     const C: [f64; 9] = [
-        0.99999999999980993,
+        0.999_999_999_999_809_9,
         676.5203681218851,
         -1259.1392167224028,
-        771.32342877765313,
-        -176.61502916214059,
+        771.323_428_777_653_1,
+        -176.615_029_162_140_6,
         12.507343278686905,
         -0.13857109526572012,
-        9.9843695780195716e-6,
+        9.984_369_578_019_572e-6,
         1.5056327351493116e-7,
     ];
     if x < 0.5 {
@@ -373,8 +377,8 @@ fn ln_gamma(x: f64) -> f64 {
     }
     let z = x - 1.0;
     let mut a = C[0];
-    for i in 1..9 {
-        a += C[i] / (z + i as f64);
+    for (i, &c_i) in C.iter().enumerate().skip(1) {
+        a += c_i / (z + i as f64);
     }
     let t = z + G + 0.5;
     0.5 * (2.0 * std::f64::consts::PI).ln() + (z + 0.5) * t.ln() - t + a.ln()
@@ -679,10 +683,7 @@ mod tests {
         // Exact tie: two identical candidates. incumbent_idx=Some(1) → 1.
         let candidates: [(u32, u32); 2] = [(10, 5), (10, 5)];
         let winner = select_best_belief(&candidates, 0.05, Some(1));
-        assert_eq!(
-            winner, 1,
-            "incumbent should win the tie (got {winner})"
-        );
+        assert_eq!(winner, 1, "incumbent should win the tie (got {winner})");
     }
 
     #[test]
@@ -771,7 +772,11 @@ mod tests {
                         via_lut.to_bits(),
                         via_cf.to_bits(),
                         "LUT mismatch at S={}, F={}, eps={}: lut={}, cf={}",
-                        s, f, eps, via_lut, via_cf
+                        s,
+                        f,
+                        eps,
+                        via_lut,
+                        via_cf
                     );
                 }
             }
@@ -804,7 +809,11 @@ mod tests {
         assert!(
             off_grid > e05 && off_grid < e10,
             "non-standard ε=0.07 (S={}, F={}) should be between ε=0.05 ({}) and ε=0.1 ({}), got {}",
-            s, f, e05, e10, off_grid
+            s,
+            f,
+            e05,
+            e10,
+            off_grid
         );
     }
 

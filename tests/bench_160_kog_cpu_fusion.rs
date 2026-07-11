@@ -10,7 +10,7 @@
 
 use std::time::Instant;
 
-use katgpt_rs::mbu;
+use katgpt_transformer::mbu;
 use katgpt_rs::transformer::{ForwardContext, MultiLayerKVCache, TransformerWeights, forward};
 use katgpt_rs::types::{Config, Rng};
 

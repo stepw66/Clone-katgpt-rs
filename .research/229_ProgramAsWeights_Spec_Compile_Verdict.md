@@ -861,3 +861,90 @@ Phase 6: F4 (SpecAdapter) — riir-ai, secondary
 ---
 
 > **TL;DR:** PAW compiles specs into neural weights. We compile specs into symbolic constraints. For deterministic, enumerable-output specs, symbolic > neural: zero training, O(1) execution, ~1KB size, provably correct. The GOAT is F1 (SpecAsPruner). The moat is F6 (SpecProof). The bridge is F2 (SpecAsMarginals). The hybrid (symbolic structure + ternary fuzzy) covers everything PAW covers, at 1000× less size and 100× less latency. Engine gets F1+F2+F3+F5+F6. Fuel gets F4. Ship F3 first (low effort, extends SynPruner), then F1 (GOAT), then F6 (moat).
+
+---
+
+## V2 Update Addendum (2026-07-04, arXiv:2607.02512)
+
+**Source:** [Program-as-Weights: A Programming Paradigm for Fuzzy Functions](https://arxiv.org/pdf/2607.02512) — Zhang, Hotsko, Kim, Nie, Shieber, Deng (Waterloo/Cornell/Harvard), July 2026
+
+This is the **v2** of PAW. The original v1 verdict above (June 12, 2026) covered the
+prefix-tuning precursor and shipped the modelless symbolic-compile counter-thesis
+at `katgpt-rs/crates/katgpt-pruners/src/spec_compile/` (compiler.rs, marginals.rs,
+chain.rs, proof.rs — features F1, F2, F3, F5, F6 all shipped). The v2 paper changes
+the PEFT method and adds new contributions; this addendum re-runs the novelty gate
+against the v1 distillation corpus and re-affirms the verdict.
+
+### What's new in v2
+
+| # | New contribution | Mechanism class | Covered by |
+|---|---|---|---|
+| 1 | **LoRA hypernetwork compiler** (Text-to-LoRA style — mean-pool compiler hidden states → MLP → mixing coefficients over shared bases, eq. 3) replaces prefix-tuning as primary PEFT | Hypernetwork context-to-LoRA | **R062 (SHINE)** — fully distilled, runtime shipped at `riir-ai/crates/riir-gpu/src/hypernet/` (default-on, Plan 104b), training deferred → `riir-train/.plans/302_shine_context_to_lora_hypernetwork_DEFERRED.md`. PAW v2's LoRA mapper is structurally a SHINE-style hypernetwork; the shared-bases + mixing-coefficients formulation is exactly SHINE's memory-to-LoRA pattern. |
+| 2 | **FuzzyBench-10M** (10M-example dataset, 800+ task categories, 29 thematic versions) | Training data | **→ riir-train** (out of scope for this workflow). Training data is training-time concern. |
+| 3 | **Hybrid discrete + continuous program** (`p = (p_discrete, p_continuous)` — discrete pseudo-program + continuous LoRA) | Compile-output representation | **R229 hybrid strategy** (this note, §"The Hybrid Strategy") — already covered conceptually. The discrete pseudo-program is the symbolic spec side (our `SpecCompiler` output / `SpecDFA`); the continuous LoRA is the fuzzy side (our F4 SpecAdapter on riir-ai). The v2 paper's empirical finding that the discrete pseudo-program protects against noisy specs (Table 7: 4.5-pt gap on heavy-typo specs) validates the R229 hybrid design. |
+| 4 | **Multimodal VL compiler → text interpreter** (swap Qwen3-4B-Instruct compiler for Qwen3-VL-4B, keep same Qwen3 0.6B interpreter, reuse LoRA mapper — image conditioning fully encoded in PEFT) | Cross-modal PEFT bridge | **NO prior art in our repos.** Genuinely novel architectural insight: the compiler's modality is decoupled from the interpreter's modality; the PEFT module is the cross-modal bridge. See §"Multimodal cross-PEFT novelty" below. |
+| 5 | **Cross-interpreter scaling** (GPT-2 124M / Qwen3 0.6B / Qwen3.5 0.8B all serve as interpreters; 0.6B+compiled-LoRA matches Qwen3-32B prompting at 1/50 memory) | Train-once-deploy-on-different-base | **R291 (Cross-Resolution Spectral Transport)** — partially covered. R291 ships cross-resolution transfer (`d_src ≠ d_dst`) for personality shards via asymmetric FUNCATTN bases. PAW v2's claim is empirical (compiler outputs PEFT compatible across interpreter families of the same architecture family); R291 covers the modelless transport. |
+| 6 | **Quantization at deployment** (Q4_K_M base + Q4_0 LoRA, 0.6B interpreter at 30 tok/s on MacBook M3, 507 MB total) | Deployment-time quantization | **Already ships** — `riir-engine/src/turboquant.rs`, `riir-engine/src/quant/`, Q4_K paths in `riir-games` and ANE arena results (`riir-ai/.docs/09_performance/`). |
+
+### §3.5 Modelless unblock check on the genuinely new contribution (#4)
+
+The cross-modal VL-compiler → text-interpreter decoupling is the only v2 contribution with no prior art. Run the mandatory modelless unblock protocol:
+
+1. **Freeze/thaw snapshot correction?** NO. The VL compiler IS the trained artifact; we have no VL compiler to freeze. A frozen text-compiler snapshot cannot emit image-conditioned PEFT without a vision encoder.
+2. **Raw/lora reader-writer hot-swap (`LoraPair`)?** NO. A deterministically-constructed reader/writer adapter (Plan 025) cannot encode arbitrary image conditioning without a vision encoder front-end.
+3. **Latent-space correction (dot-product projection + sigmoid gate)?** PARTIAL — speculative. A frozen image embedding could in principle be projected through pre-computed direction vectors onto PEFT mixing coefficients (the SHINE mean-pool + MLP step with FROZEN bases instead of trained ones). This is a research direction worth noting, not a current capability — it would require (a) a frozen image encoder, (b) pre-computed direction vectors mapping image-embedding space to LoRA-mixing-coefficient space, (c) empirical proof that the projection preserves task-relevant image conditioning. None of these ship today.
+
+**Verdict on #4:** Genuine riir-train dependency. The cross-modal PEFT bridge requires training the VL compiler (or, equivalently, training the image-embedding-to-LoRA-coefficient projection). Document the latent-projection modelless analog as a speculative follow-up; do NOT defer to riir-train without noting it.
+
+### Multimodal cross-PEFT novelty (the one new idea)
+
+The genuinely novel architectural insight in v2 is **modality decoupling via PEFT**:
+
+```
+Text-only compiler  +  text-only interpreter   →  text fuzzy function  (v1)
+VL compiler        +  text-only interpreter   →  image fuzzy function  (v2, NEW)
+```
+
+The PEFT module carries the cross-modal conditioning; the device-resident interpreter stays single-modal and small. This is a real architectural insight — it generalizes the PAW abstraction from "compile fuzzy text functions" to "compile fuzzy functions of any modality the compiler can encode".
+
+**Why it doesn't change our verdict:** the insight is architectural (how to compose compiler + interpreter across modalities), but the *mechanism* is still trained — you need a trained VL compiler to produce the cross-modal PEFT. The modelless analog (frozen image embedding → deterministic projection → PEFT mixing coefficients) does not ship and is not trivially constructible. → riir-train.
+
+### Re-affirmed verdict: PASS (no new files in katgpt-rs)
+
+The v1 verdict stands. The modelless symbolic-compile counter-thesis at
+`spec_compile/` remains the response to PAW. v2's new contributions map cleanly:
+
+- **Hypernetwork LoRA compiler** → already shipped (R062 SHINE runtime, riir-ai)
+- **FuzzyBench-10M** → riir-train (training data)
+- **Hybrid discrete+continuous program** → already designed (R229 hybrid strategy)
+- **Multimodal VL compiler** → riir-train (training-dependent; §3.5 returns genuine dependency)
+- **Cross-interpreter scaling** → already covered (R291 cross-resolution transport)
+- **Quantization at deployment** → already ships (`turboquant.rs`, Q4_K paths)
+
+**No new plans, no new guide, no new primitive in katgpt-rs.** The modelless IP
+moat (F1 SpecAsPruner + F6 SpecProof, BLAKE3-committed, O(1) bitmap execution)
+continues to dominate the neural-compile path for deterministic, enumerable-output
+specs. For fuzzy/open-ended specs where the neural path is genuinely needed, the
+runtime substrate already ships (`LoRAWeightVersion` ArcSwap-protected atomic
+hot-swap in `riir-engine/src/episode_buffer.rs`, `ShineHypernet` context-to-LoRA
+in `riir-gpu/src/hypernet/`).
+
+### Routing summary
+
+| v2 contribution | Routing | Reason |
+|---|---|---|
+| LoRA hypernetwork compiler | **Already shipped** (R062, riir-ai runtime; riir-train Plan 302 deferred for training pipeline) | SHINE is the same mechanism |
+| FuzzyBench-10M | → riir-train | Training data, out of scope for this workflow |
+| Hybrid program | **Already designed** (R229 §"The Hybrid Strategy") | Discrete pseudo = symbolic spec; continuous LoRA = F4 SpecAdapter |
+| Multimodal VL compiler | → riir-train | Genuine training dependency after §3.5 check; latent-projection modelless analog noted as speculative follow-up |
+| Cross-interpreter scaling | **Already covered** (R291) | Cross-resolution transport ships modellessly |
+| Quantization | **Already ships** | `turboquant.rs`, Q4_K paths |
+
+### Cross-references added
+
+- R062 (SHINE) — the hypernetwork context-to-LoRA mechanism PAW v2 uses
+- R291 (Cross-Resolution Transport) — train-on-small-deploy-on-large modellessly
+- R074 (Subterranean Agents) — the "compile procedures into weights" pattern; critical finding that LoRA fails for procedural knowledge (PAW v2's neural path inherits this limit)
+- `riir-engine/src/episode_buffer.rs::LoRAWeightVersion` — the runtime half of PAW (atomic A/B hot-swap, ArcSwap-protected, Plan 354 torn-read fix Lean-proven)
+- `riir-gpu/src/hypernet/` — shipped SHINE runtime (Plan 104b, default-on)
+- `riir-neuron-db/src/freeze.rs::MerkleFrozenEnvelope` — the freeze/thaw envelope for compiled-program artifacts (the PAW "program-as-file" pattern, but BLAKE3-committed)

@@ -25,8 +25,8 @@ fn bench_score(c: &mut Criterion) {
         (0, 0),
         (1, 1),
         (10, 1),
-        (31, 31), // last in-LUT cell
-        (50, 50), // LUT miss
+        (31, 31),     // last in-LUT cell
+        (50, 50),     // LUT miss
         (1000, 1000), // LUT miss, worst case
     ];
     let mut g = c.benchmark_group("best_belief_score");

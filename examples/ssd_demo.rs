@@ -9,10 +9,10 @@
 use std::hint::black_box;
 
 use katgpt_core::ConstraintPruner;
-use katgpt_rs::cumprodsum::{context_freshness, cumprodsum_batched, cumprodsum_batched_simd};
+use katgpt_core::cumprodsum::{context_freshness, cumprodsum_batched, cumprodsum_batched_simd};
 use katgpt_rs::pruners::SemiseparablePruner;
 use katgpt_rs::speculative::{ThinkingConfig, ThinkingController};
-use katgpt_rs::ssd_block::{
+use katgpt_core::ssd_block::{
     SsdBlockConfig, SsdScratch, auto_block_len, ssd_block_forward, ssd_naive,
 };
 

@@ -28,7 +28,10 @@ fn main() {
     );
 
     // 1. Functional sweep — show inject/skip decisions across the uncertainty range.
-    println!("{:>12} {:>10} {:>14}", "uncertainty", "decision", "sigmoid_val");
+    println!(
+        "{:>12} {:>10} {:>14}",
+        "uncertainty", "decision", "sigmoid_val"
+    );
     for &u in &[0.0f32, 0.1, 0.3, 0.49, 0.5, 0.51, 0.7, 0.9, 1.0] {
         let inject = gate.should_inject(u);
         // Reproduce the internal sigmoid for display (sigma(lambda * (u - tau))).

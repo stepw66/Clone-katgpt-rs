@@ -32,7 +32,7 @@ mod infrastructure;
 mod llmexec_guard;
 mod noise;
 mod routing;
-mod simd;
+pub mod simd;
 mod sparse;
 mod speculative;
 mod ttc;
@@ -57,6 +57,7 @@ pub use infrastructure::{
     bench_raven_vs_flat_cache,
 };
 pub use noise::bench_elf_sde;
+pub use simd::bench_simd_perf;
 #[cfg(feature = "sparse_mlp")]
 pub use sparse::bench_sparse_mlp;
 pub use speculative::{
@@ -644,7 +645,9 @@ pub fn run_all(config: &Config) -> Vec<BenchResult> {
     cooldown(10);
 
     // ── Phase 10: Test-Time Compute (TTC) ──
-    #[cfg(feature = "bandit")]
+    // Not feature-gated: bench_ttc internally prints a "skipped" notice when
+    // `bandit` is off, so always calling it keeps the public fn live across
+    // feature subsets (mirrors the distillation phase above).
     {
         let ttc_results = ttc::bench_ttc();
         results.extend(ttc_results);

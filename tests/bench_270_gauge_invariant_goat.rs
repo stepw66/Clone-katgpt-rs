@@ -19,11 +19,11 @@
 
 #![cfg(feature = "gauge_invariant")]
 
-use katgpt_rs::gauge_invariant::{
-    gauge_invariant_compose, gauge_invariant_lerp, gauge_rebalance, GaugePair,
-    GaugeRebalanceScratch,
+use katgpt_spectral::gauge_invariant::{
+    GaugePair, GaugeRebalanceScratch, gauge_invariant_compose, gauge_invariant_lerp,
+    gauge_rebalance,
 };
-use katgpt_rs::newton_schulz::{ns_inv_sqrt_psd, ns_inv_sqrt_psd_into, InvSqrtScratch};
+use katgpt_core::newton_schulz::{InvSqrtScratch, ns_inv_sqrt_psd, ns_inv_sqrt_psd_into};
 use std::time::{Duration, Instant};
 
 // ── Helpers ──────────────────────────────────────────────────────────────
@@ -174,20 +174,21 @@ fn t02_power_iteration_converges_within_5_percent() {
     // Expected σ_max(B_mut) ≈ √(true_sigma · 1).
     let expected_balanced = (true_sigma * 1.0_f32).sqrt();
     // B_mut is diagonal (scaled identity), so σ_max = max diagonal element.
-    let b_mut_max = b_mut
-        .iter()
-        .map(|v| v.abs())
-        .fold(0.0f32, f32::max);
+    let b_mut_max = b_mut.iter().map(|v| v.abs()).fold(0.0f32, f32::max);
     let rel_err = (b_mut_max - expected_balanced).abs() / expected_balanced;
     assert!(
         rel_err < 0.10,
         "Power iteration σ_max estimate error = {:.3} > 10% \
          (b_mut_max={}, expected≈{}). Power iteration on rank-1 matrix should converge fast.",
-        rel_err, b_mut_max, expected_balanced
+        rel_err,
+        b_mut_max,
+        expected_balanced
     );
     eprintln!(
         "t02 PASS: power iteration σ_max balanced to ≈ √(σ_a·σ_b) = {:.3} (got {:.3}, err {:.2}%)",
-        expected_balanced, b_mut_max, rel_err * 100.0
+        expected_balanced,
+        b_mut_max,
+        rel_err * 100.0
     );
 }
 
@@ -263,7 +264,10 @@ fn t04_ns_inv_sqrt_stable_under_ill_conditioning() {
 
     // Stability requirement: no NaN/Inf in the output.
     for &v in &inv_sqrt {
-        assert!(v.is_finite(), "NS inv-sqrt produced non-finite value {v} for κ=1e6 matrix");
+        assert!(
+            v.is_finite(),
+            "NS inv-sqrt produced non-finite value {v} for κ=1e6 matrix"
+        );
     }
 
     // Correctness check for ill-conditioned case: P^{-1/2} · P · P^{-1/2} ≈ I.
@@ -339,8 +343,22 @@ fn t05_compose_gauge_invariant_under_input_rescaling() {
     let mut out_a_orig = vec![0.0_f32; m * merged_r];
     let mut out_b_orig = vec![0.0_f32; n * merged_r];
     let pairs_orig = [
-        GaugePair { eta: 0.5, a: &a, b: &b, a_rows: m, b_rows: n, rank: r },
-        GaugePair { eta: 0.5, a: &a, b: &b, a_rows: m, b_rows: n, rank: r },
+        GaugePair {
+            eta: 0.5,
+            a: &a,
+            b: &b,
+            a_rows: m,
+            b_rows: n,
+            rank: r,
+        },
+        GaugePair {
+            eta: 0.5,
+            a: &a,
+            b: &b,
+            a_rows: m,
+            b_rows: n,
+            rank: r,
+        },
     ];
     gauge_invariant_compose(&pairs_orig, &mut out_a_orig, &mut out_b_orig);
     let w_orig = abt(&out_a_orig, &out_b_orig, m, merged_r, n);
@@ -349,8 +367,22 @@ fn t05_compose_gauge_invariant_under_input_rescaling() {
     let mut out_a_g = vec![0.0_f32; m * merged_r];
     let mut out_b_g = vec![0.0_f32; n * merged_r];
     let pairs_g = [
-        GaugePair { eta: 0.5, a: &a_g, b: &b_g, a_rows: m, b_rows: n, rank: r },
-        GaugePair { eta: 0.5, a: &a_g, b: &b_g, a_rows: m, b_rows: n, rank: r },
+        GaugePair {
+            eta: 0.5,
+            a: &a_g,
+            b: &b_g,
+            a_rows: m,
+            b_rows: n,
+            rank: r,
+        },
+        GaugePair {
+            eta: 0.5,
+            a: &a_g,
+            b: &b_g,
+            a_rows: m,
+            b_rows: n,
+            rank: r,
+        },
     ];
     gauge_invariant_compose(&pairs_g, &mut out_a_g, &mut out_b_g);
     let w_g = abt(&out_a_g, &out_b_g, m, merged_r, n);
@@ -360,7 +392,9 @@ fn t05_compose_gauge_invariant_under_input_rescaling() {
         diff < 1e-3,
         "Compose is not gauge-invariant: rescaling inputs by c={c} changed W by {diff:.2e}"
     );
-    eprintln!("t05 PASS: compose([(1,A·c, B/c), (1,A·c, B/c)]) = compose([(1,A,B),(1,A,B)]) (diff {diff:.2e})");
+    eprintln!(
+        "t05 PASS: compose([(1,A·c, B/c), (1,A·c, B/c)]) = compose([(1,A,B),(1,A,B)]) (diff {diff:.2e})"
+    );
 }
 
 // ── 6. NS5 + inv-sqrt roundtrip: msign(M) ≈ M · (M^T M)^{-1/2} ───────────
@@ -433,7 +467,7 @@ fn t06_msign_via_ns_inv_sqrt_matches_orthonormality() {
 #[cfg(feature = "sparse_task_vector")]
 #[test]
 fn t07_sparse_task_vector_compose_gauge_invariant() {
-    use katgpt_rs::sparse_task_vector::SparseTaskVector;
+    use katgpt_sparse::sparse_task_vector::SparseTaskVector;
 
     let a = SparseTaskVector::from_dense(
         &[0.5, 0.0, 0.0, 0.0, 0.3, 0.0, 0.0, 0.0, 0.2, 0.0, 0.0, 0.0],
@@ -472,11 +506,17 @@ fn t07_sparse_task_vector_compose_gauge_invariant() {
     b_scaled.apply_to(&mut base_b);
     merged.apply_to(&mut base_m);
     let diff = max_abs_diff(
-        &base_a.iter().zip(base_b.iter()).map(|(&x, &y)| x + y - 1.0).collect::<Vec<_>>(),
+        &base_a
+            .iter()
+            .zip(base_b.iter())
+            .map(|(&x, &y)| x + y - 1.0)
+            .collect::<Vec<_>>(),
         &base_m,
     );
     assert!(diff < 1e-6, "merged apply ≠ a + eta·b (diff = {diff:.2e})");
-    eprintln!("t07 PASS: SparseTaskVector.compose_gauge_invariant merges masks and preserves apply");
+    eprintln!(
+        "t07 PASS: SparseTaskVector.compose_gauge_invariant merges masks and preserves apply"
+    );
 }
 
 // ── 8. Throughput: rebalance (256×16, 16×256) ────────────────────────────
@@ -551,10 +591,38 @@ fn t10_throughput_compose_4_pairs() {
     let a4 = seeded_random_matrix(7, m, r);
     let b4 = seeded_random_matrix(8, n, r);
     let pairs = [
-        GaugePair { eta: 0.25, a: &a1, b: &b1, a_rows: m, b_rows: n, rank: r },
-        GaugePair { eta: 0.25, a: &a2, b: &b2, a_rows: m, b_rows: n, rank: r },
-        GaugePair { eta: 0.25, a: &a3, b: &b3, a_rows: m, b_rows: n, rank: r },
-        GaugePair { eta: 0.25, a: &a4, b: &b4, a_rows: m, b_rows: n, rank: r },
+        GaugePair {
+            eta: 0.25,
+            a: &a1,
+            b: &b1,
+            a_rows: m,
+            b_rows: n,
+            rank: r,
+        },
+        GaugePair {
+            eta: 0.25,
+            a: &a2,
+            b: &b2,
+            a_rows: m,
+            b_rows: n,
+            rank: r,
+        },
+        GaugePair {
+            eta: 0.25,
+            a: &a3,
+            b: &b3,
+            a_rows: m,
+            b_rows: n,
+            rank: r,
+        },
+        GaugePair {
+            eta: 0.25,
+            a: &a4,
+            b: &b4,
+            a_rows: m,
+            b_rows: n,
+            rank: r,
+        },
     ];
     let merged_r = n_pairs * r;
     let mut out_a = vec![0.0_f32; m * merged_r];
@@ -592,10 +660,7 @@ fn t11_gauge_rebalance_rank_one_pair() {
 
     let w_after = abt(&a, &b, m, r, n);
     let diff = max_abs_diff(&w_before, &w_after);
-    assert!(
-        diff < 1e-5,
-        "rank-1 rebalance changed A·B^T by {diff:.2e}"
-    );
+    assert!(diff < 1e-5, "rank-1 rebalance changed A·B^T by {diff:.2e}");
     // |A| and |B| should be balanced (both = sqrt(‖A‖·‖B‖) for rank-1).
     let norm_a = fro_norm(&a);
     let norm_b = fro_norm(&b);
@@ -604,9 +669,7 @@ fn t11_gauge_rebalance_rank_one_pair() {
         (ratio - 1.0).abs() < 0.10,
         "rank-1 rebalance should balance norms, got ratio {ratio:.3}"
     );
-    eprintln!(
-        "t11 PASS: rank-1 rebalance preserves A·B^T and balances ‖A‖≈‖B‖ (ratio {ratio:.3})"
-    );
+    eprintln!("t11 PASS: rank-1 rebalance preserves A·B^T and balances ‖A‖≈‖B‖ (ratio {ratio:.3})");
 }
 
 // ── 12. Edge case: compose with η=0 yields only pair 1 ───────────────────
@@ -629,7 +692,10 @@ fn t12_compose_eta_zero_yields_only_first_pair() {
     let w_merged = abt(&out_a, &out_b, m, merged_r, n);
     let w_p1 = abt(&a1, &b1, m, r, n);
     let diff = max_abs_diff(&w_merged, &w_p1);
-    assert!(diff < 1e-3, "α=0 should yield pair 1 only (diff = {diff:.2e})");
+    assert!(
+        diff < 1e-3,
+        "α=0 should yield pair 1 only (diff = {diff:.2e})"
+    );
     eprintln!("t12 PASS: lerp α=0 → pair 1 only (diff {diff:.2e})");
 }
 
@@ -653,7 +719,10 @@ fn t13_compose_eta_one_yields_only_second_pair() {
     let w_merged = abt(&out_a, &out_b, m, merged_r, n);
     let w_p2 = abt(&a2, &b2, m, r, n);
     let diff = max_abs_diff(&w_merged, &w_p2);
-    assert!(diff < 1e-3, "α=1 should yield pair 2 only (diff = {diff:.2e})");
+    assert!(
+        diff < 1e-3,
+        "α=1 should yield pair 2 only (diff = {diff:.2e})"
+    );
     eprintln!("t13 PASS: lerp α=1 → pair 2 only (diff {diff:.2e})");
 }
 
@@ -674,8 +743,22 @@ fn t14_compose_preserves_frobenius_norm() {
     let mut out_a = vec![0.0_f32; m * merged_r];
     let mut out_b = vec![0.0_f32; n * merged_r];
     let pairs = [
-        GaugePair { eta: 1.0, a: &a1, b: &b1, a_rows: m, b_rows: n, rank: r },
-        GaugePair { eta: 1.0, a: &a2, b: &b2, a_rows: m, b_rows: n, rank: r },
+        GaugePair {
+            eta: 1.0,
+            a: &a1,
+            b: &b1,
+            a_rows: m,
+            b_rows: n,
+            rank: r,
+        },
+        GaugePair {
+            eta: 1.0,
+            a: &a2,
+            b: &b2,
+            a_rows: m,
+            b_rows: n,
+            rank: r,
+        },
     ];
     gauge_invariant_compose(&pairs, &mut out_a, &mut out_b);
     let w_merged = abt(&out_a, &out_b, m, merged_r, n);
@@ -692,9 +775,7 @@ fn t14_compose_preserves_frobenius_norm() {
         rel_err < 1e-3,
         "‖W_compose‖ = {merged_norm:.5} ≠ ‖W_1 + W_2‖ = {sum_norm:.5} (rel err {rel_err:.2e})"
     );
-    eprintln!(
-        "t14 PASS: ‖compose(W_1, W_2)‖ ≈ ‖W_1 + W_2‖ (rel err {rel_err:.2e})"
-    );
+    eprintln!("t14 PASS: ‖compose(W_1, W_2)‖ ≈ ‖W_1 + W_2‖ (rel err {rel_err:.2e})");
 }
 
 // ── 15. Edge case: zero matrix rebalance is safe (no NaN/Inf) ────────────
@@ -710,8 +791,14 @@ fn t15_rebalance_zero_matrix_is_safe() {
     // Must not panic or produce NaN.
     gauge_rebalance(&mut a, &mut b, m, r, n, r, 1.0, &mut scratch);
     for &v in a.iter().chain(b.iter()) {
-        assert!(v.is_finite(), "zero rebalance produced non-finite value {v}");
-        assert!(v.abs() < 1e-20, "zero rebalance should leave zeros, got {v}");
+        assert!(
+            v.is_finite(),
+            "zero rebalance produced non-finite value {v}"
+        );
+        assert!(
+            v.abs() < 1e-20,
+            "zero rebalance should leave zeros, got {v}"
+        );
     }
     eprintln!("t15 PASS: zero-matrix rebalance is safe (no NaN/Inf, no perturbation)");
 }
@@ -762,7 +849,10 @@ fn t17_ns_inv_sqrt_extreme_condition_number_remains_finite() {
     ns_inv_sqrt_psd_into(&p, r, &mut inv_sqrt, &mut scratch, 7);
 
     for &v in &inv_sqrt {
-        assert!(v.is_finite(), "NS inv-sqrt produced non-finite value for κ=1e8");
+        assert!(
+            v.is_finite(),
+            "NS inv-sqrt produced non-finite value for κ=1e8"
+        );
     }
     eprintln!("t17 PASS: NS inv-sqrt finite for κ=1e8 (no NaN/Inf)");
 }

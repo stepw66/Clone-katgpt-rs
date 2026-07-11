@@ -359,13 +359,13 @@ cargo run --example bomber_skill_opt -- \
     --train-seeds 400 \
     --val-seeds 100 \
     --test-seeds 500 \
-    --output outputs/bomber_skill_v1/
+    --output output/bomber_skill_v1/
 ```
 
 Output structure (mirrors SkillOpt):
 
 ```
-outputs/bomber_skill_v1/
+output/bomber_skill_v1/
 ├── config.json              # Runtime config
 ├── history.json             # Per-step training history
 ├── best_skill.md            # Best validated game rules

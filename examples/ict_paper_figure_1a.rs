@@ -68,8 +68,14 @@ fn main() {
     );
 
     println!("\n=== Verdict ===");
-    println!("H_1 sees identical uncertainty:    ΔH_1 = {:.2e}", (h1_a - h1_b).abs());
-    println!("β sees different concentration:    Δβ   = {:.4}", (beta_a - beta_b).abs());
+    println!(
+        "H_1 sees identical uncertainty:    ΔH_1 = {:.2e}",
+        (h1_a - h1_b).abs()
+    );
+    println!(
+        "β sees different concentration:    Δβ   = {:.4}",
+        (beta_a - beta_b).abs()
+    );
     println!("\nThis is the ICT §1.5 / Figure 1a bifurcation in textbook form:");
     println!("H_1's blindness to the long tail (π < e⁻¹ ≈ 0.37) is why Bebop's");
     println!("acceptance forecast and Curiosity Pulse's underspecification signal");

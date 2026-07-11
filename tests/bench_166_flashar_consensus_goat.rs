@@ -18,8 +18,8 @@
 
 #![cfg(feature = "flashar_consensus")]
 
-use katgpt_rs::speculative::flashar_consensus::*;
 use katgpt_rs::speculative::d2f::D2fDecodeConfig;
+use katgpt_rs::speculative::flashar_consensus::*;
 use katgpt_rs::speculative::verifier::SpeculativeVerifier;
 use katgpt_rs::transformer::TransformerWeights;
 use katgpt_rs::types::{Config, Rng};
@@ -98,15 +98,16 @@ fn proof_g2_ternary_consensus() {
     // Case 4: Mixed
     let h4 = [10, 20, 30, 40];
     let v4 = [10, 25, 30, 45];
-    let (t4, a4) = compute_ternary_consensus(&h4, &v4, &[0.9, 0.6, 0.7, 0.3], &[0.8, 0.8, 0.6, 0.4], 4);
-    assert_eq!(t4[0], 0);   // AGREE
-    assert_eq!(t4[1], -1);  // V wins (0.8 > 0.6)
-    assert_eq!(t4[2], 0);   // AGREE
-    assert_eq!(t4[3], -1);  // V wins (0.4 > 0.3)
-    assert_eq!(a4[0], 10);  // consensus
-    assert_eq!(a4[1], 25);  // V wins
-    assert_eq!(a4[2], 30);  // consensus
-    assert_eq!(a4[3], 45);  // V wins
+    let (t4, a4) =
+        compute_ternary_consensus(&h4, &v4, &[0.9, 0.6, 0.7, 0.3], &[0.8, 0.8, 0.6, 0.4], 4);
+    assert_eq!(t4[0], 0); // AGREE
+    assert_eq!(t4[1], -1); // V wins (0.8 > 0.6)
+    assert_eq!(t4[2], 0); // AGREE
+    assert_eq!(t4[3], -1); // V wins (0.4 > 0.3)
+    assert_eq!(a4[0], 10); // consensus
+    assert_eq!(a4[1], 25); // V wins
+    assert_eq!(a4[2], 30); // consensus
+    assert_eq!(a4[3], 45); // V wins
 
     println!("G2 PASS: ternary consensus encodes {{-1, 0, +1}} correctly");
 }
@@ -125,9 +126,9 @@ fn proof_g3_thermal_routing() {
     // Position 4: H wins, low conf → COLD
 
     let mut ternary = [0i8; MAX_DRAFT_WIDTH];
-    ternary[2] = 1;  // H wins
+    ternary[2] = 1; // H wins
     ternary[3] = -1; // V wins
-    ternary[4] = 1;  // H wins
+    ternary[4] = 1; // H wins
 
     let mut h_conf = [0.0f32; MAX_DRAFT_WIDTH];
     h_conf[0] = 0.9; // PLASMA
@@ -146,15 +147,33 @@ fn proof_g3_thermal_routing() {
     let h_tokens = [42usize; MAX_DRAFT_WIDTH];
     let v_tokens = [42usize; MAX_DRAFT_WIDTH];
 
-    let result = route_thermal_paths(
-        &ternary, &h_conf, &v_conf, &h_tokens, &v_tokens, &config, 5,
-    );
+    let result = route_thermal_paths(&ternary, &h_conf, &v_conf, &h_tokens, &v_tokens, &config, 5);
 
-    assert_eq!(result.thermal_paths[0], ThermalPath::Plasma, "pos 0: high conf agree → Plasma");
-    assert_eq!(result.thermal_paths[1], ThermalPath::Hot, "pos 1: moderate conf agree → Hot");
-    assert_eq!(result.thermal_paths[2], ThermalPath::Hot, "pos 2: H wins high conf → Hot");
-    assert_eq!(result.thermal_paths[3], ThermalPath::Warm, "pos 3: V wins mid conf → Warm");
-    assert_eq!(result.thermal_paths[4], ThermalPath::Cold, "pos 4: H wins low conf → Cold");
+    assert_eq!(
+        result.thermal_paths[0],
+        ThermalPath::Plasma,
+        "pos 0: high conf agree → Plasma"
+    );
+    assert_eq!(
+        result.thermal_paths[1],
+        ThermalPath::Hot,
+        "pos 1: moderate conf agree → Hot"
+    );
+    assert_eq!(
+        result.thermal_paths[2],
+        ThermalPath::Hot,
+        "pos 2: H wins high conf → Hot"
+    );
+    assert_eq!(
+        result.thermal_paths[3],
+        ThermalPath::Warm,
+        "pos 3: V wins mid conf → Warm"
+    );
+    assert_eq!(
+        result.thermal_paths[4],
+        ThermalPath::Cold,
+        "pos 4: H wins low conf → Cold"
+    );
 
     println!("G3 PASS: thermal routing assigns correct paths by confidence");
 }
@@ -172,13 +191,8 @@ fn proof_g4_verifier_always_returns_token() {
     let d2f_config = D2fDecodeConfig::with_block_size(4);
     let consensus_config = ConsensusConfig::default();
 
-    let mut verifier = FlashARConsensusVerifier::new(
-        &target_weights,
-        &config,
-        d2f_config,
-        consensus_config,
-        4,
-    );
+    let mut verifier =
+        FlashARConsensusVerifier::new(&target_weights, &config, d2f_config, consensus_config, 4);
 
     // Test across many seeds — must always return ≥ 1 token
     for seed in 0..100u64 {
@@ -250,9 +264,7 @@ fn proof_g5_consensus_acceptance_ge_prefix_match() {
         "consensus avg acceptance = {avg_consensus}, must be ≥ 1.0"
     );
 
-    println!(
-        "G5 PASS: consensus avg tokens/call = {avg_consensus:.2} (≥ 1.0)"
-    );
+    println!("G5 PASS: consensus avg tokens/call = {avg_consensus:.2} (≥ 1.0)");
 }
 
 // ── G6: Plasma path skips AR verification ───────────────────────
@@ -273,9 +285,7 @@ fn proof_g6_plasma_skips_verify() {
     let h_tokens = [42usize; MAX_DRAFT_WIDTH];
     let v_tokens = [42usize; MAX_DRAFT_WIDTH];
 
-    let result = route_thermal_paths(
-        &ternary, &h_conf, &v_conf, &h_tokens, &v_tokens, &config, 8,
-    );
+    let result = route_thermal_paths(&ternary, &h_conf, &v_conf, &h_tokens, &v_tokens, &config, 8);
 
     let plasma_count = result.thermal_paths[..8]
         .iter()
@@ -307,10 +317,10 @@ fn proof_g7_heuristic_routing_consistent() {
     let config = ConsensusConfig::default();
 
     let mut ternary = [0i8; MAX_DRAFT_WIDTH];
-    ternary[0] = 0;  // agree
-    ternary[1] = 1;  // H wins
+    ternary[0] = 0; // agree
+    ternary[1] = 1; // H wins
     ternary[2] = -1; // V wins
-    ternary[3] = 0;  // agree
+    ternary[3] = 0; // agree
 
     let mut h_conf = [0.0f32; MAX_DRAFT_WIDTH];
     h_conf[0] = 0.9;
@@ -328,12 +338,8 @@ fn proof_g7_heuristic_routing_consistent() {
     let v_tokens = [10, 25, 35, 40];
 
     // Run twice — must produce identical results
-    let r1 = route_thermal_paths(
-        &ternary, &h_conf, &v_conf, &h_tokens, &v_tokens, &config, 4,
-    );
-    let r2 = route_thermal_paths(
-        &ternary, &h_conf, &v_conf, &h_tokens, &v_tokens, &config, 4,
-    );
+    let r1 = route_thermal_paths(&ternary, &h_conf, &v_conf, &h_tokens, &v_tokens, &config, 4);
+    let r2 = route_thermal_paths(&ternary, &h_conf, &v_conf, &h_tokens, &v_tokens, &config, 4);
 
     for i in 0..4 {
         assert_eq!(
@@ -412,7 +418,10 @@ fn bench_t9_flashar_consensus_metrics() {
 
     // Sanity checks
     assert!(avg_tokens >= 1.0, "avg tokens/call must be ≥ 1.0");
-    assert!(total_accepted >= n_runs as usize, "must accept at least 1 token per call");
+    assert!(
+        total_accepted >= n_runs as usize,
+        "must accept at least 1 token per call"
+    );
 }
 
 // ── Plasma path hit rate measurement ────────────────────────────
@@ -447,7 +456,11 @@ fn bench_t9_plasma_hit_rate() {
 
             // Random tokens — 50% chance of agreement
             let h_tok = (rng.next() % 10) as usize;
-            let v_tok = if rng.next().is_multiple_of(2) { h_tok } else { (rng.next() % 10) as usize };
+            let v_tok = if rng.next().is_multiple_of(2) {
+                h_tok
+            } else {
+                (rng.next() % 10) as usize
+            };
             // Note: we can't modify h_tokens/v_tokens since they're fixed-size
             // Use separate arrays
             let _ht = [h_tok; MAX_DRAFT_WIDTH];
@@ -479,10 +492,22 @@ fn bench_t9_plasma_hit_rate() {
     let cold_rate = cold_hits as f64 / total_positions as f64;
 
     println!("T9 Plasma hit rate (200 trials, 4 positions each):");
-    println!("  Plasma: {:.1}% ({plasma_hits}/{total_positions})", plasma_rate * 100.0);
-    println!("  Hot:    {:.1}% ({hot_hits}/{total_positions})", hot_rate * 100.0);
-    println!("  Warm:   {:.1}% ({warm_hits}/{total_positions})", warm_rate * 100.0);
-    println!("  Cold:   {:.1}% ({cold_hits}/{total_positions})", cold_rate * 100.0);
+    println!(
+        "  Plasma: {:.1}% ({plasma_hits}/{total_positions})",
+        plasma_rate * 100.0
+    );
+    println!(
+        "  Hot:    {:.1}% ({hot_hits}/{total_positions})",
+        hot_rate * 100.0
+    );
+    println!(
+        "  Warm:   {:.1}% ({warm_hits}/{total_positions})",
+        warm_rate * 100.0
+    );
+    println!(
+        "  Cold:   {:.1}% ({cold_hits}/{total_positions})",
+        cold_rate * 100.0
+    );
 
     // With random uniform confidences and 50% agreement rate:
     // Expected plasma ≈ P(agree) * P(min(h,v) ≥ 0.7) ≈ 0.5 * 0.3² ≈ 4.5%

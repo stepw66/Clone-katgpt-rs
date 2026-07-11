@@ -2,7 +2,7 @@
 //!
 //! Measures: classification accuracy, latency per query class.
 
-use katgpt_rs::pipeline_pruner::{PipelineConfig, QueryClassifier, QueryFeatures};
+use katgpt_core::pipeline_pruner::{PipelineConfig, QueryClassifier, QueryFeatures};
 
 #[test]
 fn test_classify_simple_fast() {

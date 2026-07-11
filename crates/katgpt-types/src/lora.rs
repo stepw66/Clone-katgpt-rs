@@ -1,7 +1,7 @@
 //! CPU-side LoRA adapter.
 
-use super::*;
 use super::domain::{read_f32_le, read_u16_le, read_u32_le};
+use super::*;
 
 // ---------------------------------------------------------------------------
 // LoRA Adapter — CPU inference path (Plan 025)
@@ -21,6 +21,7 @@ use super::domain::{read_f32_le, read_u16_le, read_u32_le};
 ///
 /// Fields ordered by descending alignment to minimize padding:
 /// usize/Vec (8-byte) → f32 (4-byte).
+#[derive(Clone)]
 pub struct LoraAdapter {
     /// LoRA rank.
     pub rank: usize,
@@ -194,9 +195,10 @@ impl LoraAdapter {
     /// payload = `[n_adapters(u32) | rank(u32) | alpha(f32) | per-adapter:
     /// in_dim(u32) | out_dim(u32) | a_f32s | b_f32s]`.
     ///
-    /// This is the CPU-side counterpart to `riir_gpu::lora::export_lora`, producing
-    /// byte-identical files that load via either path. Used by `CpuLoraTrainer`
-    /// (Issue 018 CPU fallback) to produce arena-loadable adapters without a GPU.
+    /// This is the CPU-side counterpart to the private GPU LoRA exporter,
+    /// producing byte-identical files that load via either path. Used by
+    /// `CpuLoraTrainer` (Issue 018 CPU fallback) to produce arena-loadable
+    /// adapters without a GPU.
     pub fn save(
         adapters: &[&Self],
         rank: usize,
@@ -242,11 +244,36 @@ impl LoraAdapter {
                     adapter.b.len()
                 ));
             }
-            for val in &adapter.a {
-                payload.extend_from_slice(&val.to_le_bytes());
+            // Bulk write matrix data on LE targets (avoids per-element
+            // extend_from_slice overhead). f32 is plain-old-data with no
+            // padding; on LE targets to_ne_bytes == to_le_bytes.
+            // SAFETY: f32 has no padding and is plain-old-data; we reinterpret
+            // the contiguous &[f32] as bytes for a single bulk copy.
+            #[cfg(target_endian = "little")]
+            {
+                let a_bytes = unsafe {
+                    std::slice::from_raw_parts(
+                        adapter.a.as_ptr() as *const u8,
+                        adapter.a.len() * std::mem::size_of::<f32>(),
+                    )
+                };
+                payload.extend_from_slice(a_bytes);
+                let b_bytes = unsafe {
+                    std::slice::from_raw_parts(
+                        adapter.b.as_ptr() as *const u8,
+                        adapter.b.len() * std::mem::size_of::<f32>(),
+                    )
+                };
+                payload.extend_from_slice(b_bytes);
             }
-            for val in &adapter.b {
-                payload.extend_from_slice(&val.to_le_bytes());
+            #[cfg(not(target_endian = "little"))]
+            {
+                for val in &adapter.a {
+                    payload.extend_from_slice(&val.to_le_bytes());
+                }
+                for val in &adapter.b {
+                    payload.extend_from_slice(&val.to_le_bytes());
+                }
             }
         }
 
@@ -260,8 +287,7 @@ impl LoraAdapter {
         file_data.extend_from_slice(checksum.as_bytes());
         file_data.extend_from_slice(&payload);
 
-        std::fs::write(path, &file_data)
-            .map_err(|e| format!("Failed to write lora file: {e}"))
+        std::fs::write(path, &file_data).map_err(|e| format!("Failed to write lora file: {e}"))
     }
 
     /// Load LoRA adapters from a compact binary format.

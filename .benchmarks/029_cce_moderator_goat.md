@@ -168,7 +168,7 @@ games is a Plan 325 follow-up (requires editing riir-games, separate repo).
 
 - **Plan:** [`katgpt-rs/.plans/295_lp_cce_moderator_primitive.md`](../.plans/295_lp_cce_moderator_primitive.md)
 - **Research:** [`katgpt-rs/.research/274_Optimal_CCE_Moderator_LP_No_Regret.md`](../.research/274_Optimal_CCE_Moderator_LP_No_Regret.md)
-- **API docs:** [`katgpt-rs/.docs/cce_moderator.md`](../.docs/cce_moderator.md)
+- **API docs:** [`katgpt-rs/.docs/04_calibration/cce_moderator.md`](../.docs/04_calibration/cce_moderator.md)
 - **G2 details:** [`katgpt-rs/.benchmarks/029_cce_convergence.md`](029_cce_convergence.md)
 - **G1 test:** [`katgpt-rs/tests/cce_vs_nash.rs`](../tests/cce_vs_nash.rs)
 - **G2 test:** [`katgpt-rs/tests/cce_convergence.rs`](../tests/cce_convergence.rs)

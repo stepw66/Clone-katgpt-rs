@@ -16,7 +16,7 @@ pub struct DemuxResult {
 }
 
 /// Verifies that a superposition span can be uniquely demultiplexed.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct MuxDemuxVerifier {
     /// Expected superposition width.
     pub k: usize,

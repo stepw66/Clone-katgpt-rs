@@ -6,7 +6,7 @@
 //!
 //! Run: `CARGO_TARGET_DIR=/tmp/riir-test-build cargo test --features msa_adaptive_k --test bench_256_adaptive_k_goat -- --nocapture`
 
-use katgpt_rs::dash_attn::adaptive_k::{compute_adaptive_k, AdaptiveKConfig, AdaptiveKRouter};
+use katgpt_rs::dash_attn::adaptive_k::{AdaptiveKConfig, AdaptiveKRouter, compute_adaptive_k};
 use katgpt_rs::dash_attn::block_topk::{BlockTopKCache, BlockTopKRouter};
 use katgpt_rs::dash_attn::vortex_flow::{RoutingDecision, VortexFlow, VortexScratch};
 use std::hint::black_box;
@@ -76,7 +76,9 @@ fn make_scattered_query(blocks: &[usize]) -> Vec<f32> {
 fn build_focused_set(n_blocks: usize) -> QuerySet {
     QuerySet {
         label: "focused",
-        queries: (0..N_QUERIES).map(|i| make_focused_query(i % n_blocks)).collect(),
+        queries: (0..N_QUERIES)
+            .map(|i| make_focused_query(i % n_blocks))
+            .collect(),
     }
 }
 
@@ -141,10 +143,18 @@ struct Metrics {
 
 impl Metrics {
     fn avg_recall(&self) -> f64 {
-        (self.n > 0).then(|| self.recall_sum / self.n as f64).unwrap_or(0.0)
+        if self.n > 0 {
+            self.recall_sum / self.n as f64
+        } else {
+            0.0
+        }
     }
     fn avg_k(&self) -> f64 {
-        (self.n > 0).then(|| self.k_sum as f64 / self.n as f64).unwrap_or(0.0)
+        if self.n > 0 {
+            self.k_sum as f64 / self.n as f64
+        } else {
+            0.0
+        }
     }
 }
 
@@ -162,7 +172,11 @@ fn measure_router<R: VortexFlow<Cache = BlockTopKCache>>(
         let dense = dense_topk_blocks(&dot_query_centroids(q, cache, n_blocks), K_FIXED);
         let dense_set: std::collections::HashSet<usize> = dense.into_iter().collect();
         let decision = router.forward_indexer(q, cache, n_blocks, K_FIXED, &mut scratch);
-        let hits = decision.blocks.iter().filter(|&&b| dense_set.contains(&b)).count();
+        let hits = decision
+            .blocks
+            .iter()
+            .filter(|&&b| dense_set.contains(&b))
+            .count();
         m.recall_sum += hits as f64 / K_FIXED as f64;
         m.k_sum += decision.len();
         m.n += 1;
@@ -184,17 +198,25 @@ fn measure_router<R: VortexFlow<Cache = BlockTopKCache>>(
 // Both use existing data (dot scores, dense_topk_blocks, decision.blocks).
 #[derive(Default, Clone, Copy)]
 struct MetricsO3 {
-    precision_sum: f64,   // Σ precision@adaptive_k per query
-    weighted_sum: f64,    // Σ weighted_recall per query
+    precision_sum: f64, // Σ precision@adaptive_k per query
+    weighted_sum: f64,  // Σ weighted_recall per query
     n: usize,
 }
 
 impl MetricsO3 {
     fn avg_precision(&self) -> f64 {
-        (self.n > 0).then(|| self.precision_sum / self.n as f64).unwrap_or(0.0)
+        if self.n > 0 {
+            self.precision_sum / self.n as f64
+        } else {
+            0.0
+        }
     }
     fn avg_weighted(&self) -> f64 {
-        (self.n > 0).then(|| self.weighted_sum / self.n as f64).unwrap_or(0.0)
+        if self.n > 0 {
+            self.weighted_sum / self.n as f64
+        } else {
+            0.0
+        }
     }
 }
 
@@ -217,8 +239,7 @@ fn measure_router_o3<R: VortexFlow<Cache = BlockTopKCache>>(
         // Adaptive router decision.
         let decision = router.forward_indexer(q, cache, n_blocks, K_FIXED, &mut scratch);
         let adapt_k = decision.len();
-        let adapt_set: std::collections::HashSet<usize> =
-            decision.blocks.iter().copied().collect();
+        let adapt_set: std::collections::HashSet<usize> = decision.blocks.iter().copied().collect();
 
         // precision@adaptive_k: of adapt_k picked, how many are in dense_top{adapt_k}?
         if adapt_k > 0 {
@@ -274,24 +295,49 @@ fn bench_adaptive_k_vs_fixed_k() {
     let adaptive_config = AdaptiveKConfig::new(4, K_FIXED);
 
     // Sanity demo: compute_adaptive_k on synthetic score shapes.
-    println!("\n── compute_adaptive_k reference (k_min=4, k_max={}) ──", K_FIXED);
+    println!(
+        "\n── compute_adaptive_k reference (k_min=4, k_max={}) ──",
+        K_FIXED
+    );
     let one_peak: Vec<f32> = (0..64).map(|i| if i == 0 { 5.0 } else { 0.1 }).collect();
-    println!("  one_peak (high var)  → k = {}", compute_adaptive_k(&one_peak, 64, &adaptive_config));
-    println!("  uniform  (low  var)  → k = {}", compute_adaptive_k(&vec![1.0; 64], 64, &adaptive_config));
+    println!(
+        "  one_peak (high var)  → k = {}",
+        compute_adaptive_k(&one_peak, 64, &adaptive_config)
+    );
+    println!(
+        "  uniform  (low  var)  → k = {}",
+        compute_adaptive_k(&vec![1.0; 64], 64, &adaptive_config)
+    );
 
-    let (mut adapt_k, mut adapt_recall, mut fixed_recall, mut count) = (0usize, 0.0f64, 0.0f64, 0usize);
-    let mut by_label_k: std::collections::HashMap<&'static str, (usize, usize)> = std::collections::HashMap::new();
+    let (mut adapt_k, mut adapt_recall, mut fixed_recall, mut count) =
+        (0usize, 0.0f64, 0.0f64, 0usize);
+    let mut by_label_k: std::collections::HashMap<&'static str, (usize, usize)> =
+        std::collections::HashMap::new();
     // O3 (Issue 015) — precision@adaptive_k + weighted recall accumulators.
     let (mut o3_precision_sum, mut o3_weighted_sum, mut o3_n) = (0.0f64, 0.0f64, 0usize);
     println!();
-    println!("╔════════════════════╦═══════════╦════════════════╦════════════════╦═══════════════════╦══════════════════╗");
-    println!("║ Plan 256 Phase 2 — Adaptive-K vs Fixed-K Block Selection (GOAT gate)                             ║");
-    println!("║ K_FIXED={}, AdaptiveKConfig(k_min=4, k_max={}, w=5.0, b=0.0), HEAD_DIM={}                          ║",
-        K_FIXED, K_FIXED, HEAD_DIM);
-    println!("╠════════════════════╦═══════════╦════════════════╦════════════════╦═══════════════════╦══════════════════╣");
-    println!("║ n_blocks           ║ query     ║ fixed recall   ║ adapt recall   ║ fixed k / adapt k ║ adapt/fixed ns/q ║");
-    println!("║                    ║ type      ║ (vs dense)     ║ (vs dense)     ║ avg per query     ║ (lower=better)   ║");
-    println!("╠════════════════════╬═══════════╬════════════════╬════════════════╬═══════════════════╬══════════════════╣");
+    println!(
+        "╔════════════════════╦═══════════╦════════════════╦════════════════╦═══════════════════╦══════════════════╗"
+    );
+    println!(
+        "║ Plan 256 Phase 2 — Adaptive-K vs Fixed-K Block Selection (GOAT gate)                             ║"
+    );
+    println!(
+        "║ K_FIXED={}, AdaptiveKConfig(k_min=4, k_max={}, w=5.0, b=0.0), HEAD_DIM={}                          ║",
+        K_FIXED, K_FIXED, HEAD_DIM
+    );
+    println!(
+        "╠════════════════════╦═══════════╦════════════════╦════════════════╦═══════════════════╦══════════════════╣"
+    );
+    println!(
+        "║ n_blocks           ║ query     ║ fixed recall   ║ adapt recall   ║ fixed k / adapt k ║ adapt/fixed ns/q ║"
+    );
+    println!(
+        "║                    ║ type      ║ (vs dense)     ║ (vs dense)     ║ avg per query     ║ (lower=better)   ║"
+    );
+    println!(
+        "╠════════════════════╬═══════════╬════════════════╬════════════════╬═══════════════════╬══════════════════╣"
+    );
     for &n_blocks in N_BLOCKS_CONFIGS {
         let focused = build_focused_set(n_blocks);
         let scattered = build_scattered_set(n_blocks);
@@ -300,33 +346,54 @@ fn bench_adaptive_k_vs_fixed_k() {
         let mut fixed_cache = fixed_router.cache_new(n_blocks, HEAD_DIM);
         populate_cache(&fixed_router, &mut fixed_cache, n_blocks);
 
-        let adapt_router = AdaptiveKRouter::new(BlockTopKRouter::new(true), adaptive_config.clone());
+        let adapt_router =
+            AdaptiveKRouter::new(BlockTopKRouter::new(true), adaptive_config.clone());
         let mut adapt_cache = adapt_router.cache_new(n_blocks, HEAD_DIM);
         populate_cache(&adapt_router, &mut adapt_cache, n_blocks);
 
         for qs in [&focused, &scattered] {
             let m_fixed = measure_router(&fixed_router, &fixed_cache, qs, n_blocks);
             let m_adapt = measure_router(&adapt_router, &adapt_cache, qs, n_blocks);
-            let fixed_ns = time_router(&fixed_router, &fixed_cache, &qs.queries, n_blocks, LATENCY_ITERS);
-            let adapt_ns = time_router(&adapt_router, &adapt_cache, &qs.queries, n_blocks, LATENCY_ITERS);
+            let fixed_ns = time_router(
+                &fixed_router,
+                &fixed_cache,
+                &qs.queries,
+                n_blocks,
+                LATENCY_ITERS,
+            );
+            let adapt_ns = time_router(
+                &adapt_router,
+                &adapt_cache,
+                &qs.queries,
+                n_blocks,
+                LATENCY_ITERS,
+            );
 
             // O3 (Issue 015) — additional metrics on existing data.
             let m_o3 = measure_router_o3(&adapt_router, &adapt_cache, qs, n_blocks);
 
             println!(
                 "║ n_blocks={:<9}║ {:<9}║ {:>11.1}%   ║ {:>11.1}%   ║ {:>5.1} / {:<5.1}    ║ {:>5.0} / {:<5.0}    ║",
-                n_blocks, qs.label,
-                m_fixed.avg_recall() * 100.0, m_adapt.avg_recall() * 100.0,
-                m_fixed.avg_k(), m_adapt.avg_k(), adapt_ns, fixed_ns,
+                n_blocks,
+                qs.label,
+                m_fixed.avg_recall() * 100.0,
+                m_adapt.avg_recall() * 100.0,
+                m_fixed.avg_k(),
+                m_adapt.avg_k(),
+                adapt_ns,
+                fixed_ns,
             );
             // O3 metrics printed via eprintln so they surface under --nocapture
             // without disturbing the existing table layout.
             eprintln!(
                 "    [O3] n_blocks={nb} {label}: precision@adapt_k={p:.4}  weighted_recall={w:.4}  \
                  (adapt_k≈{ak:.1}, fixed_k={fk})",
-                nb = n_blocks, label = qs.label,
-                p = m_o3.avg_precision(), w = m_o3.avg_weighted(),
-                ak = m_adapt.avg_k(), fk = K_FIXED,
+                nb = n_blocks,
+                label = qs.label,
+                p = m_o3.avg_precision(),
+                w = m_o3.avg_weighted(),
+                ak = m_adapt.avg_k(),
+                fk = K_FIXED,
             );
 
             adapt_k += m_adapt.k_sum;
@@ -341,62 +408,141 @@ fn bench_adaptive_k_vs_fixed_k() {
             e.1 += m_adapt.n;
         }
     }
-    println!("╚════════════════════╩═══════════╩════════════════╩════════════════╩═══════════════════╩══════════════════╝");
+    println!(
+        "╚════════════════════╩═══════════╩════════════════╩════════════════╩═══════════════════╩══════════════════╝"
+    );
     // Variance gate check (focused vs scattered avg k)
     let fk = by_label_k.get("focused").copied().unwrap_or((0, 0));
     let sk = by_label_k.get("scattered").copied().unwrap_or((0, 0));
-    let focused_avg_k = (fk.1 > 0).then(|| fk.0 as f64 / fk.1 as f64).unwrap_or(0.0);
-    let scattered_avg_k = (sk.1 > 0).then(|| sk.0 as f64 / sk.1 as f64).unwrap_or(0.0);
+    let focused_avg_k = if fk.1 > 0 {
+        fk.0 as f64 / fk.1 as f64
+    } else {
+        0.0
+    };
+    let scattered_avg_k = if sk.1 > 0 {
+        sk.0 as f64 / sk.1 as f64
+    } else {
+        0.0
+    };
     println!();
     println!("── Variance gate behaviour (observed) ──");
-    println!("  Focused  avg k : {:>5.2}  (one peak  → mathematically HIGH variance)", focused_avg_k);
-    println!("  Scattered avg k: {:>5.2}  (multimodal → lower variance per query)", scattered_avg_k);
-    println!("  Δ (focused - scattered) = {:+.2} blocks", focused_avg_k - scattered_avg_k);
+    println!(
+        "  Focused  avg k : {:>5.2}  (one peak  → mathematically HIGH variance)",
+        focused_avg_k
+    );
+    println!(
+        "  Scattered avg k: {:>5.2}  (multimodal → lower variance per query)",
+        scattered_avg_k
+    );
+    println!(
+        "  Δ (focused - scattered) = {:+.2} blocks",
+        focused_avg_k - scattered_avg_k
+    );
 
     // ── GOAT verdict ──────────────────────────────────────────────────────────
-    let avg_k_adapt = (count > 0).then(|| adapt_k as f64 / count as f64).unwrap_or(0.0);
-    let avg_recall_adapt = (count > 0).then(|| adapt_recall / count as f64).unwrap_or(0.0);
-    let avg_recall_fixed = (count > 0).then(|| fixed_recall / count as f64).unwrap_or(0.0);
+    let avg_k_adapt = if count > 0 {
+        adapt_k as f64 / count as f64
+    } else {
+        0.0
+    };
+    let avg_recall_adapt = if count > 0 {
+        adapt_recall / count as f64
+    } else {
+        0.0
+    };
+    let avg_recall_fixed = if count > 0 {
+        fixed_recall / count as f64
+    } else {
+        0.0
+    };
     let savings_ratio = avg_k_adapt / K_FIXED as f64;
-    let recall_ratio = (avg_recall_fixed > 0.0).then(|| avg_recall_adapt / avg_recall_fixed).unwrap_or(0.0);
+    let recall_ratio = if avg_recall_fixed > 0.0 {
+        avg_recall_adapt / avg_recall_fixed
+    } else {
+        0.0
+    };
 
     println!();
-    println!("── Overall ({} queries × {} configs = {} samples) ──", N_QUERIES, N_BLOCKS_CONFIGS.len(), count);
-    println!("  Avg k used by adaptive : {:.2} (fixed budget = {})", avg_k_adapt, K_FIXED);
-    println!("  Compute savings        : {:>5.1}%  (criterion: ≥ 25%)", (1.0 - savings_ratio) * 100.0);
+    println!(
+        "── Overall ({} queries × {} configs = {} samples) ──",
+        N_QUERIES,
+        N_BLOCKS_CONFIGS.len(),
+        count
+    );
+    println!(
+        "  Avg k used by adaptive : {:.2} (fixed budget = {})",
+        avg_k_adapt, K_FIXED
+    );
+    println!(
+        "  Compute savings        : {:>5.1}%  (criterion: ≥ 25%)",
+        (1.0 - savings_ratio) * 100.0
+    );
     println!("  Adaptive recall        : {:.4}", avg_recall_adapt);
     println!("  Fixed-k recall         : {:.4}", avg_recall_fixed);
-    println!("  Recall ratio (ad/fixed): {:.4}  (criterion: ≥ 0.90)", recall_ratio);
+    println!(
+        "  Recall ratio (ad/fixed): {:.4}  (criterion: ≥ 0.90)",
+        recall_ratio
+    );
 
     // O3 (Issue 015) — precision@adaptive_k + weighted recall aggregates.
     // These reframe the recall result: recall_ratio is capped at adapt_k/32 ≈ 0.625
     // by construction (adaptive picks fewer blocks); precision@adaptive_k and
     // weighted recall ask "did adaptive pick the RIGHT (highest-scoring) blocks?",
     // which is the actual design question. Informational, not a gate.
-    let o3_avg_precision = (o3_n > 0).then(|| o3_precision_sum / o3_n as f64).unwrap_or(0.0);
-    let o3_avg_weighted = (o3_n > 0).then(|| o3_weighted_sum / o3_n as f64).unwrap_or(0.0);
+    let o3_avg_precision = if o3_n > 0 {
+        o3_precision_sum / o3_n as f64
+    } else {
+        0.0
+    };
+    let o3_avg_weighted = if o3_n > 0 {
+        o3_weighted_sum / o3_n as f64
+    } else {
+        0.0
+    };
     println!();
-    println!("── O3 (Issue 015): precision@adaptive_k + weighted recall ({} samples) ──", o3_n);
-    println!("  precision@adaptive_k : {:.4}  (1.0 = adaptive picks exactly dense top-adapt_k)", o3_avg_precision);
-    println!("  weighted recall      : {:.4}  (1.0 = adaptive captures all dense-top-32 score mass)", o3_avg_weighted);
-    println!("  (reframes recall ratio {:.3}: adaptive picks fewer but higher-value blocks)", recall_ratio);
+    println!(
+        "── O3 (Issue 015): precision@adaptive_k + weighted recall ({} samples) ──",
+        o3_n
+    );
+    println!(
+        "  precision@adaptive_k : {:.4}  (1.0 = adaptive picks exactly dense top-adapt_k)",
+        o3_avg_precision
+    );
+    println!(
+        "  weighted recall      : {:.4}  (1.0 = adaptive captures all dense-top-32 score mass)",
+        o3_avg_weighted
+    );
+    println!(
+        "  (reframes recall ratio {:.3}: adaptive picks fewer but higher-value blocks)",
+        recall_ratio
+    );
     eprintln!(
         "    [O3 aggregate] precision@adapt_k={p:.4}  weighted_recall={w:.4}  \
          recall_ratio={rr:.4}  adapt_k≈{ak:.2}",
-        p = o3_avg_precision, w = o3_avg_weighted, rr = recall_ratio, ak = avg_k_adapt,
+        p = o3_avg_precision,
+        w = o3_avg_weighted,
+        rr = recall_ratio,
+        ak = avg_k_adapt,
     );
 
     let pass_savings = savings_ratio <= 0.75;
     let pass_recall = recall_ratio >= 0.90;
     println!();
     if pass_savings && pass_recall {
-        println!("GOAT: PASS — adaptive-k saves {:.1}% compute at {:.1}% recall",
-            (1.0 - savings_ratio) * 100.0, recall_ratio * 100.0);
+        println!(
+            "GOAT: PASS — adaptive-k saves {:.1}% compute at {:.1}% recall",
+            (1.0 - savings_ratio) * 100.0,
+            recall_ratio * 100.0
+        );
     } else {
         let mut reasons = Vec::new();
         if !pass_savings {
-            reasons.push(format!("savings {:.1}% < 25% (avg k {:.2} > {:.0})",
-                (1.0 - savings_ratio) * 100.0, avg_k_adapt, (0.75 * K_FIXED as f64).ceil()));
+            reasons.push(format!(
+                "savings {:.1}% < 25% (avg k {:.2} > {:.0})",
+                (1.0 - savings_ratio) * 100.0,
+                avg_k_adapt,
+                (0.75 * K_FIXED as f64).ceil()
+            ));
         }
         if !pass_recall {
             reasons.push(format!("recall ratio {:.3} < 0.90", recall_ratio));

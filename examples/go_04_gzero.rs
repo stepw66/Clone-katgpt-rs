@@ -347,12 +347,12 @@ fn section_delta_evolution(num_episodes: usize, board_size: usize) {
         }
 
         let mut deltas = [0.0f32; 4];
-        for tmpl_idx in 0..4 {
+        for (tmpl_idx, delta_slot) in deltas.iter_mut().enumerate().take(4) {
             if let Some(history) = results.template_delta_history.get(tmpl_idx) {
                 // Find the last entry at or before this episode
                 let relevant: Vec<_> = history.iter().filter(|(ep, _)| *ep <= episode).collect();
                 if let Some((_, delta)) = relevant.last() {
-                    deltas[tmpl_idx] = *delta;
+                    *delta_slot = *delta;
                 }
             }
         }
@@ -479,7 +479,7 @@ fn main() {
         .and_then(|s| s.parse().ok())
         .unwrap_or(DEFAULT_BOARD_SIZE);
 
-    let delta_gating = env::var("GO_NO_DELTA").ok().map_or(true, |v| v != "1");
+    let delta_gating = env::var("GO_NO_DELTA").ok().is_none_or(|v| v != "1");
 
     // Select which sections to run
     let section_set = env::var("GO_SET").ok().unwrap_or_else(|| "all".to_string());

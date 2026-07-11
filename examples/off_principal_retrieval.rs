@@ -17,8 +17,8 @@
 
 #![cfg(feature = "off_principal_retrieval")]
 
-use katgpt_rs::off_principal::OffPrincipalIndex;
-use katgpt_rs::simd::simd_dot_f32;
+use katgpt_core::simd::simd_dot_f32;
+use katgpt_spectral::off_principal::OffPrincipalIndex;
 
 const D: usize = 64;
 const N_ADAPTERS: usize = 8;
@@ -40,10 +40,7 @@ fn main() {
         "OffPrincipalIndex: d={}, k={}, k_frac={:.2}",
         idx.d, idx.k, idx.k_frac
     );
-    println!(
-        "BLAKE3(src) = {}",
-        hex_hash(&idx.src_hash)
-    );
+    println!("BLAKE3(src) = {}", hex_hash(&idx.src_hash));
     println!();
 
     // Build adapters: principal varies (breaks cosine), off-principal is unique.
@@ -108,7 +105,10 @@ fn main() {
     let gain = (op_acc - cosine_acc) * 100.0;
 
     println!("Results over {} trials:", n_trials);
-    println!("  Raw cosine top-1 accuracy:     {:.1}%", cosine_acc * 100.0);
+    println!(
+        "  Raw cosine top-1 accuracy:     {:.1}%",
+        cosine_acc * 100.0
+    );
     println!("  Off-principal top-1 accuracy: {:.1}%", op_acc * 100.0);
     println!("  Gain:                         {:+.1} pp", gain);
     println!();

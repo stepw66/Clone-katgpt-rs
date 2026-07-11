@@ -24,10 +24,10 @@ use katgpt_core::types::{SenseKind, TernaryDir};
 /// Generate 64 distinct pre-hashed leaves.
 fn generate_leaf_hashes() -> [[u8; HASH_SIZE]; MERKLE_OCTREE_LEAVES] {
     let mut leaves = [[0u8; HASH_SIZE]; MERKLE_OCTREE_LEAVES];
-    for i in 0..MERKLE_OCTREE_LEAVES {
+    for (i, leaf) in leaves.iter_mut().enumerate() {
         let mut buf = [0u8; 32];
         buf[0..8].copy_from_slice(&(i as u64).to_le_bytes());
-        leaves[i] = *blake3::hash(&buf).as_bytes();
+        *leaf = *blake3::hash(&buf).as_bytes();
     }
     leaves
 }

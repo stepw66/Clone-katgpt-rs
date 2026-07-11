@@ -17,7 +17,7 @@
 #![cfg(feature = "osc_kv")]
 
 use katgpt_core::Rng;
-use katgpt_rs::osc_kv::{OscKVCache, OscKVConfig};
+use katgpt_kv::osc_kv::{OscKVCache, OscKVConfig};
 #[cfg(feature = "spectral_quant")]
 use katgpt_rs::spectralquant::{SpectralQuantKVCache, SpectralQuantKVCacheConfig};
 use std::time::Instant;
@@ -111,14 +111,14 @@ fn g1_cyclic_reconstruction_quality() {
 
     // ── OscKV ──
     let mut osc = OscKVCache::with_config(&config);
-    for pos in 0..n_pos {
-        osc.store_key(0, pos, &keys[pos]);
+    for (pos, key) in keys.iter().enumerate() {
+        osc.store_key(0, pos, key);
     }
     let mut osc_cosines: Vec<f64> = Vec::with_capacity(n_pos);
     let mut buf = vec![0.0f32; config.kv_dim];
-    for pos in 0..n_pos {
+    for (pos, key) in keys.iter().enumerate() {
         osc.dequantize_key_into(0, pos, &mut buf);
-        osc_cosines.push(cosine_sim(&keys[pos], &buf) as f64);
+        osc_cosines.push(cosine_sim(key, &buf) as f64);
     }
     let osc_st = QualityStats::from_values(&osc_cosines);
 
@@ -129,14 +129,14 @@ fn g1_cyclic_reconstruction_quality() {
             .map(|p| cyclic_key(config.kv_dim, p, freq * 0.7))
             .collect();
         let mut sq = SpectralQuantKVCache::from_keys(&sq_config(), &keys, &vals);
-        for pos in 0..n_pos {
-            sq.store_key(0, pos, &keys[pos]);
+        for (pos, key) in keys.iter().enumerate() {
+            sq.store_key(0, pos, key);
         }
         let mut cosines: Vec<f64> = Vec::with_capacity(n_pos);
         let mut b = vec![0.0f32; config.kv_dim];
-        for pos in 0..n_pos {
+        for (pos, key) in keys.iter().enumerate() {
             sq.dequantize_key_into(0, pos, &mut b);
-            cosines.push(cosine_sim(&keys[pos], &b) as f64);
+            cosines.push(cosine_sim(key, &b) as f64);
         }
         Some(QualityStats::from_values(&cosines))
     };
@@ -199,14 +199,14 @@ fn g2_random_reconstruction_quality() {
 
     // ── OscKV ──
     let mut osc = OscKVCache::with_config(&config);
-    for pos in 0..n_pos {
-        osc.store_key(0, pos, &keys[pos]);
+    for (pos, key) in keys.iter().enumerate() {
+        osc.store_key(0, pos, key);
     }
     let mut osc_cosines: Vec<f64> = Vec::with_capacity(n_pos);
     let mut buf = vec![0.0f32; config.kv_dim];
-    for pos in 0..n_pos {
+    for (pos, key) in keys.iter().enumerate() {
         osc.dequantize_key_into(0, pos, &mut buf);
-        osc_cosines.push(cosine_sim(&keys[pos], &buf) as f64);
+        osc_cosines.push(cosine_sim(key, &buf) as f64);
     }
     let osc_st = QualityStats::from_values(&osc_cosines);
 
@@ -217,14 +217,14 @@ fn g2_random_reconstruction_quality() {
             .map(|_| gaussian_vec(config.kv_dim, &mut rng))
             .collect();
         let mut sq = SpectralQuantKVCache::from_keys(&sq_config(), &keys, &vals);
-        for pos in 0..n_pos {
-            sq.store_key(0, pos, &keys[pos]);
+        for (pos, key) in keys.iter().enumerate() {
+            sq.store_key(0, pos, key);
         }
         let mut cosines: Vec<f64> = Vec::with_capacity(n_pos);
         let mut b = vec![0.0f32; config.kv_dim];
-        for pos in 0..n_pos {
+        for (pos, key) in keys.iter().enumerate() {
             sq.dequantize_key_into(0, pos, &mut b);
-            cosines.push(cosine_sim(&keys[pos], &b) as f64);
+            cosines.push(cosine_sim(key, &b) as f64);
         }
         Some(QualityStats::from_values(&cosines))
     };
@@ -289,13 +289,13 @@ fn g3_store_latency_comparison() {
 
     // ── OscKV latency ──
     let mut osc = OscKVCache::with_config(&config);
-    for pos in 0..n_warmup {
-        osc.store_key(0, pos, &keys[pos]);
+    for (pos, key) in keys.iter().take(n_warmup).enumerate() {
+        osc.store_key(0, pos, key);
     }
     let mut osc_buf = vec![0.0f32; config.kv_dim];
     let t0 = Instant::now();
-    for pos in n_warmup..(n_warmup + n_pos) {
-        osc.store_key(0, pos, &keys[pos]);
+    for (pos, key) in keys.iter().enumerate().skip(n_warmup) {
+        osc.store_key(0, pos, key);
         osc.dequantize_key_into(0, pos, &mut osc_buf);
     }
     let osc_elapsed = t0.elapsed();
@@ -311,13 +311,13 @@ fn g3_store_latency_comparison() {
             .map(|_| gaussian_vec(config.kv_dim, &mut rng))
             .collect();
         let mut sq = SpectralQuantKVCache::from_keys(&sq_cfg, ck, &cv);
-        for pos in 0..n_warmup {
-            sq.store_key(0, pos, &keys[pos]);
+        for (pos, key) in keys.iter().take(n_warmup).enumerate() {
+            sq.store_key(0, pos, key);
         }
         let mut b = vec![0.0f32; config.kv_dim];
         let t0 = Instant::now();
-        for pos in n_warmup..(n_warmup + n_pos) {
-            sq.store_key(0, pos, &keys[pos]);
+        for (pos, key) in keys.iter().enumerate().skip(n_warmup) {
+            sq.store_key(0, pos, key);
             sq.dequantize_key_into(0, pos, &mut b);
         }
         t0.elapsed().as_nanos() as f64 / n_pos as f64
@@ -445,14 +445,14 @@ fn g5_quality_vs_sequence_length() {
 
         // OscKV
         let mut osc = OscKVCache::with_config(&config);
-        for pos in 0..seq_len {
-            osc.store_key(0, pos, &keys[pos]);
+        for (pos, key) in keys.iter().enumerate() {
+            osc.store_key(0, pos, key);
         }
         let mut buf = vec![0.0f32; config.kv_dim];
         let mut cos_sum = 0.0f64;
-        for pos in 0..seq_len {
+        for (pos, key) in keys.iter().enumerate() {
             osc.dequantize_key_into(0, pos, &mut buf);
-            cos_sum += cosine_sim(&keys[pos], &buf) as f64;
+            cos_sum += cosine_sim(key, &buf) as f64;
         }
         let osc_cos = cos_sum / seq_len as f64;
         osc_cosines.push(osc_cos);
@@ -479,14 +479,14 @@ fn g5_quality_vs_sequence_length() {
                 .map(|p| cyclic_key(64, p, freq * 0.7))
                 .collect();
             let mut sq = SpectralQuantKVCache::from_keys(&sq_cfg, &keys, &vals);
-            for pos in 0..seq_len {
-                sq.store_key(0, pos, &keys[pos]);
+            for (pos, key) in keys.iter().enumerate() {
+                sq.store_key(0, pos, key);
             }
             let mut b = vec![0.0f32; 64];
             let mut s = 0.0f64;
-            for pos in 0..seq_len {
+            for (pos, key) in keys.iter().enumerate() {
                 sq.dequantize_key_into(0, pos, &mut b);
-                s += cosine_sim(&keys[pos], &b) as f64;
+                s += cosine_sim(key, &b) as f64;
             }
             s / seq_len as f64
         };

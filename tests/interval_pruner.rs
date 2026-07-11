@@ -3,7 +3,7 @@
 #[cfg(feature = "interval_pruner")]
 mod tests {
     use katgpt_core::ConstraintPruner;
-    use katgpt_rs::interval_pruner::{IntervalMask, IntervalPruner};
+    use katgpt_pruners::interval_pruner::{IntervalMask, IntervalPruner};
 
     // ── Test 1: contiguous valid range is interval-closed ──
 

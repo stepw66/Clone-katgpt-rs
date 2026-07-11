@@ -6,9 +6,9 @@
 //! - BackendKind enum works
 //! - CPU backend produces same results as direct transformer::forward
 
-use katgpt_rs::inference_backend::{BackendKind, CpuBackend, InferenceBackend, auto_backend};
+use katgpt_backend::{BackendKind, CpuBackend, InferenceBackend, auto_backend};
 use katgpt_rs::transformer::{self, ForwardContext, MultiLayerKVCache, TransformerWeights};
-use katgpt_rs::types::{Config, Rng, sample_token, softmax_scaled};
+use katgpt_rs::types::{Config, Rng, sample_token_into, softmax_scaled};
 
 fn setup() -> (Config, TransformerWeights) {
     let config = Config::micro();
@@ -51,11 +51,25 @@ fn goat_p2_auto_backend_cpu_forced() {
     assert_eq!(backend.device_name(), "CPU");
 }
 
-// P3: auto_backend with Auto falls back to CPU when no model
+// P3: auto_backend with Auto selects best available backend
+// (ANE when macOS + `ane` feature is active, else falls back to CPU).
+// The unconditional `== "CPU"` assertion was a pre-existing test bug (Issue 413
+// follow-up): default features pull `ane` in transitively via
+// `async_qdq_overlap` → `inference_router` → `ane`, so on macOS the default
+// build selects ANE, not CPU.
 #[test]
 fn goat_p3_auto_backend_auto_fallback() {
     let backend = auto_backend(BackendKind::Auto, None);
-    assert_eq!(backend.device_name(), "CPU");
+    #[cfg(all(target_os = "macos", feature = "ane"))]
+    {
+        // ANE feature is active on macOS — auto selects ANE.
+        assert_eq!(backend.device_name(), "ANE");
+    }
+    #[cfg(not(all(target_os = "macos", feature = "ane")))]
+    {
+        // No ANE available — auto falls back to CPU.
+        assert_eq!(backend.device_name(), "CPU");
+    }
 }
 
 // P4: BackendKind default is Auto
@@ -94,6 +108,7 @@ fn goat_p6_cpu_backend_generation_valid_tokens() {
     let mut ctx = ForwardContext::new(&config);
     let mut cache = MultiLayerKVCache::new(&config);
     let mut rng = Rng::new(42);
+    let mut cdf = Vec::with_capacity(config.vocab_size);
 
     let mut token = config.bos_token;
     let mut generated = Vec::new();
@@ -101,7 +116,7 @@ fn goat_p6_cpu_backend_generation_valid_tokens() {
     for pos in 0..10 {
         let logits = backend.forward(&mut ctx, &weights, &mut cache, token, pos, &config);
         softmax_scaled(logits, 1.0 / config.temperature);
-        let next = sample_token(&ctx.logits, &mut rng);
+        let next = sample_token_into(&ctx.logits, &mut rng, &mut cdf);
         assert!(
             next < config.vocab_size,
             "token {next} >= vocab_size {}",

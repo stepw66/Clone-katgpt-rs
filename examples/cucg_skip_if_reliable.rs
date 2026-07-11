@@ -10,8 +10,8 @@
 //! cargo run --example cucg_skip_if_reliable
 //! ```
 
-use katgpt_rs::compaction::rubrics::search::SearchRubric;
-use katgpt_rs::compaction::{Backstop, ClosedUnitCompactionGate, FireRule, RubricScratch};
+use katgpt_core::compaction::rubrics::search::SearchRubric;
+use katgpt_core::compaction::{Backstop, ClosedUnitCompactionGate, FireRule, RubricScratch};
 
 fn main() {
     println!("═══ CUCG skip-if-reliable Suppression (G2, Plan 333) ═══");
@@ -35,8 +35,8 @@ fn main() {
     let safe_point_features = [0.8_f32, 4.0, 1.2, 0.3]; // coherence, rank, div, novelty
 
     let clr_votes: &[(&str, f32)] = &[
-        ("no CLR vote", 0.0),    // None path — not suppressed
-        ("low reliability", 0.5), // below 0.8 — not suppressed
+        ("no CLR vote", 0.0),      // None path — not suppressed
+        ("low reliability", 0.5),  // below 0.8 — not suppressed
         ("high reliability", 0.9), // above 0.8 — SUPPRESSED
         ("very high reliability", 0.99),
     ];
@@ -53,8 +53,16 @@ fn main() {
         scratch.f32_buf.extend_from_slice(&safe_point_features);
         let d_skip = gate_skip.evaluate(b"traj", 0, 10_000, Some(*vote), &mut scratch);
 
-        let plain_str = if d_plain.is_compress() { "Compress" } else { "Continue" };
-        let skip_str = if d_skip.is_compress() { "Compress" } else { "Continue (suppressed)" };
+        let plain_str = if d_plain.is_compress() {
+            "Compress"
+        } else {
+            "Continue"
+        };
+        let skip_str = if d_skip.is_compress() {
+            "Compress"
+        } else {
+            "Continue (suppressed)"
+        };
         let suppressed = d_plain.is_compress() && !d_skip.is_compress();
 
         println!("CLR vote = {} ({label}):", vote);

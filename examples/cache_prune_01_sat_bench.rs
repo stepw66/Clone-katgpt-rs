@@ -4,7 +4,7 @@
 //!
 //! Run: `cargo run --example cache_prune_01_sat_bench --features cache_prune`
 
-use katgpt_rs::cache_prune::SummedAreaTable;
+use katgpt_kv::cache_prune::SummedAreaTable;
 
 fn main() {
     println!("=== CachePrune SAT Benchmark (Plan 140 GOAT) ===\n");

@@ -233,7 +233,7 @@ Per SKILL §1 fusion protocol — fuse this paper with the 2-3 closest cousins:
 1. ✅ Open primitive → `katgpt-rs/.research/278_*.md` (this doc) + `katgpt-rs/.plans/299_*.md`
 2. ✅ Private guide → `riir-ai/.research/147_Engram_Conditional_Memory_NPC_Guide.md`
 3. ✅ Plan → `katgpt-rs/.plans/299_Engram_Hash_Addressed_Pattern_Memory.md`
-4. ⏳ Chain half → `riir-chain/.research/001_Engram_LatCal_Commitment_Bridge.md` (TODO, tracked in R147 §9)
+4. ✅ Chain half → `riir-chain/.research/007_Engram_LatCal_Commitment_Bridge.md` (filed 2026-07-04, tracked in R147 §9)
 
 **Reasoning:** The paper introduces a *new sparsity axis* (conditional memory), not a faster version of an existing axis. Our stack already has the complementary axis (Raven = conditional computation); adding the missing axis creates a hybrid that the paper proves is strictly better than either alone. The chain-committable angle (LatCal-fixed hash addresses) is a *novel capability class* — no shipped primitive crosses the sync boundary as raw committed values for embedding lookups. This is the moat.
 

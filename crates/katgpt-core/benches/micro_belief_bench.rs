@@ -3,8 +3,8 @@
 //! Canonical criterion wiring for the G1.4 latency gate and friends. Replaces
 //! the wall-clock `g1_4_attractor_step_32_under_100ns` test as the source of
 //! truth for the per-step ns number cited in
-//! `katgpt-rs/.issues/024_micro_belief_g1_4_attractor_latency.md` and
-//! `katgpt-rs/.benchmarks/276_micro_belief_goat.md`.
+//! `katgpt-rs/.benchmarks/276_micro_belief_goat.md` (originally also tracked in
+//! Issue 024, closed + issue removed; benchmark is the canonical record).
 //!
 //! # GOAT gates covered
 //!
@@ -165,11 +165,8 @@ fn bench_batch_1000_npcs(c: &mut Criterion) {
             .collect(),
     );
     // Per-NPC belief vectors (the `par_iter_mut` needs mutable state).
-    let states: Mutex<Vec<Vec<f32>>> = Mutex::new(
-        (0..BATCH_NPCS)
-            .map(|_| vec![0.0f32; BATCH_DIM])
-            .collect(),
-    );
+    let states: Mutex<Vec<Vec<f32>>> =
+        Mutex::new((0..BATCH_NPCS).map(|_| vec![0.0f32; BATCH_DIM]).collect());
     let input = vec![0.5f32; BATCH_DIM];
 
     group.bench_function("leaky_rayon_par_iter_dim8", |b| {

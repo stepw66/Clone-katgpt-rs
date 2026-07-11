@@ -16,7 +16,7 @@
 //! All trait methods are zero-allocation by contract — they either return
 //! scalars or write into caller-provided scratch buffers.
 
-use crate::cgsp::types::{Candidate, CycleResult, Direction, Priority, Target};
+use crate::cgsp::types::{Candidate, CycleResult, Direction, HintPolicy, Priority, Target};
 // Note: `Candidate` import retained for `BatchQualityGate::is_degenerate`
 // (still receives `&[Candidate]`). The `Solver::attempt` signature now takes
 // `&Direction` + `pool_index` directly to avoid per-cycle `Candidate` clones
@@ -108,6 +108,22 @@ pub trait Solver {
         candidate_direction: &Direction,
         pool_index: usize,
     ) -> f32;
+
+    /// How much this solver benefits from injected branching-order hints
+    /// (the priority-weighted candidate ordering).
+    ///
+    /// Returns [`HintPolicy::OrderOnly`] by default — every shipped solver is
+    /// search-dominated and hint-receptive, so the bandit absorb runs unchanged.
+    /// Override to [`HintPolicy::Skip`] for overhead-dominated solvers (e.g. a
+    /// future CDCL SAT backend with fixed startup cost) so their noise-dominated
+    /// solve-rates do not corrupt the hint priority table.
+    ///
+    /// Distilled from G-RRM §3 (arXiv 2607.02491, Bertram et al.) — see
+    /// `.issues/037` for the deferred rationale.
+    #[inline]
+    fn hint_receptivity(&self) -> HintPolicy {
+        HintPolicy::OrderOnly
+    }
 }
 
 // ── HintDeltaBandit ───────────────────────────────────────────────────────
@@ -123,7 +139,7 @@ pub trait Solver {
 /// - `absorb(arm, reward)` — incremental update, no allocation.
 /// - `priority(arm)`       — returns the current priority ∈ `[0, 1]`.
 /// - `priorities_mut()`    — exposes the priority table for collapse checks
-///                           and snapshotting.
+///   and snapshotting.
 pub trait HintDeltaBandit {
     /// Absorb a synthetic reward `(1 − solve_rate) · guide_score` for `arm`.
     fn absorb(&mut self, arm: usize, reward: f32);
@@ -290,7 +306,9 @@ mod trait_tests {
 
     #[test]
     fn stub_bandit_satisfies_trait() {
-        let mut b = StubBandit { prios: vec![0.1; 4] };
+        let mut b = StubBandit {
+            prios: vec![0.1; 4],
+        };
         b.absorb(0, 0.5);
         assert!((b.priority(0) - 0.6).abs() < 1e-6);
         assert_eq!(b.num_arms(), 4);

@@ -2,7 +2,7 @@
 //!
 //! Measures: perplexity impact, KV cache size consistency, latency.
 
-use katgpt_rs::targeted_precision::PrecisionBudget;
+use katgpt_kv::targeted_precision::PrecisionBudget;
 
 #[test]
 fn test_uniform_budget_consistency() {

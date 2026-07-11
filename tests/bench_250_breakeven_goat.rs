@@ -14,8 +14,8 @@
 #[cfg(test)]
 #[cfg(feature = "breakeven_routing")]
 mod tests {
-    use katgpt_rs::breakeven::{BreakevenBandit, BreakevenTierPair, BreakevenTracker};
-    use katgpt_rs::trigger_gate::ComputeTier;
+    use katgpt_core::breakeven::{BreakevenBandit, BreakevenTierPair, BreakevenTracker};
+    use katgpt_core::trigger_gate::ComputeTier;
     use std::time::Instant;
 
     // ── Helpers ────────────────────────────────────────────────────────────

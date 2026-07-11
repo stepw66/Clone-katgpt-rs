@@ -347,7 +347,7 @@ fn test_critical_entropy_updates_last_observed() {
 #[cfg(feature = "breakeven_routing")]
 #[test]
 fn test_breakeven_tracker_n_star() {
-    use crate::breakeven::BreakevenTracker;
+    use katgpt_core::breakeven::BreakevenTracker;
 
     let tracker = BreakevenTracker::new(1000);
     for _ in 0..50 {
@@ -368,7 +368,7 @@ fn test_breakeven_tracker_n_star() {
 #[cfg(feature = "breakeven_routing")]
 #[test]
 fn test_breakeven_tracker_amortized_flips() {
-    use crate::breakeven::BreakevenTracker;
+    use katgpt_core::breakeven::BreakevenTracker;
 
     let tracker = BreakevenTracker::new(10_000);
     for _ in 0..50 {
@@ -395,8 +395,8 @@ fn test_breakeven_tracker_amortized_flips() {
 #[cfg(feature = "breakeven_routing")]
 #[test]
 fn test_breakeven_bandit_prefers_amortized() {
-    use crate::breakeven::{BreakevenBandit, BreakevenTierPair};
-    use crate::trigger_gate::ComputeTier;
+    use katgpt_core::breakeven::{BreakevenBandit, BreakevenTierPair};
+    use katgpt_core::trigger_gate::ComputeTier;
 
     let bandit = BreakevenBandit::new(100, 200, 50);
     for _ in 0..20 {
@@ -417,7 +417,7 @@ fn test_breakeven_bandit_prefers_amortized() {
 #[cfg(feature = "breakeven_routing")]
 #[test]
 fn test_fidelity_matcher_higher_compression_later() {
-    use crate::breakeven::fidelity::{CompressionLevel, FidelityMatcher};
+    use katgpt_core::breakeven::fidelity::{CompressionLevel, FidelityMatcher};
 
     let fm = FidelityMatcher::new(0.1);
     let early = fm.error_matched_level(0);
@@ -430,8 +430,8 @@ fn test_fidelity_matcher_higher_compression_later() {
 #[cfg(feature = "breakeven_routing")]
 #[test]
 fn test_router_breakeven_routes_differently() {
-    use crate::breakeven::{BreakevenBandit, BreakevenTierPair};
-    use crate::trigger_gate::ComputeTier;
+    use katgpt_core::breakeven::{BreakevenBandit, BreakevenTierPair};
+    use katgpt_core::trigger_gate::ComputeTier;
 
     let bandit = BreakevenBandit::new(100, 200, 50);
     for _ in 0..20 {
@@ -662,8 +662,10 @@ fn set_tvp_config_adjusts_thresholds() {
     let mut router = fast_router(true, false);
 
     // Raise promote_at to 0.95 → 0.9 disagreement no longer promotes.
-    let mut cfg = TvpConfig::default();
-    cfg.promote_at = 0.95;
+    let cfg = TvpConfig {
+        promote_at: 0.95,
+        ..TvpConfig::default()
+    };
     router.set_tvp_config(cfg);
     assert_eq!(router.tvp_config().promote_at, 0.95);
 
@@ -692,55 +694,115 @@ fn stats_exposes_tvp_signal() {
 #[cfg(feature = "thicket_variance_probe")]
 #[test]
 fn tvp_tier_decision_branches() {
-    use crate::pruners::thicket_variance_probe::tvp_tier_decision;
+    // Pure unit test of the pruners-side fn — use the pruners-side `ComputeTier`
+    // directly (the leaf crate mirrors the root enum bit-for-bit; values cross
+    // the boundary as u8 via `tier_to_kp` in prod). Asserting on the pruners
+    // enum here is the honest framing for an isolated-fn test.
+    use crate::pruners::thicket_variance_probe::{ComputeTier as KpComputeTier, tvp_tier_decision};
 
     // No signal → Defer.
     assert_eq!(
-        tvp_tier_decision(None, 0.6, 0.2, ComputeTier::CpuOnly, true, true),
+        tvp_tier_decision(None, 0.6, 0.2, KpComputeTier::CpuOnly, true, true),
         TvpTierDecision::Defer
     );
 
     // Promote branch.
     assert_eq!(
-        tvp_tier_decision(Some(tvp_reasoning(0.9)), 0.6, 0.2, ComputeTier::CpuOnly, true, true),
+        tvp_tier_decision(
+            Some(tvp_reasoning(0.9)),
+            0.6,
+            0.2,
+            KpComputeTier::CpuOnly,
+            true,
+            true
+        ),
         TvpTierDecision::PromoteGpu
     );
     // No GPU → cannot promote.
     assert_eq!(
-        tvp_tier_decision(Some(tvp_reasoning(0.9)), 0.6, 0.2, ComputeTier::CpuOnly, false, true),
+        tvp_tier_decision(
+            Some(tvp_reasoning(0.9)),
+            0.6,
+            0.2,
+            KpComputeTier::CpuOnly,
+            false,
+            true
+        ),
         TvpTierDecision::Hold
     );
     // Already CpuGpu → cannot promote further.
     assert_eq!(
-        tvp_tier_decision(Some(tvp_reasoning(0.9)), 0.6, 0.2, ComputeTier::CpuGpu, true, true),
+        tvp_tier_decision(
+            Some(tvp_reasoning(0.9)),
+            0.6,
+            0.2,
+            KpComputeTier::CpuGpu,
+            true,
+            true
+        ),
         TvpTierDecision::Hold
     );
 
     // Demote branch.
     assert_eq!(
-        tvp_tier_decision(Some(tvp_reasoning(0.1)), 0.6, 0.2, ComputeTier::CpuGpu, true, true),
+        tvp_tier_decision(
+            Some(tvp_reasoning(0.1)),
+            0.6,
+            0.2,
+            KpComputeTier::CpuGpu,
+            true,
+            true
+        ),
         TvpTierDecision::DemoteCpu
     );
     // High load → cannot demote.
     assert_eq!(
-        tvp_tier_decision(Some(tvp_reasoning(0.1)), 0.6, 0.2, ComputeTier::CpuGpu, true, false),
+        tvp_tier_decision(
+            Some(tvp_reasoning(0.1)),
+            0.6,
+            0.2,
+            KpComputeTier::CpuGpu,
+            true,
+            false
+        ),
         TvpTierDecision::Hold
     );
     // Already CpuOnly → cannot demote.
     assert_eq!(
-        tvp_tier_decision(Some(tvp_reasoning(0.1)), 0.6, 0.2, ComputeTier::CpuOnly, true, true),
+        tvp_tier_decision(
+            Some(tvp_reasoning(0.1)),
+            0.6,
+            0.2,
+            KpComputeTier::CpuOnly,
+            true,
+            true
+        ),
         TvpTierDecision::Hold
     );
 
     // Mid-range disagreement → Hold.
     assert_eq!(
-        tvp_tier_decision(Some(tvp_reasoning(0.4)), 0.6, 0.2, ComputeTier::CpuOnly, true, true),
+        tvp_tier_decision(
+            Some(tvp_reasoning(0.4)),
+            0.6,
+            0.2,
+            KpComputeTier::CpuOnly,
+            true,
+            true
+        ),
         TvpTierDecision::Hold
     );
 
     // Format-only signal → never promotes.
     assert_eq!(
-        tvp_tier_decision(Some(tvp_format_only(0.99)), 0.6, 0.2, ComputeTier::CpuOnly, true, true),
+        tvp_tier_decision(
+            Some(tvp_format_only(0.99)),
+            0.6,
+            0.2,
+            KpComputeTier::CpuOnly,
+            true,
+            true
+        ),
         TvpTierDecision::Hold
     );
 }
@@ -791,11 +853,15 @@ fn simulate_cascade(
 
     // TVP gate (Plan 267) — sits between critical and breakeven.
     let low_load = true; // we are in a test with zero QPS.
+    // `tvp_tier_decision` lives in the `katgpt-pruners` leaf crate and takes
+    // the pruners-side `ComputeTier`. Bridge the root tier across the boundary
+    // with the same `tier_to_kp` the prod router uses (DRY: one conversion).
+    use crate::inference_router::router_tvp::tier_to_kp;
     match tvp_tier_decision(
         tvp,
         tvp_promote_at,
         tvp_demote_at,
-        tier_after_critical,
+        tier_to_kp(tier_after_critical),
         gate.gpu_available(),
         low_load,
     ) {
@@ -834,16 +900,16 @@ fn g4_tvp_plus_rv_strictly_dominates_either_alone() {
     // Class D — both low: obvious easy query. Neither promotes (correct).
     let queries: &[(f64, f32, bool)] = &[
         // (rv, tvp_reasoning, should_promote)
-        (0.20, 0.40, true),  // A: RV-high, TVP-mid — hard (RV catches, TVP holds)
-        (0.20, 0.50, true),  // A: variant
-        (0.01, 0.90, true),  // B: RV-low, TVP-high — hard (TVP catches)
-        (0.005, 0.85, true), // B: variant
-        (0.20, 0.90, true),  // C: both high — hard
-        (0.15, 0.95, true),  // C: variant
-        (0.01, 0.05, false), // D: both low — easy
+        (0.20, 0.40, true),   // A: RV-high, TVP-mid — hard (RV catches, TVP holds)
+        (0.20, 0.50, true),   // A: variant
+        (0.01, 0.90, true),   // B: RV-low, TVP-high — hard (TVP catches)
+        (0.005, 0.85, true),  // B: variant
+        (0.20, 0.90, true),   // C: both high — hard
+        (0.15, 0.95, true),   // C: variant
+        (0.01, 0.05, false),  // D: both low — easy
         (0.005, 0.10, false), // D: variant
-        (0.05, 0.40, false), // ambiguous mid-range — easy (no strong signal)
-        (0.05, 0.50, false), // ambiguous mid-range — easy
+        (0.05, 0.40, false),  // ambiguous mid-range — easy (no strong signal)
+        (0.05, 0.50, false),  // ambiguous mid-range — easy
     ];
 
     let mut correct_rv_only = 0usize;
@@ -963,9 +1029,16 @@ fn chiar_hook_reports_stats_after_observing_keys() {
         router.observe_chiar_key(&entropy_key);
     }
     let stats = router.chiar_stats().expect("stats after 100 keys");
-    assert!(stats.tokens_observed >= 100, "tokens_observed = {}", stats.tokens_observed);
+    assert!(
+        stats.tokens_observed >= 100,
+        "tokens_observed = {}",
+        stats.tokens_observed
+    );
     let entropy = stats.utilization_entropy.expect("utilization_entropy");
-    assert!((0.0..=1.0).contains(&entropy), "entropy out of range: {entropy}");
+    assert!(
+        (0.0..=1.0).contains(&entropy),
+        "entropy out of range: {entropy}"
+    );
 }
 
 #[cfg(feature = "chiaroscuro")]
@@ -974,7 +1047,10 @@ fn chiar_hook_stats_visible_in_router_stats() {
     let mut router = fast_router(false, false);
     router.observe_chiar_key(&[0.5f32; 256]);
     let stats = router.stats();
-    assert!(stats.chiar_stats.is_some(), "chiar_stats should be Some in RouterStats");
+    assert!(
+        stats.chiar_stats.is_some(),
+        "chiar_stats should be Some in RouterStats"
+    );
     let cs = stats.chiar_stats.unwrap();
     assert!(cs.tokens_observed >= 1);
 }

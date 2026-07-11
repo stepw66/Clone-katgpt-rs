@@ -8,7 +8,7 @@
 fn main() {
     #[cfg(feature = "adaptive_cot_identifiability")]
     {
-        use katgpt_rs::adaptive_cot_stopper::{AdaptiveCoTConfig, AdaptiveCoTStopper};
+        use katgpt_band::adaptive_cot_stopper::{AdaptiveCoTConfig, AdaptiveCoTStopper};
 
         println!("=== Plan 265 Phase 4: Adaptive CoT Stopping ===\n");
 
@@ -21,7 +21,10 @@ fn main() {
 
         println!("Initial state:");
         println!("  segments:           {n_segments}");
-        println!("  unresolved pairs:   {} (upper bound)", stopper.unresolved_count());
+        println!(
+            "  unresolved pairs:   {} (upper bound)",
+            stopper.unresolved_count()
+        );
         println!("  initial uncertainty: {:.4}", stopper.uncertainty());
 
         // Simulate BCKVSS-style pruning: only 60% of pairs are collider-relevant.

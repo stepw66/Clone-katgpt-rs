@@ -157,7 +157,7 @@ Snapshot roundtrip works. BLAKE3 commitment verified. Ready for riir-ai Plan 299
   - **Result:** ✅ PASS (bounded, NOT zero) — **13.00 allocs/cycle**. Two root causes:
     `scratch.candidates.resize(k, placeholder)` clones Vec<f32> per slot (~8 allocs), and
     `candidates[i].clone()` allocates per admitted candidate (~5 allocs). See `.benchmarks/274_cgsp_goat.md`
-    §P3. Follow-up optimisation filed as `.issues/021_cgsp_cycle_allocation_reduction.md`.
+    §P3. Follow-up optimisation filed as issue 021 (closed + removed, resolved).
 
 - [x] **T3.7** Latent/raw boundary audit
   - Grep `cgsp/` for any type that could cross sync boundary
@@ -266,4 +266,4 @@ These are all game IP and belong in `riir-ai`.
 **Next action:** None — Plan 274 is fully shipped. CGSP remains opt-in until
 riir-ai Plan 299 validates on real game domains. The remaining optimisation
 debt (P3: 55.91 allocs/cycle, not zero) is tracked separately in
-`./issues/021_cgsp_cycle_allocation_reduction.md` and is not blocking.
+issue 021 (closed + removed, resolved) and is not blocking.

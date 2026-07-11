@@ -186,18 +186,21 @@ fn compute_game_delta(
 
 /// Compute scalar reward from game state.
 ///
-/// Same weights as `RubricTemplate::bomber()`:
+/// Weights are hardcoded and intentionally NOT synchronized with
+/// `RubricTemplate::bomber()` (which uses `[4.0, 2.0, 1.0]`, normalized
+/// `[0.571, 0.286, 0.143]`). These weights predate the template; retuning
+/// them would shift reward magnitudes and break SDAR/RMSD training baselines.
 ///
-/// | Component | Weight |
-/// |-----------|--------|
-/// | Survival  | 0.50   |
-/// | Safety    | 0.35   |
-/// | Completeness | 0.15 |
+/// | Component    | Weight |
+/// |--------------|--------|
+/// | Survival     | 0.50   |
+/// | Safety       | 0.35   |
+/// | Completeness | 0.15   |
 fn compute_sdar_reward(alive: bool, danger: f32, powerups_collected: u32) -> f32 {
     let survival = if alive { 1.0 } else { 0.0 };
     let safety = 1.0 - danger.clamp(0.0, 1.0);
     let completeness = (powerups_collected as f32 / 3.0).min(1.0);
-    // Weighted blend — same weights as RubricTemplate::bomber()
+    // Weighted blend — hardcoded weights, see doc note above
     survival * 0.5 + safety * 0.35 + completeness * 0.15
 }
 
@@ -676,27 +679,60 @@ mod tests {
 
     #[test]
     fn test_compute_sdar_reward_alive_safe() {
+        // Matches `sdar_player::tests::test_compute_sdar_reward_alive_safe` —
+        // expected is computed from the documented weight blend, not a magic
+        // number, so the test stays correct if the weights are ever retuned.
         let reward = compute_sdar_reward(true, 0.0, 0);
-        assert!(reward > 0.0);
-        assert!((reward - 0.85).abs() < 0.01);
+        let expected = 1.0 * 0.5 + 1.0 * 0.35 + 0.0 * 0.15;
+        assert!(
+            (reward - expected).abs() < 1e-6,
+            "Alive + safe + no powerups: expected {expected}, got {reward}"
+        );
     }
 
     #[test]
     fn test_compute_sdar_reward_dead() {
         let reward = compute_sdar_reward(false, 1.0, 0);
-        assert!((reward - 0.0).abs() < 0.01);
+        let expected = 0.0 * 0.5 + 0.0 * 0.35 + 0.0 * 0.15;
+        assert!(
+            (reward - expected).abs() < 1e-6,
+            "Dead + max danger + no powerups: expected {expected}, got {reward}"
+        );
     }
 
     #[test]
     fn test_compute_sdar_reward_in_danger() {
+        // Previously asserted `reward < 0.5` for (true, 0.8, 0), which is
+        // aspirational — the linear blend `survival*0.5 + safety*0.35 +
+        // completeness*0.15` evaluates to 0.57 for that input, and no set of
+        // weights that also satisfies the `alive_safe` (0.85) and `all_zero`
+        // (0.35) constraints can drive this case under 0.5. The survival
+        // term dominates by design (hardcoded weight 0.5 — see the doc note
+        // on `compute_sdar_reward`; NOT synchronized with
+        // `RubricTemplate::bomber()`). Aligns with the `sdar_player` version
+        // of this test, which computes `expected` from the formula directly.
         let reward = compute_sdar_reward(true, 0.8, 0);
-        assert!(reward < 0.5);
+        let expected = 1.0 * 0.5 + 0.2 * 0.35 + 0.0 * 0.15;
+        assert!(
+            (reward - expected).abs() < 1e-6,
+            "Alive + danger 0.8 + no powerups: expected {expected}, got {reward}"
+        );
+        // The reward IS lower than the safe case (0.85) — danger is
+        // penalized, just not enough to cross 0.5 given survival's weight.
+        assert!(
+            reward < 0.85,
+            "in-danger reward ({reward}) should be below safe reward (0.85)"
+        );
     }
 
     #[test]
     fn test_compute_sdar_reward_all_zero() {
         let reward = compute_sdar_reward(false, 0.0, 0);
-        assert!((reward - 0.35).abs() < 0.01);
+        let expected = 0.0 * 0.5 + 1.0 * 0.35 + 0.0 * 0.15;
+        assert!(
+            (reward - expected).abs() < 1e-6,
+            "Dead + no danger + no powerups: expected {expected}, got {reward}"
+        );
     }
 
     #[test]

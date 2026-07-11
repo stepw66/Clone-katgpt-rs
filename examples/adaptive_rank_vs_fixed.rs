@@ -18,7 +18,7 @@
 
 #![cfg(feature = "spectral_rank")]
 
-use katgpt_rs::spectral_concentration::{
+use katgpt_spectral::spectral_concentration::{
     adaptive_rank, cot_budget_from_concentration, spectral_concentration,
 };
 
@@ -77,7 +77,10 @@ fn main() {
 
     // Concentration stats.
     let c_min = concentrations.iter().cloned().fold(f32::INFINITY, f32::min);
-    let c_max = concentrations.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
+    let c_max = concentrations
+        .iter()
+        .cloned()
+        .fold(f32::NEG_INFINITY, f32::max);
     let c_mean = concentrations.iter().sum::<f32>() / N_ADAPTERS as f32;
 
     println!("Spectral concentration stats:");

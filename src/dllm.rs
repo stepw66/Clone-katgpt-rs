@@ -127,7 +127,7 @@ impl AdaptiveNoiseSchedule {
 
         let step_trackers = current_ratios
             .iter()
-            .map(|&ratio| VarianceMinimizer::with_param(config.clone(), ratio))
+            .map(|&ratio| VarianceMinimizer::with_param(config, ratio))
             .collect();
 
         Self {
@@ -194,7 +194,7 @@ impl AdaptiveNoiseSchedule {
         self.step_trackers = self
             .current_ratios
             .iter()
-            .map(|&ratio| VarianceMinimizer::with_param(config.clone(), ratio))
+            .map(|&ratio| VarianceMinimizer::with_param(config, ratio))
             .collect();
 
         self.adaptations = 0;
@@ -271,343 +271,43 @@ pub fn corrupt_block(
 }
 
 // ═══════════════════════════════════════════════════════════════
-// Task 0.1: Bidirectional Attention Forward
+// Forward-Positions Cluster — re-export from katgpt-forward
 // ═══════════════════════════════════════════════════════════════
-
-/// Pre-allocated buffers for `forward_bidirectional_positions`, avoiding per-position Vec allocations.
-struct BidirectionalContext {
-    x: Vec<f32>,
-    q: Vec<f32>,
-    k: Vec<f32>,
-    v: Vec<f32>,
-    x_proj: Vec<f32>,
-    xr2: Vec<f32>,
-    hidden: Vec<f32>,
-    x_mlp: Vec<f32>,
-    logits: Vec<f32>,
-    // Attention scratch buffers (reused across positions)
-    attn_out_buf: Vec<f32>,
-    attn_weights_buf: Vec<f32>,
-    scores_buf: Vec<f32>,
-    // Cross-position buffers (resized per call, reused across calls)
-    k_cache: Vec<f32>,
-    v_cache: Vec<f32>,
-    x_norm2_all: Vec<f32>,
-    xr_all: Vec<f32>,
-    // Output buffers (pre-allocated to max capacity, sliced per call)
-    all_logits: Vec<f32>,
-    all_attn_weights: Vec<f32>,
-    /// RCD residual embedding override for masked positions: `[block_size * n_embd]`.
-    /// When `rcd_active` is true and a position's token is the mask token,
-    /// this buffer's slice `[p*n..(p+1)*n]` is used instead of `wte[mask_token]`.
-    /// Written by `denoise_loop_rcd` after each commitment phase, read in the next forward pass.
-    #[cfg(feature = "rcd_residual")]
-    rcd_residual_embeddings: Vec<f32>,
-    /// Whether the residual embedding override is active for the current step.
-    /// Step 0 has no residuals yet (all-mask), so this is false on the first forward pass.
-    #[cfg(feature = "rcd_residual")]
-    rcd_active: bool,
-    /// 3SR warm-start embedding override for masked positions: `[block_size * n_embd]`.
-    /// When `tsr_active` is true and a position's token is the mask token, this
-    /// buffer's slice `[p*n..(p+1)*n]` is used *instead of* `rcd_residual_embeddings`
-    /// (it pre-composes the RCD residual with the prior step's solved state via
-    /// `warm_start_lerp`). Written by `denoise_loop_rcd_3sr` after each commitment
-    /// phase, read in the next forward pass. Plan 291, Research 265.
-    #[cfg(feature = "d2f_3sr_warm_start")]
-    tsr_warm_start_embeddings: Vec<f32>,
-    /// Whether the 3SR warm-start override is active for the current step.
-    /// Step 0 has no z_prev (no transitions to classify), so this is false on
-    /// the first forward pass — same rule as `rcd_active`.
-    #[cfg(feature = "d2f_3sr_warm_start")]
-    tsr_active: bool,
-}
-
-impl BidirectionalContext {
-    fn new(config: &Config) -> Self {
-        let n = config.n_embd;
-        let kvd = kv_dim(config);
-        let bs = config.block_size;
-        Self {
-            x: vec![0.0f32; n],
-            q: vec![0.0f32; n],
-            k: vec![0.0f32; kvd],
-            v: vec![0.0f32; kvd],
-            x_proj: vec![0.0f32; n],
-            xr2: vec![0.0f32; n],
-            hidden: vec![0.0f32; config.mlp_hidden],
-            x_mlp: vec![0.0f32; n],
-            logits: vec![0.0f32; config.vocab_size],
-            attn_out_buf: vec![0.0f32; n],
-            attn_weights_buf: vec![0.0f32; config.n_head * bs],
-            scores_buf: vec![0.0f32; bs],
-            k_cache: vec![0.0f32; bs * kvd],
-            v_cache: vec![0.0f32; bs * kvd],
-            x_norm2_all: vec![0.0f32; bs * n],
-            xr_all: vec![0.0f32; bs * n],
-            all_logits: vec![0.0f32; bs * config.vocab_size],
-            all_attn_weights: vec![0.0f32; bs * config.n_head * bs],
-            #[cfg(feature = "rcd_residual")]
-            rcd_residual_embeddings: vec![0.0f32; bs * n],
-            #[cfg(feature = "rcd_residual")]
-            rcd_active: false,
-            #[cfg(feature = "d2f_3sr_warm_start")]
-            tsr_warm_start_embeddings: vec![0.0f32; bs * n],
-            #[cfg(feature = "d2f_3sr_warm_start")]
-            tsr_active: false,
-        }
-    }
-}
-
-/// Bidirectional forward pass for all positions.
-/// Each position attends to ALL other positions (no causal mask).
-/// Returns logits per position and per-head attention weights.
-pub fn forward_bidirectional_positions(
-    weights: &TransformerWeights,
-    tokens: &[usize],
-    config: &Config,
-) -> (Vec<f32>, Vec<f32>) {
-    let mut bctx = BidirectionalContext::new(config);
-    let (logits_len, attn_len) =
-        forward_bidirectional_positions_into(weights, tokens, config, &mut bctx);
-    (
-        bctx.all_logits[..logits_len].to_vec(),
-        bctx.all_attn_weights[..attn_len].to_vec(),
-    )
-}
-
-/// Zero-alloc variant of [`forward_bidirectional_positions`] that reuses a pre-allocated context.
-///
-/// Pass a `BidirectionalContext` to avoid per-call heap allocation when calling in a loop
-/// (e.g., `denoise_loop`).
-///
-/// Writes results into `bctx.all_logits` and `bctx.all_attn_weights` and returns
-/// `(logits_len, attn_len)` so the caller can index the context buffers directly.
-/// This avoids lifetime issues when the caller needs to reuse other fields from `bctx`.
-fn forward_bidirectional_positions_into(
-    weights: &TransformerWeights,
-    tokens: &[usize],
-    config: &Config,
-    bctx: &mut BidirectionalContext,
-) -> (usize, usize) {
-    let n = config.n_embd;
-    let hd = config.head_dim;
-    let kvd = kv_dim(config);
-    let seq_len = tokens.len().min(config.block_size);
-    let scale = 1.0 / (hd as f32).sqrt();
-
-    // Phase A: Compute K/V for all positions.
-    // (k_cache, v_cache, x_norm2_all, xr_all are fully overwritten for [0..seq_len)
-    // inside the loop, so no pre-zero is needed.)
-    for (p, &token) in tokens.iter().enumerate().take(seq_len) {
-        // RCD / 3SR: when an embedding override is active and this position is
-        // still masked, use the override buffer instead of `wte[mask_token]`.
-        // 3SR warm-start takes precedence — it pre-composes the RCD residual
-        // (which serves as `h_pre_t`) with the prior step's solved state via
-        // `warm_start_lerp`. When 3SR is inactive, the RCD residual is used.
-        //
-        // This is a single branch per position — does not touch the inner matmul loops.
-        #[cfg(feature = "d2f_3sr_warm_start")]
-        let emb = if bctx.tsr_active && token == config.mask_token {
-            &bctx.tsr_warm_start_embeddings[p * n..(p + 1) * n]
-        } else if bctx.rcd_active && token == config.mask_token {
-            &bctx.rcd_residual_embeddings[p * n..(p + 1) * n]
-        } else {
-            &weights.wte[token * n..(token + 1) * n]
-        };
-        #[cfg(all(feature = "rcd_residual", not(feature = "d2f_3sr_warm_start")))]
-        let emb = if bctx.rcd_active && token == config.mask_token {
-            &bctx.rcd_residual_embeddings[p * n..(p + 1) * n]
-        } else {
-            &weights.wte[token * n..(token + 1) * n]
-        };
-        #[cfg(not(feature = "rcd_residual"))]
-        let emb = &weights.wte[token * n..(token + 1) * n];
-        crate::simd::simd_add_into(&mut bctx.x, emb, &weights.wpe[p * n..(p + 1) * n]);
-        rmsnorm(&mut bctx.x);
-        bctx.xr_all[p * n..(p + 1) * n].copy_from_slice(&bctx.x);
-        rmsnorm(&mut bctx.x);
-        bctx.x_norm2_all[p * n..(p + 1) * n].copy_from_slice(&bctx.x);
-
-        let layer = &weights.layers[0];
-        // matmul overwrites all `kvd` rows of bctx.k / bctx.v, so no pre-zero needed.
-        matmul(&mut bctx.k, &layer.attn_wk, &bctx.x, kvd, n);
-        matmul(&mut bctx.v, &layer.attn_wv, &bctx.x, kvd, n);
-        bctx.k_cache[p * kvd..(p + 1) * kvd].copy_from_slice(&bctx.k);
-        bctx.v_cache[p * kvd..(p + 1) * kvd].copy_from_slice(&bctx.v);
-    }
-
-    // Phase B: Bidirectional attention for all positions
-    let vocab = config.vocab_size;
-    let n_heads = config.n_head;
-    let logits_len = seq_len * vocab;
-    let attn_len = seq_len * n_heads * seq_len;
-    // (all_logits[..logits_len] and all_attn_weights[..attn_len] are fully
-    // overwritten inside the loop, so no pre-zero is needed.)
-    let layer = &weights.layers[0];
-
-    for p in 0..seq_len {
-        bctx.x
-            .copy_from_slice(&bctx.x_norm2_all[p * n..(p + 1) * n]);
-
-        // matmul overwrites all `n` rows of bctx.q, so no pre-zero needed.
-        matmul(&mut bctx.q, &layer.attn_wq, &bctx.x, n, n);
-
-        attention_forward_safe_into(
-            &bctx.q,
-            &bctx.k_cache,
-            &bctx.v_cache,
-            config.n_head,
-            config.n_kv_head,
-            hd,
-            kvd,
-            seq_len,
-            scale,
-            &mut bctx.attn_out_buf,
-            &mut bctx.attn_weights_buf,
-            &mut bctx.scores_buf,
-        );
-
-        // `matmul` overwrites all n rows of x_proj (output[r] = dot(...)), so no
-        // pre-zero is needed — matches the sibling q/k/v/hidden/x_mlp buffers.
-        matmul(&mut bctx.x_proj, &layer.attn_wo, &bctx.attn_out_buf, n, n);
-        crate::simd::simd_add_inplace(&mut bctx.x_proj, &bctx.xr_all[p * n..(p + 1) * n]);
-
-        // MLP
-        bctx.xr2.copy_from_slice(&bctx.x_proj);
-        rmsnorm(&mut bctx.x_proj);
-        // matmul_relu overwrites all `mlp_hidden` rows of bctx.hidden.
-        matmul_relu(
-            &mut bctx.hidden,
-            &layer.mlp_w1,
-            &bctx.x_proj,
-            config.mlp_hidden,
-            n,
-        );
-        // matmul overwrites all `n` rows of bctx.x_mlp.
-        matmul(
-            &mut bctx.x_mlp,
-            &layer.mlp_w2,
-            &bctx.hidden,
-            n,
-            config.mlp_hidden,
-        );
-        crate::simd::simd_add_inplace(&mut bctx.x_mlp, &bctx.xr2);
-
-        // matmul overwrites all `vocab_size` rows of bctx.logits.
-        matmul(
-            &mut bctx.logits,
-            &weights.lm_head,
-            &bctx.x_mlp,
-            config.vocab_size,
-            n,
-        );
-        bctx.all_logits[p * vocab..(p + 1) * vocab].copy_from_slice(&bctx.logits);
-        bctx.all_attn_weights[p * n_heads * seq_len..(p + 1) * n_heads * seq_len]
-            .copy_from_slice(&bctx.attn_weights_buf[..n_heads * seq_len]);
-    }
-
-    (logits_len, attn_len)
-}
+//
+// Plan 402 (2026-07-06): `BidirectionalContext`, `forward_bidirectional_positions`,
+// `forward_bidirectional_positions_into`, `attention_forward_safe` (allocating
+// wrapper), and `forward_block_causal_positions` moved to
+// `katgpt_forward::forward_positions`. This block re-exports them so every
+// historical `crate::dllm::*` import path (notably the `denoise_loop*` family,
+// `evaluate_accuracy` training code, and `forward_save`) continues to resolve.
+//
+// The struct's fields are `pub` in katgpt-forward because root's
+// `denoise_loop_rcd` / `denoise_loop_rcd_3sr` write directly to the
+// cfg-gated `rcd_residual_embeddings` / `tsr_warm_start_embeddings` buffers
+// (and the `rcd_active` / `tsr_active` flags) after each commitment phase.
+// This mirrors the standard "move type, re-export, leave consumers in root"
+// pattern (same as `forward_set_causal_positions` in Plan 401).
+#[cfg(feature = "dllm")]
+pub use katgpt_forward::forward_positions::{
+    BidirectionalContext, attention_forward_safe, forward_bidirectional_positions,
+    forward_bidirectional_positions_into,
+};
+// `forward_block_causal_positions` is re-exported separately near its original
+// location (below, after the training code) for source-history continuity.
 
 /// Safe bidirectional attention for one query position.
 /// Returns (attn_output[n_embd], attn_weights[n_head * seq_len]).
-#[inline]
-fn attention_forward_safe_into(
-    q: &[f32],
-    k_all: &[f32],
-    v_all: &[f32],
-    n_head: usize,
-    n_kv_head: usize,
-    head_dim: usize,
-    kv_dim: usize,
-    seq_len: usize,
-    scale: f32,
-    attn_out: &mut [f32],
-    all_weights: &mut [f32],
-    scores: &mut [f32],
-) {
-    debug_assert!(attn_out.len() >= n_head * head_dim);
-    debug_assert!(all_weights.len() >= n_head * seq_len);
-    debug_assert!(scores.len() >= seq_len);
+///
+/// Plan 398 (2026-07-05): the zero-alloc `_into` variant moved to
+/// `katgpt_forward::d2f_context::attention_forward_safe_into` and is
+/// re-exported here. Single source of truth across the root callers that
+/// remain (`forward_save`, `forward_save_set_causal`).
+/// Plan 402 (2026-07-06): the allocating wrapper + the bidirectional/block-causal
+/// position forwards also moved to katgpt-forward; this `_into` re-export stays
+/// because `forward_save` (training activations, root-resident) still calls it.
+pub(crate) use katgpt_forward::attention_forward_safe_into;
 
-    attn_out[..n_head * head_dim].fill(0.0);
-
-    for h in 0..n_head {
-        let kv_group = h * n_kv_head / n_head;
-        let q_off = h * head_dim;
-        let kv_off = kv_group * head_dim;
-
-        // Compute scores (reuse buffer across heads)
-        let mut max_score = f32::NEG_INFINITY;
-        for t in 0..seq_len {
-            let dot = crate::simd::simd_dot_f32(
-                &q[q_off..q_off + head_dim],
-                &k_all[t * kv_dim + kv_off..t * kv_dim + kv_off + head_dim],
-                head_dim,
-            );
-            scores[t] = dot * scale;
-            if scores[t] > max_score {
-                max_score = scores[t];
-            }
-        }
-
-        // Softmax (SIMD batch exp + sum)
-        crate::simd::simd_add_scalar_inplace(&mut scores[..seq_len], -max_score);
-        crate::simd::simd_exp_inplace(&mut scores[..seq_len]);
-        let sum_exp = crate::simd::simd_sum_f32(&scores[..seq_len]);
-        let inv_sum = 1.0 / sum_exp;
-        crate::simd::simd_scale_inplace(&mut scores[..seq_len], inv_sum);
-        all_weights[h * seq_len..h * seq_len + seq_len].copy_from_slice(&scores[..seq_len]);
-
-        // Weighted value sum: accumulate per-position scaled value rows (SIMD-friendly)
-        // Loop order: t outer → contiguous v_all row access, better cache locality.
-        // Previous d-outer/t-inner order touched a different cache line per t for each d.
-        for t in 0..seq_len {
-            let s = scores[t];
-            let v_row = &v_all[t * kv_dim + kv_off..t * kv_dim + kv_off + head_dim];
-            crate::simd::simd_fused_scale_acc(
-                &mut attn_out[q_off..q_off + head_dim],
-                v_row,
-                s,
-                head_dim,
-            );
-        }
-    }
-}
-
-/// Allocating wrapper — prefer `attention_forward_safe_into` in hot loops.
-#[allow(dead_code)]
-fn attention_forward_safe(
-    q: &[f32],
-    k_all: &[f32],
-    v_all: &[f32],
-    n_head: usize,
-    n_kv_head: usize,
-    head_dim: usize,
-    kv_dim: usize,
-    seq_len: usize,
-    scale: f32,
-) -> (Vec<f32>, Vec<f32>) {
-    let n_embd = n_head * head_dim;
-    let mut attn_out = vec![0.0f32; n_embd];
-    let mut all_weights = vec![0.0f32; n_head * seq_len];
-    let mut scores = vec![0.0f32; seq_len];
-    attention_forward_safe_into(
-        q,
-        k_all,
-        v_all,
-        n_head,
-        n_kv_head,
-        head_dim,
-        kv_dim,
-        seq_len,
-        scale,
-        &mut attn_out,
-        &mut all_weights,
-        &mut scores,
-    );
-    (attn_out, all_weights)
-}
+// (End of forward-positions cluster re-export block — see Plan 402.)
 
 // ═══════════════════════════════════════════════════════════════
 // Task 0.3: Training Infrastructure
@@ -838,7 +538,7 @@ fn forward_save<'a>(
 
     // Phase A: Embeddings + K/V
     for (p, &token) in tokens.iter().enumerate().take(seq_len) {
-        crate::simd::simd_add_into(
+        katgpt_core::simd::simd_add_into(
             &mut ctx.embeddings[p * n..(p + 1) * n],
             &weights.wte[token * n..(token + 1) * n],
             &weights.wpe[p * n..(p + 1) * n],
@@ -900,7 +600,10 @@ fn forward_save<'a>(
             n,
         );
         // Add residual: x_proj += after_norm1
-        crate::simd::simd_add_inplace(&mut ctx.x_proj_buf, &ctx.after_norm1[p * n..(p + 1) * n]);
+        katgpt_core::simd::simd_add_inplace(
+            &mut ctx.x_proj_buf,
+            &ctx.after_norm1[p * n..(p + 1) * n],
+        );
         // after_attn_res = x_proj (the residual output)
         ctx.after_attn_res[p * n..(p + 1) * n].copy_from_slice(&ctx.x_proj_buf[..n]);
 
@@ -926,7 +629,218 @@ fn forward_save<'a>(
             config.mlp_hidden,
         );
         // Add xr2 residual (stored in x_buf)
-        crate::simd::simd_add_inplace(&mut ctx.x_mlp_buf, &ctx.x_buf[..n]);
+        katgpt_core::simd::simd_add_inplace(&mut ctx.x_mlp_buf, &ctx.x_buf[..n]);
+        ctx.hidden_final[p * n..(p + 1) * n].copy_from_slice(&ctx.x_mlp_buf);
+        matmul(
+            &mut ctx.logits_all[p * config.vocab_size..],
+            &weights.lm_head,
+            &ctx.x_mlp_buf,
+            config.vocab_size,
+            n,
+        );
+    }
+
+    ForwardActivations {
+        embeddings: &ctx.embeddings[..seq_len * n],
+        after_norm1: &ctx.after_norm1[..seq_len * n],
+        after_norm2: &ctx.after_norm2[..seq_len * n],
+        q: &ctx.q_all[..seq_len * n],
+        k: &ctx.k_all[..seq_len * kvd],
+        v: &ctx.v_all[..seq_len * kvd],
+        attn_weights: &ctx.attn_weights_all[..seq_len * config.n_head * seq_len],
+        attn_out: &ctx.attn_out_all[..seq_len * n],
+        after_attn_res: &ctx.after_attn_res[..seq_len * n],
+        after_mlp_norm: &ctx.after_mlp_norm[..seq_len * n],
+        mlp_hidden: &ctx.mlp_hidden_all[..seq_len * config.mlp_hidden],
+        hidden_final: &ctx.hidden_final[..seq_len * n],
+        logits: &ctx.logits_all[..seq_len * config.vocab_size],
+        seq_len,
+    }
+}
+
+/// Set-causal forward pass with activation saving (for SW-SetDLM training).
+///
+/// Identical to [`forward_save`] except Phase B applies a set-causal attention
+/// mask: position `q` attends only to positions `t` where
+/// `gen_steps[t] <= gen_steps[q]`. Ineligible positions get zero attention
+/// weight (never enter the softmax denominator). This is the training-time
+/// companion of [`forward_set_causal_positions`] — it produces the same
+/// logits/attention pattern but saves all intermediate activations into
+/// `ctx` so that [`backward`] can compute gradients.
+///
+/// # The backward compatibility invariant
+///
+/// [`backward`] computes the softmax Jacobian-vector product via
+/// [`softmax_backward_into`], whose formula is `d_scores[i] = w[i] * (dy[i] - dot(w, dy))`.
+/// When `w[i] == 0.0` (ineligible position), `d_scores[i]` is identically zero,
+/// so no gradient flows through masked attention paths. This means the
+/// existing [`backward`] works correctly for set-causal WITHOUT modification —
+/// the mask is encoded in the attention weights, not in the backward logic.
+///
+/// # Arguments
+/// - `gen_steps`: generation step per position, length `seq_len`. Position `q`
+///   attends to `t` iff `gen_steps[t] <= gen_steps[q]`. Use
+///   [`crate::speculative::set_diffusion::order_to_gen_steps`] to convert a
+///   sampled ordering to this buffer.
+#[cfg(feature = "set_diffusion")]
+fn forward_save_set_causal<'a>(
+    weights: &TransformerWeights,
+    tokens: &[usize],
+    config: &Config,
+    gen_steps: &[u32],
+    ctx: &'a mut ForwardSaveContext,
+) -> ForwardActivations<'a> {
+    let n = config.n_embd;
+    let hd = config.head_dim;
+    let kvd = kv_dim(config);
+    let seq_len = tokens.len().min(config.block_size);
+    let scale = 1.0 / (hd as f32).sqrt();
+    let layer = &weights.layers[0];
+
+    debug_assert_eq!(gen_steps.len(), seq_len, "gen_steps length mismatch");
+
+    ctx.reset(seq_len);
+
+    // Phase A: Embeddings + K/V (identical to forward_save — mask-independent).
+    for (p, &token) in tokens.iter().enumerate().take(seq_len) {
+        katgpt_core::simd::simd_add_into(
+            &mut ctx.embeddings[p * n..(p + 1) * n],
+            &weights.wte[token * n..(token + 1) * n],
+            &weights.wpe[p * n..(p + 1) * n],
+        );
+        ctx.x_buf[..n].copy_from_slice(&ctx.embeddings[p * n..(p + 1) * n]);
+        rmsnorm(&mut ctx.x_buf);
+        ctx.after_norm1[p * n..(p + 1) * n].copy_from_slice(&ctx.x_buf[..n]);
+        rmsnorm(&mut ctx.x_buf);
+        ctx.after_norm2[p * n..(p + 1) * n].copy_from_slice(&ctx.x_buf[..n]);
+
+        matmul(&mut ctx.q_all[p * n..], &layer.attn_wq, &ctx.x_buf, n, n);
+        matmul(
+            &mut ctx.k_all[p * kvd..],
+            &layer.attn_wk,
+            &ctx.x_buf,
+            kvd,
+            n,
+        );
+        matmul(
+            &mut ctx.v_all[p * kvd..],
+            &layer.attn_wv,
+            &ctx.x_buf,
+            kvd,
+            n,
+        );
+    }
+
+    // Phase B: Set-causal attention with masked softmax.
+    //
+    // Mirrors `forward_set_causal_positions` Phase B: for each query q, compute
+    // scores only for eligible positions (gen_steps[t] <= gen_steps[q]), apply
+    // masked softmax (zero for ineligible), and accumulate the weighted value
+    // sum. Saves into ctx.attn_out_all and ctx.attn_weights_all so backward()
+    // sees the same layout as the bidirectional case (with zeros on masked
+    // positions, which the softmax Jacobian handles correctly).
+    for q in 0..seq_len {
+        let q_gen_step = gen_steps[q];
+        ctx.attn_scratch_out[..n].fill(0.0);
+
+        for h in 0..config.n_head {
+            let kv_group = h * config.n_kv_head / config.n_head;
+            let q_off = h * hd;
+            let kv_off = kv_group * hd;
+
+            // Pass 1: scores for eligible positions only, track max for stability.
+            let mut max_score = f32::NEG_INFINITY;
+            for t in 0..seq_len {
+                if gen_steps[t] <= q_gen_step {
+                    let dot = katgpt_core::simd::simd_dot_f32(
+                        &ctx.q_all[q * n + q_off..q * n + q_off + hd],
+                        &ctx.k_all[t * kvd + kv_off..t * kvd + kv_off + hd],
+                        hd,
+                    );
+                    ctx.attn_scratch_scores[t] = dot * scale;
+                    if ctx.attn_scratch_scores[t] > max_score {
+                        max_score = ctx.attn_scratch_scores[t];
+                    }
+                } else {
+                    ctx.attn_scratch_scores[t] = 0.0;
+                }
+            }
+
+            // Pass 2: exp(score - max) for eligible positions, 0 for ineligible.
+            let mut sum_exp = 0.0f32;
+            for t in 0..seq_len {
+                if gen_steps[t] <= q_gen_step {
+                    let e = (ctx.attn_scratch_scores[t] - max_score).exp();
+                    ctx.attn_scratch_scores[t] = e;
+                    sum_exp += e;
+                } else {
+                    ctx.attn_scratch_scores[t] = 0.0;
+                }
+            }
+
+            // Normalize over eligible positions only.
+            let inv_sum = 1.0 / sum_exp;
+            for t in 0..seq_len {
+                if gen_steps[t] <= q_gen_step {
+                    ctx.attn_scratch_scores[t] *= inv_sum;
+                }
+            }
+
+            // Persist attention weights (ineligible positions stay 0.0).
+            ctx.attn_weights_all[q * config.n_head * seq_len + h * seq_len
+                ..q * config.n_head * seq_len + (h + 1) * seq_len]
+                .copy_from_slice(&ctx.attn_scratch_scores[..seq_len]);
+
+            // Weighted value sum over eligible positions only.
+            for t in 0..seq_len {
+                let s = ctx.attn_scratch_scores[t];
+                if s > 0.0 {
+                    katgpt_core::simd::simd_fused_scale_acc(
+                        &mut ctx.attn_scratch_out[q_off..q_off + hd],
+                        &ctx.v_all[t * kvd + kv_off..t * kvd + kv_off + hd],
+                        s,
+                        hd,
+                    );
+                }
+            }
+        }
+
+        ctx.attn_out_all[q * n..(q + 1) * n].copy_from_slice(&ctx.attn_scratch_out[..n]);
+    }
+
+    // Phase C: Output projection + residual + MLP + logits (identical to forward_save).
+    for p in 0..seq_len {
+        matmul(
+            &mut ctx.x_proj_buf,
+            &layer.attn_wo,
+            &ctx.attn_out_all[p * n..(p + 1) * n],
+            n,
+            n,
+        );
+        katgpt_core::simd::simd_add_inplace(
+            &mut ctx.x_proj_buf,
+            &ctx.after_norm1[p * n..(p + 1) * n],
+        );
+        ctx.after_attn_res[p * n..(p + 1) * n].copy_from_slice(&ctx.x_proj_buf[..n]);
+
+        ctx.x_buf[..n].copy_from_slice(&ctx.x_proj_buf[..n]);
+        rmsnorm(&mut ctx.x_proj_buf);
+        ctx.after_mlp_norm[p * n..(p + 1) * n].copy_from_slice(&ctx.x_proj_buf);
+        matmul_relu(
+            &mut ctx.mlp_hidden_all[p * config.mlp_hidden..],
+            &layer.mlp_w1,
+            &ctx.x_proj_buf,
+            config.mlp_hidden,
+            n,
+        );
+        matmul(
+            &mut ctx.x_mlp_buf,
+            &layer.mlp_w2,
+            &ctx.mlp_hidden_all[p * config.mlp_hidden..],
+            n,
+            config.mlp_hidden,
+        );
+        katgpt_core::simd::simd_add_inplace(&mut ctx.x_mlp_buf[..n], &ctx.x_buf[..n]);
         ctx.hidden_final[p * n..(p + 1) * n].copy_from_slice(&ctx.x_mlp_buf);
         matmul(
             &mut ctx.logits_all[p * config.vocab_size..],
@@ -974,9 +888,9 @@ fn rmsnorm_backward(x_input: &[f32], y_output: &[f32], dy: &[f32]) -> Vec<f32> {
 fn rmsnorm_backward_into(x_input: &[f32], y_output: &[f32], dy: &[f32], out: &mut [f32]) {
     let n = x_input.len();
     debug_assert!(out.len() >= n);
-    let sum_sq = crate::simd::simd_sum_sq(x_input, n);
+    let sum_sq = katgpt_core::simd::simd_sum_sq(x_input, n);
     let rms = (sum_sq / n as f32 + 1e-5).sqrt();
-    let dot_dy_y = crate::simd::simd_dot_f32(dy, y_output, n);
+    let dot_dy_y = katgpt_core::simd::simd_dot_f32(dy, y_output, n);
     let mean_dy_y = dot_dy_y / n as f32;
     let inv_rms = 1.0 / rms;
     for i in 0..n {
@@ -1001,7 +915,7 @@ fn softmax_backward(weights: &[f32], dy: &[f32]) -> Vec<f32> {
 fn softmax_backward_into(weights: &[f32], dy: &[f32], out: &mut [f32]) {
     let n = weights.len();
     debug_assert!(out.len() >= n);
-    let dot = crate::simd::simd_dot_f32(weights, dy, n);
+    let dot = katgpt_core::simd::simd_dot_f32(weights, dy, n);
     for i in 0..n {
         out[i] = weights[i] * (dy[i] - dot);
     }
@@ -1059,19 +973,19 @@ fn backward(
         // Cross-entropy backward: d_logit[i] = softmax(logit)[i] - (1 if i==target else 0)
         let logits_p = &act.logits[p * vocab..(p + 1) * vocab];
         let target = tokens[p];
-        let max_l = crate::simd::simd_max_f32(logits_p);
+        let max_l = katgpt_core::simd::simd_max_f32(logits_p);
         // Compute exp(logits - max) once into d_logits using SIMD, then reuse for sum and gradient
         bctx.d_logits[..vocab].copy_from_slice(logits_p);
-        crate::simd::simd_add_scalar_inplace(&mut bctx.d_logits[..vocab], -max_l);
-        crate::simd::simd_exp_inplace(&mut bctx.d_logits[..vocab]);
-        let sum_exp = crate::simd::simd_sum_f32(&bctx.d_logits[..vocab]);
+        katgpt_core::simd::simd_add_scalar_inplace(&mut bctx.d_logits[..vocab], -max_l);
+        katgpt_core::simd::simd_exp_inplace(&mut bctx.d_logits[..vocab]);
+        let sum_exp = katgpt_core::simd::simd_sum_f32(&bctx.d_logits[..vocab]);
         let inv_sum = 1.0 / sum_exp;
-        crate::simd::simd_scale_inplace(&mut bctx.d_logits[..vocab], inv_sum);
+        katgpt_core::simd::simd_scale_inplace(&mut bctx.d_logits[..vocab], inv_sum);
         bctx.d_logits[target] -= 1.0;
 
         // LM Head: d_lm_head += outer(d_logits, hidden_final)
         let hf = &act.hidden_final[p * n..(p + 1) * n];
-        crate::simd::simd_outer_product_acc(
+        katgpt_core::simd::simd_outer_product_acc(
             &mut grads.lm_head,
             &bctx.d_logits[..vocab],
             hf,
@@ -1083,7 +997,7 @@ fn backward(
         bctx.d_hf[..n].fill(0.0);
         for i in 0..vocab {
             let grad = bctx.d_logits[i];
-            crate::simd::simd_fused_scale_acc(
+            katgpt_core::simd::simd_fused_scale_acc(
                 &mut bctx.d_hf[..n],
                 &weights.lm_head[i * n..(i + 1) * n],
                 grad,
@@ -1097,12 +1011,12 @@ fn backward(
 
         // MLP w2: d_w2 += outer(d_after_mlp, mlp_hidden)
         let mh = &act.mlp_hidden[p * mlp_h..(p + 1) * mlp_h];
-        crate::simd::simd_outer_product_acc(&mut grads.mlp_w2, &bctx.d_hf[..n], mh, n, mlp_h);
+        katgpt_core::simd::simd_outer_product_acc(&mut grads.mlp_w2, &bctx.d_hf[..n], mh, n, mlp_h);
         // d_mlp_hidden = w2^T @ d_after_mlp, then ReLU backward
         bctx.d_mh[..mlp_h].fill(0.0);
         for i in 0..n {
             let grad = bctx.d_hf[i];
-            crate::simd::simd_fused_scale_acc(
+            katgpt_core::simd::simd_fused_scale_acc(
                 &mut bctx.d_mh[..mlp_h],
                 &layer.mlp_w2[i * mlp_h..(i + 1) * mlp_h],
                 grad,
@@ -1116,12 +1030,18 @@ fn backward(
 
         // MLP w1: d_w1 += outer(d_mh, after_mlp_norm)
         let amn = &act.after_mlp_norm[p * n..(p + 1) * n];
-        crate::simd::simd_outer_product_acc(&mut grads.mlp_w1, &bctx.d_mh[..mlp_h], amn, mlp_h, n);
+        katgpt_core::simd::simd_outer_product_acc(
+            &mut grads.mlp_w1,
+            &bctx.d_mh[..mlp_h],
+            amn,
+            mlp_h,
+            n,
+        );
         // d_after_mlp_norm = w1^T @ d_mh
         bctx.d_amn[..n].fill(0.0);
         for i in 0..mlp_h {
             let grad = bctx.d_mh[i];
-            crate::simd::simd_fused_scale_acc(
+            katgpt_core::simd::simd_fused_scale_acc(
                 &mut bctx.d_amn[..n],
                 &layer.mlp_w1[i * n..(i + 1) * n],
                 grad,
@@ -1132,18 +1052,18 @@ fn backward(
         // RMSNorm backward (after_attn_res → after_mlp_norm)
         let aar = &act.after_attn_res[p * n..(p + 1) * n];
         rmsnorm_backward_into(aar, amn, &bctx.d_amn, &mut bctx.d_rmsnorm_buf);
-        crate::simd::simd_add_inplace(&mut bctx.d_an1[..n], &bctx.d_rmsnorm_buf[..n]); // d_after_attn_res = d_hf + d_aar_from_mlp
+        katgpt_core::simd::simd_add_inplace(&mut bctx.d_an1[..n], &bctx.d_rmsnorm_buf[..n]); // d_after_attn_res = d_hf + d_aar_from_mlp
 
         // Save d_after_attn_res for Phase 3
         bctx.d_after_attn_res_saved[p * n..(p + 1) * n].copy_from_slice(&bctx.d_an1[..n]);
 
         // Attention output projection: d_wo += outer(d_after_attn_res, attn_out)
         let ao = &act.attn_out[p * n..(p + 1) * n];
-        crate::simd::simd_outer_product_acc(&mut grads.attn_wo, &bctx.d_an1[..n], ao, n, n);
+        katgpt_core::simd::simd_outer_product_acc(&mut grads.attn_wo, &bctx.d_an1[..n], ao, n, n);
         // d_attn_out = wo^T @ d_after_attn_res
         for i in 0..n {
             let grad = bctx.d_an1[i];
-            crate::simd::simd_fused_scale_acc(
+            katgpt_core::simd::simd_fused_scale_acc(
                 &mut bctx.d_attn_out[p * n..(p + 1) * n],
                 &layer.attn_wo[i * n..(i + 1) * n],
                 grad,
@@ -1168,7 +1088,7 @@ fn backward(
             // d_raw_weights[t] = dot(d_attn_out[h], v[t,h])
             // No fill needed: d_raw[t] is assigned (not accumulated) below.
             for t in 0..seq_len {
-                bctx.d_raw[t] = crate::simd::simd_dot_f32(
+                bctx.d_raw[t] = katgpt_core::simd::simd_dot_f32(
                     &d_ao[q_off..q_off + hd],
                     &act.v[t * kvd + kv_off..t * kvd + kv_off + hd],
                     hd,
@@ -1186,7 +1106,7 @@ fn backward(
 
             // d_v[t] += weights[t] * d_attn_out[h]
             for t in 0..seq_len {
-                crate::simd::simd_fused_scale_acc(
+                katgpt_core::simd::simd_fused_scale_acc(
                     &mut bctx.d_v[t * kvd + kv_off..t * kvd + kv_off + hd],
                     &d_ao[q_off..q_off + hd],
                     w_h[t],
@@ -1196,7 +1116,7 @@ fn backward(
 
             // d_q[h] += d_scores[t] * k[t,h] * scale
             for t in 0..seq_len {
-                crate::simd::simd_fused_scale_acc(
+                katgpt_core::simd::simd_fused_scale_acc(
                     &mut bctx.d_q[p * n + q_off..p * n + q_off + hd],
                     &act.k[t * kvd + kv_off..t * kvd + kv_off + hd],
                     d_scores[t] * scale,
@@ -1206,7 +1126,7 @@ fn backward(
 
             // d_k[t,h] += d_scores[t] * q[p,h] * scale
             for t in 0..seq_len {
-                crate::simd::simd_fused_scale_acc(
+                katgpt_core::simd::simd_fused_scale_acc(
                     &mut bctx.d_k[t * kvd + kv_off..t * kvd + kv_off + hd],
                     &act.q[p * n + q_off..p * n + q_off + hd],
                     d_scores[t] * scale,
@@ -1228,21 +1148,21 @@ fn backward(
         for p in 0..seq_len {
             // d_wq, d_wk, d_wv
             let an2 = &act.after_norm2[p * n..(p + 1) * n];
-            crate::simd::simd_outer_product_acc(
+            katgpt_core::simd::simd_outer_product_acc(
                 &mut grads.attn_wq,
                 &bctx.d_q[p * n..p * n + n],
                 an2,
                 n,
                 n,
             );
-            crate::simd::simd_outer_product_acc(
+            katgpt_core::simd::simd_outer_product_acc(
                 &mut grads.attn_wk,
                 &bctx.d_k[p * kvd..p * kvd + kvd],
                 an2,
                 kvd,
                 n,
             );
-            crate::simd::simd_outer_product_acc(
+            katgpt_core::simd::simd_outer_product_acc(
                 &mut grads.attn_wv,
                 &bctx.d_v[p * kvd..p * kvd + kvd],
                 an2,
@@ -1254,7 +1174,7 @@ fn backward(
             bctx.d_an2[..n].fill(0.0);
             for i in 0..n {
                 let grad = bctx.d_q[p * n + i];
-                crate::simd::simd_fused_scale_acc(
+                katgpt_core::simd::simd_fused_scale_acc(
                     &mut bctx.d_an2[..n],
                     &layer.attn_wq[i * n..(i + 1) * n],
                     grad,
@@ -1264,13 +1184,13 @@ fn backward(
             for i in 0..kvd {
                 let gk = bctx.d_k[p * kvd + i];
                 let gv = bctx.d_v[p * kvd + i];
-                crate::simd::simd_fused_scale_acc(
+                katgpt_core::simd::simd_fused_scale_acc(
                     &mut bctx.d_an2[..n],
                     &layer.attn_wk[i * n..(i + 1) * n],
                     gk,
                     n,
                 );
-                crate::simd::simd_fused_scale_acc(
+                katgpt_core::simd::simd_fused_scale_acc(
                     &mut bctx.d_an2[..n],
                     &layer.attn_wv[i * n..(i + 1) * n],
                     gv,
@@ -1293,11 +1213,11 @@ fn backward(
         let an1 = &act.after_norm1[p * n..(p + 1) * n];
         let an2 = &act.after_norm2[p * n..(p + 1) * n];
         rmsnorm_backward_into(an1, an2, an2_grad, &mut bctx.d_rmsnorm_buf);
-        crate::simd::simd_add_inplace(&mut bctx.d_an1[..n], &bctx.d_rmsnorm_buf[..n]);
+        katgpt_core::simd::simd_add_inplace(&mut bctx.d_an1[..n], &bctx.d_rmsnorm_buf[..n]);
 
         // From residual: after_attn_res = wo @ attn_out + after_norm1
         // d_after_norm1 += d_after_attn_res (saved from Phase 1)
-        crate::simd::simd_add_inplace(
+        katgpt_core::simd::simd_add_inplace(
             &mut bctx.d_an1[..n],
             &bctx.d_after_attn_res_saved[p * n..p * n + n],
         );
@@ -1311,11 +1231,14 @@ fn backward(
 
         // d_wte[token] += d_emb, d_wpe[p] += d_emb
         let token = tokens[p];
-        crate::simd::simd_add_inplace(
+        katgpt_core::simd::simd_add_inplace(
             &mut grads.wte[token * n..token * n + n],
             &bctx.d_rmsnorm_buf[..n],
         );
-        crate::simd::simd_add_inplace(&mut grads.wpe[p * n..p * n + n], &bctx.d_rmsnorm_buf[..n]);
+        katgpt_core::simd::simd_add_inplace(
+            &mut grads.wpe[p * n..p * n + n],
+            &bctx.d_rmsnorm_buf[..n],
+        );
     }
 }
 
@@ -1325,15 +1248,15 @@ fn sgd_update(weights: &mut TransformerWeights, grads: &TrainingGradients, lr: f
     let layer = &mut weights.layers[0];
     // SIMD-fused: w[i] = 1.0*w[i] + (-lr)*g[i] = w[i] - lr*g[i]
     let neg_lr = -lr;
-    crate::simd::simd_fused_decay_write(&mut weights.wte, 1.0, &grads.wte, neg_lr);
-    crate::simd::simd_fused_decay_write(&mut weights.wpe, 1.0, &grads.wpe, neg_lr);
-    crate::simd::simd_fused_decay_write(&mut weights.lm_head, 1.0, &grads.lm_head, neg_lr);
-    crate::simd::simd_fused_decay_write(&mut layer.attn_wq, 1.0, &grads.attn_wq, neg_lr);
-    crate::simd::simd_fused_decay_write(&mut layer.attn_wk, 1.0, &grads.attn_wk, neg_lr);
-    crate::simd::simd_fused_decay_write(&mut layer.attn_wv, 1.0, &grads.attn_wv, neg_lr);
-    crate::simd::simd_fused_decay_write(&mut layer.attn_wo, 1.0, &grads.attn_wo, neg_lr);
-    crate::simd::simd_fused_decay_write(&mut layer.mlp_w1, 1.0, &grads.mlp_w1, neg_lr);
-    crate::simd::simd_fused_decay_write(&mut layer.mlp_w2, 1.0, &grads.mlp_w2, neg_lr);
+    katgpt_core::simd::simd_fused_decay_write(&mut weights.wte, 1.0, &grads.wte, neg_lr);
+    katgpt_core::simd::simd_fused_decay_write(&mut weights.wpe, 1.0, &grads.wpe, neg_lr);
+    katgpt_core::simd::simd_fused_decay_write(&mut weights.lm_head, 1.0, &grads.lm_head, neg_lr);
+    katgpt_core::simd::simd_fused_decay_write(&mut layer.attn_wq, 1.0, &grads.attn_wq, neg_lr);
+    katgpt_core::simd::simd_fused_decay_write(&mut layer.attn_wk, 1.0, &grads.attn_wk, neg_lr);
+    katgpt_core::simd::simd_fused_decay_write(&mut layer.attn_wv, 1.0, &grads.attn_wv, neg_lr);
+    katgpt_core::simd::simd_fused_decay_write(&mut layer.attn_wo, 1.0, &grads.attn_wo, neg_lr);
+    katgpt_core::simd::simd_fused_decay_write(&mut layer.mlp_w1, 1.0, &grads.mlp_w1, neg_lr);
+    katgpt_core::simd::simd_fused_decay_write(&mut layer.mlp_w2, 1.0, &grads.mlp_w2, neg_lr);
 }
 
 /// Compute cross-entropy loss on masked positions.
@@ -1355,11 +1278,11 @@ fn masked_loss_into(
         }
         let l = &logits[p * vocab..(p + 1) * vocab];
         // Log-softmax: log_softmax[i] = x[i] - max - ln(Σ exp(x - max))
-        let max_l = crate::simd::simd_max_f32(l);
+        let max_l = katgpt_core::simd::simd_max_f32(l);
         exp_buf[..vocab].copy_from_slice(l);
-        crate::simd::simd_add_scalar_inplace(&mut exp_buf[..vocab], -max_l);
-        crate::simd::simd_exp_inplace(&mut exp_buf[..vocab]);
-        let sum_exp = crate::simd::simd_sum_f32(&exp_buf[..vocab]);
+        katgpt_core::simd::simd_add_scalar_inplace(&mut exp_buf[..vocab], -max_l);
+        katgpt_core::simd::simd_exp_inplace(&mut exp_buf[..vocab]);
+        let sum_exp = katgpt_core::simd::simd_sum_f32(&exp_buf[..vocab]);
         let log_sum_exp = sum_exp.ln();
         total -= l[targets[p]] - max_l - log_sum_exp;
         count += 1;
@@ -1421,7 +1344,7 @@ pub fn evaluate_accuracy(
             let logits_p = &bctx.all_logits[p * vocab..(p + 1) * vocab];
             // Single-pass argmax: fuses max-finding and index-recovery into one
             // traversal (vs the old two-pass simd_max_f32 + position scan).
-            let (predicted, _) = crate::simd::simd_argmax_f32(logits_p);
+            let (predicted, _) = katgpt_core::simd::simd_argmax_f32(logits_p);
             if predicted == tokens[p] {
                 correct += 1;
             }
@@ -1454,7 +1377,15 @@ pub fn generate_pattern_dataset(
     let mut seq = Vec::with_capacity(seq_len);
     for _ in 0..n_sequences {
         let a = (rng.next() as usize) % effective_vocab;
-        let b = (rng.next() as usize) % effective_vocab;
+        let mut b = (rng.next() as usize) % effective_vocab;
+        // Reject a == b (constant sequences). Issue 049: a constant sequence
+        // [c,c,...,c] teaches the model nothing about the alternating pattern
+        // and corrupts FUNCATTN's learned basis with a degenerate direction.
+        // Bump b to the next token; preserves the rest of the PRNG stream so
+        // downstream RNG state is byte-identical to the pre-fix behavior.
+        if effective_vocab > 1 && b == a {
+            b = (b + 1) % effective_vocab;
+        }
         seq.clear();
         seq.extend((0..seq_len).map(|i| if i % 2 == 0 { a } else { b }));
         // Clone seq into output and reuse the allocation for next iteration.
@@ -1551,6 +1482,215 @@ pub fn train_mini_dllm(
     }
 
     (weights, loss_history)
+}
+
+// ═══════════════════════════════════════════════════════════════
+// Research 376 Phase 4: SW-SetDLM Training (set-causal attention)
+// ═══════════════════════════════════════════════════════════════
+//
+// Gate: the functions below reference `crate::speculative::set_diffusion`,
+// which is gated behind the `set_diffusion` feature. Without this gate,
+// `cargo build -p katgpt-rs` fails when `dllm` is enabled but `set_diffusion`
+// is not (feature unification via dev-deps + dev-dep defaults transitively
+// enables `dllm`). Minimal fix: gate each function so they only compile
+// when `set_diffusion` is explicitly requested.
+
+/// Train a mini transformer with **set-causal attention** (SW-SetDLM training).
+///
+/// This is the set-causal counterpart of [`train_mini_dllm`]. Each training
+/// step samples a generation ordering σ from the [`PositionOffsetSchedule`],
+/// converts it to generation steps, runs a set-causal forward pass via
+/// [`forward_save_set_causal`], computes the NELBO loss (mean cross-entropy
+/// over ALL positions — the all-L-conditionals estimator, Eq. 9), and runs
+/// backprop + SGD update.
+///
+/// # Why this exists (the GOAT-gate unblock)
+///
+/// The set-diffusion decoder substrate (Phase 4 T4.1–T4.3) is validated
+/// against bidirectionally-trained models, but a bidirectional model shows
+/// NO GAIN over direct bidirectional decode at the MDLM endpoint (they're the
+/// same thing). To pass the GOAT gate, the decoder needs a model that was
+/// TRAINED to exploit set-causal attention's flexibility. This function
+/// produces such a model on CPU, mirroring the `train_mini_dllm` precedent.
+///
+/// # Key difference from `train_mini_dllm`
+///
+/// | Aspect | `train_mini_dllm` | `train_mini_set_causal` |
+/// |--------|-------------------|-------------------------|
+/// | Attention | Bidirectional (all ↔ all) | Set-causal (gen-step masked) |
+/// | Input | Corrupted (mask_token substituted) | Clean tokens (no corruption) |
+/// | Targets | Masked positions only | ALL positions |
+/// | Ordering | Fixed (bidirectional) | Sampled from schedule each step |
+///
+/// In SW-SetDLM training, the model sees CLEAN tokens and predicts each token
+/// conditioned on its set-causal context (positions revealed earlier in σ).
+/// The loss is the mean cross-entropy over all L positions — this is the
+/// all-L-conditionals estimator that gives ~3× lower gradient variance than
+/// single-position estimation (paper Table 5, verified in
+/// `riir-train/tests/set_diffusion_variance_376.rs`).
+///
+/// # Arguments
+/// - `schedule`: the position-offset schedule to sample orderings from.
+///   Use [`PositionOffsetSchedule::default`] for the SW-SetDLM setting (w=0.5).
+/// - All other args mirror [`train_mini_dllm`].
+///
+/// # Returns
+/// `(weights, loss_history)` — the trained model and per-epoch mean NELBO.
+#[cfg(feature = "set_diffusion")]
+pub fn train_mini_set_causal(
+    config: &Config,
+    train_data: &[Vec<usize>],
+    test_data: &[Vec<usize>],
+    n_epochs: usize,
+    lr: f32,
+    schedule: &PositionOffsetSchedule,
+    seed: u64,
+) -> (TransformerWeights, Vec<f32>) {
+    let mut rng = Rng::new(seed);
+    let mut weights = TransformerWeights::new(config, &mut rng);
+    let mut loss_history = Vec::with_capacity(n_epochs);
+    let mut fwd_ctx = ForwardSaveContext::new(config);
+    let mut bwd_ctx = BackwardContext::new(config);
+
+    // In SW-SetDLM training, ALL positions are targets (no masking/corruption).
+    // The model sees clean tokens and predicts each given its set-causal context.
+    let mut is_masked_all: Vec<bool> = vec![true; config.block_size];
+
+    let mut indices: Vec<usize> = (0..train_data.len()).collect();
+    for epoch in 0..n_epochs {
+        let mut epoch_loss = 0.0f32;
+        let mut n_samples = 0usize;
+
+        // Shuffle training data in-place
+        for i in (1..indices.len()).rev() {
+            let j = (rng.next() as usize) % (i + 1);
+            indices.swap(i, j);
+        }
+
+        for &idx in &indices {
+            let tokens = &train_data[idx];
+            let seq_len = tokens.len().min(config.block_size);
+            is_masked_all[..seq_len].fill(true);
+
+            // Sample ordering σ from the schedule, convert to gen_steps.
+            let order = schedule.sample_order_with(seq_len, || rng.uniform());
+            let gen_steps = crate::speculative::set_diffusion::order_to_gen_steps(&order);
+
+            // Set-causal forward with activation saving.
+            let act = forward_save_set_causal(&weights, tokens, config, &gen_steps, &mut fwd_ctx);
+
+            // NELBO loss: mean cross-entropy over all positions.
+            let loss = masked_loss_into(
+                act.logits,
+                tokens,
+                &is_masked_all[..seq_len],
+                config.vocab_size,
+                LossAveraging::Global,
+                &mut bwd_ctx.loss_exp_buf,
+            );
+
+            // Backward + SGD update (same as train_mini_dllm — the mask is
+            // encoded in the attention weights, so backward() works as-is).
+            backward(
+                &act,
+                &weights,
+                tokens,
+                &is_masked_all[..seq_len],
+                config,
+                &mut bwd_ctx,
+            );
+            sgd_update(&mut weights, &bwd_ctx.grads, lr);
+
+            epoch_loss += loss;
+            n_samples += 1;
+        }
+
+        let avg_loss = if n_samples > 0 {
+            epoch_loss / n_samples as f32
+        } else {
+            0.0
+        };
+        loss_history.push(avg_loss);
+
+        if epoch % 100 == 0 || epoch == n_epochs - 1 {
+            // Evaluate NELBO on test data at the training schedule.
+            let test_nelbo = evaluate_set_causal_nelbo_internal(
+                &weights,
+                test_data,
+                config,
+                schedule,
+                &mut rng,
+                &mut fwd_ctx,
+            );
+            eprintln!(
+                "Epoch {:>4}/{}: train_nelbo={:.4} test_nelbo={:.4}",
+                epoch, n_epochs, avg_loss, test_nelbo,
+            );
+        }
+    }
+
+    (weights, loss_history)
+}
+
+/// Evaluate mean NELBO of a model under set-causal attention at a given schedule.
+///
+/// Samples one ordering per test sequence (matching the training distribution)
+/// and computes the mean NELBO. Allocates its own forward context — use
+/// [`evaluate_set_causal_nelbo_internal`] in hot paths to reuse a context.
+///
+/// Used by the GOAT gate test for cross-model comparison (set-causal vs
+/// bidirectional models at various schedule endpoints).
+#[cfg(feature = "set_diffusion")]
+pub fn evaluate_set_causal_nelbo(
+    weights: &TransformerWeights,
+    data: &[Vec<usize>],
+    config: &Config,
+    schedule: &PositionOffsetSchedule,
+    rng: &mut Rng,
+) -> f32 {
+    let mut fwd_ctx = ForwardSaveContext::new(config);
+    evaluate_set_causal_nelbo_internal(weights, data, config, schedule, rng, &mut fwd_ctx)
+}
+
+/// Internal allocation-free variant — caller provides the forward context.
+#[cfg(feature = "set_diffusion")]
+fn evaluate_set_causal_nelbo_internal(
+    weights: &TransformerWeights,
+    data: &[Vec<usize>],
+    config: &Config,
+    schedule: &PositionOffsetSchedule,
+    rng: &mut Rng,
+    fwd_ctx: &mut ForwardSaveContext,
+) -> f32 {
+    let mut total = 0.0f32;
+    let mut count = 0usize;
+    let mut is_masked_all: Vec<bool> = vec![true; config.block_size];
+    let mut exp_buf: Vec<f32> = vec![0.0f32; config.vocab_size];
+    for tokens in data {
+        let seq_len = tokens.len().min(config.block_size);
+        if seq_len == 0 {
+            continue;
+        }
+        is_masked_all[..seq_len].fill(true);
+        let order = schedule.sample_order_with(seq_len, || rng.uniform());
+        let gen_steps = crate::speculative::set_diffusion::order_to_gen_steps(&order);
+        let act = forward_save_set_causal(weights, tokens, config, &gen_steps, fwd_ctx);
+        let loss = masked_loss_into(
+            act.logits,
+            tokens,
+            &is_masked_all[..seq_len],
+            config.vocab_size,
+            LossAveraging::Global,
+            &mut exp_buf,
+        );
+        total += loss;
+        count += 1;
+    }
+    if count == 0 {
+        0.0
+    } else {
+        total / count as f32
+    }
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -1675,949 +1815,100 @@ pub fn train_mini_dllm_adaptive(
 }
 
 // ═══════════════════════════════════════════════════════════════
-// Task 0.4: Block-Causal Forward
+// Block-Causal Forward — re-export from katgpt-forward (Plan 402)
 // ═══════════════════════════════════════════════════════════════
-
-/// Block-causal attention: bidirectional within block, causal across blocks.
-/// `causal_block_size` divides the sequence into blocks.
-pub fn forward_block_causal_positions(
-    weights: &TransformerWeights,
-    tokens: &[usize],
-    config: &Config,
-    causal_block_size: usize,
-) -> (Vec<Vec<f32>>, Vec<Vec<f32>>) {
-    let n = config.n_embd;
-    let hd = config.head_dim;
-    let kvd = kv_dim(config);
-    let seq_len = tokens.len().min(config.block_size);
-    let scale = 1.0 / (hd as f32).sqrt();
-    let layer = &weights.layers[0];
-
-    // Phase A: K/V for all positions
-    let mut k_cache = vec![0.0f32; seq_len * kvd];
-    let mut v_cache = vec![0.0f32; seq_len * kvd];
-    let mut x_norm2_all = vec![0.0f32; seq_len * n];
-    let mut xr_all = vec![0.0f32; seq_len * n];
-
-    // Pre-allocate scratch buffers (reused across positions)
-    let mut x_buf = vec![0.0f32; n];
-    let mut k_buf = vec![0.0f32; kvd];
-    let mut v_buf = vec![0.0f32; kvd];
-
-    for (p, &token) in tokens.iter().enumerate().take(seq_len) {
-        crate::simd::simd_add_into(
-            &mut x_buf,
-            &weights.wte[token * n..(token + 1) * n],
-            &weights.wpe[p * n..(p + 1) * n],
-        );
-        rmsnorm(&mut x_buf);
-        xr_all[p * n..(p + 1) * n].copy_from_slice(&x_buf);
-        rmsnorm(&mut x_buf);
-        x_norm2_all[p * n..(p + 1) * n].copy_from_slice(&x_buf);
-        matmul(&mut k_buf, &layer.attn_wk, &x_buf, kvd, n);
-        matmul(&mut v_buf, &layer.attn_wv, &x_buf, kvd, n);
-        k_cache[p * kvd..(p + 1) * kvd].copy_from_slice(&k_buf);
-        v_cache[p * kvd..(p + 1) * kvd].copy_from_slice(&v_buf);
-    }
-
-    // Phase B: Block-causal attention
-    // Pre-allocate output buffers upfront (avoid per-position clone)
-    let mut all_logits = vec![vec![0.0f32; config.vocab_size]; seq_len];
-    let mut all_attn_weights = vec![vec![0.0f32; config.n_head * seq_len]; seq_len];
-
-    // Pre-allocate Phase B scratch buffers (reused across positions)
-    let mut q_buf = vec![0.0f32; n];
-    let mut attn_out_buf = vec![0.0f32; n];
-    let mut attn_w_buf = vec![0.0f32; config.n_head * seq_len];
-    let mut scores_buf = vec![0.0f32; seq_len];
-    let mut x_proj = vec![0.0f32; n];
-    let mut hidden = vec![0.0f32; config.mlp_hidden];
-    let mut x_mlp = vec![0.0f32; n];
-    let mut xr2_buf = vec![0.0f32; n];
-
-    for p in 0..seq_len {
-        x_buf.copy_from_slice(&x_norm2_all[p * n..(p + 1) * n]);
-        matmul(&mut q_buf, &layer.attn_wq, &x_buf, n, n);
-
-        // Block-causal: attend to positions [0..end_of_current_block]
-        let block_end = (p / causal_block_size + 1) * causal_block_size;
-        let t_n = block_end.min(seq_len);
-
-        attention_forward_safe_into(
-            &q_buf,
-            &k_cache,
-            &v_cache,
-            config.n_head,
-            config.n_kv_head,
-            hd,
-            kvd,
-            t_n,
-            scale,
-            &mut attn_out_buf,
-            &mut attn_w_buf,
-            &mut scores_buf,
-        );
-
-        // Pad attn_w to seq_len for consistent output (zero-fill then slice-copy per head)
-        all_attn_weights[p].fill(0.0f32);
-        for h in 0..config.n_head {
-            all_attn_weights[p][h * seq_len..h * seq_len + t_n]
-                .copy_from_slice(&attn_w_buf[h * t_n..h * t_n + t_n]);
-        }
-
-        matmul(&mut x_proj, &layer.attn_wo, &attn_out_buf, n, n);
-        crate::simd::simd_add_inplace(&mut x_proj, &xr_all[p * n..(p + 1) * n]);
-
-        xr2_buf[..n].copy_from_slice(&x_proj[..n]);
-        rmsnorm(&mut x_proj);
-        matmul_relu(&mut hidden, &layer.mlp_w1, &x_proj, config.mlp_hidden, n);
-        matmul(&mut x_mlp, &layer.mlp_w2, &hidden, n, config.mlp_hidden);
-        crate::simd::simd_add_inplace(&mut x_mlp[..n], &xr2_buf[..n]);
-
-        matmul(
-            &mut all_logits[p],
-            &weights.lm_head,
-            &x_mlp,
-            config.vocab_size,
-            n,
-        );
-    }
-
-    (all_logits, all_attn_weights)
-}
+//
+// Plan 402 (2026-07-06): `forward_block_causal_positions` moved to
+// `katgpt_forward::forward_positions`. Re-exported here so every historical
+// `crate::dllm::forward_block_causal_positions` import path (notably the
+// now-moved comparison tests + D2F training code) continues to resolve.
+#[cfg(feature = "dllm")]
+pub use katgpt_forward::forward_positions::forward_block_causal_positions;
 
 // ═══════════════════════════════════════════════════════════════
-// Zero-Alloc D2F Context + Forward
+// Set-Causal Attention Forward (Research 376 Phase 0 T0.2)
 // ═══════════════════════════════════════════════════════════════
+//
+// Plan 401 (2026-07-06): The function body + 5 of 7 Research 376 T0.2 tests
+// moved to `crates/katgpt-forward/src/forward_set_causal.rs` (the function is
+// pure inference — no gradients/backprop/loss — despite the old "Root-resident
+// by design (Issue 033 §C, Option C)" comment, which was obsolete; Issue 033
+// does not exist and all cited blockers now resolve to leaf crates).
+//
+// The 2 comparison tests that additionally need `forward_block_causal_positions`
+// / `forward_bidirectional_positions` stay here (those siblings are NOT yet
+// extracted — deferred to Plan 402). They call this function via the re-export
+// below, so their source is unchanged.
+//
+// Re-export preserves every historical `crate::dllm::forward_set_causal_positions`
+// import path (notably `src/speculative/set_diffusion.rs` production + tests).
 
-/// Pre-allocated buffers for zero-alloc D2F denoising.
-///
-/// Unlike `SpeculativeContext` (single-token autoregressive), D2F processes
-/// all positions in a block simultaneously, so we use flat 2D buffers
-/// indexed by `[p * dim..(p+1) * dim]`.
-pub struct D2fContext {
-    /// Flat KV cache: `[max_seq * kv_dim]`.
-    pub k_cache: Vec<f32>,
-    pub v_cache: Vec<f32>,
-    /// Normalized embeddings per position: `[max_seq * n_embd]`.
-    pub x_norm: Vec<f32>,
-    /// Residual (pre-norm) embeddings per position: `[max_seq * n_embd]`.
-    pub xr: Vec<f32>,
-    /// Flat logits: `[max_seq * vocab_size]`.
-    pub logits_flat: Vec<f32>,
-    /// Temp buffer for per-position embedding: `[n_embd]`.
-    pub x_buf: Vec<f32>,
-    /// Temp buffer for query: `[n_embd]`.
-    pub q_buf: Vec<f32>,
-    /// Temp buffer for key: `[kv_dim]`.
-    pub k_buf: Vec<f32>,
-    /// Temp buffer for value: `[kv_dim]`.
-    pub v_buf: Vec<f32>,
-    /// Temp buffer for attention projection: `[n_embd]`.
-    pub x_proj_buf: Vec<f32>,
-    /// Temp buffer for MLP hidden: `[mlp_hidden]`.
-    pub hidden_buf: Vec<f32>,
-    /// Temp buffer for MLP output: `[n_embd]`.
-    pub x_mlp_buf: Vec<f32>,
-    /// Temp buffer for single-position logits: `[vocab_size]`.
-    pub logits_buf: Vec<f32>,
-    /// Attention output buffer: `[n_head * head_dim]` (reused per position).
-    attn_out_buf: Vec<f32>,
-    /// Attention weights buffer: `[n_head * max_seq]` (reused per position).
-    attn_weights_buf: Vec<f32>,
-    /// Attention scores buffer: `[max_seq]` (reused per position).
-    attn_scores_buf: Vec<f32>,
-    /// Cached logits from previous denoising step: `[max_seq * vocab_size]`.
-    /// Used by DPM-Solver++(2M) multistep extrapolation (Plan 078 T10.5).
-    pub prev_logits_flat: Vec<f32>,
-    /// Cached logits from two steps ago: `[max_seq * vocab_size]`.
-    /// Second cache for multistep logit extrapolation (Plan 078 T10.5).
-    pub prev_prev_logits_flat: Vec<f32>,
-    /// Residual embeddings for RCD injection: `[max_seq * n_embd]`.
-    /// Stores interpolated residual embeddings for masked positions.
-    /// Written after token commitment, read during next step's input construction.
-    #[cfg(feature = "rcd_residual")]
-    pub residual_embeddings: Vec<f32>,
-    /// Entropy weights per position: `[max_seq]`.
-    /// α_i values computed from marginal distributions.
-    #[cfg(feature = "rcd_residual")]
-    pub entropy_weights: Vec<f32>,
-    /// Softmax scratch buffer for RCD: `[vocab_size]`.
-    #[cfg(feature = "rcd_residual")]
-    pub rcd_softmax_scratch: Vec<f32>,
-    // usize fields after all Vec<f32> fields to eliminate inter-field padding.
-    /// Number of positions with committed KV cache entries.
-    /// Positions `[0..committed_len)` are valid and won't be recomputed.
-    pub committed_len: usize,
-}
+/// Re-export of the set-causal forward pass (moved to katgpt-forward).
+/// See `katgpt_forward::forward_set_causal::forward_set_causal_positions` for docs.
+#[cfg(feature = "set_diffusion")]
+pub use katgpt_forward::forward_set_causal_positions;
 
-impl D2fContext {
-    /// Create a new context with buffers sized for the given config.
-    pub fn new(config: &Config) -> Self {
-        let n = config.n_embd;
-        let kvd = kv_dim(config);
-        let max_seq = config.block_size;
-        let vocab = config.vocab_size;
-        let hidden = config.mlp_hidden;
+// ═══════════════════════════════════════════════════════════════
+// Zero-Alloc D2F Context + Forward — re-export from katgpt-forward
+// ═══════════════════════════════════════════════════════════════
+//
+// Plan 398 (2026-07-05): `D2fContext`, `forward_block_causal_with`, and
+// `denoising_accuracy` moved to `katgpt_forward::d2f_context`. This module
+// re-exports them so every historical `katgpt_rs::dllm::D2fContext` /
+// `katgpt_rs::dllm::forward_block_causal_with` /
+// `katgpt_rs::dllm::denoising_accuracy` import path continues to resolve.
+//
+// The substrate is gated `dllm` in katgpt-forward (mirrors root's gate on
+// the same name); we gate the re-export here with the same feature so the
+// items disappear together when the feature is off.
+//
+// `attention_forward_safe_into` is re-exported separately near its original
+// location (search above) because 4 stay-in-root training callers consume it.
 
-        Self {
-            k_cache: vec![0.0f32; max_seq * kvd],
-            v_cache: vec![0.0f32; max_seq * kvd],
-            x_norm: vec![0.0f32; max_seq * n],
-            xr: vec![0.0f32; max_seq * n],
-            logits_flat: vec![0.0f32; max_seq * vocab],
-            x_buf: vec![0.0f32; n],
-            q_buf: vec![0.0f32; n],
-            k_buf: vec![0.0f32; kvd],
-            v_buf: vec![0.0f32; kvd],
-            x_proj_buf: vec![0.0f32; n],
-            hidden_buf: vec![0.0f32; hidden],
-            x_mlp_buf: vec![0.0f32; n],
-            logits_buf: vec![0.0f32; vocab],
-            attn_out_buf: vec![0.0f32; n],
-            attn_weights_buf: vec![0.0f32; config.n_head * max_seq],
-            attn_scores_buf: vec![0.0f32; max_seq],
-            prev_logits_flat: vec![0.0f32; max_seq * vocab],
-            prev_prev_logits_flat: vec![0.0f32; max_seq * vocab],
-            #[cfg(feature = "rcd_residual")]
-            residual_embeddings: vec![0.0f32; max_seq * n],
-            #[cfg(feature = "rcd_residual")]
-            entropy_weights: vec![0.0f32; max_seq],
-            #[cfg(feature = "rcd_residual")]
-            rcd_softmax_scratch: vec![0.0f32; vocab],
-            committed_len: 0,
-        }
-    }
-
-    /// Reset flat buffers for a new forward pass.
-    ///
-    /// Temp buffers (`x_buf`, `q_buf`, etc.) need not be reset since they are
-    /// always fully written before being read.
-    pub fn reset(&mut self) {
-        self.k_cache.fill(0.0);
-        self.v_cache.fill(0.0);
-        self.x_norm.fill(0.0);
-        self.xr.fill(0.0);
-        self.logits_flat.fill(0.0);
-        self.committed_len = 0;
-        self.prev_logits_flat.fill(0.0);
-        self.prev_prev_logits_flat.fill(0.0);
-        #[cfg(feature = "rcd_residual")]
-        {
-            self.residual_embeddings.fill(0.0);
-            self.entropy_weights.fill(0.0);
-        }
-    }
-
-    /// Commit KV cache entries for positions `[0..len)`.
-    /// After calling this, subsequent forward passes will skip KV computation
-    /// for these positions.
-    pub fn commit(&mut self, len: usize) {
-        self.committed_len = len;
-    }
-}
-
-/// Zero-alloc variant of [`forward_block_causal_positions`].
-///
-/// Writes logits into `ctx.logits_flat[p * vocab..(p+1) * vocab]` instead of
-/// returning `Vec<Vec<f32>>`. Attention weights are not computed since D2F
-/// denoising only needs logits.
-///
-/// Returns `seq_len` (the actual number of positions processed).
-pub fn forward_block_causal_with(
-    ctx: &mut D2fContext,
-    weights: &TransformerWeights,
-    tokens: &[usize],
-    config: &Config,
-    causal_block_size: usize,
-) -> usize {
-    let n = config.n_embd;
-    let hd = config.head_dim;
-    let kvd = kv_dim(config);
-    let seq_len = tokens.len().min(config.block_size);
-    let scale = 1.0 / (hd as f32).sqrt();
-    let vocab = config.vocab_size;
-    let layer = &weights.layers[0];
-
-    let committed = ctx.committed_len;
-
-    // Only clear logits for uncommitted positions
-    for p in committed..seq_len {
-        ctx.logits_flat[p * vocab..(p + 1) * vocab].fill(0.0);
-    }
-
-    // Phase A: Fill K/V cache, x_norm, xr for UNCOMMITTED positions only
-    for (p, &token) in tokens.iter().enumerate().take(seq_len).skip(committed) {
-        // Embedding = wte[token] + wpe[position]
-        crate::simd::simd_add_into(
-            &mut ctx.x_buf,
-            &weights.wte[token * n..(token + 1) * n],
-            &weights.wpe[p * n..(p + 1) * n],
-        );
-        // First rmsnorm → residual (xr)
-        rmsnorm(&mut ctx.x_buf);
-        ctx.xr[p * n..(p + 1) * n].copy_from_slice(&ctx.x_buf);
-        // Second rmsnorm → normalized embedding (x_norm)
-        rmsnorm(&mut ctx.x_buf);
-        ctx.x_norm[p * n..(p + 1) * n].copy_from_slice(&ctx.x_buf);
-
-        // K, V projections
-        matmul(&mut ctx.k_buf, &layer.attn_wk, &ctx.x_buf, kvd, n);
-        matmul(&mut ctx.v_buf, &layer.attn_wv, &ctx.x_buf, kvd, n);
-        ctx.k_cache[p * kvd..(p + 1) * kvd].copy_from_slice(&ctx.k_buf);
-        ctx.v_cache[p * kvd..(p + 1) * kvd].copy_from_slice(&ctx.v_buf);
-    }
-
-    // Phase B: Block-causal attention + MLP + logits for UNCOMMITTED positions only
-    for p in committed..seq_len {
-        // Load normalized embedding
-        ctx.x_buf.copy_from_slice(&ctx.x_norm[p * n..(p + 1) * n]);
-
-        // Query projection
-        matmul(&mut ctx.q_buf, &layer.attn_wq, &ctx.x_buf, n, n);
-
-        // Block-causal: attend to positions [0..end_of_current_block]
-        let block_end = (p / causal_block_size + 1) * causal_block_size;
-        let t_n = block_end.min(seq_len);
-
-        // Zero-alloc attention using pre-allocated buffers in D2fContext
-        attention_forward_safe_into(
-            &ctx.q_buf,
-            &ctx.k_cache,
-            &ctx.v_cache,
-            config.n_head,
-            config.n_kv_head,
-            hd,
-            kvd,
-            t_n,
-            scale,
-            &mut ctx.attn_out_buf,
-            &mut ctx.attn_weights_buf,
-            &mut ctx.attn_scores_buf,
-        );
-
-        // Attention output projection + residual connection
-        matmul(&mut ctx.x_proj_buf, &layer.attn_wo, &ctx.attn_out_buf, n, n);
-        crate::simd::simd_add_inplace(&mut ctx.x_proj_buf, &ctx.xr[p * n..(p + 1) * n]);
-
-        // Save residual before rmsnorm by reusing x_buf (no longer needed this iteration)
-        ctx.x_buf.copy_from_slice(&ctx.x_proj_buf);
-
-        // Post-attention rmsnorm
-        rmsnorm(&mut ctx.x_proj_buf);
-
-        // MLP: relu hidden → output projection + residual
-        matmul_relu(
-            &mut ctx.hidden_buf,
-            &layer.mlp_w1,
-            &ctx.x_proj_buf,
-            config.mlp_hidden,
-            n,
-        );
-        matmul(
-            &mut ctx.x_mlp_buf,
-            &layer.mlp_w2,
-            &ctx.hidden_buf,
-            n,
-            config.mlp_hidden,
-        );
-        crate::simd::simd_add_inplace(&mut ctx.x_mlp_buf, &ctx.x_buf[..n]);
-
-        // Logits
-        matmul(
-            &mut ctx.logits_buf,
-            &weights.lm_head,
-            &ctx.x_mlp_buf,
-            vocab,
-            n,
-        );
-        ctx.logits_flat[p * vocab..(p + 1) * vocab].copy_from_slice(&ctx.logits_buf);
-    }
-
-    seq_len
-}
+#[cfg(feature = "dllm")]
+pub use katgpt_forward::d2f_context::{D2fContext, forward_block_causal_with};
 
 // ═══════════════════════════════════════════════════════════════
 // Task 0.5: Denoising Loop with Constraint
 // ═══════════════════════════════════════════════════════════════
-
-/// Simple constraint trait for denoising guidance.
-pub trait DenoiseConstraint {
-    /// Returns true if `token` is valid at `position` given `current_tokens`.
-    fn is_valid(&self, position: usize, token: usize, current_tokens: &[usize]) -> bool;
-
-    /// Rebuild any internal state from the current tokens. Default is no-op.
-    fn rebuild(&mut self, _tokens: &[usize], _mask: usize) {}
-}
-
-/// No-op constraint that allows all tokens.
-pub struct NoConstraint;
-
-impl DenoiseConstraint for NoConstraint {
-    fn is_valid(&self, _position: usize, _token: usize, _current_tokens: &[usize]) -> bool {
-        true
-    }
-}
-
-/// No-repeat constraint: tokens must be unique in the sequence.
-/// Uses a precomputed `used` set for O(1) lookups instead of O(seq_len) scans.
-pub struct NoRepeatConstraint {
-    used: Vec<bool>,
-}
-
-impl Default for NoRepeatConstraint {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl NoRepeatConstraint {
-    pub fn new() -> Self {
-        Self { used: Vec::new() }
-    }
-
-    /// Rebuild the used-token set from current tokens.
-    pub fn rebuild(&mut self, tokens: &[usize], mask: usize) {
-        let max_token = tokens
-            .iter()
-            .copied()
-            .filter(|&t| t != mask)
-            .max()
-            .unwrap_or(0);
-        self.used.clear();
-        if self.used.len() <= max_token {
-            self.used.resize(max_token + 1, false);
-        }
-        for &t in tokens {
-            if t != mask && t < self.used.len() {
-                self.used[t] = true;
-            }
-        }
-    }
-}
-
-impl DenoiseConstraint for NoRepeatConstraint {
-    fn is_valid(&self, _position: usize, token: usize, _current_tokens: &[usize]) -> bool {
-        !self.used.get(token).copied().unwrap_or(false)
-    }
-}
-
-/// Run denoising loop starting from all-mask tokens.
-/// Returns (final_tokens, n_steps_to_converge).
-pub fn denoise_loop(
-    weights: &TransformerWeights,
-    target_tokens: &[usize],
-    config: &Config,
-    n_steps: usize,
-    confidence_threshold: f32,
-    constraint: &mut dyn DenoiseConstraint,
-    _rng: &mut Rng,
-) -> (Vec<usize>, usize) {
-    let seq_len = target_tokens.len().min(config.block_size);
-    let mask = config.mask_token;
-
-    // Pre-allocate context once — reused across all denoising steps
-    let mut bctx = BidirectionalContext::new(config);
-
-    // Initialize with mask tokens
-    let mut tokens = vec![mask; seq_len];
-    let mut converged_step = n_steps;
-    let mut remaining = seq_len;
-
-    let vocab = config.vocab_size;
-
-    for step in 0..n_steps {
-        forward_bidirectional_positions_into(weights, &tokens, config, &mut bctx);
-        let mut any_changed = false;
-
-        // Rebuild constraint used-token set once per step
-        constraint.rebuild(&tokens, mask);
-
-        for p in 0..seq_len {
-            if tokens[p] != mask {
-                continue;
-            }
-
-            let logits_p = &bctx.all_logits[p * vocab..(p + 1) * vocab];
-            let max_l = crate::simd::simd_max_f32(logits_p);
-            // OPT: compute exp once, reuse for both sum and argmax
-            let exp_buf = &mut bctx.all_attn_weights[..vocab]; // reuse attn weights as scratch
-            exp_buf[..vocab].copy_from_slice(logits_p);
-            crate::simd::simd_add_scalar_inplace(&mut exp_buf[..vocab], -max_l);
-            crate::simd::simd_exp_inplace(&mut exp_buf[..vocab]);
-            let sum_exp = crate::simd::simd_sum_f32(&exp_buf[..vocab]);
-            let inv_sum = 1.0 / sum_exp;
-
-            // Find highest-confidence valid token.
-            //
-            // Hoist `inv_sum` out of the per-token comparison: since `inv_sum > 0`,
-            // comparing `exp_buf[t] * inv_sum > best_prob` is equivalent to
-            // `exp_buf[t] > best_prob * sum_exp`. We track `best_exp` (= best_prob * sum_exp)
-            // across the scan and divide once at the end. This removes one fmul
-            // from the vocab-sized inner loop.
-            let mut best_token = mask;
-            let mut best_exp = 0.0f32; // exp_buf values are >= 0
-            for t in 0..vocab {
-                if t == mask {
-                    continue;
-                }
-                if !constraint.is_valid(p, t, &tokens) {
-                    continue;
-                }
-                let e = exp_buf[t];
-                if e > best_exp {
-                    best_exp = e;
-                    best_token = t;
-                }
-            }
-            let best_prob = best_exp * inv_sum;
-
-            if best_prob >= confidence_threshold && best_token != mask {
-                tokens[p] = best_token;
-                any_changed = true;
-                remaining -= 1;
-            }
-        }
-
-        if !any_changed && remaining == 0 {
-            converged_step = step;
-            break;
-        }
-    }
-
-    // Check if all unmasked
-    if remaining == 0 && converged_step == n_steps {
-        converged_step = n_steps - 1;
-    }
-
-    (tokens, converged_step)
-}
-
-/// Run denoising loop with Residual Context Diffusion (Plan 258).
-///
-/// After each denoising step, computes entropy-weighted residuals for the
-/// positions that are *still masked* (discarded low-confidence distributions)
-/// and injects them into the next step's input embeddings via:
-///   `ẽ_i = (1 - α_i) * E_mask + α_i * Δ_i`
-/// where `α_i = H(p_i) / log(V)` and `Δ_i = Σ_j p_ij * E_j`.
-///
-/// This gives the model soft context about discarded tokens, accelerating
-/// convergence (paper reports 4-5× step reduction at equivalent accuracy).
-///
-/// When `rcd_config` is `None` or `enabled = false`, behaves identically to
-/// [`denoise_loop`] — the residual buffer is never activated.
-#[cfg(feature = "rcd_residual")]
-pub fn denoise_loop_rcd(
-    weights: &TransformerWeights,
-    target_tokens: &[usize],
-    config: &Config,
-    n_steps: usize,
-    confidence_threshold: f32,
-    constraint: &mut dyn DenoiseConstraint,
-    rng: &mut Rng,
-    rcd_config: Option<&mut crate::dllm_solver::RcdConfig>,
-) -> (Vec<usize>, usize) {
-    // If RCD is disabled at runtime, fall back to the standard loop with zero overhead.
-    let rcd_enabled = rcd_config.as_ref().is_some_and(|c| c.enabled);
-    if !rcd_enabled {
-        return denoise_loop(
-            weights,
-            target_tokens,
-            config,
-            n_steps,
-            confidence_threshold,
-            constraint,
-            rng,
-        );
-    }
-
-    use crate::dllm_solver::{compute_residual, interpolate_residual, normalized_entropy};
-
-    let seq_len = target_tokens.len().min(config.block_size);
-    let mask = config.mask_token;
-    let n = config.n_embd;
-    let vocab = config.vocab_size;
-    let log_vocab = rcd_config.as_ref().map_or(1.0, |c| c.log_vocab);
-
-    let mut bctx = BidirectionalContext::new(config);
-    let mut tokens = vec![mask; seq_len];
-    let mut converged_step = n_steps;
-    let mut remaining = seq_len;
-
-    // Reusable scratch buffers — allocated once, never reallocated in the loop.
-    let mut softmax_scratch = vec![0.0f32; vocab];
-    let mut residual_scratch = vec![0.0f32; n];
-    // E_mask: the embedding the masked positions would receive by default.
-    // Borrow directly from weights — no allocation (interpolate_residual takes &[f32]).
-    let mask_emb: &[f32] = &weights.wte[mask * n..(mask + 1) * n];
-
-    for step in 0..n_steps {
-        // The residual buffer is populated *after* step 0's forward pass, so the
-        // first forward is always standard (no residuals exist yet).
-        forward_bidirectional_positions_into(weights, &tokens, config, &mut bctx);
-
-        // Standard commitment phase — mirror of `denoise_loop`.
-        constraint.rebuild(&tokens, mask);
-        let mut any_changed = false;
-
-        for p in 0..seq_len {
-            if tokens[p] != mask {
-                continue;
-            }
-
-            let logits_p = &bctx.all_logits[p * vocab..(p + 1) * vocab];
-            let max_l = crate::simd::simd_max_f32(logits_p);
-            let exp_buf = &mut bctx.all_attn_weights[..vocab];
-            exp_buf[..vocab].copy_from_slice(logits_p);
-            crate::simd::simd_add_scalar_inplace(&mut exp_buf[..vocab], -max_l);
-            crate::simd::simd_exp_inplace(&mut exp_buf[..vocab]);
-            let sum_exp = crate::simd::simd_sum_f32(&exp_buf[..vocab]);
-            let inv_sum = 1.0 / sum_exp;
-
-            // Find highest-confidence valid token (see denoise_loop for inv_sum hoist rationale).
-            let mut best_token = mask;
-            let mut best_exp = 0.0f32;
-            for t in 0..vocab {
-                if t == mask {
-                    continue;
-                }
-                if !constraint.is_valid(p, t, &tokens) {
-                    continue;
-                }
-                let e = exp_buf[t];
-                if e > best_exp {
-                    best_exp = e;
-                    best_token = t;
-                }
-            }
-            let best_prob = best_exp * inv_sum;
-
-            if best_prob >= confidence_threshold && best_token != mask {
-                tokens[p] = best_token;
-                any_changed = true;
-                remaining -= 1;
-            }
-        }
-
-        // RCD: for every position that is *still* masked after commitment,
-        // compute the entropy-weighted residual and stash it for the next step.
-        // The override is activated only when at least one residual was written,
-        // so the first step is guaranteed to use standard mask embeddings.
-        let mut wrote_residual = false;
-        for p in 0..seq_len {
-            if tokens[p] != mask {
-                continue;
-            }
-
-            // Softmax the logits for position p into scratch to get marginals p^k_i.
-            let logits_p = &bctx.all_logits[p * vocab..(p + 1) * vocab];
-            let max_l = crate::simd::simd_max_f32(logits_p);
-            softmax_scratch[..vocab].copy_from_slice(logits_p);
-            crate::simd::simd_add_scalar_inplace(&mut softmax_scratch[..vocab], -max_l);
-            crate::simd::simd_exp_inplace(&mut softmax_scratch[..vocab]);
-            let sum_exp = crate::simd::simd_sum_f32(&softmax_scratch[..vocab]);
-            if sum_exp > 0.0 {
-                let inv = 1.0 / sum_exp;
-                crate::simd::simd_scale_inplace(&mut softmax_scratch[..vocab], inv);
-            }
-
-            // α_i = H(p_i) / log(V), Δ_i = Σ_j p_ij * E_j, ẽ_i = (1-α)E_mask + α·Δ_i.
-            let alpha = normalized_entropy(&softmax_scratch[..vocab], log_vocab);
-            compute_residual(
-                &softmax_scratch[..vocab],
-                &weights.wte,
-                n,
-                &mut residual_scratch,
-            );
-            interpolate_residual(
-                mask_emb,
-                &residual_scratch,
-                alpha,
-                &mut bctx.rcd_residual_embeddings[p * n..(p + 1) * n],
-            );
-            wrote_residual = true;
-        }
-
-        // Activate the override for the *next* forward pass if we wrote anything.
-        // If all masked positions got committed, we're done — no residuals needed.
-        bctx.rcd_active = wrote_residual;
-
-        if !any_changed && remaining == 0 {
-            converged_step = step;
-            break;
-        }
-    }
-
-    // Disable the override before returning so the context is left in a clean state.
-    bctx.rcd_active = false;
-
-    if remaining == 0 && converged_step == n_steps {
-        converged_step = n_steps - 1;
-    }
-
-    (tokens, converged_step)
-}
-
-/// Run denoising loop with Residual Context Diffusion (Plan 258) **composed**
-/// with Three-State Reuse warm-start (Plan 291, Research 265).
-///
-/// This is the entry point for `d2f_3sr_warm_start`. It runs the same commitment
-/// loop as [`denoise_loop_rcd`], but after each step's RCD residual computation
-/// it additionally classifies per-position transitions between the previous and
-/// current token state and applies the CoFRe §1.2 warm-start lerp:
-///
-///     h⁰_t[i] = γ[i] · h⋆_{t+1}[i] + (1 − γ[i]) · h_pre,t[i]
-///
-/// where `h_pre,t[i]` is the RCD residual embedding (RCD's output serves as the
-/// preprocessing-stack result for 3SR) and `h⋆_{t+1}[i]` is the prior step's
-/// embedding (modelless proxy for the FP solver hidden state — full FP-state
-/// 3SR requires Plan 108 LT2's loop carry, out of scope for this plan).
-///
-/// γ is chosen per-position by transition type (UnchangedVisible / StillMasked /
-/// NewlyRevealed) and modulated by the step's visible fraction for StillMasked
-/// positions (paper Tables 4-5).
-///
-/// **Operational hook**: 3SR writes its lerped warm-start into
-/// `bctx.tsr_warm_start_embeddings`, which the embedding-lookup path prefers
-/// over `rcd_residual_embeddings` when `tsr_active` is set. RCD's residual
-/// computation is unchanged — 3SR composes on top of it.
-///
-/// **Honest scope note**: this captures the *structure* of 3SR (token-type-aware
-/// warm-start with three discrete γ coefficients) but operates on the input
-/// embedding layer (same layer as RCD), not the FP solver hidden state. The
-/// full paper version would stash the FP solver's hidden state; we don't have
-/// an FP solver exposed here, so we use the prior step's residual as a proxy.
-///
-/// When `tsr_config` is `None` or `enabled = false`, behaves identically to
-/// [`denoise_loop_rcd`] (zero overhead — falls through directly).
-#[cfg(feature = "d2f_3sr_warm_start")]
-pub fn denoise_loop_rcd_3sr(
-    weights: &TransformerWeights,
-    target_tokens: &[usize],
-    config: &Config,
-    n_steps: usize,
-    confidence_threshold: f32,
-    constraint: &mut dyn DenoiseConstraint,
-    rng: &mut Rng,
-    rcd_config: Option<&mut crate::dllm_solver::RcdConfig>,
-    tsr_config: Option<&crate::dllm_solver::ThreeStateReuseConfig>,
-) -> (Vec<usize>, usize) {
-    // Zero-overhead runtime gate: if 3SR is disabled at runtime, delegate to RCD.
-    let tsr_enabled = tsr_config.map_or(false, |c| c.enabled);
-    if !tsr_enabled {
-        return denoise_loop_rcd(
-            weights,
-            target_tokens,
-            config,
-            n_steps,
-            confidence_threshold,
-            constraint,
-            rng,
-            rcd_config,
-        );
-    }
-
-    // 3SR implies rcd_residual (via Cargo feature deps), so we can rely on
-    // rcd_config being meaningful. If RCD itself is disabled at runtime,
-    // h_pre,t degenerates to the standard mask embedding — still well-defined.
-    let rcd_enabled = rcd_config.as_ref().map_or(false, |c| c.enabled);
-    if !rcd_enabled {
-        // RCD disabled: 3SR still runs, but h_pre,t falls back to the mask
-        // embedding for every still-masked position. This is the
-        // modelless-3SR-on-bare-D2F mode (no RCD composition).
-    }
-
-    use crate::dllm_solver::{
-        ThreeStateReuseConfig, classify_transitions, compute_gammas, compute_residual,
-        interpolate_residual, normalized_entropy, warm_start_lerp,
-    };
-    let tsr_cfg: &ThreeStateReuseConfig = tsr_config.expect("checked tsr_enabled above");
-
-    let seq_len = target_tokens.len().min(config.block_size);
-    let mask = config.mask_token;
-    let n = config.n_embd;
-    let vocab = config.vocab_size;
-    let log_vocab = rcd_config.as_ref().map_or(1.0, |c| c.log_vocab);
-
-    let mut bctx = BidirectionalContext::new(config);
-    let mut tokens = vec![mask; seq_len];
-    let mut converged_step = n_steps;
-    let mut remaining = seq_len;
-
-    // Reusable scratch buffers — allocated once, never reallocated in the loop.
-    let mut softmax_scratch = vec![0.0f32; vocab];
-    let mut residual_scratch = vec![0.0f32; n];
-    let mask_emb: &[f32] = &weights.wte[mask * n..(mask + 1) * n];
-
-    // 3SR-specific scratch (Plan 291). All allocated once outside the loop.
-    let mut transition_scratch =
-        vec![crate::dllm_solver::TransitionType::UnchangedVisible; seq_len];
-    let mut gamma_scratch = vec![0.0f32; seq_len];
-    // h_star_next: previous step's residual buffer (modelless proxy for FP state).
-    // Length `seq_len * n_embd`, zero-init (first step has no z_prev).
-    let mut prev_residual = vec![0.0f32; seq_len * n];
-    // z_prev_tokens: snapshot of tokens from the previous step. Initialized to
-    // all-mask so step 0's transition classification is trivially StillMasked
-    // everywhere (then explicitly skipped — see step-0 guard below).
-    let mut z_prev_tokens = vec![mask; seq_len];
-
-    for step in 0..n_steps {
-        // Forward uses standard embedding on step 0 (tsr_active = false),
-        // RCD residual on step k>0 if 3SR didn't write anything this step,
-        // 3SR warm-start on step k>0 when 3SR composed over RCD's output.
-        forward_bidirectional_positions_into(weights, &tokens, config, &mut bctx);
-
-        // Standard commitment phase — mirror of `denoise_loop_rcd`.
-        constraint.rebuild(&tokens, mask);
-        let mut any_changed = false;
-
-        for p in 0..seq_len {
-            if tokens[p] != mask {
-                continue;
-            }
-
-            let logits_p = &bctx.all_logits[p * vocab..(p + 1) * vocab];
-            let max_l = crate::simd::simd_max_f32(logits_p);
-            let exp_buf = &mut bctx.all_attn_weights[..vocab];
-            exp_buf[..vocab].copy_from_slice(logits_p);
-            crate::simd::simd_add_scalar_inplace(&mut exp_buf[..vocab], -max_l);
-            crate::simd::simd_exp_inplace(&mut exp_buf[..vocab]);
-            let sum_exp = crate::simd::simd_sum_f32(&exp_buf[..vocab]);
-            let inv_sum = 1.0 / sum_exp;
-
-            let mut best_token = mask;
-            let mut best_exp = 0.0f32;
-            for t in 0..vocab {
-                if t == mask {
-                    continue;
-                }
-                if !constraint.is_valid(p, t, &tokens) {
-                    continue;
-                }
-                let e = exp_buf[t];
-                if e > best_exp {
-                    best_exp = e;
-                    best_token = t;
-                }
-            }
-            let best_prob = best_exp * inv_sum;
-
-            if best_prob >= confidence_threshold && best_token != mask {
-                tokens[p] = best_token;
-                any_changed = true;
-                remaining -= 1;
-            }
-        }
-
-        // RCD pass: compute entropy-weighted residual for every still-masked
-        // position and write to `rcd_residual_embeddings` (h_pre,t for 3SR).
-        let mut wrote_residual = false;
-        for p in 0..seq_len {
-            if tokens[p] != mask {
-                continue;
-            }
-
-            let logits_p = &bctx.all_logits[p * vocab..(p + 1) * vocab];
-            let max_l = crate::simd::simd_max_f32(logits_p);
-            softmax_scratch[..vocab].copy_from_slice(logits_p);
-            crate::simd::simd_add_scalar_inplace(&mut softmax_scratch[..vocab], -max_l);
-            crate::simd::simd_exp_inplace(&mut softmax_scratch[..vocab]);
-            let sum_exp = crate::simd::simd_sum_f32(&softmax_scratch[..vocab]);
-            if sum_exp > 0.0 {
-                let inv = 1.0 / sum_exp;
-                crate::simd::simd_scale_inplace(&mut softmax_scratch[..vocab], inv);
-            }
-
-            let alpha = normalized_entropy(&softmax_scratch[..vocab], log_vocab);
-            compute_residual(
-                &softmax_scratch[..vocab],
-                &weights.wte,
-                n,
-                &mut residual_scratch,
-            );
-            interpolate_residual(
-                &mask_emb,
-                &residual_scratch,
-                alpha,
-                &mut bctx.rcd_residual_embeddings[p * n..(p + 1) * n],
-            );
-            wrote_residual = true;
-        }
-        bctx.rcd_active = wrote_residual;
-
-        // 3SR pass (Plan 291). Step 0 has no z_prev → skip warm-start this step;
-        // forward on step 1 will use the RCD residual directly. From step ≥ 1,
-        // classify transitions between z_prev and the current `tokens`, compute
-        // γ per position, and lerp between prev_residual (h⋆) and rcd_residual
-        // (h_pre) into tsr_warm_start_embeddings. tsr_active gates the next
-        // forward's embedding lookup to prefer the 3SR buffer.
-        if step > 0 && wrote_residual {
-            classify_transitions(&z_prev_tokens, &tokens, mask, &mut transition_scratch);
-            // visible_fraction_t = (seq_len - remaining) / seq_len.
-            let visible_fraction = if seq_len > 0 {
-                (seq_len - remaining) as f32 / seq_len as f32
-            } else {
-                0.0
-            };
-            compute_gammas(
-                &transition_scratch,
-                visible_fraction,
-                tsr_cfg,
-                &mut gamma_scratch,
-            );
-            // h_pre_t = rcd_residual_embeddings (just written above).
-            // h_star_next = prev_residual (stashed from prior step).
-            // out = tsr_warm_start_embeddings.
-            warm_start_lerp(
-                &prev_residual,
-                &bctx.rcd_residual_embeddings,
-                &gamma_scratch,
-                n,
-                &mut bctx.tsr_warm_start_embeddings,
-            );
-            bctx.tsr_active = true;
-        } else {
-            bctx.tsr_active = false;
-        }
-
-        // Stash the current step's residual buffer as next step's h_star_next.
-        // Only the still-masked positions have meaningful residuals — the rest
-        // are stale but unused (their transition type will be UnchangedVisible
-        // or NewlyRevealed, not StillMasked, so γ will not select them).
-        if wrote_residual {
-            prev_residual[..seq_len * n]
-                .copy_from_slice(&bctx.rcd_residual_embeddings[..seq_len * n]);
-        }
-
-        // Snapshot current tokens as next iteration's z_prev.
-        z_prev_tokens[..seq_len].copy_from_slice(&tokens[..seq_len]);
-
-        if !any_changed && remaining == 0 {
-            converged_step = step;
-            break;
-        }
-    }
-
-    // Leave the context in a clean state for callers that reuse it.
-    bctx.rcd_active = false;
-    bctx.tsr_active = false;
-
-    if remaining == 0 && converged_step == n_steps {
-        converged_step = n_steps - 1;
-    }
-
-    (tokens, converged_step)
-}
+//
+// Plan 403 (2026-07-06): The `DenoiseConstraint` trait, `NoConstraint` /
+// `NoRepeatConstraint` impls, and the four `denoise_loop*` variants moved to
+// `katgpt-forward/src/denoise_loops.rs`. Root re-exports via the shims below
+// so every historical `crate::dllm::{denoise_loop, denoise_loop_rcd,
+// DenoiseConstraint, NoConstraint, NoRepeatConstraint, ...}` import path
+// continues to resolve. The 9 denoise tests in `mod tests` exercise the
+// public API via these re-exports (they depend on root-only training helpers
+// `train_mini_dllm` / `generate_pattern_dataset`, so they stay in root).
+
+#[cfg(all(feature = "dllm", feature = "rcd_residual"))]
+pub use katgpt_forward::denoise_loops::denoise_loop_rcd;
+#[cfg(all(feature = "dllm", feature = "d2f_3sr_warm_start"))]
+pub use katgpt_forward::denoise_loops::denoise_loop_rcd_3sr;
+#[cfg(feature = "dllm")]
+pub use katgpt_forward::denoise_loops::{
+    DenoiseConstraint, NoConstraint, NoRepeatConstraint, denoise_loop, denoise_loop_scheduled,
+};
+
+// ═══════════════════════════════════════════════════════════════
+// Position-Offset Reveal-Time Schedule (Research 376, arXiv:2607.01775)
+// ═══════════════════════════════════════════════════════════════
+//
+// DRY consolidation (2026-07-04): the canonical `PositionOffsetSchedule` now
+// lives in `katgpt-core::set_diffusion_schedule`. Re-exported here so existing
+// `katgpt_rs::dllm::PositionOffsetSchedule` paths continue to resolve.
+//
+// The katgpt-core version is RNG-agnostic via `sample_order_with(l, || ...)`.
+// Call sites in this file that use `katgpt_types::Rng` pass `|| rng.uniform()`;
+// consumers using `fastrand::Rng` (e.g. riir-train) use `|| rng.f32()` or the
+// `sample_order(l, &mut fastrand::Rng)` convenience wrapper.
+pub use katgpt_core::PositionOffsetSchedule;
 
 /// Measure denoising accuracy: fraction of correctly recovered tokens.
-pub fn denoising_accuracy(predicted: &[usize], target: &[usize]) -> f32 {
-    let len = predicted.len().min(target.len());
-    if len == 0 {
-        return 0.0;
-    }
-    let correct = (0..len).filter(|&i| predicted[i] == target[i]).count();
-    correct as f32 / len as f32
-}
+///
+/// Plan 398 (2026-07-05): Re-exported from `katgpt_forward::d2f_context`.
+#[cfg(feature = "dllm")]
+pub use katgpt_forward::d2f_context::denoising_accuracy;
 
 // ═══════════════════════════════════════════════════════════════
 // Tests
@@ -2926,19 +2217,19 @@ mod tests {
         // Block-causal with block_size=4: positions 0-3 only attend to 0-3
         let (_, attn_bc) = forward_block_causal_positions(&weights, &tokens, &config, 4);
 
-        // Position 0 should only attend to positions 0-3 (first block)
-        let w0 = &attn_bc[0]; // weights for position 0
+        // FLAT layout: attn_bc[q * (n_head*seq_len) + h*seq_len + t]
+        let w0_base = 0; // position 0
         for h in 0..config.n_head {
             // Positions 4-7 should have zero weight for position 0's attention
             for t in 4..8 {
-                let w = w0[h * 8 + t];
+                let w = attn_bc[w0_base + h * 8 + t];
                 assert_eq!(
                     w, 0.0,
                     "Position 0 head {h} should not attend to position {t}: weight={w}"
                 );
             }
             // Positions 0-3 should sum to ~1.0
-            let sum: f32 = (0..4).map(|t| w0[h * 8 + t]).sum();
+            let sum: f32 = (0..4).map(|t| attn_bc[w0_base + h * 8 + t]).sum();
             assert!(
                 (sum - 1.0).abs() < 1e-4,
                 "Position 0 head {h} first block weights should sum to 1.0: {sum}"
@@ -2991,7 +2282,7 @@ mod tests {
                     .max_by(|a, b| a.1.partial_cmp(b.1).unwrap())
                     .map(|(i, _)| i)
                     .unwrap_or(0);
-                let pred_bc = logits_bc[p]
+                let pred_bc = logits_bc[p * vocab..(p + 1) * vocab]
                     .iter()
                     .enumerate()
                     .max_by(|a, b| a.1.partial_cmp(b.1).unwrap())
@@ -3176,7 +2467,7 @@ mod tests {
             &mut Rng::new(42),
         );
 
-        let mut rcd_cfg = crate::dllm_solver::RcdConfig::disabled();
+        let mut rcd_cfg = katgpt_core::dllm_solver::RcdConfig::disabled();
         let (rcd_tokens, rcd_steps) = denoise_loop_rcd(
             &weights,
             &target,
@@ -3212,7 +2503,7 @@ mod tests {
 
         let target = vec![3, 7, 3, 7];
 
-        let mut rcd_cfg = crate::dllm_solver::RcdConfig::new(config.vocab_size, config.n_embd);
+        let mut rcd_cfg = katgpt_core::dllm_solver::RcdConfig::new(config.vocab_size, config.n_embd);
         let (tokens, steps) = denoise_loop_rcd(
             &weights,
             &target,
@@ -3268,7 +2559,7 @@ mod tests {
                 &mut NoConstraint,
                 &mut Rng::new(42),
             );
-            let mut rcd_cfg = crate::dllm_solver::RcdConfig::new(config.vocab_size, config.n_embd);
+            let mut rcd_cfg = katgpt_core::dllm_solver::RcdConfig::new(config.vocab_size, config.n_embd);
             let (rcd_tokens, rcd_steps) = denoise_loop_rcd(
                 &weights,
                 target,
@@ -3332,8 +2623,8 @@ mod tests {
         );
 
         // Both RCD and 3SR disabled → must produce baseline behavior.
-        let mut rcd_cfg = crate::dllm_solver::RcdConfig::disabled();
-        let tsr_cfg = crate::dllm_solver::ThreeStateReuseConfig::disabled();
+        let mut rcd_cfg = katgpt_core::dllm_solver::RcdConfig::disabled();
+        let tsr_cfg = katgpt_core::dllm_solver::ThreeStateReuseConfig::disabled();
         let (tsr_tokens, tsr_steps) = denoise_loop_rcd_3sr(
             &weights,
             &target,
@@ -3370,8 +2661,8 @@ mod tests {
 
         let target = vec![3, 7, 3, 7];
 
-        let mut rcd_cfg = crate::dllm_solver::RcdConfig::new(config.vocab_size, config.n_embd);
-        let tsr_cfg = crate::dllm_solver::ThreeStateReuseConfig::default();
+        let mut rcd_cfg = katgpt_core::dllm_solver::RcdConfig::new(config.vocab_size, config.n_embd);
+        let tsr_cfg = katgpt_core::dllm_solver::ThreeStateReuseConfig::default();
         let (tokens, steps) = denoise_loop_rcd_3sr(
             &weights,
             &target,
@@ -3419,7 +2710,7 @@ mod tests {
         let mut tsr_steps_total = 0usize;
 
         for target in &targets {
-            let mut rcd_cfg = crate::dllm_solver::RcdConfig::new(config.vocab_size, config.n_embd);
+            let mut rcd_cfg = katgpt_core::dllm_solver::RcdConfig::new(config.vocab_size, config.n_embd);
             let (rcd_tokens, rcd_steps) = denoise_loop_rcd(
                 &weights,
                 target,
@@ -3432,8 +2723,8 @@ mod tests {
             );
 
             let mut rcd_cfg_t =
-                crate::dllm_solver::RcdConfig::new(config.vocab_size, config.n_embd);
-            let tsr_cfg = crate::dllm_solver::ThreeStateReuseConfig::default();
+                katgpt_core::dllm_solver::RcdConfig::new(config.vocab_size, config.n_embd);
+            let tsr_cfg = katgpt_core::dllm_solver::ThreeStateReuseConfig::default();
             let (tsr_tokens, tsr_steps) = denoise_loop_rcd_3sr(
                 &weights,
                 target,
@@ -3526,7 +2817,7 @@ mod replaid_tests {
         }
 
         for &r in schedule.ratios() {
-            assert!(r >= 0.1 - 0.01 && r <= 0.9 + 0.01);
+            assert!((0.1 - 0.01..=0.9 + 0.01).contains(&r));
         }
     }
 
@@ -3581,7 +2872,7 @@ mod replaid_tests {
                 }
                 let act = forward_save(&weights_fixed, &corrupted_buf, &config, &mut fwd_ctx);
                 let loss = masked_loss(
-                    &act.logits,
+                    act.logits,
                     tokens,
                     &is_masked_buf,
                     config.vocab_size,
@@ -3658,7 +2949,7 @@ mod replaid_tests {
                 }
                 let act = forward_save(&weights_adaptive, &corrupted_buf2, &config, &mut fwd_ctx2);
                 let loss = masked_loss(
-                    &act.logits,
+                    act.logits,
                     tokens,
                     &is_masked_buf2,
                     config.vocab_size,

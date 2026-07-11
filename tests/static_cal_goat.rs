@@ -3,7 +3,7 @@
 //! Measures: decode latency with Sinkhorn (before) vs static scales (after),
 //! perplexity delta, calibration convergence.
 
-use katgpt_rs::static_cal::{HeadStats, StaticCalTable};
+use katgpt_attn::static_cal::{HeadStats, StaticCalTable};
 
 /// Simulate per-head activation stats for calibration.
 fn simulate_head_stats(num_layers: usize, num_heads: usize) -> Vec<HeadStats> {
@@ -83,8 +83,8 @@ fn test_o1_lookup_latency() {
 
 #[test]
 fn test_vs_sinkhorn_iterations() {
-    use katgpt_rs::kvarn::var_norm::VarNormConfig;
-    use katgpt_rs::kvarn::variance_normalize;
+    use katgpt_kv::kvarn::var_norm::VarNormConfig;
+    use katgpt_kv::kvarn::variance_normalize;
 
     // Create a representative 128x128 tile
     let rows = 128;
@@ -155,7 +155,7 @@ fn test_commitment_tamper_detection() {
 
 #[test]
 fn goat_g1_static_cal_latency_and_quality() {
-    use katgpt_rs::kvarn::var_norm::{VarNormConfig, variance_normalize};
+    use katgpt_kv::kvarn::var_norm::{VarNormConfig, variance_normalize};
 
     // ── Setup ──
     let rows = 128;

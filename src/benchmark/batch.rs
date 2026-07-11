@@ -1,4 +1,6 @@
-use crate::transformer::{ForwardContext, MultiLayerKVCache, TransformerWeights, generate_into, tokens_to_string};
+use crate::transformer::{
+    ForwardContext, MultiLayerKVCache, TransformerWeights, generate_into, tokens_to_string,
+};
 use crate::types::{Config, Rng};
 use rayon::prelude::*;
 

@@ -14,22 +14,18 @@
 
 #![cfg(feature = "closed_unit_compaction")]
 
-use katgpt_rs::compaction::rubrics::search::SearchRubric;
-use katgpt_rs::compaction::rubrics::shard_freeze::{
+use katgpt_core::compaction::rubrics::search::SearchRubric;
+use katgpt_core::compaction::rubrics::shard_freeze::{
     SHARD_FREEZE_FLATNESS_THRESHOLD, ShardFreezeRubric,
 };
-use katgpt_rs::compaction::{Backstop, ClosedUnitCompactionGate, FireRule, RubricScratch};
+use katgpt_core::compaction::{Backstop, ClosedUnitCompactionGate, FireRule, RubricScratch};
 
 fn main() {
     println!("═══ CUCG GOAT Gate Report (Plan 333, Research 300) ═══");
     println!();
 
     // G1: rubric beats fixed-interval (search rubric recall/FDR)
-    let mut results = vec![(
-        "G1",
-        "rubric recall ≥0.80, FDR ≤0.20",
-        g1_search_rubric(),
-    )];
+    let mut results = vec![("G1", "rubric recall ≥0.80, FDR ≤0.20", g1_search_rubric())];
 
     // G2: skip-if-reliable ≥50% suppression
     results.push((
@@ -194,7 +190,7 @@ fn g2_skip_if_reliable() -> (String, bool) {
 // ─── G3: probe latency independent of L ───────────────────────────────────────
 
 fn g3_probe_latency() -> (String, bool) {
-    use katgpt_rs::compaction::probe::CacheReuseProbe;
+    use katgpt_core::compaction::probe::CacheReuseProbe;
     let probe = CacheReuseProbe::new();
     let prompt = b" [RUBRIC]";
     let mut measurements = Vec::new();
@@ -345,12 +341,7 @@ fn g6_sigmoid_never_softmax() -> (String, bool) {
         format!(
             "static: 0 softmax hits; canary T={:.0}: H_softmax={:.4} (\u{2192}0), \
              H_sigmoid={:.4} (\u{2192}ln({})={:.4}), \u{394}={:.4} \u{2014} different class",
-            large_t,
-            h_softmax,
-            h_sigmoid,
-            n_positive as i64,
-            expected_plateau,
-            plateau_gap,
+            large_t, h_softmax, h_sigmoid, n_positive as i64, expected_plateau, plateau_gap,
         ),
         pass,
     )

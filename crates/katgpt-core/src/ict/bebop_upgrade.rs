@@ -39,7 +39,7 @@ use crate::ict::math::collision_purity;
 ///
 /// The EMA fields smooth β and α across tokens; downstream Bebop-style
 /// adaptive-γ loops can read them via the public accessors.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct AcceptanceForecastH2 {
     /// Linear forecast intercept (Bebop `a`).
     pub a: f32,
@@ -67,13 +67,7 @@ impl AcceptanceForecastH2 {
 
     /// Override the default EMA decay (0.9). Clamped to `[0, 1]`.
     pub fn with_ema_decay(mut self, decay: f32) -> Self {
-        self.ema_decay = if decay < 0.0 {
-            0.0
-        } else if decay > 1.0 {
-            1.0
-        } else {
-            decay
-        };
+        self.ema_decay = decay.clamp(0.0, 1.0);
         self
     }
 
@@ -148,7 +142,11 @@ impl AcceptanceForecastH2 {
         let beta = collision_purity(prob_scratch);
         // Guard against log(0) when β underflows (impossible for finite
         // softmax but f32 arithmetic can drift).
-        let h2 = if beta > 0.0 { -beta.ln() } else { f32::INFINITY };
+        let h2 = if beta > 0.0 {
+            -beta.ln()
+        } else {
+            f32::INFINITY
+        };
         let alpha = self.a - self.b * h2;
 
         // ── EMA update. ──
@@ -167,7 +165,12 @@ impl AcceptanceForecastH2 {
     /// Matches Bebop's adaptive-γ policy; the only difference is `ema_alpha`
     /// here comes from the H₂ forecast rather than the H₁ forecast.
     #[inline]
-    pub fn adaptive_gamma(&self, _target_accept_length: f32, gamma_min: usize, gamma_max: usize) -> usize {
+    pub fn adaptive_gamma(
+        &self,
+        _target_accept_length: f32,
+        gamma_min: usize,
+        gamma_max: usize,
+    ) -> usize {
         let gamma_f = self.ema_alpha;
         let gamma = if gamma_f < gamma_min as f32 {
             gamma_min as f32
@@ -192,7 +195,10 @@ mod tests {
     fn empty_logits_returns_intercept() {
         let mut f = AcceptanceForecastH2::new(8.0, 1.0);
         let alpha = f.observe_and_forecast(&[]);
-        assert!((alpha - 8.0).abs() < 1e-6, "empty logits → α=a=8.0, got {alpha}");
+        assert!(
+            (alpha - 8.0).abs() < 1e-6,
+            "empty logits → α=a=8.0, got {alpha}"
+        );
     }
 
     #[test]
@@ -202,7 +208,10 @@ mod tests {
         let mut f = AcceptanceForecastH2::new(8.0, 2.0);
         let logits = [0.0_f32, -1e10];
         let alpha = f.observe_and_forecast(&logits);
-        assert!((alpha - 8.0).abs() < 1e-3, "degenerate α should be a=8.0, got {alpha}");
+        assert!(
+            (alpha - 8.0).abs() < 1e-3,
+            "degenerate α should be a=8.0, got {alpha}"
+        );
     }
 
     #[test]
@@ -252,7 +261,7 @@ mod tests {
         let _ = f.observe_and_forecast(&logits);
         let g = f.adaptive_gamma(8.0, 1, 16);
         // α ≈ 8.61 → γ should be clamped to [1, 16], so g = 8 (or 9).
-        assert!(g >= 1 && g <= 16, "γ out of range: {g}");
+        assert!((1..=16).contains(&g), "γ out of range: {g}");
         // Now lower α dramatically: uniform over 1024 → α = 10 - log(1024) ≈ 3.06.
         let logits_low = [0.0_f32; 1024];
         let _ = f.observe_and_forecast(&logits_low);

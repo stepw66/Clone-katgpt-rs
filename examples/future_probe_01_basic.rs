@@ -26,9 +26,8 @@
 //!   (Phase 4 GOAT gate runs that).
 //! - **FPCG selector** — that's the next example (`fpcg_01_basic.rs`).
 
-use katgpt_core::FeatureClass;
-use katgpt_rs::pruners::future_probe::{FutureBehaviorProbe, ProbeLoadError};
 use katgpt_core::traits::ScreeningPruner;
+use katgpt_rs::pruners::future_probe::{FutureBehaviorProbe, ProbeLoadError};
 
 fn main() {
     println!("=== FutureBehaviorProbe Example (Plan 292 Phase 2) ===\n");
@@ -42,8 +41,14 @@ fn main() {
         "Probe: d_model={} layer=7 behavior=\"refusal\" bias=-1.0",
         d_model
     );
-    println!("Artifact hash (first 8 bytes): {}", first_8_hex(&probe.artifact_hash()));
-    println!("FeatureClass tag: {:?} (Plan 292 Phase 1)", probe.feature_class());
+    println!(
+        "Artifact hash (first 8 bytes): {}",
+        first_8_hex(&probe.artifact_hash())
+    );
+    println!(
+        "FeatureClass tag: {:?} (Plan 292 Phase 1)",
+        probe.feature_class()
+    );
     println!();
 
     // ── 2. Forecast on boundary activations ─────────────────────────
@@ -99,11 +104,17 @@ fn main() {
     println!();
 
     // ── 4. Atomic hot-swap ──────────────────────────────────────────
-    println!("Before swap: artifact_hash = {}", first_8_hex(&probe.artifact_hash()));
+    println!(
+        "Before swap: artifact_hash = {}",
+        first_8_hex(&probe.artifact_hash())
+    );
     let probe_v2 = FutureBehaviorProbe::new(vec![-1.0, 0.0, 0.0, 0.0], 1.0, 7, "aggression");
     let hash_v2 = probe_v2.artifact_hash();
     probe.swap_direction(probe_v2);
-    println!("After swap:  artifact_hash = {}", first_8_hex(&probe.artifact_hash()));
+    println!(
+        "After swap:  artifact_hash = {}",
+        first_8_hex(&probe.artifact_hash())
+    );
     assert_eq!(probe.artifact_hash(), hash_v2, "swap must replace the hash");
 
     // After swap, the same activation gives a different forecast.

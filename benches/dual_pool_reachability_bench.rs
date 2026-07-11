@@ -324,11 +324,7 @@ fn main() {
     let never_escaped = samples.iter().filter(|&&c| c >= max_cycles).count();
     println!(
         "{:<36} {:>8} {:>8} {:>8} {:>8}",
-        "single-pool, no detector",
-        "∞",
-        "∞",
-        "∞",
-        "∞"
+        "single-pool, no detector", "∞", "∞", "∞", "∞"
     );
     println!(
         "  └─ {} of {} trials never escaped (permanent trap — the failure mode)",
@@ -344,14 +340,13 @@ fn main() {
     let (dp_ns, dp_alpha) = time_dual_pool_routing(n_iters);
     let sp_ns = time_single_pool_detector(n_iters);
 
-    println!(
-        "{:<36} {:>10} {:>10}",
-        "Strategy", "ns/cycle", "notes"
-    );
+    println!("{:<36} {:>10} {:>10}", "Strategy", "ns/cycle", "notes");
     println!("{}", "─".repeat(36 + 11 + 11));
     println!(
         "{:<36} {:>10.1} {:>10}",
-        "dual-pool begin_cycle()", dp_ns, format!("α={:.4}", dp_alpha)
+        "dual-pool begin_cycle()",
+        dp_ns,
+        format!("α={:.4}", dp_alpha)
     );
     println!(
         "{:<36} {:>10.1} {:>10}",

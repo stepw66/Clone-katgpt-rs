@@ -33,8 +33,8 @@
 //! Run with: `cargo run --example sleep_time_01_basic --features sleep_time_anticipation --release`
 
 use katgpt_core::sleep_time::{
-    consume, consume_gate, AmortizationCostModel, AnticipatedQueryDir, DotPredictabilityScorer,
-    IdentityFunctorOp, SleepTimeAnticipator, SleepTimeScratch,
+    AmortizationCostModel, AnticipatedQueryDir, DotPredictabilityScorer, IdentityFunctorOp,
+    SleepTimeAnticipator, SleepTimeScratch, consume, consume_gate,
 };
 
 // ── Constants ───────────────────────────────────────────────────────────────
@@ -81,7 +81,11 @@ fn main() {
 
     println!("── Step 1: anticipated-query catalog (hardcoded) ──");
     for (i, d) in dirs.iter().enumerate() {
-        println!("  dir[{i}] = {:?}  blake3={}…", d.direction, hex_short(&d.blake3));
+        println!(
+            "  dir[{i}] = {:?}  blake3={}…",
+            d.direction,
+            hex_short(&d.blake3)
+        );
     }
     println!();
 
@@ -109,11 +113,17 @@ fn main() {
 
     println!("── Step 2: anticipate() → c' artifact (sleep-time compute) ──");
     println!("  context c = {:?}", c);
-    println!("  c'.blake3 = {}…  (commits all slot bytes)", hex_short(&c_prime.blake3));
+    println!(
+        "  c'.blake3 = {}…  (commits all slot bytes)",
+        hex_short(&c_prime.blake3)
+    );
     println!("  c'.version = {}", c_prime.version);
     println!("  commitment verifies: {}", c_prime.verify_commitment());
     println!();
-    println!("  {:<6} {:<24} {:<24} {:>14}", "slot", "direction", "precomputed z_i", "predictability");
+    println!(
+        "  {:<6} {:<24} {:<24} {:>14}",
+        "slot", "direction", "precomputed z_i", "predictability"
+    );
     for (i, slot) in c_prime.slots.iter().enumerate() {
         println!(
             "  [{i:<4}] {:<24} {:<24} {:>14.6}",
@@ -157,15 +167,24 @@ fn main() {
     let (best_p, gate_p) = consume_gate(&q_predictable, &c_prime, TAU, BETA);
     let out_p = consume(&q_predictable, &c_prime, TAU, BETA, fresh_think);
     println!("  predictable query q = {:?}", q_predictable);
-    println!("    best slot i* = {best_p}  predictability p_{{i*}} = {:.6}", c_prime.slots[best_p].predictability);
+    println!(
+        "    best slot i* = {best_p}  predictability p_{{i*}} = {:.6}",
+        c_prime.slots[best_p].predictability
+    );
     println!("    gate = {:.6}  (high → use precomputed)", gate_p);
-    println!("    out  = {}  ≈ precomputed slot (gate·z + (1−gate)·fresh)", fmt_array(&out_p));
+    println!(
+        "    out  = {}  ≈ precomputed slot (gate·z + (1−gate)·fresh)",
+        fmt_array(&out_p)
+    );
     println!();
 
     let (best_u, gate_u) = consume_gate(&q_unpredictable, &c_prime, TAU, BETA);
     let out_u = consume(&q_unpredictable, &c_prime, TAU, BETA, fresh_think);
     println!("  unpredictable query q = {:?}", q_unpredictable);
-    println!("    best slot i* = {best_u}  predictability p_{{i*}} = {:.6}", c_prime.slots[best_u].predictability);
+    println!(
+        "    best slot i* = {best_u}  predictability p_{{i*}} = {:.6}",
+        c_prime.slots[best_u].predictability
+    );
     println!("    gate = {:.6}  (low → fall through to fresh)", gate_u);
     println!("    out  = {}  ≈ fresh_think output", fmt_array(&out_u));
     println!();
@@ -190,11 +209,17 @@ fn main() {
     let e_gate = 0.5; // expected gate hit rate (would be measured in production)
 
     println!("── Step 4: AmortizationCostModel (paper §5.3) ──");
-    println!("  t = {} (latency premium), b_max = {} (wake-time budget/consumer)", model.t, model.b_max);
+    println!(
+        "  t = {} (latency premium), b_max = {} (wake-time budget/consumer)",
+        model.t, model.b_max
+    );
     println!("  sleep_cost = Σ budgets[i] = {sleep_cost:.0}");
     println!("  E[gate] = {e_gate} (expected fraction of queries that hit the cache)");
     println!();
-    println!("  {:<24} {:>14} {:>14} {:>14}", "scenario", "total_cost", "amort. factor", "pre-compute?");
+    println!(
+        "  {:<24} {:>14} {:>14} {:>14}",
+        "scenario", "total_cost", "amort. factor", "pre-compute?"
+    );
     for n in [1u32, 5, 10, 50] {
         let total = model.total_cost(sleep_cost, n, e_gate);
         let factor = model.amortization_factor(sleep_cost, n, e_gate);
@@ -217,7 +242,9 @@ fn main() {
     println!("  • Amortization: one c' serves many consumers; factor < 1.0 = pre-compute wins.");
     println!();
     println!("See .plans/334_sleep_time_query_anticipator_primitive.md Phase 3 T3.1.");
-    println!("See sleep_time_02_curiosity_inversion.rs for the curiosity↔predictability inversion.");
+    println!(
+        "See sleep_time_02_curiosity_inversion.rs for the curiosity↔predictability inversion."
+    );
 }
 
 // ── Display helpers ────────────────────────────────────────────────────────

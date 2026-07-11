@@ -18,9 +18,7 @@
 
 #![cfg(feature = "orthogonal_procrustes")]
 
-use katgpt_rs::procrustes::{
-    orthogonal_procrustes, ProcrustesConfig, ProcrustesScratch,
-};
+use katgpt_spectral::procrustes::{ProcrustesConfig, ProcrustesScratch, orthogonal_procrustes};
 use std::time::{Duration, Instant};
 
 /// Deterministic xorshift32 PRNG (matches the unit-test PRNG).
@@ -107,14 +105,20 @@ fn main() {
         // (n, d, latency_gate_us, gate_name)
         (32, 16, 200.0, "small"),
         (128, 16, 400.0, "G4-baseline"),
-        (512, 32, 800.0, "G1"),     // Issue 001 G1: ≤ 800 µs.
-        (2048, 64, 5000.0, "G2"),   // Issue 001 G2: ≤ 5 ms.
+        (512, 32, 800.0, "G1"),   // Issue 001 G1: ≤ 800 µs.
+        (2048, 64, 5000.0, "G2"), // Issue 001 G2: ≤ 5 ms.
     ];
 
     let mut all_pass = true;
 
-    println!("{:>6} {:>4} {:>12} {:>12} {:>10}  gate", "n", "d", "latency", "residual", "scratch");
-    println!("{:->6} {:->4} {:->12} {:->12} {:->10}  ----", "", "", "", "", "");
+    println!(
+        "{:>6} {:>4} {:>12} {:>12} {:>10}  gate",
+        "n", "d", "latency", "residual", "scratch"
+    );
+    println!(
+        "{:->6} {:->4} {:->12} {:->12} {:->10}  ----",
+        "", "", "", "", ""
+    );
 
     for &(n, d, gate_us, gate_name) in cases {
         let a = seeded_anchors(42, n, d);
@@ -155,7 +159,9 @@ fn main() {
         let scratch_pass = scratch_bytes <= 64 * 1024; // G6: ≤ 64 KB.
 
         let all = latency_pass && residual_pass && scratch_pass;
-        if !all { all_pass = false; }
+        if !all {
+            all_pass = false;
+        }
 
         println!(
             "{:>6} {:>4} {:>12} {:>11.4}% {:>9} B  {}",
@@ -164,7 +170,11 @@ fn main() {
             fmt_us(us),
             residual_pct,
             scratch_bytes,
-            if all { format!("✓ {}", gate_name) } else { format!("✗ {} (gate={} us)", gate_name, fmt_us(gate_us)) }
+            if all {
+                format!("✓ {}", gate_name)
+            } else {
+                format!("✗ {} (gate={} us)", gate_name, fmt_us(gate_us))
+            }
         );
         if !latency_pass {
             println!("     ⚠ latency {:.2} > gate {:.2}", us, gate_us);
@@ -182,7 +192,9 @@ fn main() {
         println!("=== ALL GATES PASS — GOAT candidate confirmed. Promote to default-on. ===");
         std::process::exit(0);
     } else {
-        println!("=== SOME GATES FAILED — keep behind feature flag, revisit per Issue 001 outcome matrix. ===");
+        println!(
+            "=== SOME GATES FAILED — keep behind feature flag, revisit per Issue 001 outcome matrix. ==="
+        );
         std::process::exit(1);
     }
 }

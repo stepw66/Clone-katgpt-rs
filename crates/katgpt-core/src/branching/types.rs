@@ -338,7 +338,10 @@ impl<E> CognitiveBranch<E> {
     /// Push a sorted token onto the signature (maintains sort + dedup).
     /// Call this after writing an episodic entry to enable Jaccard fallback.
     pub fn push_token(&mut self, token: u64) {
-        let pos = self.token_signature.binary_search(&token).unwrap_or_else(|p| p);
+        let pos = self
+            .token_signature
+            .binary_search(&token)
+            .unwrap_or_else(|p| p);
         if pos == self.token_signature.len() || self.token_signature[pos] != token {
             self.token_signature.insert(pos, token);
         }
@@ -431,8 +434,10 @@ mod tests {
 
     #[test]
     fn branch_stats_staleness() {
-        let mut stats = BranchStats::default();
-        stats.last_touch_tick = 100;
+        let stats = BranchStats {
+            last_touch_tick: 100,
+            ..Default::default()
+        };
         assert!(!stats.is_stale(150, 100)); // 50 ticks since touch, window 100
         assert!(stats.is_stale(250, 100)); // 150 ticks since touch, window 100
         assert!(!stats.is_stale(50, 100)); // now < touch (saturating_sub → 0)

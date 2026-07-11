@@ -17,8 +17,8 @@
 
 use criterion::{BenchmarkId, Criterion, black_box, criterion_group, criterion_main};
 use katgpt_core::sleep_time::{
-    consume, consume_gate, AnticipatedQueryDir, DotPredictabilityScorer, IdentityFunctorOp,
-    SleepTimeAnticipator, SleepTimeScratch,
+    AnticipatedQueryDir, DotPredictabilityScorer, IdentityFunctorOp, SleepTimeAnticipator,
+    SleepTimeScratch, consume, consume_gate,
 };
 
 /// Build a c' artifact for benchmarking. K directions of the given dim.

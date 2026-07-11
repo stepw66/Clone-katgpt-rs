@@ -159,7 +159,10 @@ mod tests {
             std::mem::size_of::<BlobId>(),
             std::mem::size_of::<[u8; 32]>()
         );
-        assert_eq!(std::mem::align_of::<BlobId>(), std::mem::align_of::<[u8; 32]>());
+        assert_eq!(
+            std::mem::align_of::<BlobId>(),
+            std::mem::align_of::<[u8; 32]>()
+        );
     }
 
     #[test]

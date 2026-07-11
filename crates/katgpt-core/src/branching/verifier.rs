@@ -106,11 +106,7 @@ impl VerifierGate {
     /// Construct with custom thresholds.
     #[inline]
     #[must_use]
-    pub const fn new(
-        tau_write: f32,
-        tau_curiosity: f32,
-        quarantine_centroid_thresh: f32,
-    ) -> Self {
+    pub const fn new(tau_write: f32, tau_curiosity: f32, quarantine_centroid_thresh: f32) -> Self {
         Self {
             tau_write,
             tau_curiosity,
@@ -241,7 +237,10 @@ mod tests {
         // uses strict less-than).
         assert_eq!(gate.should_write(0.9, 0.9, 0.5), WriteDecision::Write);
         // centroid just below → Quarantine.
-        assert_eq!(gate.should_write(0.9, 0.9, 0.499), WriteDecision::Quarantine);
+        assert_eq!(
+            gate.should_write(0.9, 0.9, 0.499),
+            WriteDecision::Quarantine
+        );
     }
 
     #[test]
@@ -257,7 +256,10 @@ mod tests {
     #[test]
     fn composed_rejects_when_clr_rejects() {
         let gate = VerifierGate::default();
-        assert_eq!(gate.should_write_composed(false, 0.99), WriteDecision::Reject);
+        assert_eq!(
+            gate.should_write_composed(false, 0.99),
+            WriteDecision::Reject
+        );
     }
 
     #[test]

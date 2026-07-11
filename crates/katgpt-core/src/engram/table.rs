@@ -19,6 +19,7 @@
 //! sigmoid gate in Phase 3 filters any residual noise.
 
 use super::{EngramHash, EngramTable, HashHead, K_MAX};
+use crate::simd::simd_sum_abs_f32;
 use std::sync::OnceLock;
 
 /// Frozen in-memory engram pattern table.
@@ -26,6 +27,9 @@ use std::sync::OnceLock;
 /// Construct via [`EngramTableBuilder`]. After `build()`, the slots and
 /// heads are immutable; the only lazy state is the cached BLAKE3
 /// commitment (computed on first call to [`commitment`](EngramTable::commitment)).
+/// For surgical per-slot edits without rebuilding the whole table, see
+/// [`crate::engram::StagingEngramTable`] (Plan 360).
+#[derive(Debug)]
 pub struct InMemoryEngramTable {
     /// Flat `N × D` row-major slot array. Slot `i` occupies
     /// `slots[i*D..(i+1)*D]`. Empty / unpopulated slots are all-zeros.
@@ -56,6 +60,41 @@ impl InMemoryEngramTable {
     pub fn heads(&self) -> &[HashHead; K_MAX] {
         &self.heads
     }
+
+    /// Raw slot array access (crate-visible). Used by `StagingEngramTable`
+    /// (Plan 360) to copy-on-write the slot array during surgical per-slot
+    /// mutations. Returns the flat `N × D` row-major slice.
+    #[inline]
+    pub(crate) fn slots(&self) -> &[f32] {
+        &self.slots
+    }
+
+    /// Construct from pre-validated parts (crate-visible). Used by
+    /// `StagingEngramTable::commit()` (Plan 360) to build a new table from a
+    /// mutated slot array without re-validating dimensions — the staging
+    /// table has already validated everything.
+    ///
+    /// `n_slots` MUST equal `slots.len() / d` (debug_asserted). The heads are
+    /// carried from the source table (preserving its identity configuration).
+    #[inline]
+    pub(crate) fn from_parts(
+        slots: Box<[f32]>,
+        heads: Box<[HashHead; K_MAX]>,
+        n_slots: usize,
+        d: usize,
+    ) -> Self {
+        debug_assert_eq!(
+            slots.len(),
+            n_slots.checked_mul(d).expect("n_slots*d overflow")
+        );
+        Self {
+            slots,
+            heads,
+            n_slots,
+            d,
+            commitment_cache: OnceLock::new(),
+        }
+    }
 }
 
 impl EngramTable for InMemoryEngramTable {
@@ -75,9 +114,7 @@ impl EngramTable for InMemoryEngramTable {
         // Guard against n == 0 to avoid division-by-zero. Treat empty tables
         // as all-zero outputs.
         if n == 0 {
-            for v in out[..K_MAX * d].iter_mut() {
-                *v = 0.0;
-            }
+            out[..K_MAX * d].fill(0.0);
             return 0;
         }
 
@@ -89,10 +126,12 @@ impl EngramTable for InMemoryEngramTable {
             let src = &self.slots[slot_idx * d..(slot_idx + 1) * d];
             let dst = &mut out[k * d..(k + 1) * d];
             dst.copy_from_slice(src);
-            // Hit = any non-zero element in the slot. SIMD-friendly check
-            // would be `simd_sum_abs_f32(src) > 0.0` but for K_MAX=16 the
-            // scalar scan is cheap and branch-predictor-friendly.
-            if src.iter().any(|&v| v != 0.0) {
+            // Hit = any non-zero element in the slot. `simd_sum_abs_f32`
+            // is the branch-free SIMD reduction — one NEON/AVX2 horizontal
+            // add vs D scalar compares with unpredictable short-circuit
+            // branches (the slot is usually all-zero or all-nonzero, but
+            // the branch predictor can't tell which ahead of time).
+            if simd_sum_abs_f32(src) > 0.0 {
                 hits += 1;
             }
         }
@@ -229,9 +268,9 @@ fn default_heads(n_slots: usize) -> [HashHead; K_MAX] {
     }; K_MAX];
     // Use a base modulus ≥ max(n_slots, 2) to avoid mod-by-1 degeneracy.
     let base = (n_slots.max(2)) as u64;
-    for k in 0..K_MAX {
+    for (k, head) in heads.iter_mut().enumerate() {
         let prime = next_prime(base + k as u64); // distinct prime per head
-        heads[k] = HashHead {
+        *head = HashHead {
             n: 0,
             k: k as u8,
             modulus: prime,
@@ -263,12 +302,12 @@ fn is_prime(n: u64) -> bool {
     if n < 4 {
         return true; // 2, 3
     }
-    if n % 2 == 0 {
+    if n.is_multiple_of(2) {
         return false;
     }
     let mut i: u64 = 3;
     while i.saturating_mul(i) <= n {
-        if n % i == 0 {
+        if n.is_multiple_of(i) {
             return false;
         }
         i += 2;

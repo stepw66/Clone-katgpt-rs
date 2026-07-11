@@ -146,7 +146,7 @@ pub struct IrrepPruner {
 /// Configuration for [`IrrepPruner`].
 ///
 /// Default: threshold=0.7, top_k=10, pre-alloc=0 (lazy).
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct IrrepPrunerConfig {
     pub max_vocab: usize,
     pub convergence_threshold: f32,
@@ -252,6 +252,7 @@ impl IrrepPruner {
     }
 
     /// Get current spectral flatness (computed by last `set_logits` call).
+    #[inline]
     pub fn current_flatness(&self) -> f32 {
         self.current_flatness
     }
@@ -260,6 +261,7 @@ impl IrrepPruner {
     ///
     /// High (~1.0) = converged (peaked logits).
     /// Low (~0.0) = uncertain (flat logits).
+    #[inline]
     pub fn convergence_score(&self) -> f32 {
         self.current_flatness
     }

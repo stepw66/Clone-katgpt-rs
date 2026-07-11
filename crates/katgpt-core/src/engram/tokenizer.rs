@@ -152,6 +152,7 @@ pub enum SurjectiveMapLoadError {
 }
 
 impl std::fmt::Display for SurjectiveMapLoadError {
+    #[cold]
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::TooShort => write!(f, "SurjectiveMap bytes too short (< 32)"),
@@ -456,9 +457,9 @@ mod tests {
             // Half are bare words, half have leading-space or capitalized variants.
             let variant = match i % 4 {
                 0 => word.to_string(),
-                1 => format!(" {word}"),              // leading space
-                2 => format!("{}", capitalize(word)), // capitalized
-                _ => word.to_uppercase(),             // uppercase
+                1 => format!(" {word}"),           // leading space
+                2 => capitalize(word).to_string(), // capitalized
+                _ => word.to_uppercase(),          // uppercase
             };
             tokens.push(variant);
         }

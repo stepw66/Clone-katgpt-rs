@@ -9,6 +9,12 @@ use katgpt_core::types::{self, Config, Rng};
 
 /// Per-layer transformer weights.
 /// Each layer has its own attention and MLP parameters.
+///
+/// `Clone` derived (Issue 374 / Plan 301): consumers that fork frozen base weights
+/// (e.g. `riir-train-gpu`'s CPU LoRA fallback trainer) need `.clone()` without
+/// rebuilding from a seed. All fields are `Vec<f32>` / `Option<Vec<f32>>` — clone
+/// is a shallow vector copy, no deep aliasing.
+#[derive(Clone)]
 pub struct LayerWeights {
     pub attn_wq: Vec<f32>, // [n_embd, n_embd]
     pub attn_wk: Vec<f32>, // [kv_dim, n_embd] where kv_dim = n_kv_head * head_dim
@@ -23,7 +29,7 @@ pub struct LayerWeights {
     #[cfg(feature = "kog_cpu_fusion")]
     pub attn_norm_gamma: Vec<f32>, // [n_embd] pre-attention RMSNorm gamma (identity=1.0)
     #[cfg(feature = "kog_cpu_fusion")]
-    pub mlp_norm_gamma: Vec<f32>,  // [n_embd] pre-MLP RMSNorm gamma (identity=1.0)
+    pub mlp_norm_gamma: Vec<f32>, // [n_embd] pre-MLP RMSNorm gamma (identity=1.0)
     // Kog CPU fusion (Plan 160): fused QKV weight storage
     #[cfg(feature = "kog_cpu_fusion")]
     pub attn_qkv_fused: Option<Vec<f32>>, // [(n_embd + 2*kv_dim), n_embd] interleaved
@@ -50,6 +56,10 @@ pub struct LayerWeights {
 /// Key insight: only storage changes; compute stays in `f32`. This avoids the need
 /// for f16 arithmetic hardware support and keeps the attention kernel simple.
 /// Estimated memory savings: ~50% for f16, ~75% for 4-bit quantized.
+// `Clone` derived (Issue 374 / Plan 301): the CPU LoRA fallback trainer needs to
+// fork frozen base weights. All fields are `Vec` / `Option<Vec>` — clone is a
+// shallow vector copy, no deep aliasing.
+#[derive(Clone)]
 pub struct TransformerWeights {
     pub wte: Vec<f32>,             // [vocab_size, n_embd]
     pub wpe: Vec<f32>,             // [block_size, n_embd]

@@ -101,7 +101,7 @@ fn bench_planar_quant(
     keys: &[Vec<f32>],
     queries: &[Vec<f32>],
 ) -> BackendResult {
-    use katgpt_rs::planar_quant::{PlanarQuantConfig, PlanarQuantKVCache};
+    use katgpt_quant::planar_quant::{PlanarQuantConfig, PlanarQuantKVCache};
 
     let n_keys = keys.len();
     let config = PlanarQuantConfig {
@@ -148,9 +148,9 @@ fn bench_iso_quant(
     seed: u64,
     keys: &[Vec<f32>],
     queries: &[Vec<f32>],
-    mode: katgpt_rs::iso_quant::IsoQuantMode,
+    mode: katgpt_quant::iso_quant::IsoQuantMode,
 ) -> BackendResult {
-    use katgpt_rs::iso_quant::{IsoQuantConfig, IsoQuantKVCache};
+    use katgpt_quant::iso_quant::{IsoQuantConfig, IsoQuantKVCache};
 
     let n_keys = keys.len();
     let config = IsoQuantConfig {
@@ -200,7 +200,7 @@ fn bench_octopus(
     keys: &[Vec<f32>],
     queries: &[Vec<f32>],
 ) -> BackendResult {
-    use katgpt_rs::octopus::{OctopusConfig, OctopusKVCache};
+    use katgpt_quant::octopus::{OctopusConfig, OctopusKVCache};
 
     let n_keys = keys.len();
     let config = OctopusConfig {
@@ -249,7 +249,7 @@ fn bench_turboquant(
     keys: &[Vec<f32>],
     queries: &[Vec<f32>],
 ) -> BackendResult {
-    use katgpt_rs::turboquant::{TurboQuantKVCache, TurboQuantKVCacheConfig};
+    use katgpt_quant::turboquant::{TurboQuantKVCache, TurboQuantKVCacheConfig};
 
     let n_keys = keys.len();
     let config = TurboQuantKVCacheConfig {
@@ -296,7 +296,7 @@ fn bench_hybrid_oct_pq(
     keys: &[Vec<f32>],
     queries: &[Vec<f32>],
 ) -> BackendResult {
-    use katgpt_rs::hybrid_oct_pq::{HybridOctPqConfig, HybridOctPqKVCache};
+    use katgpt_quant::hybrid_oct_pq::{HybridOctPqConfig, HybridOctPqKVCache};
 
     let n_keys = keys.len();
     let config = HybridOctPqConfig {
@@ -339,7 +339,6 @@ fn bench_hybrid_oct_pq(
 // ══════════════════════════════════════════════════════════════
 
 #[test]
-
 #[ignore = "pure measurement benchmark (no assertions), slow in debug; run with --release --ignored"]
 fn goat_block_diagonal_quality_sweep() {
     let dim = 128usize;
@@ -461,7 +460,7 @@ fn goat_block_diagonal_quality_sweep() {
         // IsoQuant Full
         #[cfg(feature = "iso_quant")]
         {
-            use katgpt_rs::iso_quant::IsoQuantMode;
+            use katgpt_quant::iso_quant::IsoQuantMode;
             let mut agg = BackendResult::default();
             for seed in 0..n_seeds {
                 let r = bench_iso_quant(
@@ -486,7 +485,7 @@ fn goat_block_diagonal_quality_sweep() {
         // IsoQuant Fast
         #[cfg(feature = "iso_quant")]
         {
-            use katgpt_rs::iso_quant::IsoQuantMode;
+            use katgpt_quant::iso_quant::IsoQuantMode;
             let mut agg = BackendResult::default();
             for seed in 0..n_seeds {
                 let r = bench_iso_quant(
@@ -518,7 +517,6 @@ fn goat_block_diagonal_quality_sweep() {
 // ══════════════════════════════════════════════════════════════
 
 #[test]
-
 #[ignore = "pure measurement benchmark (no assertions), slow in debug; run with --release --ignored"]
 fn goat_block_diagonal_pairwise_comparison() {
     let dim = 128usize;
@@ -632,7 +630,7 @@ fn goat_block_diagonal_pairwise_comparison() {
 
     #[cfg(feature = "iso_quant")]
     {
-        use katgpt_rs::iso_quant::IsoQuantMode;
+        use katgpt_quant::iso_quant::IsoQuantMode;
         for (mode, name) in [
             (IsoQuantMode::Full, "IsoQuant-F"),
             (IsoQuantMode::Fast, "IsoQuant-R"),
@@ -717,7 +715,6 @@ fn goat_block_diagonal_pairwise_comparison() {
 // ══════════════════════════════════════════════════════════════
 
 #[test]
-
 #[ignore = "pure measurement benchmark (no assertions), slow in debug; run with --release --ignored"]
 fn goat_rotation_cost_comparison() {
     println!("\n⚡ GOAT 023: Rotation Cost Comparison");
@@ -793,7 +790,6 @@ fn goat_rotation_cost_comparison() {
 // ══════════════════════════════════════════════════════════════
 
 #[test]
-
 #[ignore = "pure measurement benchmark (no assertions), slow in debug; run with --release --ignored"]
 fn goat_planar_quant_vs_octopus_head_to_head() {
     let dim = 128usize;
@@ -875,11 +871,10 @@ fn goat_planar_quant_vs_octopus_head_to_head() {
 // ══════════════════════════════════════════════════════════════
 
 #[test]
-
 #[ignore = "pure measurement benchmark (no assertions), slow in debug; run with --release --ignored"]
 #[cfg(feature = "iso_quant")]
 fn goat_iso_quant_full_vs_fast() {
-    use katgpt_rs::iso_quant::IsoQuantMode;
+    use katgpt_quant::iso_quant::IsoQuantMode;
 
     let dim = 128usize;
     let bits_list = [2u8, 3, 4];
@@ -952,7 +947,6 @@ fn goat_iso_quant_full_vs_fast() {
 // ══════════════════════════════════════════════════════════════
 
 #[test]
-
 #[ignore = "pure measurement benchmark (no assertions), slow in debug; run with --release --ignored"]
 fn goat_dimension_scaling() {
     let dims = [64usize, 128, 256];
@@ -1004,7 +998,7 @@ fn goat_dimension_scaling() {
 
         #[cfg(feature = "iso_quant")]
         let (iq_mse, iq_cos) = {
-            use katgpt_rs::iso_quant::IsoQuantMode;
+            use katgpt_quant::iso_quant::IsoQuantMode;
             let mut agg = BackendResult::default();
             for seed in 0..n_seeds {
                 let r = bench_iso_quant(
@@ -1037,7 +1031,6 @@ fn goat_dimension_scaling() {
 // ══════════════════════════════════════════════════════════════
 
 #[test]
-
 #[ignore = "pure measurement benchmark (no assertions), slow in debug; run with --release --ignored"]
 fn goat_three_way_matrix() {
     let dim = 128usize;
@@ -1098,7 +1091,7 @@ fn goat_three_way_matrix() {
 
     #[cfg(feature = "iso_quant")]
     let iq_mse = {
-        use katgpt_rs::iso_quant::IsoQuantMode;
+        use katgpt_quant::iso_quant::IsoQuantMode;
         let mut agg = BackendResult::default();
         for seed in 0..n_seeds {
             let r = bench_iso_quant(
@@ -1164,7 +1157,7 @@ fn goat_three_way_matrix() {
 
     #[cfg(feature = "iso_quant")]
     let iq_cos = {
-        use katgpt_rs::iso_quant::IsoQuantMode;
+        use katgpt_quant::iso_quant::IsoQuantMode;
         let mut agg = BackendResult::default();
         for seed in 0..n_seeds {
             let r = bench_iso_quant(
@@ -1273,7 +1266,6 @@ fn goat_three_way_matrix() {
 // ══════════════════════════════════════════════════════════════
 
 #[test]
-
 #[ignore = "pure measurement benchmark (no assertions), slow in debug; run with --release --ignored"]
 fn goat_production_stack_verdict() {
     println!("\n🏆 GOAT 023: Production Stack Verdict");
@@ -1358,7 +1350,7 @@ fn goat_production_stack_verdict() {
 
     #[cfg(feature = "iso_quant")]
     {
-        use katgpt_rs::iso_quant::IsoQuantMode;
+        use katgpt_quant::iso_quant::IsoQuantMode;
         let mut agg = BackendResult::default();
         for seed in 0..n_seeds {
             let r = bench_iso_quant(
@@ -1518,7 +1510,7 @@ fn goat_production_stack_verdict() {
 #[test]
 #[ignore = "pure measurement benchmark (no assertions), slow in debug; run with --release --ignored"]
 fn goat_maxsim_late_interaction() {
-    use katgpt_rs::simd::maxsim_score;
+    use katgpt_core::simd::maxsim_score;
 
     let dim = 128usize;
     let n_keys = 512usize;
@@ -1603,7 +1595,7 @@ fn goat_maxsim_late_interaction() {
             // ── PlanarQuant ──
             #[cfg(feature = "planar_quant")]
             {
-                use katgpt_rs::planar_quant::{PlanarQuantConfig, PlanarQuantKVCache};
+                use katgpt_quant::planar_quant::{PlanarQuantConfig, PlanarQuantKVCache};
                 let config = PlanarQuantConfig {
                     key_bits: bits,
                     val_bits: bits,
@@ -1633,7 +1625,7 @@ fn goat_maxsim_late_interaction() {
             // ── IsoQuant Fast ──
             #[cfg(feature = "iso_quant")]
             {
-                use katgpt_rs::iso_quant::{IsoQuantConfig, IsoQuantKVCache, IsoQuantMode};
+                use katgpt_quant::iso_quant::{IsoQuantConfig, IsoQuantKVCache, IsoQuantMode};
                 let config = IsoQuantConfig {
                     key_bits: bits,
                     val_bits: bits,
@@ -1667,7 +1659,7 @@ fn goat_maxsim_late_interaction() {
             // ── IsoQuant Full ──
             #[cfg(feature = "iso_quant")]
             {
-                use katgpt_rs::iso_quant::{IsoQuantConfig, IsoQuantKVCache, IsoQuantMode};
+                use katgpt_quant::iso_quant::{IsoQuantConfig, IsoQuantKVCache, IsoQuantMode};
                 let config = IsoQuantConfig {
                     key_bits: bits,
                     val_bits: bits,
@@ -1701,7 +1693,7 @@ fn goat_maxsim_late_interaction() {
             // ── OCTOPUS ──
             #[cfg(feature = "octopus")]
             {
-                use katgpt_rs::octopus::{OctopusConfig, OctopusKVCache};
+                use katgpt_quant::octopus::{OctopusConfig, OctopusKVCache};
                 let config = OctopusConfig {
                     key_bits: bits,
                     val_bits: bits,
@@ -1733,7 +1725,7 @@ fn goat_maxsim_late_interaction() {
             // ── TurboQuant ──
             #[cfg(feature = "turboquant")]
             {
-                use katgpt_rs::turboquant::{TurboQuantKVCache, TurboQuantKVCacheConfig};
+                use katgpt_quant::turboquant::{TurboQuantKVCache, TurboQuantKVCacheConfig};
                 let config = TurboQuantKVCacheConfig {
                     key_bits: bits,
                     val_bits: bits,
@@ -1821,7 +1813,6 @@ fn goat_maxsim_late_interaction() {
 // ══════════════════════════════════════════════════════════════
 
 #[test]
-
 #[ignore = "pure measurement benchmark (no assertions), slow in debug; run with --release --ignored"]
 fn goat_hybrid_oct_pq_quality_sweep() {
     let dim = 128usize;
@@ -2102,7 +2093,7 @@ fn goat_hybrid_oct_pq_quality_sweep() {
 #[test]
 #[ignore = "pure measurement benchmark (no assertions), slow in debug; run with --release --ignored"]
 fn goat_hybrid_maxsim_late_interaction() {
-    use katgpt_rs::simd::maxsim_score;
+    use katgpt_core::simd::maxsim_score;
 
     let dim = 128usize;
     let n_keys = 512usize;
@@ -2174,7 +2165,7 @@ fn goat_hybrid_maxsim_late_interaction() {
             // ── Hybrid OCT+PQ ──
             #[cfg(feature = "hybrid_oct_pq")]
             {
-                use katgpt_rs::hybrid_oct_pq::{HybridOctPqConfig, HybridOctPqKVCache};
+                use katgpt_quant::hybrid_oct_pq::{HybridOctPqConfig, HybridOctPqKVCache};
                 let config = HybridOctPqConfig {
                     key_bits: bits,
                     val_bits: bits,
@@ -2205,7 +2196,7 @@ fn goat_hybrid_maxsim_late_interaction() {
             // ── OCTOPUS ──
             #[cfg(feature = "octopus")]
             {
-                use katgpt_rs::octopus::{OctopusConfig, OctopusKVCache};
+                use katgpt_quant::octopus::{OctopusConfig, OctopusKVCache};
                 let config = OctopusConfig {
                     key_bits: bits,
                     val_bits: bits,
@@ -2237,7 +2228,7 @@ fn goat_hybrid_maxsim_late_interaction() {
             // ── PlanarQuant ──
             #[cfg(feature = "planar_quant")]
             {
-                use katgpt_rs::planar_quant::{PlanarQuantConfig, PlanarQuantKVCache};
+                use katgpt_quant::planar_quant::{PlanarQuantConfig, PlanarQuantKVCache};
                 let config = PlanarQuantConfig {
                     key_bits: bits,
                     val_bits: bits,

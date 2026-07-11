@@ -9,22 +9,37 @@
 //! See `README.md` for the architectural rationale (why this is a separate
 //! crate from `katgpt-core`).
 
-mod contiguous;
 mod context;
+mod contiguous;
 mod kv_cache;
 mod mtp;
 mod weights;
 
-pub use contiguous::ContiguousWeights;
+// Phase 9 absorptions (Proposal 003) — modules moved from katgpt-rs root.
+#[cfg(feature = "dense_mesh")]
+pub mod dense_mesh;
+#[cfg(feature = "kog_cpu_fusion")]
+pub mod mbu;
+#[cfg(feature = "swir_switch_thinking")]
+pub mod swir;
+#[cfg(feature = "tf_loop")]
+pub mod tf_loop;
+// Phase 12 T4.6 (2026-07-04): module moved from katgpt-rs root.
+// thinking_cot hosts the ThinkingStrategy trait + StepContext + StepDirective
+// wiring types consumed by swir/strategy_adapter (Plan 194).
+#[cfg(feature = "thinking_cot")]
+pub mod thinking_cot;
+
 pub use context::PrefillContext;
 #[cfg(feature = "wall_attention")]
 pub use context::{GateStatistics, WallPrefixState};
+pub use contiguous::ContiguousWeights;
+/// Page size in tokens for [`PagedKVCache`] (tuneable, must be power of 2).
+pub use kv_cache::PAGE_SIZE;
 pub use kv_cache::{
     KVCache, KVLayerSnapshot, KVSnapshot, MultiLayerKVCache, PagedKVCache, RavenKVCache,
     preload_kv_cache,
 };
-/// Page size in tokens for [`PagedKVCache`] (tuneable, must be power of 2).
-pub use kv_cache::PAGE_SIZE;
 pub use mtp::{MtpProjection, load_mtp_projection, project_target_activation};
 pub use weights::{LayerWeights, TransformerWeights};
 

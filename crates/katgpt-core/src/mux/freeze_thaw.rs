@@ -68,6 +68,7 @@ impl MuxPatternStore {
 
     /// Total number of patterns across all keys.
     /// O(1) — maintained incrementally on freeze.
+    #[inline]
     pub fn pattern_count(&self) -> usize {
         self.total_patterns
     }

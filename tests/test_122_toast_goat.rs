@@ -6,7 +6,7 @@
 mod tests {
     use std::collections::HashMap;
 
-    use katgpt_rs::tokenizer::{
+    use katgpt_tokenizer::{
         BpeTokenizerImpl, BpeTrainer, SplitTreeBuilder, ToastTokenizer, ToastTokenizerImpl,
     };
 
@@ -147,16 +147,11 @@ mod tests {
 
     /// Count single-byte tokens in a BPE token ID list.
     fn count_single_byte_tokens_bpe(
-        tokenizer: &katgpt_rs::tokenizer::BpeTokenizer,
+        tokenizer: &katgpt_tokenizer::BpeTokenizer,
         ids: &[usize],
     ) -> usize {
         ids.iter()
-            .filter(|&&id| {
-                tokenizer
-                    .id_to_vocab
-                    .get(id)
-                    .is_some_and(|v| v.as_bytes().len() == 1)
-            })
+            .filter(|&&id| tokenizer.id_to_vocab.get(id).is_some_and(|v| v.len() == 1))
             .count()
     }
 

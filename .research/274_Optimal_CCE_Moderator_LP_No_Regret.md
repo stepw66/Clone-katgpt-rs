@@ -430,14 +430,14 @@ complete end-to-end at both primitive (katgpt-rs Plan 300) and runtime
 **Scope boundary:** this is the subjective-CCE wiring path (Issue 327 Path
 A+). Strict Bayes-CCE (no-common-prior per-NPC CWMs modeled as draws from a
 non-degenerate joint) is deferred Super-GOAT research, tracked separately in
-`riir-ai/.issues/328_no_common_prior_bayes_cce.md`.
+`riir-ai/.issues/328_no_common_prior_bayes_cce.md` (riir-ai issue, closed + removed).
 
 **References:**
 - Plan 300 (primitive): [`katgpt-rs/.plans/300_subjective_cce_heterogeneous_payoff_wrapper.md`](../.plans/300_subjective_cce_heterogeneous_payoff_wrapper.md)
 - Plan 328 (runtime adapter): [`riir-ai/.plans/328_subjective_cce_crowd_batch_wiring.md`](../../riir-ai/.plans/328_subjective_cce_crowd_batch_wiring.md)
 - Plan 328 GOAT evidence: [`riir-ai/.benchmarks/328_subjective_cce_crowd_goat.md`](../../riir-ai/.benchmarks/328_subjective_cce_crowd_goat.md)
-- Parent issue (closed): [`riir-ai/.issues/327_cwm_cce_bayes_fusion.md`](../../riir-ai/.issues/327_cwm_cce_bayes_fusion.md)
-- Sibling issue (deferred): [`riir-ai/.issues/328_no_common_prior_bayes_cce.md`](../../riir-ai/.issues/328_no_common_prior_bayes_cce.md)
+- Parent issue (closed + removed, riir-ai): `riir-ai/.issues/327_cwm_cce_bayes_fusion.md`
+- Sibling issue (closed + removed, riir-ai): `riir-ai/.issues/328_no_common_prior_bayes_cce.md`
 - Regret sketch: [`riir-ai/.docs/62_bayes_cce_regret_sketch.md`](../../riir-ai/.docs/62_bayes_cce_regret_sketch.md) §2
 
 **TL;DR:** Campi et al. give us **optimal Coarse Correlated Equilibria in Mean Field Games via LP relaxation + no-regret primal-dual with Bregman regularization** (`O(N⁻¹ᐟ²)` convergence, no monotonicity assumption). The neural-network parametrization is training-flavored (→ riir-train), but the LP-CCE formulation + primal-dual iterator distill modellessly into `CceLp<N,A>` + `CcePrimalDual` in katgpt-rs. The latent-space reframing — `state` = HLA bucket, `action` = CGSP conjecturer arm, `signal` = zone-mood latent scalar broadcast via HLA channel, sync-committed via LatCal — is the **Super-GOAT**: coordinated emergent population behavior via a latent broadcast signal with a designer-steerable moderator objective, Pareto-dominating any Nash-seeking competitor, at crowd-scale (thousands of NPCs, 20Hz tick) within plasma-tier latency budgets. All 4 novelty-gate questions YES. Mandatory outputs shipped: this note (R274 public), Plan 295 (public primitive), riir-ai R143 (private guide), riir-ai Plan 325 (private runtime).

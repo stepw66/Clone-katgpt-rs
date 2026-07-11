@@ -8,7 +8,7 @@
 mod tests {
     use std::collections::HashMap;
 
-    use katgpt_rs::tokenizer::{
+    use katgpt_tokenizer::{
         BpeTokenizerImpl, BpeTrainer, SplitTreeBuilder, ToastTokenizer, ToastTokenizerImpl,
     };
 

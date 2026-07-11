@@ -56,7 +56,10 @@ impl Lcg {
         Self { state: seed }
     }
     fn next_u64(&mut self) -> u64 {
-        self.state = self.state.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+        self.state = self
+            .state
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
         self.state
     }
     fn next_f32(&mut self) -> f32 {
@@ -84,9 +87,9 @@ fn sample_decision_point(rng: &mut Lcg) -> Vec<Vec<f32>> {
                 let mut p = vec![0.0_f32; ACTION_DIM];
                 p[dom] = dom_mass;
                 let rest = (1.0 - dom_mass) / (ACTION_DIM - 1) as f32;
-                for j in 0..ACTION_DIM {
+                for (j, pj) in p.iter_mut().enumerate() {
                     if j != dom {
-                        p[j] = rest * (0.5 + rng.next_f32());
+                        *pj = rest * (0.5 + rng.next_f32());
                     }
                 }
                 p
@@ -95,18 +98,18 @@ fn sample_decision_point(rng: &mut Lcg) -> Vec<Vec<f32>> {
                 let top_count = 2 + (rng.next_u64() % 2) as usize;
                 let mut p = vec![0.0_f32; ACTION_DIM];
                 let base = 1.0 / top_count as f32;
-                for k in 0..top_count {
-                    p[k] = base * (0.8 + 0.4 * rng.next_f32());
+                for pk in p.iter_mut().take(top_count) {
+                    *pk = base * (0.8 + 0.4 * rng.next_f32());
                 }
-                for j in top_count..ACTION_DIM {
-                    p[j] = 0.02 * rng.next_f32();
+                for pj in p[top_count..].iter_mut() {
+                    *pj = 0.02 * rng.next_f32();
                 }
                 p
             }
             _ => {
                 let mut p = vec![0.0_f32; ACTION_DIM];
-                for j in 0..ACTION_DIM {
-                    p[j] = 1.0 + rng.next_f32();
+                for pj in p.iter_mut() {
+                    *pj = 1.0 + rng.next_f32();
                 }
                 p
             }
@@ -170,11 +173,7 @@ fn pearson(xs: &[f32], ys: &[f32]) -> f32 {
         dy2 += dy * dy;
     }
     let den = (dx2 * dy2).sqrt();
-    if den > 0.0 {
-        num / den
-    } else {
-        0.0
-    }
+    if den > 0.0 { num / den } else { 0.0 }
 }
 
 /// Spearman rank correlation: Pearson on ranks.
@@ -231,7 +230,10 @@ fn ascii_scatter(xs: &[f32], ys: &[f32]) {
         grid[row * w + col] = b'*';
     }
     println!("      H_1 (x) →");
-    println!("      {:.3}                                                            {:.3}", xmin, xmax);
+    println!(
+        "      {:.3}                                                            {:.3}",
+        xmin, xmax
+    );
     for row in 0..h {
         let label = if row == 0 {
             format!("{:.3}", ymax)
@@ -240,7 +242,10 @@ fn ascii_scatter(xs: &[f32], ys: &[f32]) {
         } else {
             String::new()
         };
-        let line: String = grid[row * w..(row + 1) * w].iter().map(|&c| c as char).collect();
+        let line: String = grid[row * w..(row + 1) * w]
+            .iter()
+            .map(|&c| c as char)
+            .collect();
         println!("{:>6} |{}", label, line);
     }
     println!("       +-----------------------------------------------------------");
@@ -290,12 +295,16 @@ fn g3_orthogonality_to_h1_make_or_break() {
     // ── Spearman ρ + bootstrap 95% CI. ──
     let rho = spearman(&h1_samples, &umax_samples);
     let mut boot_rng = Lcg::new(0xC0FFEE_u64);
-    let (ci_lo, ci_hi) = spearman_bootstrap_ci(&h1_samples, &umax_samples, N_BOOTSTRAP, &mut boot_rng);
+    let (ci_lo, ci_hi) =
+        spearman_bootstrap_ci(&h1_samples, &umax_samples, N_BOOTSTRAP, &mut boot_rng);
 
     println!("\n=== G3 — Orthogonality to H_1 (MAKE-OR-BREAK) ===");
     println!("Samples: {N_DECISION_POINTS} decision points × (H_1(P̄), max_k u_k)");
     println!("\nSpearman ρ(H_1, u_max) = {:.4}", rho);
-    println!("Bootstrap 95% CI       = [{:.4}, {:.4}]  (n_boot = {N_BOOTSTRAP})", ci_lo, ci_hi);
+    println!(
+        "Bootstrap 95% CI       = [{:.4}, {:.4}]  (n_boot = {N_BOOTSTRAP})",
+        ci_lo, ci_hi
+    );
     println!("\nScatter (H_1 on x, u_max on y):");
     ascii_scatter(&h1_samples, &umax_samples);
 

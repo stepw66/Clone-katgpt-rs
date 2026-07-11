@@ -42,7 +42,11 @@ pub(crate) struct MockCounterState {
 
 impl MockCounterState {
     pub(crate) fn new(counter: u32, step_size: u32) -> Self {
-        Self { counter, step_size, tick: 0 }
+        Self {
+            counter,
+            step_size,
+            tick: 0,
+        }
     }
 }
 
@@ -58,7 +62,11 @@ impl GameState for MockCounterState {
 
     fn available_actions(&self, _player_id: u8) -> Vec<Self::Action> {
         // Legal set is state-independent: {Inc, Dec, NoOp}.
-        vec![MockCounterAction::Inc, MockCounterAction::Dec, MockCounterAction::NoOp]
+        vec![
+            MockCounterAction::Inc,
+            MockCounterAction::Dec,
+            MockCounterAction::NoOp,
+        ]
     }
 
     fn advance(&self, action: &Self::Action, _player_id: u8) -> Self {
@@ -82,6 +90,7 @@ impl GameState for MockCounterState {
         0.0
     }
 
+    #[inline]
     fn tick(&self) -> u32 {
         self.tick
     }
@@ -121,7 +130,9 @@ impl BeliefInferenceFn<MockCounterState> for MockEnumBelief {
     ) -> Vec<Self::Sample> {
         let count = n.min(self.support_size);
         // Deterministic given seed: derive each sample from seed + index.
-        (0..count).map(|i| seed.wrapping_add(i as u64) as u32).collect()
+        (0..count)
+            .map(|i| seed.wrapping_add(i as u64) as u32)
+            .collect()
     }
 }
 
@@ -180,7 +191,10 @@ fn cwm_commitment_from_kernel_matches_manual() {
 fn cwm_commitment_matches_kernel() {
     let k = MockCounterState::new(0, 5);
     let c = CwmCommitment::from_kernel(&k, 1, 100);
-    assert!(c.matches_kernel(&k), "commitment must match its source kernel");
+    assert!(
+        c.matches_kernel(&k),
+        "commitment must match its source kernel"
+    );
     // Different step_size → different kernel → no match.
     let k_other = MockCounterState::new(0, 6);
     assert!(!c.matches_kernel(&k_other));
@@ -261,8 +275,16 @@ fn verify_transition_detects_wrong_step_size() {
         }) => {
             // actual_post should have counter=14, step_size=4.
             // expected_post should have counter=13, step_size=3.
-            assert!(actual_post_debug.contains("counter: 14"), "actual: {}", actual_post_debug);
-            assert!(expected_post_debug.contains("counter: 13"), "expected: {}", expected_post_debug);
+            assert!(
+                actual_post_debug.contains("counter: 14"),
+                "actual: {}",
+                actual_post_debug
+            );
+            assert!(
+                expected_post_debug.contains("counter: 13"),
+                "expected: {}",
+                expected_post_debug
+            );
         }
         other => panic!("expected StateMismatch, got {:?}", other),
     }
@@ -329,9 +351,24 @@ fn verify_transition_state_mismatch_path() {
 fn make_transition_tests_from_trajectory_emits_one_per_step() {
     let s0 = MockCounterState::new(0, 1);
     let steps: [(MockCounterState, MockCounterAction, u8, MockCounterState); 3] = [
-        (s0, MockCounterAction::Inc, 0, s0.advance(&MockCounterAction::Inc, 0)),
-        (s0, MockCounterAction::Dec, 0, s0.advance(&MockCounterAction::Dec, 0)),
-        (s0, MockCounterAction::NoOp, 0, s0.advance(&MockCounterAction::NoOp, 0)),
+        (
+            s0,
+            MockCounterAction::Inc,
+            0,
+            s0.advance(&MockCounterAction::Inc, 0),
+        ),
+        (
+            s0,
+            MockCounterAction::Dec,
+            0,
+            s0.advance(&MockCounterAction::Dec, 0),
+        ),
+        (
+            s0,
+            MockCounterAction::NoOp,
+            0,
+            s0.advance(&MockCounterAction::NoOp, 0),
+        ),
     ];
     let tests = make_transition_tests_from_trajectory(steps);
     assert_eq!(tests.len(), 3);

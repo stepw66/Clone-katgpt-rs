@@ -11,7 +11,7 @@ use std::collections::HashMap;
 use std::hint::black_box;
 use std::time::Instant;
 
-use katgpt_rs::tokenizer::{DatrieTreeIndex, DatrieVocab, SplitNode, SplitTree};
+use katgpt_tokenizer::{DatrieTreeIndex, DatrieVocab, SplitNode, SplitTree};
 
 // ── Config ─────────────────────────────────────────────────────
 
@@ -163,7 +163,7 @@ fn bench_lookup_latency() {
         for _ in 0..1000 {
             for key in &all_keys {
                 black_box(vocab.get(*key));
-                black_box(datrie.lookup(*key));
+                black_box(datrie.lookup(key));
             }
         }
 
@@ -238,7 +238,7 @@ fn bench_encode_throughput() {
                 // Longest prefix match (brute force — how HashMap is typically used)
                 let mut best_len = 1;
                 for end in (pos + 1..=input.len()).rev().take(20) {
-                    if vocab.get(&input[pos..end]).is_some() {
+                    if vocab.contains_key(&input[pos..end]) {
                         best_len = end - pos;
                         break;
                     }

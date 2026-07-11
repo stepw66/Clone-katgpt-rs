@@ -54,16 +54,24 @@ impl PairedLossGap {
         );
         let len = log_probs_a.len();
         let mut deltas = Vec::with_capacity(len);
-        // Sound: `with_capacity(len)` reserved exactly `len` slots; we write
-        // exactly `len` elements before any observable read. The direct-index
-        // form (vs `push`) lets LLVM lower this to packed f32 subtracts without
-        // a per-iteration capacity check.
+        // SAFETY: `spare_capacity_mut()` exposes exactly `len` uninitialized
+        // slots; we `.write()` each one once before any observable read, then
+        // `set_len(len)` only after the full write pass. This preserves the
+        // perf intent (no per-iteration capacity check, packed f32 subtracts)
+        // without the unsound `set_len`-before-write pattern clippy flags as
+        // `uninit_vec`.
+        {
+            let spare = deltas.spare_capacity_mut();
+            for (slot, (&a, &b)) in spare
+                .iter_mut()
+                .zip(log_probs_a.iter().zip(log_probs_b.iter()))
+            {
+                slot.write(a - b);
+            }
+        }
+        // SAFETY: all `len` slots were initialized above.
         unsafe {
             deltas.set_len(len);
-            for i in 0..len {
-                *deltas.get_unchecked_mut(i) =
-                    *log_probs_a.get_unchecked(i) - *log_probs_b.get_unchecked(i);
-            }
         }
         Self { deltas }
     }
@@ -134,9 +142,7 @@ impl PairedLossGap {
         let mut count = 0u32;
         for i in 0..len {
             // Safety: debug_assert above ensures equal lengths.
-            let (d, cls) = unsafe {
-                (*self.deltas.get_unchecked(i), *classes.get_unchecked(i))
-            };
+            let (d, cls) = unsafe { (*self.deltas.get_unchecked(i), *classes.get_unchecked(i)) };
             let m = u32::from(cls == target);
             sum += d * (m as f32);
             count += m;
@@ -304,9 +310,7 @@ impl PairedLossGap {
         let mut count = 0u32;
         for i in 0..len {
             // Safety: callers ensure classes.len() == deltas.len().
-            let (d, cls) = unsafe {
-                (*self.deltas.get_unchecked(i), *classes.get_unchecked(i))
-            };
+            let (d, cls) = unsafe { (*self.deltas.get_unchecked(i), *classes.get_unchecked(i)) };
             let m = u32::from(cls == target);
             sum += d * (m as f32);
             count += m;
@@ -366,9 +370,7 @@ impl PairedLossGap {
         let mut acc: std::collections::HashMap<TokenClass, (f32, u32)> =
             std::collections::HashMap::new();
         for i in 0..self.deltas.len() {
-            let (d, cls) = unsafe {
-                (*self.deltas.get_unchecked(i), *classes.get_unchecked(i))
-            };
+            let (d, cls) = unsafe { (*self.deltas.get_unchecked(i), *classes.get_unchecked(i)) };
             let entry = acc.entry(cls).or_insert((0.0f32, 0u32));
             entry.0 += d;
             entry.1 += 1;
@@ -376,7 +378,11 @@ impl PairedLossGap {
         // Build rows. Look up each class's bound; NaN if not provided.
         let mut rows: Vec<ClassGapRow> = Vec::with_capacity(acc.len());
         for (cls, (sum, count)) in acc {
-            let mean_gap = if count == 0 { 0.0 } else { sum / (count as f32) };
+            let mean_gap = if count == 0 {
+                0.0
+            } else {
+                sum / (count as f32)
+            };
             let (log_v_tau, ratio) = match bounds.get(&cls) {
                 Some(b) => {
                     let lv = b.log_v_tau;
@@ -403,6 +409,10 @@ impl PairedLossGap {
         }
         // Sort by gap_to_bound_ratio descending, NaN-aware (NaN sorts last).
         // sort_by is stable; ties keep insertion (HashMap) order.
+        //
+        // NOTE: cannot use `total_cmp` here — it places NaN as largest, which
+        // would put NaN FIRST in this descending sort. The explicit match
+        // preserves the documented "NaN sorts last" semantics.
         rows.sort_by(|a, b| {
             let ra = a.gap_to_bound_ratio;
             let rb = b.gap_to_bound_ratio;
@@ -412,11 +422,8 @@ impl PairedLossGap {
                 (true, true) => std::cmp::Ordering::Equal,
                 (true, false) => std::cmp::Ordering::Greater,
                 (false, true) => std::cmp::Ordering::Less,
-                // Both finite: descending = reverse natural order
-                // (rb.partial_cmp(ra) returns Less when ra > rb).
-                (false, false) => rb
-                    .partial_cmp(&ra)
-                    .unwrap_or(std::cmp::Ordering::Equal),
+                // Both finite: descending = reverse natural order.
+                (false, false) => rb.total_cmp(&ra),
             }
         });
         ClassGapReport { rows }

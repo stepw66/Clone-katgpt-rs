@@ -135,7 +135,7 @@ Module compiled when EITHER feature is on; submodules individually gated in `mod
 - **Source paper:** [arxiv 2601.22436](https://arxiv.org/pdf/2601.22436) — Zhao et al. 2026 (ICML)
 - **Implementation:** `crates/katgpt-core/src/faithfulness/{mod,types,probe,attribution,gate,perturb,goat_gate}.rs` (moved from `katgpt-rs/src/faithfulness/` so riir-engine Plan 308 can consume via katgpt-core)
 - **Benches:** `katgpt-rs/benches/{triggered_injection_bench,faithfulness_probe_bench}.rs` (import via `katgpt_core::faithfulness::*`)
-- **API docs:** [`.docs/faithfulness_probe.md`](../.docs/faithfulness_probe.md)
+- **API docs:** [`.docs/04_calibration/faithfulness_probe.md`](../.docs/04_calibration/faithfulness_probe.md)
 
 ## TL;DR
 

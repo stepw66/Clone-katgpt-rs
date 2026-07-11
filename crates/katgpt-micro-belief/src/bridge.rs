@@ -92,13 +92,19 @@ mod tests {
         for v in [-2.0f32, -0.5, 0.0, 0.5, 2.0] {
             let state = [v, 0.0f32];
             project_to_scalars(&state, &directions, dim, &mut out);
-            let prev = if v == -2.0 { f32::NEG_INFINITY } else {
+            let prev = if v == -2.0 {
+                f32::NEG_INFINITY
+            } else {
                 let s = [v - 0.1, 0.0f32];
                 let mut o = [0.0f32; 1];
                 project_to_scalars(&s, &directions, dim, &mut o);
                 o[0]
             };
-            assert!(out[0] > prev, "not monotone at v={v}: out={o0:?} prev={prev:?}", o0 = out[0]);
+            assert!(
+                out[0] > prev,
+                "not monotone at v={v}: out={o0:?} prev={prev:?}",
+                o0 = out[0]
+            );
         }
     }
 
@@ -107,11 +113,7 @@ mod tests {
         let dim = 3usize;
         let state = [1.0f32, 1.0, 1.0];
         // 3 directions: identity axes
-        let directions: [f32; 9] = [
-            1.0, 0.0, 0.0,
-            0.0, 1.0, 0.0,
-            0.0, 0.0, 1.0,
-        ];
+        let directions: [f32; 9] = [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0];
         let mut out = [0.0f32; 3];
         project_to_scalars(&state, &directions, dim, &mut out);
         // Each dot = 1.0 → sigmoid(1) ≈ 0.731

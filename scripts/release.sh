@@ -4,9 +4,10 @@
 # What it does (from develop):
 #   1. If no release PR is open, triggers release-plz to create one (and waits)
 #   2. Merges the release PR into develop (merge commit, never squash)
-#   3. Promotes develop → main (fast-forward)
+#   3. Promotes develop → main (--no-ff merge)
 #   4. Explicitly triggers the publish job on main (push alone does NOT fire it)
 #   5. Waits for publish (cargo publish to crates.io + tag + GitHub release)
+#   6. Syncs main back into develop (fast-forward) so branches don't diverge
 #
 # The release-plz workflow itself ONLY fires on workflow_dispatch — pushes to
 # develop/main do nothing. This script is the sole entry point for releases.
@@ -102,8 +103,16 @@ RUN_ID="$(gh run list --workflow=release-plz.yml --branch=main \
   --event=workflow_dispatch --limit=1 --json databaseId --jq '.[0].databaseId')"
 [[ -n "$RUN_ID" ]] && gh run watch "$RUN_ID" --exit-status
 
-# Switch back to develop for continued work
+# ── Step 6: sync main back into develop (fast-forward) ───────────────
+# Without this, the --no-ff merge commit on main (step 4) stays on main only,
+# and develop falls behind by one merge commit per release. Over N releases
+# that's N divergent commits — confusing and makes the next promotion's
+# merge-base look stale. Since develop is an ancestor of main after the
+# --no-ff merge, this is a clean fast-forward.
+echo "→ syncing main back into develop (fast-forward)..."
 git checkout develop
+git merge --ff-only main
+git push origin develop
 
 echo ""
 echo "✓ shipped. CI is publishing katgpt-core to crates.io."

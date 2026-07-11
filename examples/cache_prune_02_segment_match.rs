@@ -4,7 +4,7 @@
 //!
 //! Run: `cargo run --example cache_prune_02_segment_match --features cache_prune`
 
-use katgpt_rs::cache_prune::{KvSegmentPool, RollingHash};
+use katgpt_kv::cache_prune::{KvSegmentPool, RollingHash};
 
 fn main() {
     println!("=== CachePrune Rolling Hash Segment Matching (Plan 140 GOAT) ===\n");

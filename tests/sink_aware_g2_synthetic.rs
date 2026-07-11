@@ -26,7 +26,7 @@
 
 #![cfg(feature = "sink_aware_attn")]
 
-use katgpt_rs::data_probe::sink_classify::{
+use katgpt_core::data_probe::sink_classify::{
     SinkAwarePolicy, SinkClassifierConfig, StableRankScratch, apply_dual_policy_gate,
 };
 
@@ -102,12 +102,15 @@ fn g2_synthetic_broadcast_dual_preserves_more_than_uniform() {
     );
 
     // Uniform path is a pure copy — no classification.
-    assert_eq!(kind_uniform, katgpt_rs::data_probe::sink_classify::SinkKind::None);
+    assert_eq!(
+        kind_uniform,
+        katgpt_core::data_probe::sink_classify::SinkKind::None
+    );
 
     // Dual path should classify the dominant sink as Broadcast.
     assert_eq!(
         kind_dual,
-        katgpt_rs::data_probe::sink_classify::SinkKind::Broadcast,
+        katgpt_core::data_probe::sink_classify::SinkKind::Broadcast,
         "DualPolicy should classify the synthetic Broadcast head as Broadcast"
     );
 
@@ -217,10 +220,13 @@ fn g2_synthetic_nop_dual_gates_uniform_does_not() {
         &mut out_dual,
     );
 
-    assert_eq!(kind_uniform, katgpt_rs::data_probe::sink_classify::SinkKind::None);
+    assert_eq!(
+        kind_uniform,
+        katgpt_core::data_probe::sink_classify::SinkKind::None
+    );
     assert_eq!(
         kind_dual,
-        katgpt_rs::data_probe::sink_classify::SinkKind::Nop,
+        katgpt_core::data_probe::sink_classify::SinkKind::Nop,
         "DualPolicy should classify the synthetic NOP head as Nop"
     );
 

@@ -19,9 +19,9 @@
 
 #![cfg(feature = "cgsp_dual_pool")]
 
-use katgpt_rs::cgsp::{
-    traits::HintDeltaBandit, types::Priority, DualPoolBandit, DualPoolConfig, PoolId,
-    ReachableDualPoolRouter,
+use katgpt_core::cgsp::{
+    DualPoolBandit, DualPoolConfig, PoolId, ReachableDualPoolRouter, traits::HintDeltaBandit,
+    types::Priority,
 };
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -133,11 +133,19 @@ fn demo_reachability() {
     println!("  After {TOTAL} cycles (all E-pool successes):");
     println!("    w_E               : {:.4}", dp.w_e());
     println!("    α = sigmoid(w_E−w_X): {:.6}", alpha);
-    println!("    is_reachable()    : {}  (X-pool floor > 0)", dp.is_reachable());
-    println!("    X-pool selections : {x_selections} / {TOTAL}  (P ≈ {:.6})",
-        x_selections as f64 / TOTAL as f64);
+    println!(
+        "    is_reachable()    : {}  (X-pool floor > 0)",
+        dp.is_reachable()
+    );
+    println!(
+        "    X-pool selections : {x_selections} / {TOTAL}  (P ≈ {:.6})",
+        x_selections as f64 / TOTAL as f64
+    );
     assert!(dp.is_reachable(), "G1 FAIL: X-pool lost reachability");
-    assert!(x_selections > 0, "G1 FAIL: X-pool never selected in {TOTAL} cycles");
+    assert!(
+        x_selections > 0,
+        "G1 FAIL: X-pool never selected in {TOTAL} cycles"
+    );
     println!();
     println!("  ✓ X-pool selected even at extreme exploitation — proactive non-trap.");
 }
@@ -160,10 +168,12 @@ fn demo_epool_growth() {
 
     let e = GrowingVecBandit::uniform(4);
     let x = GrowingVecBandit::uniform(16);
-    let mut cfg = DualPoolConfig::default();
-    cfg.growth_enabled = true;
-    cfg.promotion_threshold = 0.1;
-    cfg.max_epool_size = 64;
+    let cfg = DualPoolConfig {
+        growth_enabled: true,
+        promotion_threshold: 0.1,
+        max_epool_size: 64,
+        ..Default::default()
+    };
     let mut dp = DualPoolBandit::with_config(e, x, cfg);
 
     let initial_e_size = dp.e_pool().num_arms();
@@ -178,7 +188,10 @@ fn demo_epool_growth() {
     dp.set_active_pool(PoolId::Exploration);
     dp.absorb(7, 0.8); // Arm 7 earns enough reward to cross threshold.
     println!();
-    println!("  ── rewarding X-pool arm 7 with r=0.8 (threshold={}) ──", dp.config().promotion_threshold);
+    println!(
+        "  ── rewarding X-pool arm 7 with r=0.8 (threshold={}) ──",
+        dp.config().promotion_threshold
+    );
     dp.consolidate();
 
     let final_e_size = dp.e_pool().num_arms();
@@ -194,7 +207,12 @@ fn demo_epool_growth() {
     );
     // The promoted arm should have elevated priority (X-pool arm 7's prio
     // at consolidate time: uniform 1/16 + absorbed 0.8 = 0.8625).
-    let max_e_prio = dp.e_pool().priorities().iter().cloned().fold(0.0f32, f32::max);
+    let max_e_prio = dp
+        .e_pool()
+        .priorities()
+        .iter()
+        .cloned()
+        .fold(0.0f32, f32::max);
     let uniform_4 = 1.0 / 4.0;
     assert!(
         max_e_prio > uniform_4,
@@ -232,12 +250,11 @@ fn demo_faithfulness_gate() {
     let live_arms: Vec<usize> = (0..4).collect();
     let gate = |arm: usize| live_arms.contains(&arm);
 
-    let make_cfg = || {
-        let mut cfg = DualPoolConfig::default();
-        cfg.growth_enabled = true;
-        cfg.promotion_threshold = 0.05;
-        cfg.max_epool_size = 64;
-        cfg
+    let make_cfg = || DualPoolConfig {
+        growth_enabled: true,
+        promotion_threshold: 0.05,
+        max_epool_size: 64,
+        ..Default::default()
     };
 
     // ── Gate ON ──────────────────────────────────────────────────────────
@@ -252,7 +269,7 @@ fn demo_faithfulness_gate() {
     for arm in 0..8 {
         dp_on.absorb(arm, 0.3); // All arms cross threshold 0.05.
     }
-    dp_on.consolidate_growing_gated(&gate);
+    dp_on.consolidate_growing_gated(gate);
     let on_size = dp_on.e_pool().num_arms();
     println!("    E-pool size: {on_size} (expected: 1 initial + 4 live = 5)");
 
@@ -274,10 +291,18 @@ fn demo_faithfulness_gate() {
     println!("    E-pool size: {off_size} (expected: 1 initial + 8 all = 9)");
 
     println!();
-    assert!(on_size < off_size,
-        "G4 FAIL: gate didn't filter dead items ({on_size} vs {off_size})");
-    assert_eq!(on_size, 5, "G4 FAIL: gate ON should promote exactly 4 live arms (+1 initial)");
-    assert_eq!(off_size, 9, "G4 FAIL: gate OFF should promote all 8 arms (+1 initial)");
+    assert!(
+        on_size < off_size,
+        "G4 FAIL: gate didn't filter dead items ({on_size} vs {off_size})"
+    );
+    assert_eq!(
+        on_size, 5,
+        "G4 FAIL: gate ON should promote exactly 4 live arms (+1 initial)"
+    );
+    assert_eq!(
+        off_size, 9,
+        "G4 FAIL: gate OFF should promote all 8 arms (+1 initial)"
+    );
     println!("  ✓ Gate ON: 4 live arms promoted, 4 dead filtered (E-pool = {on_size}).");
     println!("  ✓ Gate OFF: all 8 promoted, dead weight clogs E-pool (E-pool = {off_size}).");
     println!("    The gate prevents Research 244's 'dead condensed memory' failure mode.");

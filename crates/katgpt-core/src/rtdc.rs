@@ -29,8 +29,10 @@
 //!
 //! ## What Phase 1 does NOT deliver
 //!
-//! - Cross-depth consistency proof (`subtree_inclusion`) — tracked in
-//!   `riir-chain/issues/002_rtdc_subtree_inclusion_research.md`.
+//! - Cross-depth consistency proof (`subtree_inclusion`) — Candidate C
+//!   (probabilistic sampling) shipped behind `rtdc_subtree_inclusion`;
+//!   Candidate A (Pedersen deterministic) research closed dormant, see
+//!   `riir-chain/.research/006_RTDC_Candidate_A_Pedersen_Resolution.md`.
 //! - LatCal-backed `DeterministicLeafEncode` impl — lives in riir-chain
 //!   (Plan 003, gated on this module's trait existing).
 //! - Chain quorum over 3 roots — riir-chain Plan 003.
@@ -77,8 +79,10 @@ const MAX_RTDC_SIBLINGS: usize = 2 * (MERKLE_OCTREE_BRANCHING - 1);
 ///
 /// **Soundness caveat (Phase 1):** each root is independently correct, but
 /// cross-depth consistency (`roots[d]` faithfully aggregates `roots[d+1]`)
-/// requires the Phase 2 `subtree_inclusion` proof — see
-/// `riir-chain/issues/002_rtdc_subtree_inclusion_research.md`.
+/// requires the `subtree_inclusion` proof — Candidate C (probabilistic)
+/// shipped behind `rtdc_subtree_inclusion`; Candidate A (Pedersen
+/// deterministic) research closed dormant, see
+/// `riir-chain/.research/006_RTDC_Candidate_A_Pedersen_Resolution.md`.
 #[repr(C)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct DepthTieredRoots {
@@ -98,7 +102,7 @@ impl DepthTieredRoots {
 /// Selects which depth to verify at, given a continuous σ.
 ///
 /// Built from SLoD `ScaleBoundary` set (must have ≥2 boundaries for 3 tiers).
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct DepthSelector {
     /// σ thresholds from SLoD `boundary_scan`, ascending.
     ///
@@ -246,8 +250,10 @@ impl DepthTieredMerkleOctree {
     /// cryptographically sound. At depth-1 and depth-0 the proof establishes
     /// the leaf's position in the octree but does NOT prove the resulting
     /// internal/root hash is part of the published `roots[d]` — that
-    /// requires the Phase 2 cross-depth consistency proof (see
-    /// `riir-chain/issues/002_rtdc_subtree_inclusion_research.md`).
+    /// requires the cross-depth consistency proof — Candidate C (probabilistic)
+    ///   shipped behind `rtdc_subtree_inclusion`; Candidate A (Pedersen
+    ///   deterministic) research closed dormant, see
+    ///   `riir-chain/.research/006_RTDC_Candidate_A_Pedersen_Resolution.md`.
     ///
     /// Returns `None` if `depth > 2` or `leaf_index >= 64`.
     pub fn prove_at_depth(&self, leaf_index: u8, depth: usize) -> Option<RtdcProof> {
@@ -730,6 +736,7 @@ pub enum RtdcError {
 }
 
 impl std::fmt::Display for RtdcError {
+    #[cold]
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::InsufficientBoundaries { n, need } => {
@@ -771,10 +778,10 @@ mod tests {
 
     fn populated_octree() -> MerkleOctree {
         let mut leaf_hashes = [[0u8; HASH_SIZE]; MERKLE_OCTREE_LEAVES];
-        for i in 0..MERKLE_OCTREE_LEAVES {
+        for (i, leaf_hash) in leaf_hashes.iter_mut().enumerate() {
             let mut buf = [0u8; 32];
             buf[0..8].copy_from_slice(&(i as u64).to_le_bytes());
-            leaf_hashes[i] = *blake3::hash(&buf).as_bytes();
+            *leaf_hash = *blake3::hash(&buf).as_bytes();
         }
         MerkleOctree::build_from_leaves(&leaf_hashes)
     }
@@ -850,10 +857,10 @@ mod tests {
 
         // Flip one leaf hash and rebuild.
         let mut leaf_hashes_b = [[0u8; HASH_SIZE]; MERKLE_OCTREE_LEAVES];
-        for i in 0..MERKLE_OCTREE_LEAVES {
+        for (i, leaf_hash) in leaf_hashes_b.iter_mut().enumerate() {
             let mut buf = [0u8; 32];
             buf[0..8].copy_from_slice(&(i as u64).to_le_bytes());
-            leaf_hashes_b[i] = *blake3::hash(&buf).as_bytes();
+            *leaf_hash = *blake3::hash(&buf).as_bytes();
         }
         leaf_hashes_b[0][0] ^= 0xFF;
         let octree_b = MerkleOctree::build_from_leaves(&leaf_hashes_b);
@@ -1181,7 +1188,7 @@ mod tests {
             // Flip internal hash 0, then recompute roots[1] to match the
             // tampered internal (so the deterministic check passes).
             let mut tampered_hashes = t.inner().hashes;
-            tampered_hashes[1 + 0][0] ^= 0xFF;
+            tampered_hashes[1][0] ^= 0xFF;
             let mut h1 = blake3::Hasher::new();
             h1.update(RTDC_REGIONAL_TAG);
             for i in 0..MERKLE_OCTREE_INTERNAL {

@@ -13,9 +13,7 @@
 
 use katgpt_core::traits::{NoScreeningPruner, ScreeningPruner};
 use katgpt_rs::pruners::bandit::{BanditPruner, BanditStrategy};
-use katgpt_rs::pruners::dynamic_rank::{
-    DynamicRankPruner, StaticRankingReport, static_ranking_diagnostic,
-};
+use katgpt_rs::pruners::dynamic_rank::{DynamicRankPruner, static_ranking_diagnostic};
 
 const VOCAB: usize = 32;
 const MAX_DEPTH: usize = 6;
@@ -131,8 +129,10 @@ fn g3_dynamic_rank_correction_improves_diversity() {
             // Simulate reward: higher for "correct" tokens in this context
             let reward = if parent[0] < 2 {
                 if t < VOCAB / 2 { 0.8 } else { 0.2 }
+            } else if t >= VOCAB / 2 {
+                0.8
             } else {
-                if t >= VOCAB / 2 { 0.8 } else { 0.2 }
+                0.2
             };
             if reward > 0.5 {
                 wrapped.record_correction(parent, t, 0.1);

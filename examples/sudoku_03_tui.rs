@@ -27,7 +27,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph, Tabs, Wrap};
 use ratatui::{Frame, Terminal};
 
-use katgpt_rs::percepta::Sudoku9x9;
+use katgpt_percepta::Sudoku9x9;
 use katgpt_rs::pruners::SudokuPruner;
 use katgpt_rs::speculative::{
     ConstraintPruner, TreeNode, build_dd_tree, build_dd_tree_pruned, extract_parent_tokens,

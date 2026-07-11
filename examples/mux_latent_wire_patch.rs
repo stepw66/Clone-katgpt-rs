@@ -10,7 +10,7 @@
 //! Run: cargo run --example mux_latent_wire_patch --features mux_latent_wire
 
 #[cfg(feature = "mux_latent_wire")]
-use katgpt_rs::mux_latent::{
+use katgpt_core::mux_latent::{
     CompressionRatio, LatentPatch, LatentPatchBatch, LatentPatcher, MuxLatentConfig,
     MuxLatentEncoder,
 };
@@ -23,7 +23,7 @@ fn main() {
 
 #[cfg(feature = "mux_latent_wire")]
 fn main() {
-    use katgpt_rs::mux_latent::LatentSegment;
+    use katgpt_core::mux_latent::LatentSegment;
 
     println!("╔══════════════════════════════════════════════════════════╗");
     println!("║   MUX-Latent Wire Patch — Latent-to-Latent on Wire     ║");
@@ -54,17 +54,16 @@ fn main() {
             .segments
             .iter()
             .find(|s| s.segment_id() == Some(sid))
+            && let LatentSegment::Compressed { weights, .. } = seg
         {
-            if let LatentSegment::Compressed { weights, .. } = seg {
-                let first_3 = &weights[..3.min(weights.len())];
-                println!(
-                    "  Segment {sid}: [{:.3}, {:.3}, {:.3}, ...] ({} weights)",
-                    first_3[0],
-                    first_3.get(1).unwrap_or(&0.0),
-                    first_3.get(2).unwrap_or(&0.0),
-                    weights.len()
-                );
-            }
+            let first_3 = &weights[..3.min(weights.len())];
+            println!(
+                "  Segment {sid}: [{:.3}, {:.3}, {:.3}, ...] ({} weights)",
+                first_3[0],
+                first_3.get(1).unwrap_or(&0.0),
+                first_3.get(2).unwrap_or(&0.0),
+                weights.len()
+            );
         }
     }
     println!();
@@ -120,17 +119,16 @@ fn main() {
             .segments
             .iter()
             .find(|s| s.segment_id() == Some(sid))
+            && let LatentSegment::Compressed { weights, .. } = seg
         {
-            if let LatentSegment::Compressed { weights, .. } = seg {
-                let first_3 = &weights[..3.min(weights.len())];
-                println!(
-                    "  Segment {sid}: [{:.3}, {:.3}, {:.3}, ...] ({} weights)",
-                    first_3[0],
-                    first_3.get(1).unwrap_or(&0.0),
-                    first_3.get(2).unwrap_or(&0.0),
-                    weights.len()
-                );
-            }
+            let first_3 = &weights[..3.min(weights.len())];
+            println!(
+                "  Segment {sid}: [{:.3}, {:.3}, {:.3}, ...] ({} weights)",
+                first_3[0],
+                first_3.get(1).unwrap_or(&0.0),
+                first_3.get(2).unwrap_or(&0.0),
+                weights.len()
+            );
         }
     }
     println!();

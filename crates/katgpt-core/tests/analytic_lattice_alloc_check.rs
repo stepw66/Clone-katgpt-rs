@@ -17,27 +17,11 @@ use katgpt_core::analytic_lattice::{
     LatticeVector, TransportOperator, batch_compose_chain_into, compose_chain_into,
     direction_vector_decode,
 };
-use std::alloc::{GlobalAlloc, Layout, System};
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::Ordering;
 
-struct CountingAllocator;
-
-static ALLOC_COUNT: AtomicUsize = AtomicUsize::new(0);
-static DEALLOC_COUNT: AtomicUsize = AtomicUsize::new(0);
-
-unsafe impl GlobalAlloc for CountingAllocator {
-    unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
-        ALLOC_COUNT.fetch_add(1, Ordering::Relaxed);
-        unsafe { System.alloc(layout) }
-    }
-    unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
-        DEALLOC_COUNT.fetch_add(1, Ordering::Relaxed);
-        unsafe { System.dealloc(ptr, layout) }
-    }
-}
-
-#[global_allocator]
-static A: CountingAllocator = CountingAllocator;
+#[path = "common/mod.rs"]
+mod common;
+counting_allocator!();
 
 /// G5 zero-alloc gate for all three hot-path primitives.
 ///
@@ -155,12 +139,10 @@ fn g5_zero_alloc_after_warmup_all_primitives() {
             ((seed >> 33) as f32) / (1u64 << 31) as f32 * 2.0 - 1.0
         };
 
-        let state = LatticeVector::<N>::new([
-            rng(), rng(), rng(), rng(), rng(), rng(), rng(), rng(),
-        ]);
-        let direction = LatticeVector::<N>::new([
-            rng(), rng(), rng(), rng(), rng(), rng(), rng(), rng(),
-        ]);
+        let state =
+            LatticeVector::<N>::new([rng(), rng(), rng(), rng(), rng(), rng(), rng(), rng()]);
+        let direction =
+            LatticeVector::<N>::new([rng(), rng(), rng(), rng(), rng(), rng(), rng(), rng()]);
 
         for _ in 0..5 {
             let _ = direction_vector_decode(&state, &direction, 1.0);

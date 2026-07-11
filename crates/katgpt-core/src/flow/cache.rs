@@ -357,6 +357,12 @@ impl FlowFieldCache {
     pub fn len(&self) -> usize {
         self.fields.len()
     }
+
+    /// Returns `true` if no fields are cached.
+    #[cfg(test)]
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
 }
 
 #[cfg(test)]
@@ -401,6 +407,7 @@ mod tests {
             q
         }
 
+        #[inline]
         fn goal_count(&self) -> usize {
             self.goals
         }
@@ -580,6 +587,9 @@ mod tests {
 
         // Same tick but new topology → should recompute
         let f2 = cache.get_or_compute(1, &head, &[0.0], 0, 4, 4, 0, 5);
-        assert!(f2.is_some(), "should return a field even after topology change");
+        assert!(
+            f2.is_some(),
+            "should return a field even after topology change"
+        );
     }
 }

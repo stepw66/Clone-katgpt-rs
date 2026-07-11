@@ -23,10 +23,10 @@
 
 use std::time::Instant;
 
-use katgpt_rs::newton_schulz::{
+use katgpt_core::newton_schulz::{
     NewtonSchulzScratch, muon_update, muon_update_into, newton_schulz5, newton_schulz5_into,
 };
-use katgpt_rs::river_valley;
+use katgpt_spectral::river_valley;
 
 const WARMUP: usize = 10;
 const ITERS: usize = 100;

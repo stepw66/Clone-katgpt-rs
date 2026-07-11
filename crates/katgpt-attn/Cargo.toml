@@ -1,0 +1,101 @@
+[package]
+name = "katgpt-attn"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+description = "Attention stack primitives — GDN2 kernels, DashAttention, Chiaroscuro, RAT+ Bridge, EGA, StaticCal, DiagonalGate, FuncAttn composition. Extracted from katgpt-rs/src/ (Proposal 003 Phase 2)."
+repository = "https://github.com/katopz/katgpt-rs"
+publish = false
+
+[dependencies]
+katgpt-core = { path = "../katgpt-core" }
+# katgpt-forward + katgpt-transformer (Issue 007 Phase F.4a, 2026-07-02):
+# the gdn2/forward.rs + dash_attn/forward.rs composition layers moved here
+# from root. Activated by `gdn2_attention` / `dash_attn` features respectively
+# (the forward modules live inside those feature-gated parent modules).
+katgpt-forward = { path = "../katgpt-forward", default-features = false, optional = true }
+katgpt-transformer = { path = "../katgpt-transformer", optional = true }
+# katgpt-spectral: needed by funcattn_compose/spectral_pre_rotate (calibrate_eigenbasis).
+# Optional — only pulled when the funcattn_spectral_pre_rotate feature is on.
+katgpt-spectral = { path = "../katgpt-spectral", optional = true }
+# katgpt-pruners + katgpt-kv: needed by the Phase 12 VortexFlow cluster
+# (meta_router imports katgpt_pruners::bandit; sat_analysis imports
+# katgpt_kv::cache_prune::SummedAreaTable). Optional — only pulled when the
+# `dash_attn` feature is on (the cluster's parent module gate).
+katgpt-pruners = { path = "../katgpt-pruners", optional = true }
+katgpt-kv = { path = "../katgpt-kv", optional = true }
+# rustfft: DCT spectral entropy operator for Chiaroscuro attention.
+rustfft = { version = "6.2", optional = true }
+# blake3: commitment hashing for FuncAttn freeze/thaw snapshots + StaticCal tables.
+blake3 = { version = "1.8", optional = true }
+# serde: (De)serialization for FuncAttn freeze/thaw snapshots.
+serde = { version = "1", features = ["derive"], optional = true }
+
+[dev-dependencies]
+fastrand = "2"
+serde_json = "1"
+
+[features]
+default = []
+# GDN2 recurrent attention kernels (types + kernel) AND the composition layer
+# (forward_gdn2, Issue 007 Phase F.4a). The forward module moved here from root;
+# pulls katgpt-forward (ForwardContext) + katgpt-transformer (TransformerWeights).
+gdn2_attention = ["dep:blake3", "dep:katgpt-forward", "dep:katgpt-transformer"]
+# Wall Attention diagonal gate — shared DiagonalGate trait used by both GDN2
+# and Wall attention. Gated alongside gdn2_attention / wall_attention in root.
+diagonal_gate = []
+# DashAttention clean core (entmax, routing, chunk_summary) AND the composition
+# layer (forward_dash_attn_prefill / forward_dash_attn_decode, Issue 007 Phase
+# F.4a) AND the Phase 12 VortexFlow cluster (vortex_flow, block_topk,
+# channel_aware, entmax_router, kv_outer_prefill, msa_distill, value_energy,
+# adaptive_k, meta_router, sat_analysis). The forward module pulls katgpt-forward
+# (ForwardContext) + katgpt-transformer (TransformerWeights/MultiLayerKVCache);
+# the VortexFlow cluster pulls katgpt-pruners (meta_router bandit dep) +
+# katgpt-kv (sat_analysis SummedAreaTable dep).
+# NOTE: forward_dash_attn_decode_vortex was STRIPPED — see dash_attn/forward.rs
+# module comment. The token-level decode_vortex variant lives in root
+# src/dash_attn/tests.rs (needs root transformer glue).
+dash_attn = ["dep:katgpt-forward", "dep:katgpt-transformer", "dep:katgpt-pruners", "katgpt-pruners/bandit", "dep:katgpt-kv", "katgpt-kv/cache_prune", "dep:serde"]
+# VortexFlow composable sparse routing (Plan 196). Sub-feature of dash_attn —
+# gates the vortex_flow.rs/block_topk.rs/channel_aware.rs/entmax_router.rs/
+# meta_router.rs/value_energy.rs primitives. Phase 12 (2026-07-04): these moved
+# from root; the feature still exists for back-compat with root's feature chain.
+vortex_flow = ["dash_attn"]
+# MSA blockwise sparse distillation sub-features (Plan 256 GOAT gates).
+# All imply vortex_flow (the parent cluster).
+msa_sparse = ["vortex_flow"]
+msa_per_group = ["msa_sparse"]
+msa_kv_outer = ["msa_sparse"]
+msa_adaptive_k = ["msa_sparse"]
+# Chiaroscuro attention — per-token DCT spectral entropy operator routing.
+chiaroscuro = ["dep:rustfft"]
+# RAT+ Recurrence Bridge — modelless dilated inference via GDN2 state.
+rat_plus_bridge = []
+# Energy-Gated Attention — spectral salience gating.
+ega_attn = []
+# Static Calibration Tables — pre-computed per-head attention scales.
+static_cal_tables = ["dep:blake3"]
+# Plan 424 T4.2: GDN2 cache ↔ tree verify bridge adapter. Implies
+# `gdn2_attention` (needs GDN2 types + forward composition) and forwards to
+# `katgpt-core/gdn_tree_verify` (the rollback-free verify primitive).
+gdn_tree_verify = ["gdn2_attention", "katgpt-core/gdn_tree_verify"]
+# FuncAttn composition layer (Plan 286 Phase 5).
+funcattn_freeze_thaw = ["dep:blake3", "dep:serde"]
+funcattn_spectral_pre_rotate = ["dep:katgpt-spectral"]
+funcattn_chiar_blend = ["chiaroscuro"]
+# sparse_mlp: gates the `#[cfg(feature = "sparse_mlp")]` MLP path in
+# gdn2/forward.rs. Forwards to katgpt-core (for sparse_matmul) and
+# katgpt-forward (for ForwardContext.active_indices/active_values).
+sparse_mlp = ["katgpt-core/sparse_mlp", "katgpt-forward/sparse_mlp"]
+# HOLA Hippocampal Exact KV Cache integration (Plan 395, Research 378).
+# Forwards to katgpt-core/hippocampal_cache. When active, Gdn2LayerState gains
+# an optional `cache: Option<HippocampalCache<HEAD_DIM, W>>` field that observes
+# the delta-rule write magnitude (β·‖e‖) per token. The cache is a pure observer
+# — it does not perturb the GDN2 state. Zero overhead when None.
+hippocampal_cache = ["katgpt-core/hippocampal_cache"]
+# Hierarchical Global Attention forward path (Plan 397, Research 379).
+# Forwards to katgpt-core/hga. When active, provides `forward_hga` — the
+# three-stage chunk→group→token routing path using dash_attn::entmax_1p5 for
+# chunk selection + katgpt_core::hga::GroupSummaryCache for group selection +
+# katgpt_kv::tiered_kv::TieredKvStore for route-and-fetch.
+hga = ["katgpt-core/hga"]

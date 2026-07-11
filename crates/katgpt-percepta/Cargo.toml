@@ -1,0 +1,36 @@
+[package]
+name = "katgpt-percepta"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+description = "Percepta-style O(log N) 2D Attention via Convex Hull KV Cache + transformer-vm RIIR (Plan 064)"
+repository = "https://github.com/katopz/katgpt-rs"
+readme = "README.md"
+keywords = ["attention", "convex-hull", "transformer", "wasm", "modelless"]
+categories = ["algorithms", "data-structures", "science"]
+publish = false  # dev/examples aggregator subtree — only katgpt-core ships to crates.io.
+
+[dependencies]
+# ordered-float: Ord wrapper for f64 — CHT breakpoints (TG-A). Optional, gated by `percepta`.
+ordered-float = { version = "4", optional = true }
+# good_lp: MILP solver — scheduling (TG-D), highs primary + microlp fallback. Optional, gated by `percepta_compile`.
+good_lp = { version = "1", optional = true, default-features = false, features = ["highs", "microlp"] }
+# log: used by scheduler + specialize (both behind percepta_compile). Always-on, matches root crate.
+log = "0.4"
+
+[features]
+default = []
+
+# ── Percepta feature ladder (cumulative) ──────────────────────
+# Each tier is a strict superset of the previous; consumers enable the highest tier they need.
+
+# TG-A: CHT hull cache — upper+lower, HullMeta, tie-break, cumsum.
+percepta = ["dep:ordered-float"]
+# TG-B: + ReGLU, stepglu, multiply, persist gate primitives.
+percepta_gates = ["percepta"]
+# TG-C: + Expression/Dimension DSL, ProgramGraph.
+percepta_graph = ["percepta_gates"]
+# TG-E+F: + WASM decoder + lowering + interpreter — pure Rust, NOT wasmtime.
+percepta_wasm = ["percepta_graph"]
+# TG-D+G-J: + MILP + weights + transformer + Futamura + CLI.
+percepta_compile = ["percepta_wasm", "dep:good_lp"]

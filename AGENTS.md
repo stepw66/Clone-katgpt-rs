@@ -73,11 +73,23 @@ default-on requires the GOAT gate to pass:
 is NOT a modelless gain — it's a speedup of a wrong result. The quality gate
 (G1 or equivalent) must pass modellessly for the GOAT to hold.
 
+**UQ-bearing primitive GOAT gate extension (the "Report the Floor" rule, adopted 2026-06-28 per Research 322 / Plan 340).** Any primitive that claims a probability distribution, predictive interval, quantile, coverage guarantee, confidence score, or calibrated uncertainty (collectively: **UQ-bearing**) MUST benchmark against the **conformal-naive floor** — `ConformalIntervalCalibrator<SeasonalNaiveForecaster>` (Plan 340 with `m=1`, plain split conformal) — on CRPS / coverage / Winkler score. If the primitive cannot beat the floor, the GOAT gate FAILS. Existing UQ-bearing primitives (BoMSampler Plan 281, Sleep-Time Anticipator Plan 334, Best-Belief Beta Selector Plan 336, KARC+overlay) are grandfathered but must include the floor at their next re-gate; future UQ primitives must include it from the initial gate. Tracked in `.issues/010`. The floor shipped in Plan 340 Phase 1 (2026-06-30); the rule is now enforceable. **Issue 010 is FULLY CLOSED (T1-T7 all complete)** — see `.benchmarks/010_report_the_floor_consolidated.md` for the cross-primitive summary.
+
 ## Research Workflow
 
 See `.agents/skills/research/SKILL.md` for the full research workflow:
 paper classification, 5-repo routing, fusion-first distillation, novelty gate,
 GOAT gate, and the mandatory modelless-unblock protocol (§3.5).
+
+## Numbering Discipline
+
+Issue, plan, doc, benchmark, and research numbers are **monotonic and never
+reused** — even after a file is removed per the noise-reduction rule. Before
+creating a new `.issues/` file, read `.issues/.highwater`, use `value + 1` as
+the number, and write the new value back. This prevents the number-recycling
+collision documented in `.issues/121`. The same rule applies to `.plans/`,
+`.docs/`, `.benchmarks/`, and `.research/` — never recycle a number that git
+history shows was already allocated.
 
 ## Branch
 

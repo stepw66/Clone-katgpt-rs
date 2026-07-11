@@ -366,13 +366,13 @@ The synthetic GOAT gate. All metrics on a planted-structure synthetic bank (no g
 
 - [x] **T5.4** Document the GOAT gate results in `.benchmarks/320_indicator_probe_bank_goat.md` with the same format as `.benchmarks/292_fpcg_goat.md` (real measurements, no fabricated numbers).
 
-- [ ] **T5.5** Update `katgpt-rs/README.md` Feature Showcase section with the new primitive (link to research note + plan).
+- [x] **T5.5** Update `katgpt-rs/README.md` Feature Showcase section with the new primitive (link to research note + plan).
 
-  *Deferred — README showcase update is a cosmetic follow-up; not blocking the promotion. The Cargo.toml feature comments + the GOAT bench doc are the canonical records.*
+  *Done (2026-07-02):* added `### 🧪 Misalignment Indicator Probe Bank — Multi-Direction OR-Fused Cascade (Plan 320, arXiv:2606.24251)` entry at the end of the `🔀 Feature Showcase` section — full G1–G7 GOAT table, the three generic primitives (`IndicatorProbeBank` / `IndicatorSimilarityMatrix` / `IndicatorCascade`), the single-feature-criterion design discipline, the §3.5 modelless note (IRLS direction construction), feature-gate status (bank + similarity DEFAULT-ON, cascade opt-in), and links to plan + research 301 + bench 320 + arXiv.
 
-- [ ] **T5.6** Update `katgpt-rs/.docs/15_paper_feature_comparison.md` with the source paper's feature mapping.
+- [x] **T5.6** Update `katgpt-rs/.docs/15_paper_feature_comparison.md` with the source paper's feature mapping.
 
-  *Deferred — paper-feature-comparison doc update is a cosmetic follow-up; not blocking the promotion.*
+  *Done (2026-07-02) as a scope-boundary note rather than a matrix row.* Verdict: Research 301 (arXiv:2606.24251) is a post-300 paper that introduces a **new feature dimension (alignment monitoring)** not representable in this matrix's 10 columns (SD, KV, Attn, Noise, Distill, TTC, Route, Diff, Game, SIMD). The doc is a 2025-07 snapshot over foundational papers 00–073. Forcing Research 301 into the matrix would be a misfit. Instead, added a "Scope boundary (Plan-300+ research wave)" paragraph to the References section documenting that post-300 primitives (Research 301 Indicator Probe Bank, 305 Phase-Modulated Coupling, 300 Self-Compaction) are tracked in the canonical records (README Feature Showcase, `.research/NNN_*.md`, `.plans/NNN_*.md`) and giving the explicit feature mapping for Research 301 (`indicator_probe_bank` + `indicator_similarity` + `indicator_cascade`, Plan 320) with a pointer to the README showcase entry.
 
 **Phase 5 exit:** primitive promoted (or demoted with documented rationale). GOAT gate results committed.
 

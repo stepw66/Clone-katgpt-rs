@@ -3,7 +3,7 @@
 **Date:** 2026-06-21
 **Research:** Forked from [`riir-ai/.docs/62_bayes_cce_regret_sketch.md`](../../riir-ai/.docs/62_bayes_cce_regret_sketch.md) §2 (subjective-CCE framing, bound transfers at math level).
 **Source paper:** [arxiv 2606.20062](https://arxiv.org/pdf/2606.20062) — Campi, Cannerozzi, Tzoumas — Optimal CCEs in MFGs via LP + No-Regret Learning.
-**Parent issue:** [`riir-ai/.issues/327_cwm_cce_bayes_fusion.md`](../../riir-ai/.issues/327_cwm_cce_bayes_fusion.md) — closed 2026-06-21 (split decision, Branch 4: subjective-CCE demoted to wiring).
+**Parent issue:** Issue 327 (riir-ai, closed + removed) — closed 2026-06-21 (split decision, Branch 4: subjective-CCE demoted to wiring).
 **Target:** `katgpt-rs/src/cce/` (extend existing module from Plan 295) + extend `cce_moderator` feature.
 **Status:** ✅ COMPLETE (2026-06-21). G1+G2+G4 PASS; G3 SPLIT into T4.3b follow-up. T5.4 (feature promotion) deferred — `cce_moderator` stays opt-in pending G3.
 
@@ -288,7 +288,7 @@ katgpt-rs/src/cce/
 
 ## Out of scope
 
-- **Strict Bayes-CCE / no-common-prior.** That's [`riir-ai/.issues/328_no_common_prior_bayes_cce.md`](../../riir-ai/.issues/328_no_common_prior_bayes_cce.md). This plan is strictly the subjective-CCE wiring.
+- **Strict Bayes-CCE / no-common-prior.** That's Issue 328 (riir-ai, closed + removed). This plan is strictly the subjective-CCE wiring.
 - **riir-ai runtime wiring.** Per-NPC `NpcCwmRuntime<K>` → `HeterogeneousPayoff` bridge is a future riir-ai plan, blocked on this plan landing. Tracked as T-A+.5 in Issue 327.
 - **Bayesian priors over payoff tables.** Not in this plan; that's the strict Bayes-CCE question (Issue 328).
 - **`CcePrimalDual` heterogeneous primal-dual iterator.** T4.3 is a stretch goal; the LP solver path (T2.1) is the primary deliverable. Primal-dual extension is a follow-up if G3 needs it.
@@ -313,8 +313,8 @@ katgpt-rs/src/cce/
 - **Plan 295 (homogeneous CceLp primitive):** [`katgpt-rs/.plans/295_lp_cce_moderator_primitive.md`](295_lp_cce_moderator_primitive.md)
 - **Source paper:** [Campi, Cannerozzi, Tzoumas — arxiv 2606.20062](https://arxiv.org/pdf/2606.20062)
 - **P0.5 regret sketch (subjective-CCE §2):** [`riir-ai/.docs/62_bayes_cce_regret_sketch.md`](../../riir-ai/.docs/62_bayes_cce_regret_sketch.md)
-- **Parent issue (closed):** [`riir-ai/.issues/327_cwm_cce_bayes_fusion.md`](../../riir-ai/.issues/327_cwm_cce_bayes_fusion.md)
-- **Sibling issue (deferred):** [`riir-ai/.issues/328_no_common_prior_bayes_cce.md`](../../riir-ai/.issues/328_no_common_prior_bayes_cce.md)
+- **Parent issue (closed):** Issue 327 (riir-ai, closed + removed)
+- **Sibling issue (deferred):** Issue 328 (riir-ai, closed + removed)
 - **Public CCE research note:** [`katgpt-rs/.research/274_Optimal_CCE_Moderator_LP_No_Regret.md`](../.research/274_Optimal_CCE_Moderator_LP_No_Regret.md)
 - **Private CCE runtime (Plan 325):** [`riir-ai/.plans/325_latent_cce_moderator_runtime.md`](../../riir-ai/.plans/325_latent_cce_moderator_runtime.md)
 - **Private CWM runtime (Plan 326):** [`riir-ai/.plans/326_cwm_npc_runtime_integration.md`](../../riir-ai/.plans/326_cwm_npc_runtime_integration.md)

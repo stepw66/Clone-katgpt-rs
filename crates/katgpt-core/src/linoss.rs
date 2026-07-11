@@ -296,7 +296,7 @@ impl LinOSSCell {
         }
         // Steps 1..n: read row i-1, write row i. ry and rz are separate allocations
         // so (prev_y, cur_y) and (prev_z, cur_z) borrows don't alias each other.
-        for step in 1..n {
+        for (step, &forcing_step) in forcings.iter().enumerate().take(n).skip(1) {
             let prev = (step - 1) * h;
             let base = step * h;
             // split_at_mut within ry to separate prev row (read) from cur row (write).
@@ -306,7 +306,7 @@ impl LinOSSCell {
             let (prev_part, cur_part) = rz.split_at_mut(base);
             let prev_z = &prev_part[prev..prev + h];
             let cur_z = &mut cur_part[..h];
-            self.imex_step_inplace(prev_y, prev_z, forcings[step], dt, cur_y, cur_z);
+            self.imex_step_inplace(prev_y, prev_z, forcing_step, dt, cur_y, cur_z);
         }
         n
     }
@@ -929,7 +929,7 @@ mod tests {
     #[test]
     fn test_linoss_zero_forcing() {
         let cell = LinOSSCell::new(8);
-        let next = cell.imex_step(&LinOSSState::zeros(8), &vec![0.0; 8], 0.1);
+        let next = cell.imex_step(&LinOSSState::zeros(8), &[0.0; 8], 0.1);
         for i in 0..8 {
             assert!(next.y[i].abs() < 1e-10, "y should stay zero");
             assert!(next.z[i].abs() < 1e-10, "z should stay zero");

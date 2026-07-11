@@ -1,0 +1,39 @@
+[package]
+name = "katgpt-ruliology"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+description = "Wolfram ruliology — exhaustive simple-program enumeration (FSM/CA/TM) as bandit arms (Plan 188, Research 168). Extracted from katgpt-rs root per Proposal 003 Phase 11 (2026-07-04)."
+repository = "https://github.com/katopz/katgpt-rs"
+keywords = ["ruliology", "wolfram", "fsm", "bandit", "modelless"]
+categories = ["algorithms", "science"]
+publish = false  # only katgpt-core ships to crates.io
+
+[dependencies]
+# katgpt-core: shared traits and primitives. Always-on.
+katgpt-core = { path = "../katgpt-core" }
+# katgpt-pruners: provides `g_zero::delta_absorb::DeltaGatedConfig` consumed by
+# `ruliology::mutation::delta_gated_co_evolve` (single struct, single field
+# read: `config.delta_threshold`). Non-optional — `mutation.rs` imports
+# `DeltaGatedConfig` at the top level (unconditional import); the function
+# that uses it is gated behind `#[cfg(feature = "ruliology")]`, but the import
+# resolves whenever mutation.rs compiles. The clean dep direction: ruliology
+# depends on pruners (never the reverse).
+katgpt-pruners = { path = "../katgpt-pruners", default-features = false, features = ["g_zero"] }
+# fastrand: deterministic RNG for `mutation::FsmTemplateProposer::propose` and
+# `delta_gated_co_evolve`. Production path.
+fastrand = "2"
+# blake3: behavioral-fingerprint hashing for FSM/CA/TM dedup (fsm.rs, ca.rs,
+# tm.rs). Production path — used to identify distinct strategies under
+# Wolfram-style ruliology enumeration.
+blake3 = "1"
+
+[features]
+default = []
+
+# Ruliology Bandit — simple program strategies as bandit arms (Plan 188).
+# Gates the `delta_gated_co_evolve` function (which uses DeltaGatedConfig).
+# The crate's modules compile unconditionally; this feature exists for
+# parity with the historical root feature name. Root's `ruliology` feature
+# forwards here.
+ruliology = ["katgpt-pruners/ruliology"]

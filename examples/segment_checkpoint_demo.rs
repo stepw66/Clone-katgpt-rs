@@ -3,8 +3,8 @@
 fn main() {
     #[cfg(feature = "segment_checkpoint")]
     {
-        use katgpt_rs::segment_checkpoint::gating::compute_gates;
-        use katgpt_rs::segment_checkpoint::{SegmentCheckpoint, SegmentStore};
+        use katgpt_kv::segment_checkpoint::gating::compute_gates;
+        use katgpt_kv::segment_checkpoint::{SegmentCheckpoint, SegmentStore};
 
         println!("=== Plan 226: SegmentCheckpoint Demo ===\n");
 
@@ -32,12 +32,12 @@ fn main() {
 
         // Top-k selection via gating module
         let top_gates =
-            katgpt_rs::segment_checkpoint::gating::top_k_gates(&query, &store.summaries(), 3);
+            katgpt_kv::segment_checkpoint::gating::top_k_gates(&query, &store.summaries(), 3);
         println!("Top-3 gates: {:?}", top_gates);
 
         #[cfg(feature = "ssc_spec_draft")]
         {
-            use katgpt_rs::segment_checkpoint::ssc::{SscDrafter, compute_and_select_top_k};
+            use katgpt_kv::segment_checkpoint::ssc::{SscDrafter, compute_and_select_top_k};
 
             // SSC top-k via pure gate selection
             // Collect summaries separately to avoid lifetime issues with closure captures

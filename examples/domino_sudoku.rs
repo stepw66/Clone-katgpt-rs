@@ -17,7 +17,7 @@ fn main() {
 
 #[cfg(all(feature = "domino_correction", feature = "sudoku"))]
 fn main() {
-    use katgpt_rs::percepta::Sudoku9x9;
+    use katgpt_percepta::Sudoku9x9;
     use katgpt_rs::pruners::SudokuPruner;
     use katgpt_rs::speculative::{
         ConstraintPruner, PrefixCorrectionTable, build_dd_tree_pruned, domino_correct_marginals,
@@ -83,11 +83,11 @@ fn main() {
     for depth in 1..lookahead {
         // For each depth, compute a correction that suppresses invalid tokens
         let mut correction = vec![0.0f32; vocab_size];
-        for token in 1..=9 {
+        for (token, correction_slot) in correction.iter_mut().enumerate().take(vocab_size).skip(1) {
             // Token 0 is padding, skip
             let is_valid = pruner.is_valid(depth, token, &[0; 0]);
             if !is_valid {
-                correction[token] = -0.1; // Suppress invalid tokens
+                *correction_slot = -0.1; // Suppress invalid tokens
             }
         }
         // Use depth as a simple key for demonstration

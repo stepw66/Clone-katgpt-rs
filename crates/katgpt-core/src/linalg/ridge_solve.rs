@@ -340,18 +340,9 @@ pub fn spd_inverse_f32(
             let mut l = lo;
             while l + 4 <= k {
                 s = inv_l_scratch[l * k + i].mul_add(inv_l_scratch[l * k + j], s);
-                s = inv_l_scratch[(l + 1) * k + i].mul_add(
-                    inv_l_scratch[(l + 1) * k + j],
-                    s,
-                );
-                s = inv_l_scratch[(l + 2) * k + i].mul_add(
-                    inv_l_scratch[(l + 2) * k + j],
-                    s,
-                );
-                s = inv_l_scratch[(l + 3) * k + i].mul_add(
-                    inv_l_scratch[(l + 3) * k + j],
-                    s,
-                );
+                s = inv_l_scratch[(l + 1) * k + i].mul_add(inv_l_scratch[(l + 1) * k + j], s);
+                s = inv_l_scratch[(l + 2) * k + i].mul_add(inv_l_scratch[(l + 2) * k + j], s);
+                s = inv_l_scratch[(l + 3) * k + i].mul_add(inv_l_scratch[(l + 3) * k + j], s);
                 l += 4;
             }
             while l < k {
@@ -526,7 +517,14 @@ mod tests {
         for i in 0..k {
             for j in 0..k {
                 let expected = if i == j { 1.0 } else { 0.0 };
-                assert!(approx_eq(prod[i * k + j], expected, 1e-4), "({},{}): {} vs {}", i, j, prod[i * k + j], expected);
+                assert!(
+                    approx_eq(prod[i * k + j], expected, 1e-4),
+                    "({},{}): {} vs {}",
+                    i,
+                    j,
+                    prod[i * k + j],
+                    expected
+                );
             }
         }
     }
@@ -592,7 +590,15 @@ mod tests {
         let mut l = vec![0.0; n * n];
         let mut z = vec![0.0; n * n_out];
         ridge_solve_woodbury_f32(
-            &mut w_t, &mut l, &mut z, &sample_gram, &y, &x, n, d_h, n_out,
+            &mut w_t,
+            &mut l,
+            &mut z,
+            &sample_gram,
+            &y,
+            &x,
+            n,
+            d_h,
+            n_out,
         );
         // Expect w ≈ [1, 1].
         assert!(approx_eq(w_t[0], 1.0, 1e-3), "woodbury w[0]={}", w_t[0]);

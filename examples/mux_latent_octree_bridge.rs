@@ -10,7 +10,7 @@
 //! Run: cargo run --example mux_latent_octree_bridge --features mux_latent_wire
 
 #[cfg(feature = "mux_latent_wire")]
-use katgpt_rs::mux_latent::{
+use katgpt_core::mux_latent::{
     CompressionRatio, LatentPatch, LatentPatcher, MortonCode, MuxLatentConfig, MuxLatentEncoder,
     OctreeLod, TernaryDir, TernaryValue, octree_leaf_to_patch_weights,
     patch_weights_to_octree_leaf,

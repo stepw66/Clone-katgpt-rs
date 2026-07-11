@@ -9,11 +9,11 @@
 
 #![cfg(feature = "budget_adaptation")]
 
-use katgpt_rs::speculative::{
-    adaptive_tree_budget, block_compression_ratio, compression_ratio,
-    effective_tree_budget, scaled_draft_lookahead,
-};
 use katgpt_rs::speculative::types::{BudgetAdaptation, FlashPrefillConfig};
+use katgpt_rs::speculative::{
+    adaptive_tree_budget, block_compression_ratio, compression_ratio, effective_tree_budget,
+    scaled_draft_lookahead,
+};
 
 // ── G7.1: Off mode is bit-identical to current behavior ────────
 
@@ -40,7 +40,10 @@ fn test_goat_midpoint_near_base() {
     // scale = 0.5 + 1.5 * 0.5 = 1.25 → budget = 2967
     let expected = (base as f32 * 1.25) as usize;
     assert_eq!(budget, expected, "midpoint budget should be 1.25× base");
-    println!("✅ G7.2: Midpoint (r=0.5) → budget = {} (1.25× base = {})", budget, expected);
+    println!(
+        "✅ G7.2: Midpoint (r=0.5) → budget = {} (1.25× base = {})",
+        budget, expected
+    );
 }
 
 // ── G7.3: Budget clamped within [base/2, base*2] for all r ────
@@ -58,7 +61,10 @@ fn test_goat_budget_always_clamped() {
         assert!(
             budget >= lo && budget <= hi,
             "budget {} out of [{}, {}] at r={}",
-            budget, lo, hi, r
+            budget,
+            lo,
+            hi,
+            r
         );
     }
 
@@ -68,10 +74,16 @@ fn test_goat_budget_always_clamped() {
         assert!(
             budget >= lo && budget <= hi,
             "budget {} out of [{}, {}] at extreme r={}",
-            budget, lo, hi, r
+            budget,
+            lo,
+            hi,
+            r
         );
     }
-    println!("✅ G7.3: Budget clamped within [{}, {}] for all tested ratios", lo, hi);
+    println!(
+        "✅ G7.3: Budget clamped within [{}, {}] for all tested ratios",
+        lo, hi
+    );
 }
 
 // ── G8: Heterogeneous prompt complexity adapts correctly ───────
@@ -94,8 +106,10 @@ fn test_goat_heterogeneous_complexity() {
         // Simple prompt: one dominant block, rest are noise → few pass threshold
         PromptProfile {
             name: "simple_boilerplate",
-            scores: vec![0.01, 0.01, 1.0, 0.01, 0.01, 0.01, 0.01, 0.01, 0.01, 0.01,
-                         0.01, 0.01, 0.01, 0.01, 0.01, 0.01, 0.01, 0.01, 0.01, 0.01],
+            scores: vec![
+                0.01, 0.01, 1.0, 0.01, 0.01, 0.01, 0.01, 0.01, 0.01, 0.01, 0.01, 0.01, 0.01, 0.01,
+                0.01, 0.01, 0.01, 0.01, 0.01, 0.01,
+            ],
             alpha: 0.50, // threshold = 0.5 → only block with score 1.0 passes
             expected_ratio_range: (0.0, 0.3),
         },
@@ -130,17 +144,25 @@ fn test_goat_heterogeneous_complexity() {
         assert!(
             r >= p.expected_ratio_range.0 && r <= p.expected_ratio_range.1,
             "{}: ratio {} outside expected {:?}",
-            p.name, r, p.expected_ratio_range
+            p.name,
+            r,
+            p.expected_ratio_range
         );
         assert!(
             budget >= lo && budget <= hi,
             "{}: budget {} out of clamped range [{}, {}]",
-            p.name, budget, lo, hi
+            p.name,
+            budget,
+            lo,
+            hi
         );
 
         println!(
             "  {:20}: ratio={:.3} → budget={} ({:.1}× base)",
-            p.name, r, budget, budget as f32 / base as f32
+            p.name,
+            r,
+            budget,
+            budget as f32 / base as f32
         );
     }
 
@@ -156,15 +178,20 @@ fn test_goat_heterogeneous_complexity() {
     assert!(
         simple_b <= medium_b,
         "simple budget {} > medium budget {}",
-        simple_b, medium_b
+        simple_b,
+        medium_b
     );
     assert!(
         medium_b <= complex_b,
         "medium budget {} > complex budget {}",
-        medium_b, complex_b
+        medium_b,
+        complex_b
     );
 
-    println!("✅ G8: Monotonic: simple({}) ≤ medium({}) ≤ complex({})", simple_b, medium_b, complex_b);
+    println!(
+        "✅ G8: Monotonic: simple({}) ≤ medium({}) ≤ complex({})",
+        simple_b, medium_b, complex_b
+    );
 }
 
 // ── G8b: Effective budget + lookahead scaling integration ──────
@@ -180,8 +207,11 @@ fn test_goat_effective_budget_lookahead_integration() {
         let la = scaled_draft_lookahead(base_lookahead, eff, base_budget);
         println!(
             "  r={:.2}: budget={} ({:.2}×), lookahead={} ({:.2}×)",
-            r, eff, eff as f64 / base_budget as f64,
-            la, la as f64 / base_lookahead as f64
+            r,
+            eff,
+            eff as f64 / base_budget as f64,
+            la,
+            la as f64 / base_lookahead as f64
         );
 
         // Lookahead should be at least 1 and at most 2× base
@@ -266,7 +296,10 @@ fn test_goat_overhead_negligible() {
         total_ns
     );
 
-    println!("✅ Overhead: {:.1} ns per prompt (well under 1μs)", total_ns);
+    println!(
+        "✅ Overhead: {:.1} ns per prompt (well under 1μs)",
+        total_ns
+    );
 }
 
 // ── Summary ─────────────────────────────────────────────────────

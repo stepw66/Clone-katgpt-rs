@@ -48,7 +48,7 @@
 use std::hint::black_box;
 use std::time::Instant;
 
-use katgpt_rs::cce::{
+use katgpt_core::cce::{
     CceLp, CcePrimalDual, Deviation, DeviationClass, OccupationMeasure, PayoffTensor, PerPlayerGame,
 };
 

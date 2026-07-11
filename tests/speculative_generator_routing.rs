@@ -8,7 +8,7 @@
 use katgpt_core::GenerativeConstraintPruner;
 use katgpt_rs::inference_router::InferenceRouter;
 use katgpt_rs::speculative::{MarginalTokenGenerator, TokenCondition, TokenOutput};
-use katgpt_rs::trigger_gate::TriggerGateConfig;
+use katgpt_core::trigger_gate::TriggerGateConfig;
 use katgpt_rs::types::Config;
 
 /// Simple pruner that accepts everything — for testing routing only.

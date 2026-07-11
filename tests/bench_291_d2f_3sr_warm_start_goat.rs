@@ -29,12 +29,12 @@
 #![cfg(feature = "d2f_3sr_warm_start")]
 
 use katgpt_core::Config;
-use katgpt_rs::dllm::{
-    denoise_loop, denoise_loop_rcd, denoise_loop_rcd_3sr, denoising_accuracy,
-    generate_pattern_dataset, train_mini_dllm, NoConstraint,
-};
 use katgpt_core::Rng;
-use katgpt_rs::dllm_solver::{RcdConfig, ThreeStateReuseConfig};
+use katgpt_rs::dllm::{
+    NoConstraint, denoise_loop, denoise_loop_rcd, denoise_loop_rcd_3sr, denoising_accuracy,
+    generate_pattern_dataset, train_mini_dllm,
+};
+use katgpt_core::dllm_solver::{RcdConfig, ThreeStateReuseConfig};
 use katgpt_rs::transformer::TransformerWeights;
 
 // ─── Config knobs ─────────────────────────────────────────────────────────
@@ -212,18 +212,29 @@ fn g1_3sr_vs_rcd_iteration_reduction_at_equal_quality() {
     let rcd_3sr = aggregate(&weights, &config, &targets, run_rcd_3sr);
 
     println!("┌───────────────────────────────────────────────────────────┐");
-    println!("│ Plan 291 G1 micro-benchmark (N_TARGETS={}, N_STEPS={})", N_TARGETS, N_STEPS);
+    println!(
+        "│ Plan 291 G1 micro-benchmark (N_TARGETS={}, N_STEPS={})",
+        N_TARGETS, N_STEPS
+    );
     println!("├──────────────────────┬──────────┬───────────┬─────────────────┤");
     println!("│ Config               │ mean its │ mean agr  │ converged       │");
     println!("├──────────────────────┼──────────┼───────────┼─────────────────┤");
-    println!("│ (0) baseline         │  {:>6.2}  │  {:.4}   │  {}/{}          │",
-        baseline.mean_iters, baseline.mean_agreement, baseline.converged_count, N_TARGETS);
-    println!("│ (a) RCD-only         │  {:>6.2}  │  {:.4}   │  {}/{}          │",
-        rcd_only.mean_iters, rcd_only.mean_agreement, rcd_only.converged_count, N_TARGETS);
-    println!("│ (b) RCD + uniform γ  │  {:>6.2}  │  {:.4}   │  {}/{}          │",
-        rcd_uniform.mean_iters, rcd_uniform.mean_agreement, rcd_uniform.converged_count, N_TARGETS);
-    println!("│ (c) RCD + 3SR        │  {:>6.2}  │  {:.4}   │  {}/{}          │",
-        rcd_3sr.mean_iters, rcd_3sr.mean_agreement, rcd_3sr.converged_count, N_TARGETS);
+    println!(
+        "│ (0) baseline         │  {:>6.2}  │  {:.4}   │  {}/{}          │",
+        baseline.mean_iters, baseline.mean_agreement, baseline.converged_count, N_TARGETS
+    );
+    println!(
+        "│ (a) RCD-only         │  {:>6.2}  │  {:.4}   │  {}/{}          │",
+        rcd_only.mean_iters, rcd_only.mean_agreement, rcd_only.converged_count, N_TARGETS
+    );
+    println!(
+        "│ (b) RCD + uniform γ  │  {:>6.2}  │  {:.4}   │  {}/{}          │",
+        rcd_uniform.mean_iters, rcd_uniform.mean_agreement, rcd_uniform.converged_count, N_TARGETS
+    );
+    println!(
+        "│ (c) RCD + 3SR        │  {:>6.2}  │  {:.4}   │  {}/{}          │",
+        rcd_3sr.mean_iters, rcd_3sr.mean_agreement, rcd_3sr.converged_count, N_TARGETS
+    );
     println!("└──────────────────────┴──────────┴───────────┴─────────────────┘");
 
     // Quality guard: 3SR must not regress agreement by more than 5% vs RCD.
@@ -234,12 +245,17 @@ fn g1_3sr_vs_rcd_iteration_reduction_at_equal_quality() {
     assert!(
         quality_delta >= -0.05,
         "G1 QUALITY FAIL: 3SR agreement {:.4} vs RCD {:.4} (Δ={:.4}, threshold -0.05)",
-        rcd_3sr.mean_agreement, rcd_only.mean_agreement, quality_delta,
+        rcd_3sr.mean_agreement,
+        rcd_only.mean_agreement,
+        quality_delta,
     );
 
     // Iteration reduction: G1 PASS = 3SR uses ≥15% fewer iterations than RCD.
     let iter_reduction = (rcd_only.mean_iters - rcd_3sr.mean_iters) / rcd_only.mean_iters.max(1.0);
-    println!("  → iteration reduction: (a)→(c) = {:.2}%", iter_reduction * 100.0);
+    println!(
+        "  → iteration reduction: (a)→(c) = {:.2}%",
+        iter_reduction * 100.0
+    );
     println!("  → G1 PASS threshold:   ≥ 15%");
 
     // Honest gate: we don't hard-assert PASS/FAIL — the actual number is what
@@ -250,15 +266,22 @@ fn g1_3sr_vs_rcd_iteration_reduction_at_equal_quality() {
     assert!(
         rcd_3sr.mean_iters < rcd_only.mean_iters * 2.0,
         "G1 CATASTROPHIC REGRESSION: 3SR mean_iters {:.2} >> RCD {:.2}",
-        rcd_3sr.mean_iters, rcd_only.mean_iters,
+        rcd_3sr.mean_iters,
+        rcd_only.mean_iters,
     );
 
     if iter_reduction >= 0.15 {
         println!("✅ G1 PASSED: 3SR uses ≥15% fewer iterations than RCD at equal quality");
     } else if iter_reduction >= 0.0 {
-        println!("⚠️  G1 PARTIAL: 3SR uses {:.2}% fewer iterations (< 15% target) — feature stays opt-in", iter_reduction * 100.0);
+        println!(
+            "⚠️  G1 PARTIAL: 3SR uses {:.2}% fewer iterations (< 15% target) — feature stays opt-in",
+            iter_reduction * 100.0
+        );
     } else {
-        println!("⚠️  G1 FAIL: 3SR uses {:.2}% MORE iterations than RCD — feature stays opt-in, document negative result", iter_reduction * 100.0);
+        println!(
+            "⚠️  G1 FAIL: 3SR uses {:.2}% MORE iterations than RCD — feature stays opt-in, document negative result",
+            iter_reduction * 100.0
+        );
     }
 }
 
@@ -290,7 +313,10 @@ fn control_b_uniform_gamma_does_not_explode() {
         "uniform-γ produced non-finite or negative agreement: {}",
         agreement,
     );
-    println!("✅ Control (b): uniform-γ does not explode (agreement = {:.4})", agreement);
+    println!(
+        "✅ Control (b): uniform-γ does not explode (agreement = {:.4})",
+        agreement
+    );
 }
 
 // ─── Sanity: 3SR disabled falls through to RCD ───────────────────────────
@@ -307,20 +333,38 @@ fn sanity_3sr_disabled_matches_rcd() {
     // RCD-only.
     let mut rcd_cfg_a = RcdConfig::new(config.vocab_size, config.n_embd);
     let (rcd_tokens, rcd_steps) = denoise_loop_rcd(
-        &weights, &target, &config, N_STEPS, CONFIDENCE_THRESHOLD,
-        &mut NoConstraint, &mut Rng::new(42), Some(&mut rcd_cfg_a),
+        &weights,
+        &target,
+        &config,
+        N_STEPS,
+        CONFIDENCE_THRESHOLD,
+        &mut NoConstraint,
+        &mut Rng::new(42),
+        Some(&mut rcd_cfg_a),
     );
 
     // RCD + 3SR-disabled.
     let mut rcd_cfg_b = RcdConfig::new(config.vocab_size, config.n_embd);
     let tsr_cfg = ThreeStateReuseConfig::disabled();
     let (tsr_tokens, tsr_steps) = denoise_loop_rcd_3sr(
-        &weights, &target, &config, N_STEPS, CONFIDENCE_THRESHOLD,
-        &mut NoConstraint, &mut Rng::new(42),
-        Some(&mut rcd_cfg_b), Some(&tsr_cfg),
+        &weights,
+        &target,
+        &config,
+        N_STEPS,
+        CONFIDENCE_THRESHOLD,
+        &mut NoConstraint,
+        &mut Rng::new(42),
+        Some(&mut rcd_cfg_b),
+        Some(&tsr_cfg),
     );
 
-    assert_eq!(rcd_tokens, tsr_tokens, "3SR disabled must match RCD tokens exactly");
-    assert_eq!(rcd_steps, tsr_steps, "3SR disabled must match RCD steps exactly");
+    assert_eq!(
+        rcd_tokens, tsr_tokens,
+        "3SR disabled must match RCD tokens exactly"
+    );
+    assert_eq!(
+        rcd_steps, tsr_steps,
+        "3SR disabled must match RCD steps exactly"
+    );
     println!("✅ Sanity: 3SR-disabled byte-identical to RCD-only (tokens + steps match)");
 }

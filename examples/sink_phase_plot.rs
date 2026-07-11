@@ -20,8 +20,8 @@
 
 #![cfg(feature = "sink_aware_attn")]
 
-use katgpt_rs::data_probe::geometry::summarize_layer_sinks;
-use katgpt_rs::data_probe::sink_classify::{SinkClassifierConfig, StableRankScratch};
+use katgpt_core::data_probe::geometry::summarize_layer_sinks;
+use katgpt_core::data_probe::sink_classify::{SinkClassifierConfig, StableRankScratch};
 
 fn main() {
     println!("=== Sink-Aware Attention Phase Plot (Plan 287 T4.3) ===\n");

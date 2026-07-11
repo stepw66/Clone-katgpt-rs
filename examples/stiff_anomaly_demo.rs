@@ -6,7 +6,7 @@
 //! 3. Run anomaly gate with FPR validation
 //! 4. Show Jaccard stability
 
-use katgpt_rs::stiff_anomaly::{
+use katgpt_spectral::stiff_anomaly::{
     EigenvalueTracker, StiffAnomalyGate, decompose, monte_carlo_null_test, soft_alignment_ratio,
     stiff_subspace_k,
 };

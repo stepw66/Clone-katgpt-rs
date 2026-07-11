@@ -47,7 +47,7 @@ use crate::types::{MicroRecurrentBeliefState, RecurrenceFamily};
 /// Construct with [`new`](Self::new). The kernel is stateless aside from its
 /// config (`lr`, `max_delta`, `dim`) — the belief vector lives in the caller's
 /// `&mut [f32]`.
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct LeakyIntegrator {
     /// Learning rate (`config.hla_learning_rate` in `ReconstructionState`).
     pub lr: f32,
@@ -102,7 +102,11 @@ impl LeakyIntegrator {
         cfg: &katgpt_types::depth_invariance::DepthInvarianceConfig,
     ) -> katgpt_types::depth_invariance::DepthInvarianceDiagnostic {
         let dim = self.dim;
-        assert_eq!(initial_state.len(), dim, "initial_state must have length dim");
+        assert_eq!(
+            initial_state.len(),
+            dim,
+            "initial_state must have length dim"
+        );
         for (i, inp) in inputs.iter().enumerate() {
             assert_eq!(inp.len(), dim, "inputs[{i}] must have length dim");
         }
@@ -153,13 +157,7 @@ impl MicroRecurrentBeliefState for LeakyIntegrator {
     }
 
     #[inline(always)]
-    fn project_to_scalars(
-        &self,
-        state: &[f32],
-        directions: &[f32],
-        dim: usize,
-        out: &mut [f32],
-    ) {
+    fn project_to_scalars(&self, state: &[f32], directions: &[f32], dim: usize, out: &mut [f32]) {
         bridge_project(state, directions, dim, out);
     }
 

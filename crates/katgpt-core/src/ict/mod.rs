@@ -48,5 +48,8 @@ pub mod types;
 pub use bebop_upgrade::AcceptanceForecastH2;
 pub use branching::{branching_point_mask, branching_point_mask_into, is_critical_branching};
 pub use detector::BranchingDetector;
-pub use math::{collision_purity, collision_purity_into, js_divergence, js_divergence_batch, renyi_h2, shannon_h1};
+pub use math::{
+    collision_purity, collision_purity_into, js_divergence, js_divergence_batch, renyi_h2,
+    shannon_h1,
+};
 pub use types::BranchingReport;

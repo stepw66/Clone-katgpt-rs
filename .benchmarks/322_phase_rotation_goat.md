@@ -113,6 +113,7 @@ Per Research 305 §2.3, this is the **genuinely-new operation class** in the cod
 | Clifford Geometric Product (Plan 319) | `u·v + u∧v` (wedge detection) | Detects rotational structure as a signal. Phase-rotation is the actuator (applies rotation); Clifford is the sensor. |
 | Cross-Resolution Transport (Plan 310) | `Ψ · C · Φ^T` (linear Tikhonov) | Linear projection preserves L2 only approximately. Phase-rotation preserves L2 exactly. |
 | DEC operators | spatial sums on cochains | Per-cell spatial operations, not per-instance latent mixes. |
+| **Spherical Steering (Plan 405, DEFAULT-ON)** | `sin((1−t)θ)/sin θ · ĥ + sin(tθ)/sin θ · μ_T` (single-target geodesic Slerp) | **Sibling, not cousin.** Same norm-preservation thesis (Slerp identity holds for all θ ∈ (0,π)), different parameterization. Plan 322 rotates *within* the `(a,b)` plane (Pythagorean identity, optimal when `a ⊥ b`); Plan 405 rotates *toward* a target direction outside the input (Slerp identity, optimal for archetype drift correction). Both ship DEFAULT-ON; consumer picks based on use case (2-subspace balance vs single-target steering). See [Research 382](../.research/382_Spherical_Steering_Geodesic_Slerp.md) + [Plan 405](../.plans/405_spherical_steering_geodesic_primitive.md). |
 
 The Pythagorean identity `sin²α + cos²α = 1` gives the headline invariant:
 

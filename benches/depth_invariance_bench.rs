@@ -220,8 +220,7 @@ fn bench_t6_3() {
         });
 
         // Overhead = (regularized − raw) / raw. Report the worst of the two modes.
-        let overhead_pct =
-            100.0 * (rmsnorm_us.max(pinch_us) - raw_us) / raw_us;
+        let overhead_pct = 100.0 * (rmsnorm_us.max(pinch_us) - raw_us) / raw_us;
         println!(
             "{:>6} {:>16.3} {:>16.3} {:>16.3} {:>9.2}%",
             d, raw_us, rmsnorm_us, pinch_us, overhead_pct
@@ -239,9 +238,7 @@ fn bench_t6_3() {
 // ── main ─────────────────────────────────────────────────────────────────
 
 fn main() {
-    println!(
-        "=== Depth-Invariance Diagnostic Benchmark (Plan 306 Phase 6) ===\n"
-    );
+    println!("=== Depth-Invariance Diagnostic Benchmark (Plan 306 Phase 6) ===\n");
     bench_t6_1();
     bench_t6_2();
     bench_t6_3();

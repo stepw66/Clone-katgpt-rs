@@ -117,10 +117,7 @@ fn bench_scenario(name: &str, marginals: Vec<Vec<f32>>, config: &Config) -> Benc
     let start = std::time::Instant::now();
     let mut baseline_tree;
     for _ in 0..ITERS {
-        baseline_tree = build_dd_tree(
-            black_box(&marginals_refs),
-            black_box(config),
-        );
+        baseline_tree = build_dd_tree(black_box(&marginals_refs), black_box(config));
         black_box(&baseline_tree);
     }
     let baseline_ns = start.elapsed().as_nanos() as f64 / ITERS as f64;
@@ -150,8 +147,12 @@ fn bench_scenario(name: &str, marginals: Vec<Vec<f32>>, config: &Config) -> Benc
 
     println!(
         "    baseline: {} nodes, path={}, {:.0}ns | dendritic: {} nodes, path={}, {:.0}ns | reduction={:.1}%",
-        baseline_nodes, baseline_path_len, baseline_ns,
-        dendritic_nodes, dendritic_path_len, dendritic_ns,
+        baseline_nodes,
+        baseline_path_len,
+        baseline_ns,
+        dendritic_nodes,
+        dendritic_path_len,
+        dendritic_ns,
         reduction_pct,
     );
 

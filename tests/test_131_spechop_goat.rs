@@ -5,7 +5,7 @@
 //! 6/6 proofs required for default-on promotion.
 //! Run: `cargo test --features spechop --test test_131_spechop_goat`
 
-use katgpt_rs::spechop::*;
+use katgpt_speculative::spechop::*;
 
 // ── Helpers ───────────────────────────────────────────────────
 

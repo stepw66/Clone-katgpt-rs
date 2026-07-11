@@ -89,12 +89,12 @@
 #![cfg(debug_assertions)]
 
 use fastrand::Rng;
-use katgpt_rs::alloc::{get_alloc_stats, reset_alloc_stats};
-use katgpt_rs::clr::{
+use katgpt_core::simd::simd_dot_f32;
+use katgpt_core::alloc::{get_alloc_stats, reset_alloc_stats};
+use katgpt_claim::clr::{
     Claim, ClaimExtractor, ClrConfig, ClrScratch, DirectionVectorSource, FnClaimExtractor,
     SigmoidProjectionVerifier, Trajectory, clr_vote_minimal,
 };
-use katgpt_rs::simd::simd_dot_f32;
 
 // ──────────────────────────────────────────────────────────────────────────
 // Synthetic data (mirrors bench_284_clr_goat.rs helpers, kept local to avoid
@@ -222,7 +222,10 @@ fn g4_zero_allocation() {
     let data_build_allocs = snap_alloc();
 
     eprintln!();
-    eprintln!("Data build (K={} trajectories, M={} claims each):", G4_K, G4_M);
+    eprintln!(
+        "Data build (K={} trajectories, M={} claims each):",
+        G4_K, G4_M
+    );
     eprintln!("  allocs: {data_build_allocs}");
 
     // ── Phase C: steady-state — 1000 clr_vote_minimal calls ────────────
@@ -317,7 +320,10 @@ fn g4_zero_allocation() {
 
     eprintln!();
     eprintln!("Vote-internals allocation overhead (Phase D):");
-    eprintln!("  Extractor only (K={} calls): {extract_only_allocs:>6} allocs", G4_K);
+    eprintln!(
+        "  Extractor only (K={} calls): {extract_only_allocs:>6} allocs",
+        G4_K
+    );
     eprintln!("  One full vote call:          {one_vote_allocs:>6} allocs");
     eprintln!("  Vote-internals overhead:     {vote_overhead:>+6} allocs (target: 0)");
 
@@ -335,8 +341,10 @@ fn g4_zero_allocation() {
     eprintln!("  - Steady-state per-call allocs: constant (no growth/leak)");
     eprintln!("  - Vote-internals overhead vs extractor-only: 0 allocs ✅");
     eprintln!();
-    eprintln!("NOTE: Per-call allocations from the extractor (~{:.0}/call) are",
-        batch1_allocs as f64 / 500.0);
+    eprintln!(
+        "NOTE: Per-call allocations from the extractor (~{:.0}/call) are",
+        batch1_allocs as f64 / 500.0
+    );
     eprintln!("      caller-domain (ClaimExtractor trait returns owned Vec<Claim<T>>).");
     eprintln!("      A future hot-path variant taking pre-extracted &[&[Claim<T>]]");
     eprintln!("      would eliminate these. The vote internals themselves are zero-alloc.");

@@ -7,9 +7,9 @@
 fn main() {
     #[cfg(feature = "bckvss")]
     {
-        use katgpt_rs::bckvss::{
-            matthews_corr, perplexity_proxy, BandConditionerSelector,
-            BandConditionerSelectorConfig, QueryEmb, SegmentSelector, SyntheticScm,
+        use katgpt_band::bckvss::{
+            BandConditionerSelector, BandConditionerSelectorConfig, QueryEmb, SegmentSelector,
+            SyntheticScm, matthews_corr, perplexity_proxy,
         };
 
         println!("=== Plan 265 Phase 1: BCKVSS vs. Dense KV Cache ===\n");

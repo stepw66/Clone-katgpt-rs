@@ -229,16 +229,28 @@ mod module_energy_route_tests {
 
     #[test]
     fn route_ffn_heavy_low_qps_is_plasma() {
-        assert_eq!(route_by_module_energy(0.75, 0.10, 100), ComputeTarget::Plasma);
-        assert_eq!(route_by_module_energy(0.85, 0.05, 500), ComputeTarget::Plasma);
-        assert_eq!(route_by_module_energy(0.95, 0.02, 999), ComputeTarget::Plasma);
+        assert_eq!(
+            route_by_module_energy(0.75, 0.10, 100),
+            ComputeTarget::Plasma
+        );
+        assert_eq!(
+            route_by_module_energy(0.85, 0.05, 500),
+            ComputeTarget::Plasma
+        );
+        assert_eq!(
+            route_by_module_energy(0.95, 0.02, 999),
+            ComputeTarget::Plasma
+        );
     }
 
     #[test]
     fn route_attn_heavy_high_qps_is_gpu() {
         assert_eq!(route_by_module_energy(0.30, 0.50, 1000), ComputeTarget::Gpu);
         assert_eq!(route_by_module_energy(0.20, 0.60, 5000), ComputeTarget::Gpu);
-        assert_eq!(route_by_module_energy(0.10, 0.80, 10000), ComputeTarget::Gpu);
+        assert_eq!(
+            route_by_module_energy(0.10, 0.80, 10000),
+            ComputeTarget::Gpu
+        );
     }
 
     #[test]
@@ -253,10 +265,16 @@ mod module_energy_route_tests {
     fn route_default_is_simd() {
         // Neither FFN-dominated nor attention-dominated, moderate QPS.
         assert_eq!(route_by_module_energy(0.50, 0.30, 500), ComputeTarget::Simd);
-        assert_eq!(route_by_module_energy(0.40, 0.35, 1500), ComputeTarget::Simd);
+        assert_eq!(
+            route_by_module_energy(0.40, 0.35, 1500),
+            ComputeTarget::Simd
+        );
         // FFN fraction high but QPS >= 1000 so rule 1 doesn't fire, and
         // attention is below 0.40 so rule 2 doesn't fire either.
-        assert_eq!(route_by_module_energy(0.75, 0.15, 1000), ComputeTarget::Simd);
+        assert_eq!(
+            route_by_module_energy(0.75, 0.15, 1000),
+            ComputeTarget::Simd
+        );
     }
 
     #[test]
@@ -264,10 +282,16 @@ mod module_energy_route_tests {
         // At exactly qps=1000, rule 1 requires qps < 1000 (false), rule 2
         // requires qps >= 1000 (true). So an attention-heavy profile at qps=1000
         // goes GPU; an FFN-heavy profile at qps=1000 does NOT go Plasma.
-        assert_eq!(route_by_module_energy(0.80, 0.10, 1000), ComputeTarget::Simd);
+        assert_eq!(
+            route_by_module_energy(0.80, 0.10, 1000),
+            ComputeTarget::Simd
+        );
         assert_eq!(route_by_module_energy(0.30, 0.50, 1000), ComputeTarget::Gpu);
         // Just below 1000: FFN-heavy → Plasma.
-        assert_eq!(route_by_module_energy(0.80, 0.10, 999), ComputeTarget::Plasma);
+        assert_eq!(
+            route_by_module_energy(0.80, 0.10, 999),
+            ComputeTarget::Plasma
+        );
     }
 
     #[test]

@@ -62,8 +62,8 @@
 //! ```
 
 use fastrand::Rng;
-use katgpt_rs::screening::{
-    CompressionPriorSampler, ComplexityProxy, EntropyComplexity, L1Complexity, RleComplexity,
+use katgpt_pruners::screening::{
+    ComplexityProxy, CompressionPriorSampler, EntropyComplexity, L1Complexity, RleComplexity,
 };
 use std::hint::black_box;
 use std::time::Instant;
@@ -378,9 +378,21 @@ fn main() {
     );
     println!(
         "  RLE     α=64  : {}   |   Entropy α=128 : {}   |   L1 α=256 : {}",
-        if xcheck_rle { "✅ identical" } else { "❌ MISMATCH" },
-        if xcheck_ent { "✅ identical" } else { "❌ MISMATCH" },
-        if xcheck_l1 { "✅ identical" } else { "❌ MISMATCH" },
+        if xcheck_rle {
+            "✅ identical"
+        } else {
+            "❌ MISMATCH"
+        },
+        if xcheck_ent {
+            "✅ identical"
+        } else {
+            "❌ MISMATCH"
+        },
+        if xcheck_l1 {
+            "✅ identical"
+        } else {
+            "❌ MISMATCH"
+        },
     );
     assert!(
         xcheck_rle && xcheck_ent && xcheck_l1,
@@ -433,19 +445,22 @@ fn main() {
     println!("  G2 verdict (best α per proxy):");
     println!(
         "    RLE     α={:<5} → {:.1}× {}{}",
-        rle_a, rle_sp,
+        rle_a,
+        rle_sp,
         if rle_pass { "✅ PASS" } else { "❌ fail" },
         if rle_str { " ✨stretch" } else { "" }
     );
     println!(
         "    Entropy α={:<5} → {:.1}× {}{}",
-        ent_a, ent_sp,
+        ent_a,
+        ent_sp,
         if ent_pass { "✅ PASS" } else { "❌ fail" },
         if ent_str { " ✨stretch" } else { "" }
     );
     println!(
         "    L1      α={:<5} → {:.1}× {}{}",
-        l1_a, l1_sp,
+        l1_a,
+        l1_sp,
         if l1_pass { "✅ PASS" } else { "❌ fail" },
         if l1_str { " ✨stretch" } else { "" }
     );
@@ -461,7 +476,9 @@ fn main() {
     println!();
 
     // ── G1: Sampler safety on random landscapes ──────────────────────────────
-    println!("── G1: Sampler safety on {G1_N_LANDSCAPES} random landscapes ({G1_N_SAMPLES} samples each, α={G1_ALPHA}) ──");
+    println!(
+        "── G1: Sampler safety on {G1_N_LANDSCAPES} random landscapes ({G1_N_SAMPLES} samples each, α={G1_ALPHA}) ──"
+    );
     println!(
         "  gate: K-prior best ≥ uniform best − {:.0}%  (per landscape, then majority-of-landscapes)",
         G1_MARGIN * 100.0
@@ -570,16 +587,23 @@ fn main() {
     println!("═══════════════════════════════════════════════════════════════");
     println!(
         "  G2 (exponential speedup, best α): RLE {:.0}× {}  |  Entropy {:.0}× {}  |  L1 {:.0}× {}",
-        rle_sp, if rle_pass { "✅" } else { "❌" },
-        ent_sp, if ent_pass { "✅" } else { "❌" },
-        l1_sp, if l1_pass { "✅" } else { "❌" },
+        rle_sp,
+        if rle_pass { "✅" } else { "❌" },
+        ent_sp,
+        if ent_pass { "✅" } else { "❌" },
+        l1_sp,
+        if l1_pass { "✅" } else { "❌" },
     );
     println!(
         "  G1 (safety, α={}, majority of {}): RLE {}/{}  |  Entropy {}/{}  |  L1 {}/{}",
-        G1_ALPHA, G1_N_LANDSCAPES,
-        g1_rle_pass_count, G1_N_LANDSCAPES,
-        g1_ent_pass_count, G1_N_LANDSCAPES,
-        g1_l1_pass_count, G1_N_LANDSCAPES,
+        G1_ALPHA,
+        G1_N_LANDSCAPES,
+        g1_rle_pass_count,
+        G1_N_LANDSCAPES,
+        g1_ent_pass_count,
+        G1_N_LANDSCAPES,
+        g1_l1_pass_count,
+        G1_N_LANDSCAPES,
     );
     println!();
     let promote = g2_majority_pass;

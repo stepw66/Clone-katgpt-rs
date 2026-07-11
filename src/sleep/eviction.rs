@@ -61,13 +61,12 @@ fn sliding_window_evict(cache: &mut MultiLayerKVCache, config: &Config, retain: 
         layer.value[copy_len..].fill(0.0);
     }
 
-    // Update fill position: reset clears to 0, then set to `retain`.
-    // advance_pos(pos) sets fill_pos = max(fill_pos, pos + 1), so with
-    // retain > 0 this correctly sets fill_pos = retain.
-    cache.reset();
-    if retain > 0 {
-        cache.advance_pos(retain - 1);
-    }
+    // Update fill position to reflect the shifted layout. We must NOT call
+    // `cache.reset()` here — it zeroes the K/V buffers (KVCache::reset fills
+    // key/value with 0.0), which would wipe the entries we just shifted into
+    // place. The tail was already zeroed above (`[copy_len..].fill(0.0)`), so
+    // only the fill marker needs updating.
+    cache.set_fill_pos(retain);
 }
 
 // ── Tests ──────────────────────────────────────────────────────

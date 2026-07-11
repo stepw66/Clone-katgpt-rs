@@ -31,7 +31,10 @@ fn main() {
     println!("Tick 1 — one divergent trajectory (idx 0):");
     println!("  mask              = {:?}", r1.mask);
     println!("  uniqueness scores = {:?}", r1.uniqueness_scores);
-    println!("  population β      = {:.4}   ema_β = {:.4}", r1.beta_per_step[0], det.ema_beta);
+    println!(
+        "  population β      = {:.4}   ema_β = {:.4}",
+        r1.beta_per_step[0], det.ema_beta
+    );
     println!("  branching_count   = {}", r1.branching_count());
 
     // Synthetic tick 2: all trajectories identical → no branching.
@@ -41,7 +44,10 @@ fn main() {
     println!("\nTick 2 — all identical (no divergence):");
     println!("  mask              = {:?}", r2.mask);
     println!("  uniqueness scores = {:?}", r2.uniqueness_scores);
-    println!("  branching_count   = {} (top-k% always flags ≥ 1 by design)", r2.branching_count());
+    println!(
+        "  branching_count   = {} (top-k% always flags ≥ 1 by design)",
+        r2.branching_count()
+    );
 
     // Synthetic tick 3: every trajectory different — top-10% picks the single
     // most divergent one.

@@ -212,7 +212,7 @@ read as **superseded by this section**.
 ## References
 
 - [Research 320](../.research/320_Red_Queen_Godel_Machine_Selective_Erasure_Best_Belief.md) (corrected).
-- [Issue 004](../.issues/004_per_npc_selective_forgetting_super_goat_fusion.md) (CLOSED — not novel).
+- Issue 004 (closed + removed, not novel — covered by R158/R161/R155).
 - RQGM paper §3.5 (Controlled Utility Evolution), App. F Prop. 4 (best-belief lower bound).
 - `katgpt-core/src/pruners/bandit.rs` `sample_beta` (Jöhnk's) — the existing Beta *sampler* (exploration) that `best_belief_score` complements as the Beta *quantile* (conservative selection).
 - `katgpt-core/src/dec/cache.rs` `DecCache` — existing criterion-versioned cache (single-slot, with derived stats). Phase 3 trait extraction target.
@@ -350,3 +350,15 @@ commit.
 - The S=0, F=0 corner: the public API returns `epsilon.clamp(EPS_MIN, 1-EPS_MIN)` directly (Uniform(0,1) quantile). The closed form was extended to handle this case identically, so the LUT cell (0,0) is bit-identical to the public API. Without this, the LUT-vs-CF bit-identity test would fail at (0,0) because Newton on Beta(1,1) converges to ≈ε but not bit-exactly.
 
 **Commit:** see `git --no-pager log --oneline | grep -i best_belief` on `develop`.
+
+---
+
+## "Report the Floor" UQ comparison (Issue 010 T5)
+
+**G-UQ: BEATS FLOOR.** Unlike BoM (T3) and Sleep-Time (T4) which were EXCLUDED via reframing, Best-Belief genuinely beats its floor on its native metric (selection regret: `θ_best − θ_selected`).
+
+- **Uniform n (homoscedastic): TIES MLE.** Theorem: `BB_ε(S, n−S)` is monotone in `S/n` → same argmax. The Beta conservatism shifts absolute scores (useful for thresholding/gating) but not the within-pool ordering.
+- **Variable n (heteroscedastic — the real-world case): WINS 15–30%.** When candidates have different evidence weights (frozen snapshots with different deployment durations), Beta reduces selection regret by 15–30% across n_mean ∈ [4, 128].
+- **Low-data stress (one candidate n_lo=2): WINS 61–77%.** A 2/2 lucky streak has MLE=1.0 (false positive) but BB_0.05(2,0)≈0.025 (correctly discounted).
+
+`best_belief` stays DEFAULT-ON (Phase 2 promotion confirmed by the floor comparison). See `tests/conformal_floor_best_belief.rs`, `.benchmarks/010_best_belief_floor_comparison.md`.

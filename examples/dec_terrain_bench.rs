@@ -3,7 +3,7 @@
 //! Compares DEC-based navigation field update vs naive grid re-scan after
 //! terrain destruction events of varying scale.
 //!
-//! Run: `cargo run --example dec_terrain_bench --features dec_terrain_ai`
+//! Run: `cargo run --example dec_terrain_bench --features dec_operators`
 //!
 //! # What This Measures
 //!
@@ -190,8 +190,8 @@ fn bench_cache_invalidation() {
     // Hodge decomposition with cache awareness
     let edge_field = {
         let pot = CochainField::zeros(0, cx.n_vertices(), 1);
-        let grad = katgpt_core::dec::exterior_derivative(&cx, &pot);
-        grad
+
+        katgpt_core::dec::exterior_derivative(&cx, &pot)
     };
     let _components = hodge_decompose(&cx, &edge_field);
 

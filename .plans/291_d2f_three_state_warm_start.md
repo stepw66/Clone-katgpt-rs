@@ -58,18 +58,18 @@ Add the CoFRe **three-state reuse (3SR)** rule as an opt-in refinement to the LT
 
 ### Tasks
 
-- [ ] **T2.1** γ-coefficient grid search on the micro benchmark: sweep `gamma_masked_min ∈ {0.6, 0.75, 0.85}`, `gamma_masked_max ∈ {0.9, 0.95}`, `gamma_newly_revealed ∈ {0.0, 0.1, 0.2, 0.3}`. Confirm paper's finding that performance is robust within a moderate range (paper Tables 4–5).
-- [ ] **T2.2** Budget-allocation sanity check: confirm decreasing FP-iteration schedule (more solver steps early) is at least as good as fixed allocation on the micro benchmark. Our `TrainingFreeLoopConfig` already supports window/count tuning — reuse, do not reinvent.
-- [ ] **T2.3** **G2 PASS condition:** chosen γ-config is within 5% of the grid-best, and the grid-best itself passes G1. Document the chosen config in `ThreeStateReuseConfig::default()`.
+- [x] **T2.1** γ-coefficient grid search on the micro benchmark: sweep `gamma_masked_min ∈ {0.6, 0.75, 0.85}`, `gamma_masked_max ∈ {0.9, 0.95}`, `gamma_newly_revealed ∈ {0.0, 0.1, 0.2, 0.3}`. Confirm paper's finding that performance is robust within a moderate range (paper Tables 4–5). _(N/A — G1 FAILED at micro_dllm scale; Phase 2 gated on G1 pass. Deferred until G1 re-attempted at realistic scale per T1.9.)_
+- [x] **T2.2** Budget-allocation sanity check: confirm decreasing FP-iteration schedule (more solver steps early) is at least as good as fixed allocation on the micro benchmark. Our `TrainingFreeLoopConfig` already supports window/count tuning — reuse, do not reinvent. _(N/A — G1 FAILED; Phase 2 gated on G1 pass.)_
+- [x] **T2.3** **G2 PASS condition:** chosen γ-config is within 5% of the grid-best, and the grid-best itself passes G1. Document the chosen config in `ThreeStateReuseConfig::default()`. _(N/A — G1 FAILED; G2 cannot run without G1 pass first.)_
 
 ## Phase 3 — Wire + Docs (only if G2 passes)
 
 ### Tasks
 
-- [ ] **T3.1** Expose `ThreeStateReuseConfig` via `InferenceOverrides` (optional override, like the existing `depth_tier`).
-- [ ] **T3.2** Add `examples/d2f_3sr_demo.rs` showing before/after iteration count at fixed agreement threshold.
-- [ ] **T3.3** Update `.docs/01_overview.md` feature-flag table — mark `d2f_3sr_warm_start` as **opt-in**, reference Research 265 + this plan. Do NOT add to default feature list.
-- [ ] **T3.4** Cross-link Research 265 §2.3 (fusion) and Plan 258 (RCD) from the module doc comment.
+- [x] **T3.1** Expose `ThreeStateReuseConfig` via `InferenceOverrides` (optional override, like the existing `depth_tier`). _(N/A — G1 FAILED; Phase 3 gated on G2 pass, which is gated on G1 pass.)_
+- [x] **T3.2** Add `examples/d2f_3sr_demo.rs` showing before/after iteration count at fixed agreement threshold. _(N/A — G1 FAILED; Phase 3 gated on G2 pass.)_
+- [x] **T3.3** Update `.docs/01_overview.md` feature-flag table — mark `d2f_3sr_warm_start` as **opt-in**, reference Research 265 + this plan. Do NOT add to default feature list. _(N/A — G1 FAILED; Phase 3 gated on G2 pass.)_
+- [x] **T3.4** Cross-link Research 265 §2.3 (fusion) and Plan 258 (RCD) from the module doc comment. _(N/A — G1 FAILED; Phase 3 gated on G2 pass.)_
 
 ## Out of Scope (→ riir-train)
 

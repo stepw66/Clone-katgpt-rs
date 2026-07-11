@@ -16,6 +16,8 @@
 //! AutoDreamer (Plan 107), applied to GDN2 fast weights instead of modelless logits.
 //!
 //! Plan 154: Sleep Consolidation — Offline Recursive Memory Consolidation at Eviction.
+//!
+//! _Root-resident by design (Issue 033 §C, Option C)._ Composes root-only GDN2 eviction (`super::eviction`, `super::types`) + `crate::gdn2`. Cannot move to `katgpt-sleep` (unrelated feature: Sleep-Time Query Anticipator, arXiv:2504.13171; this is Plan 154 GDN2 fast-weight eviction). Would need its own crate.
 
 use super::eviction;
 use super::types::SleepConfig;

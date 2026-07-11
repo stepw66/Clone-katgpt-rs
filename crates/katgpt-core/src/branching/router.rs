@@ -138,11 +138,7 @@ impl BranchRouter {
     ///
     /// Zero allocation on the hot path.
     #[inline]
-    pub fn route<E: Clone>(
-        &self,
-        query_embedding: &[f32],
-        bank: &BranchBank<E>,
-    ) -> RouteResult {
+    pub fn route<E: Clone>(&self, query_embedding: &[f32], bank: &BranchBank<E>) -> RouteResult {
         // Primary: dot-product snap.
         if let Some(id) = self.snap_dot(query_embedding, bank) {
             return RouteResult::reuse(id);
@@ -181,10 +177,10 @@ impl BranchRouter {
         }
 
         // Secondary: Jaccard fallback (only if query has tokens).
-        if !query_tokens.is_empty() {
-            if let Some(id) = self.snap_jaccard(query_tokens, bank) {
-                return RouteResult::reuse(id);
-            }
+        if !query_tokens.is_empty()
+            && let Some(id) = self.snap_jaccard(query_tokens, bank)
+        {
+            return RouteResult::reuse(id);
         }
 
         // No snap. Spawn if capacity remains, else frozen.

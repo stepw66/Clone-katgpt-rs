@@ -1,0 +1,416 @@
+//! Polynomial rolling hash for O(n) variable-length segment matching.
+//!
+//! Implements a Mersenne-prime rolling hash and a KV segment pool for
+//! fast prefix-filter + full-hash verification of cached prompt segments.
+//!
+//! Reference: Plan 140 — CachePrune (arXiv:2605.23640).
+
+#![allow(clippy::too_many_lines)]
+
+use std::collections::{HashMap, HashSet};
+
+// ---------------------------------------------------------------------------
+// RollingHash
+// ---------------------------------------------------------------------------
+
+/// Polynomial rolling hash using Mersenne prime 2^61 - 1.
+///
+/// Provides O(1) substring hashing and O(1) sliding-window updates for
+/// variable-length segment matching against cached KV-pool entries.
+pub struct RollingHash {
+    base: u64,
+    modulus: u64, // 2^61 - 1
+    powers: Vec<u64>,
+}
+
+impl RollingHash {
+    /// Initialise with `base = 127` and modulus `2^61 - 1`, pre-computing
+    /// `base^i mod modulus` for `i` in `0..=max_length`.
+    pub fn new(max_length: usize) -> Self {
+        const BASE: u64 = 127;
+        const MODULUS: u64 = (1u64 << 61) - 1;
+
+        let mut powers = Vec::with_capacity(max_length + 1);
+        powers.push(1);
+        for i in 1..=max_length {
+            powers.push(mersenne_mul(powers[i - 1], BASE, MODULUS));
+        }
+
+        Self {
+            base: BASE,
+            modulus: MODULUS,
+            powers,
+        }
+    }
+
+    /// Compute prefix hash array for `tokens`.
+    ///
+    /// `hash[i] = hash[i-1] * base + token[i]  (mod modulus)`,
+    /// with `hash[0] = 0`.  Returns an array of length `tokens.len() + 1`.
+    pub fn prefix_hashes(&self, tokens: &[u32]) -> Vec<u64> {
+        let n = tokens.len();
+        let mut h = Vec::with_capacity(n + 1);
+        h.push(0);
+        // Track previous hash in a local to avoid per-iteration `.last().unwrap()`.
+        let mut prev: u64 = 0;
+        for &t in tokens {
+            // prev * base + t  (mod Mersenne prime)
+            prev = mersenne_add(
+                mersenne_mul(prev, self.base, self.modulus),
+                t as u64,
+                self.modulus,
+            );
+            h.push(prev);
+        }
+        h
+    }
+
+    /// Hash of the half-open substring `[l..r)` from a precomputed prefix
+    /// hash array.  O(1).
+    ///
+    /// Returns `prefix[r] - prefix[l] * powers[r-l]  (mod modulus)`.
+    pub fn substring_hash(&self, prefixes: &[u64], l: usize, r: usize) -> u64 {
+        debug_assert!(l <= r, "substring_hash: l must be <= r");
+        debug_assert!(
+            r < prefixes.len(),
+            "substring_hash: r out of bounds in prefix array"
+        );
+        let len = r - l;
+        let lhs = mersenne_mul(prefixes[l], self.powers[len], self.modulus);
+        mersenne_sub(prefixes[r], lhs, self.modulus)
+    }
+
+    /// Slide a fixed-size window hash by removing `old_token` and adding
+    /// `new_token`.  O(1).
+    ///
+    /// `new_hash = old_hash - old_token * base^(window-1)  (mod modulus)`,
+    /// then `new_hash = new_hash * base + new_token  (mod modulus)`.
+    pub fn slide(&self, old_hash: u64, old_token: u32, new_token: u32, window_size: usize) -> u64 {
+        let old_contrib =
+            mersenne_mul(old_token as u64, self.powers[window_size - 1], self.modulus);
+        let removed = mersenne_sub(old_hash, old_contrib, self.modulus);
+        let shifted = mersenne_mul(removed, self.base, self.modulus);
+        mersenne_add(shifted, new_token as u64, self.modulus)
+    }
+
+    /// Direct computation of the hash of `tokens[0..len]`.
+    ///
+    /// O(tokens.len()) with zero allocation. Use this when you need a
+    /// standalone hash of a slice rather than a substring of a precomputed
+    /// prefix array.
+    #[inline]
+    pub fn direct_hash(&self, tokens: &[u32]) -> u64 {
+        let mut h: u64 = 0;
+        let base = self.base;
+        let modulus = self.modulus;
+        for &t in tokens {
+            h = mersenne_add(mersenne_mul(h, base, modulus), t as u64, modulus);
+        }
+        h
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Mersenne-prime arithmetic helpers  (modulus = 2^61 - 1)
+// ---------------------------------------------------------------------------
+
+/// Multiply followed by Mersenne reduction.
+#[inline]
+fn mersenne_mul(a: u64, b: u64, m: u64) -> u64 {
+    // Fast Mersenne reduction for m = 2^61 - 1:
+    //   a * b mod (2^61 - 1) = lo + hi, then reduce once if >= m.
+    // This avoids the expensive u128 modulo and compiles to ~3 instructions.
+    let prod = (a as u128) * (b as u128);
+    let lo = (prod & ((1u128 << 61) - 1)) as u64;
+    let hi = (prod >> 61) as u64;
+    let sum = lo + hi;
+    if sum >= m { sum - m } else { sum }
+}
+
+/// Modular addition.
+#[inline]
+fn mersenne_add(a: u64, b: u64, m: u64) -> u64 {
+    let sum = a + b;
+    if sum >= m { sum - m } else { sum }
+}
+
+/// Modular subtraction.
+#[inline]
+fn mersenne_sub(a: u64, b: u64, m: u64) -> u64 {
+    if a >= b { a - b } else { m - b + a }
+}
+
+// ---------------------------------------------------------------------------
+// CachedSegment / KvSegmentPool / MatchResult
+// ---------------------------------------------------------------------------
+
+/// A cached KV-pool segment.
+pub struct CachedSegment {
+    /// Token ids that make up the segment.
+    pub token_hashes: Vec<u32>,
+    /// Rolling hash of the first `min(128, len)` tokens.
+    pub prefix_hash: u64,
+    /// blake3 digest of the full token sequence.
+    pub full_hash: [u8; 32],
+    /// Start position in the *original* prompt that produced this segment.
+    pub start: usize,
+    /// End position (exclusive) in the original prompt.
+    pub end: usize,
+}
+
+/// Pool of cached segments indexed by prefix rolling hash.
+pub struct KvSegmentPool {
+    segments: Vec<CachedSegment>,
+    /// prefix rolling hash → indices into `segments`.
+    prefix_index: HashMap<u64, Vec<usize>>,
+    /// Set of distinct segment lengths (used to drive the sliding-window loop
+    /// in `find_matches`). Only the keys matter — candidates are filtered by
+    /// length inside the inner loop via `prefix_index`.
+    by_len: HashSet<usize>,
+}
+
+/// Result of a segment match query.
+pub struct MatchResult {
+    /// Index into the segment pool.
+    pub segment_idx: usize,
+    /// Start offset within the request tokens.
+    pub start: usize,
+    /// End offset (exclusive) within the request tokens.
+    pub end: usize,
+    /// Whether the candidate survived blake3 full-hash verification.
+    pub verified: bool,
+}
+
+/// Number of tokens used for the fast prefix filter.
+const PREFIX_WINDOW: usize = 128;
+
+impl KvSegmentPool {
+    /// Create an empty pool.
+    pub fn new() -> Self {
+        Self {
+            segments: Vec::new(),
+            prefix_index: HashMap::new(),
+            by_len: HashSet::new(),
+        }
+    }
+
+    /// Add a segment to the pool.
+    ///
+    /// Computes a rolling-hash prefix (first `min(128, len)` tokens) and a
+    /// blake3 digest of the full token sequence, then indexes by prefix hash.
+    ///
+    /// Uses [`RollingHash::direct_hash`] on just the prefix slice — O(prefix_len)
+    /// with zero allocation, vs the previous O(n) `prefix_hashes` + `substring_hash`.
+    pub fn add_segment(&mut self, tokens: &[u32], roller: &RollingHash, start: usize, end: usize) {
+        let prefix_len = PREFIX_WINDOW.min(tokens.len());
+        // O(prefix_len) hash of just the prefix slice — avoids allocating a
+        // full prefix array of size n+1 just to read one entry.
+        let prefix_hash = roller.direct_hash(&tokens[..prefix_len]);
+
+        // blake3 of the full token sequence — batch into contiguous byte buffer.
+        let mut buf = Vec::with_capacity(tokens.len() * 4);
+        for &t in tokens {
+            buf.extend_from_slice(&t.to_le_bytes());
+        }
+        let full_hash: [u8; 32] = blake3::hash(&buf).into();
+
+        let idx = self.segments.len();
+        let seg_len = tokens.len();
+        self.segments.push(CachedSegment {
+            token_hashes: tokens.to_vec(),
+            prefix_hash,
+            full_hash,
+            start,
+            end,
+        });
+
+        self.prefix_index.entry(prefix_hash).or_default().push(idx);
+        self.by_len.insert(seg_len);
+    }
+
+    /// Two-phase match: prefix-filter via rolling hash, then blake3
+    /// verification.
+    ///
+    /// For every position in `request_tokens`, slide a window equal to each
+    /// candidate segment's length and check whether the prefix rolling hash
+    /// matches any pool entry.  On a hit, verify with blake3.
+    pub fn find_matches(&self, request_tokens: &[u32], roller: &RollingHash) -> Vec<MatchResult> {
+        let request_prefixes = roller.prefix_hashes(request_tokens);
+        let n = request_tokens.len();
+        let mut results = Vec::with_capacity(self.segments.len());
+
+        // Pre-encode request tokens to little-endian bytes ONCE.
+        // Each window's bytes are then a contiguous slice — no per-position re-encoding.
+        let mut req_bytes = Vec::with_capacity(n * 4);
+        for &t in request_tokens {
+            req_bytes.extend_from_slice(&t.to_le_bytes());
+        }
+
+        // Use pre-computed length set instead of rebuilding per query.
+        for &seg_len in &self.by_len {
+            if seg_len == 0 || seg_len > n {
+                continue;
+            }
+
+            // How many tokens to use for the prefix filter.
+            let prefix_len = PREFIX_WINDOW.min(seg_len);
+            let seg_bytes = seg_len * 4;
+
+            // Slide across the request tokens.
+            for pos in 0..=(n - seg_len) {
+                let req_prefix_hash =
+                    roller.substring_hash(&request_prefixes, pos, pos + prefix_len);
+
+                if let Some(candidates) = self.prefix_index.get(&req_prefix_hash) {
+                    // Phase 2: blake3 verification — slice into pre-encoded bytes.
+                    let byte_start = pos * 4;
+                    let byte_end = byte_start + seg_bytes;
+                    let window_hash: [u8; 32] =
+                        blake3::hash(&req_bytes[byte_start..byte_end]).into();
+
+                    for &seg_idx in candidates {
+                        // Only compare against segments of the right length.
+                        let seg = &self.segments[seg_idx];
+                        if seg.token_hashes.len() != seg_len {
+                            continue;
+                        }
+                        let verified = seg.full_hash == window_hash;
+                        results.push(MatchResult {
+                            segment_idx: seg_idx,
+                            start: pos,
+                            end: pos + seg_len,
+                            verified,
+                        });
+                    }
+                }
+            }
+        }
+
+        results
+    }
+}
+
+impl Default for KvSegmentPool {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Test 1: `prefix_hashes` + `substring_hash` matches direct computation.
+    #[test]
+    fn rolling_hash_consistency() {
+        let roller = RollingHash::new(256);
+        let tokens: Vec<u32> = vec![10, 20, 30, 40, 50, 60, 70, 80];
+
+        let prefixes = roller.prefix_hashes(&tokens);
+
+        // Check every possible substring.
+        for l in 0..tokens.len() {
+            for r in (l + 1)..=tokens.len() {
+                let sub_hash = roller.substring_hash(&prefixes, l, r);
+                let direct = roller.direct_hash(&tokens[l..r]);
+                assert_eq!(
+                    sub_hash, direct,
+                    "Mismatch for [{l}..{r}): rolling={sub_hash}, direct={direct}"
+                );
+            }
+        }
+    }
+
+    /// Test 2: `slide` matches window recomputation.
+    #[test]
+    fn slide_matches_window_recomputation() {
+        let window_size = 4;
+        let roller = RollingHash::new(window_size + 1);
+        let tokens: Vec<u32> = vec![100, 200, 300, 400, 500, 600, 700];
+
+        // Initial window [0..4).
+        let prefixes = roller.prefix_hashes(&tokens);
+        let mut current_hash = roller.substring_hash(&prefixes, 0, window_size);
+
+        // Slide one position at a time and compare.
+        for i in 0..(tokens.len() - window_size) {
+            let expected = roller.substring_hash(&prefixes, i, i + window_size);
+            assert_eq!(current_hash, expected, "Slide mismatch at position {i}");
+
+            if i + window_size < tokens.len() {
+                current_hash = roller.slide(
+                    current_hash,
+                    tokens[i],
+                    tokens[i + window_size],
+                    window_size,
+                );
+            }
+        }
+    }
+
+    /// Test 3: Segment pool exact match is found and verified.
+    #[test]
+    fn segment_pool_exact_match() {
+        let roller = RollingHash::new(256);
+        let mut pool = KvSegmentPool::new();
+
+        let segment_tokens: Vec<u32> = (0..64).collect();
+        pool.add_segment(&segment_tokens, &roller, 0, 64);
+
+        // Query with the same tokens — should match.
+        let matches = pool.find_matches(&segment_tokens, &roller);
+        assert!(!matches.is_empty(), "Expected at least one match");
+        assert!(matches[0].verified, "Match should be blake3-verified");
+        assert_eq!(matches[0].segment_idx, 0);
+        assert_eq!(matches[0].start, 0);
+        assert_eq!(matches[0].end, 64);
+    }
+
+    /// Test 4: No match returns empty.
+    #[test]
+    fn segment_pool_no_match() {
+        let roller = RollingHash::new(256);
+        let mut pool = KvSegmentPool::new();
+
+        let segment_tokens: Vec<u32> = (0..64).collect();
+        pool.add_segment(&segment_tokens, &roller, 0, 64);
+
+        // Completely different tokens.
+        let request: Vec<u32> = (1000..1064).collect();
+        let matches = pool.find_matches(&request, &roller);
+        assert!(
+            matches.is_empty(),
+            "Expected no matches for unrelated tokens"
+        );
+    }
+
+    /// Test 5: Collision resistance — different sequences produce different
+    /// hashes with high probability.
+    #[test]
+    fn collision_resistance() {
+        let roller = RollingHash::new(256);
+        let mut seen_hashes: HashMap<u64, Vec<u32>> = HashMap::new();
+
+        // Generate many distinct short sequences and check for collisions.
+        for seed in 0u32..200 {
+            let tokens: Vec<u32> = vec![seed, seed.wrapping_mul(31), seed.wrapping_add(7)];
+            let prefixes = roller.prefix_hashes(&tokens);
+            let h = roller.substring_hash(&prefixes, 0, tokens.len());
+
+            if let Some(prev) = seen_hashes.get(&h) {
+                assert_eq!(
+                    prev, &tokens,
+                    "Collision detected between different sequences (seed {seed})"
+                );
+            } else {
+                seen_hashes.insert(h, tokens);
+            }
+        }
+
+        assert_eq!(seen_hashes.len(), 200, "All 200 hashes should be unique");
+    }
+}

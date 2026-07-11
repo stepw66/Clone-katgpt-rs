@@ -24,10 +24,7 @@
 
 #![cfg(feature = "ict_branching")]
 
-use katgpt_core::ict::{
-    detector::BranchingDetector,
-    math::js_divergence_batch,
-};
+use katgpt_core::ict::{detector::BranchingDetector, math::js_divergence_batch};
 
 const N_DECISION_POINTS: usize = 1000;
 const K_TRAJECTORIES: usize = 8;
@@ -45,7 +42,10 @@ impl Lcg {
     }
     fn next_u64(&mut self) -> u64 {
         // Numerical Recipes LCG constants.
-        self.state = self.state.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+        self.state = self
+            .state
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
         self.state
     }
     fn next_f32(&mut self) -> f32 {
@@ -84,9 +84,9 @@ fn sample_decision_point(rng: &mut Lcg) -> (Vec<Vec<f32>>, &'static str) {
                 let mut p = vec![0.0_f32; ACTION_DIM];
                 p[dom] = dom_mass;
                 let rest = (1.0 - dom_mass) / (ACTION_DIM - 1) as f32;
-                for j in 0..ACTION_DIM {
+                for (j, slot) in p.iter_mut().enumerate() {
                     if j != dom {
-                        p[j] = rest * (0.5 + rng.next_f32());
+                        *slot = rest * (0.5 + rng.next_f32());
                     }
                 }
                 normalize(&mut p);
@@ -97,11 +97,11 @@ fn sample_decision_point(rng: &mut Lcg) -> (Vec<Vec<f32>>, &'static str) {
                 let top_count = 2 + (rng.next_u64() % 2) as usize; // 2 or 3
                 let mut p = vec![0.0_f32; ACTION_DIM];
                 let base = 1.0 / top_count as f32;
-                for k in 0..top_count {
-                    p[k] = base * (0.8 + 0.4 * rng.next_f32());
+                for slot in &mut p[..top_count] {
+                    *slot = base * (0.8 + 0.4 * rng.next_f32());
                 }
-                for j in top_count..ACTION_DIM {
-                    p[j] = 0.02 * rng.next_f32();
+                for slot in &mut p[top_count..] {
+                    *slot = 0.02 * rng.next_f32();
                 }
                 normalize(&mut p);
                 p
@@ -109,8 +109,8 @@ fn sample_decision_point(rng: &mut Lcg) -> (Vec<Vec<f32>>, &'static str) {
             _ => {
                 // Near-uniform noise.
                 let mut p = vec![0.0_f32; ACTION_DIM];
-                for j in 0..ACTION_DIM {
-                    p[j] = 1.0 + rng.next_f32();
+                for slot in &mut p {
+                    *slot = 1.0 + rng.next_f32();
                 }
                 normalize(&mut p);
                 p
@@ -224,9 +224,18 @@ fn g2_inflection_at_approximately_10_percent() {
         let label = format!("{:.1}", bin as f32 / 10.0);
         println!("  {label:>4} | {bar:<40} ({count})");
     }
-    println!("\nMedian inflection location = {:.4} ({:.1}%)", median, 100.0 * median);
-    println!("IQR                        = [{:.4}, {:.4}]  ({:.1}% – {:.1}%)",
-        q1, q3, 100.0 * q1, 100.0 * q3);
+    println!(
+        "\nMedian inflection location = {:.4} ({:.1}%)",
+        median,
+        100.0 * median
+    );
+    println!(
+        "IQR                        = [{:.4}, {:.4}]  ({:.1}% – {:.1}%)",
+        q1,
+        q3,
+        100.0 * q1,
+        100.0 * q3
+    );
 
     // ── Plan 294 T3.2 / T3.3 verdict. ──
     // The paper's ~10% claim is LLM-token-specific (§A.4.1). Plan §Risks
@@ -239,9 +248,12 @@ fn g2_inflection_at_approximately_10_percent() {
     // cite. Per Plan §Implementation Order the G3 decision point (not G2)
     // decides Super-GOAT vs Gain — G2 borderline-fail just means we sweep
     // k_percent empirically rather than hard-coding 0.10.
-    let pass = median >= 0.05 && median <= 0.20;
+    let pass = (0.05..=0.20).contains(&median);
     if pass {
-        println!("\nG2 PASS: median inflection location {:.1}% ∈ [5%, 20%]", 100.0 * median);
+        println!(
+            "\nG2 PASS: median inflection location {:.1}% ∈ [5%, 20%]",
+            100.0 * median
+        );
     } else {
         // Document honestly. Sweep k_percent to the empirical median for
         // downstream consumers (BranchingDetector default k_percent stays
@@ -263,7 +275,7 @@ fn g2_inflection_at_approximately_10_percent() {
     // 5%-20% band is reported above as a verdict, not enforced as a panic —
     // a borderline-fail G2 is informative, not a build break.)
     assert!(
-        median >= 0.0 && median <= 1.0,
+        (0.0..=1.0).contains(&median),
         "G2 sanity: median inflection must be a fraction in [0, 1], got {median}"
     );
 }

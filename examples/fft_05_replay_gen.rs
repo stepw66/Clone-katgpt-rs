@@ -33,7 +33,7 @@ use fastrand::Rng;
 
 use katgpt_rs::pruners::fft::players::HLFFTPlayer;
 use katgpt_rs::pruners::fft::replay_encode::{FFT_STATE_LEN, encode_battle_state};
-use katgpt_rs::pruners::fft::{Action, ActionType, BattleState, FftPlayer, Team, TURN_LIMIT};
+use katgpt_rs::pruners::fft::{Action, ActionType, BattleState, FftPlayer, TURN_LIMIT, Team};
 
 // ── CLI ──────────────────────────────────────────────────────────
 
@@ -124,12 +124,7 @@ fn resolve_output(raw: &PathBuf) -> PathBuf {
 
 /// Encode a single unit-turn decision as a JSONL line matching
 /// `riir_gpu::game::fft_replay::FftSampleJson`.
-fn encode_sample_jsonl(
-    state: &BattleState,
-    action: &Action,
-    unit_id: u8,
-    quality: f32,
-) -> String {
+fn encode_sample_jsonl(state: &BattleState, action: &Action, unit_id: u8, quality: f32) -> String {
     let mut state_tokens = [0u8; FFT_STATE_LEN];
     encode_battle_state(state, &mut state_tokens);
 
@@ -186,7 +181,13 @@ fn run_instrumented_battle(
 
     // Pre-compute the unit_id → team lookup (4 party + 4 enemy).
     let unit_teams: Vec<Team> = (0u8..8)
-        .map(|id| battle.units.get(id as usize).map(|u| u.team).unwrap_or(Team::Party))
+        .map(|id| {
+            battle
+                .units
+                .get(id as usize)
+                .map(|u| u.team)
+                .unwrap_or(Team::Party)
+        })
         .collect();
 
     // Collect per-unit samples during the battle keyed by unit_id.
@@ -298,7 +299,10 @@ fn main() {
     let mut file = match std::fs::File::create(&output_path) {
         Ok(f) => f,
         Err(e) => {
-            eprintln!("Failed to create output file {}: {e}", output_path.display());
+            eprintln!(
+                "Failed to create output file {}: {e}",
+                output_path.display()
+            );
             std::process::exit(1);
         }
     };

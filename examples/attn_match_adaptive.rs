@@ -14,10 +14,9 @@
 //! cargo run --example attn_match_adaptive --features adaptive_cot_compaction --release
 //! ```
 
-use katgpt_rs::attn_match::{
-    adaptive_cot::AdaptiveTraceCompactor, online::OnlineCompactor, types::AmConfig,
-};
-use katgpt_rs::freq_bandit::FrequencyBand;
+use katgpt_attn_match::{online::OnlineCompactor, types::AmConfig};
+use katgpt_rs::attn_match_adaptive_cot::AdaptiveTraceCompactor;
+use katgpt_pruners::freq_bandit::FrequencyBand;
 
 fn synth_kv(t_len: usize, d: usize, seed: u32) -> (Vec<f32>, Vec<f32>) {
     let mut keys = vec![0.0f32; t_len * d];
@@ -62,7 +61,9 @@ fn mixed_logits(n_classes: usize, seed: u32) -> Vec<f32> {
     let mut l = vec![0.0f32; n_classes];
     let mut s = seed as u64;
     for v in l.iter_mut() {
-        s = s.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+        s = s
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
         *v = ((s >> 33) as f32) / (1u64 << 31) as f32;
     }
     l
@@ -109,19 +110,16 @@ fn run_trace(
         adaptive.observe_entropy(&logits);
 
         // Adaptive path.
-        match adaptive
+        if let Some(r) = adaptive
             .maybe_compact_adaptive(&keys, &values, &queries, pos, d, n, cfg)
             .expect("adaptive ok")
         {
-            Some(r) => {
-                adaptive_compacts += 1;
-                keys = r.online.compact_prefix.compact_keys.clone();
-                keys.extend_from_slice(&r.online.recent_keys);
-                values = r.online.compact_prefix.compact_values.clone();
-                values.extend_from_slice(&r.online.recent_values);
-                pos = r.online.total_logical_len;
-            }
-            None => {}
+            adaptive_compacts += 1;
+            keys = r.online.compact_prefix.compact_keys.clone();
+            keys.extend_from_slice(&r.online.recent_keys);
+            values = r.online.compact_prefix.compact_values.clone();
+            values.extend_from_slice(&r.online.recent_values);
+            pos = r.online.total_logical_len;
         }
 
         // Blind online path (run independently from the same starting state).
@@ -140,7 +138,11 @@ fn run_trace(
     let blind_compacts = trace_len / 80; // rough estimate
     // Blind never preserves at spike (no entropy awareness).
 
-    (adaptive_compacts, adaptive_preserved_at_spike, blind_compacts)
+    (
+        adaptive_compacts,
+        adaptive_preserved_at_spike,
+        blind_compacts,
+    )
 }
 
 fn main() {
@@ -172,8 +174,15 @@ fn main() {
     let (adapt_cmp, preserved, blind_cmp) =
         run_trace(&mut adaptive, &mut blind, 200, trace_len, d, n, &cfg);
 
-    println!("  Adaptive: {} compactions, preserved at spike: {}", adapt_cmp, preserved > 0);
-    println!("  Blind:    ~{} compactions (estimate), preserved at spike: never", blind_cmp);
+    println!(
+        "  Adaptive: {} compactions, preserved at spike: {}",
+        adapt_cmp,
+        preserved > 0
+    );
+    println!(
+        "  Blind:    ~{} compactions (estimate), preserved at spike: never",
+        blind_cmp
+    );
     println!(
         "  Final thresholds: θ_low={:.4}, θ_high={:.4}",
         adaptive.thresholds().0,
@@ -197,7 +206,7 @@ fn main() {
 
         // Reward signal: traces that compacted moderately (not too few, not
         // too many) and preserved at spikes get positive reward.
-        let reward = if cmp >= 1 && cmp <= 6 { 1.0 } else { -0.5 };
+        let reward = if (1..=6).contains(&cmp) { 1.0 } else { -0.5 };
         adaptive2.update_reward(reward);
 
         trace_stats.push((cmp, adaptive2.thresholds().0));
@@ -208,8 +217,7 @@ fn main() {
         trace_stats.iter().map(|(c, _)| *c as f32).sum::<f32>() / trace_stats.len() as f32;
     let final_low = adaptive2.thresholds().0;
     let final_high = adaptive2.thresholds().1;
-    let low_history_last10: Vec<f32> =
-        trace_stats.iter().skip(90).map(|(_, l)| *l).collect();
+    let low_history_last10: Vec<f32> = trace_stats.iter().skip(90).map(|(_, l)| *l).collect();
     let avg_low_last10: f32 = low_history_last10.iter().sum::<f32>() / 10.0;
 
     println!("  Average compactions/trace: {:.2}", avg_cmp);
@@ -231,18 +239,9 @@ fn main() {
 
     println!("\n  Bandit arm statistics:");
     println!("    total pulls: {}", total_pulls);
-    println!(
-        "    Low:  pulls={:>4}, Q={:+.4}",
-        low_pulls, low_q
-    );
-    println!(
-        "    Mid:  pulls={:>4}, Q={:+.4}",
-        mid_pulls, mid_q
-    );
-    println!(
-        "    High: pulls={:>4}, Q={:+.4}",
-        high_pulls, high_q
-    );
+    println!("    Low:  pulls={:>4}, Q={:+.4}", low_pulls, low_q);
+    println!("    Mid:  pulls={:>4}, Q={:+.4}", mid_pulls, mid_q);
+    println!("    High: pulls={:>4}, Q={:+.4}", high_pulls, high_q);
     println!("  Best arm: {:?}", adaptive2.bandit().best_arm());
 
     // ── Threshold drift visualization ───────────────────────────────────────

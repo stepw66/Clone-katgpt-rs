@@ -91,12 +91,12 @@ fn g1_fixture() -> (PairedLossGap, [TokenClass; 8]) {
     let b = [1.0f32, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0];
     let gap = PairedLossGap::from_log_probs(&a, &b);
     let classes = [
-        TokenClass::Content,    // pos 0, Δ=1
-        TokenClass::Function,   // pos 1, Δ=0
-        TokenClass::Content,    // pos 2, Δ=2
-        TokenClass::CopyN(2),   // pos 3, Δ=1
-        TokenClass::Other,      // pos 4, Δ=0
-        TokenClass::Content,    // pos 5, Δ=3
+        TokenClass::Content,      // pos 0, Δ=1
+        TokenClass::Function,     // pos 1, Δ=0
+        TokenClass::Content,      // pos 2, Δ=2
+        TokenClass::CopyN(2),     // pos 3, Δ=1
+        TokenClass::Other,        // pos 4, Δ=0
+        TokenClass::Content,      // pos 5, Δ=3
         TokenClass::BracketOpen,  // pos 6, Δ=2
         TokenClass::BracketClose, // pos 7, Δ=1
     ];
@@ -207,13 +207,7 @@ fn filtered_mean_topk_nocopy_k2() {
     // Mask = positions 0, 1, 2, 5 (Content or Function).
     // CopyN(2) at pos 3 already excluded (not Content/Function).
     // Mean over {1.0, 0.0, 2.0, 3.0} = 6.0/4 = 1.5
-    let m = gap.filtered_mean(
-        &classes,
-        FilterKind::TopKNoCopy {
-            k: 2,
-            max_ngram: 4,
-        },
-    );
+    let m = gap.filtered_mean(&classes, FilterKind::TopKNoCopy { k: 2, max_ngram: 4 });
     assert!(approx(m, 1.5), "TopKNoCopy(k=2) = {}, want 1.5", m);
 }
 
@@ -223,13 +217,7 @@ fn filtered_mean_topk_nocopy_k1_picks_higher_mean_class() {
     // k=1: only Content (mean 2.0) beats Function (mean 0.0).
     // Mask = positions 0, 2, 5 (Content only).
     // Mean over {1.0, 2.0, 3.0} = 6.0/3 = 2.0
-    let m = gap.filtered_mean(
-        &classes,
-        FilterKind::TopKNoCopy {
-            k: 1,
-            max_ngram: 4,
-        },
-    );
+    let m = gap.filtered_mean(&classes, FilterKind::TopKNoCopy { k: 1, max_ngram: 4 });
     assert!(approx(m, 2.0), "TopKNoCopy(k=1) = {}, want 2.0", m);
 }
 
@@ -237,13 +225,7 @@ fn filtered_mean_topk_nocopy_k1_picks_higher_mean_class() {
 fn filtered_mean_topk_nocopy_k0_is_empty() {
     let (gap, classes) = g1_fixture();
     // k=0: select nothing → empty mask → 0.0
-    let m = gap.filtered_mean(
-        &classes,
-        FilterKind::TopKNoCopy {
-            k: 0,
-            max_ngram: 4,
-        },
-    );
+    let m = gap.filtered_mean(&classes, FilterKind::TopKNoCopy { k: 0, max_ngram: 4 });
     assert!(approx(m, 0.0), "TopKNoCopy(k=0) = {}, want 0.0 (empty)", m);
 }
 
@@ -260,13 +242,7 @@ fn filtered_mean_topk_nocopy_excludes_copy_brackets_other() {
     // absent → NEG_INFINITY, sorts last, k=2 still only picks Content since
     // Function has no positions). The CopyN(2) position with Δ=9.0 is
     // excluded. Mean over {0.0} = 0.0.
-    let m = gap.filtered_mean(
-        &classes,
-        FilterKind::TopKNoCopy {
-            k: 2,
-            max_ngram: 4,
-        },
-    );
+    let m = gap.filtered_mean(&classes, FilterKind::TopKNoCopy { k: 2, max_ngram: 4 });
     assert!(approx(m, 0.0), "CopyN excluded: got {}, want 0.0", m);
 }
 
@@ -279,13 +255,7 @@ fn filtered_mean_amplifies_gap_vs_aggregate() {
     let (gap, classes) = g1_fixture();
     let m_all = gap.filtered_mean(&classes, FilterKind::AllTokens).abs();
     let m_topk = gap
-        .filtered_mean(
-            &classes,
-            FilterKind::TopKNoCopy {
-                k: 2,
-                max_ngram: 4,
-            },
-        )
+        .filtered_mean(&classes, FilterKind::TopKNoCopy { k: 2, max_ngram: 4 })
         .abs();
     assert!(
         m_topk >= m_all,
@@ -301,7 +271,7 @@ fn filtered_mean_amplifies_gap_vs_aggregate() {
 fn class_size_bound_boolean() {
     let b = ClassSizeBound::for_vocab_size(2);
     assert!(approx(b.log_v_tau, 2.0f32.ln()));
-    assert!(approx(b.log_v_tau, 0.693_147_18));
+    assert!(approx(b.log_v_tau, core::f32::consts::LN_2));
     assert!(approx(b.reducible_loss_ceiling(), b.log_v_tau));
 }
 
@@ -361,30 +331,15 @@ fn copy_ngram_tagger_doc_example() {
     let tagger = CopyNGramTagger::new(2);
     let prefix = [10u32, 20, 10, 20, 10];
     // position 0: not enough context → Other
-    assert_eq!(
-        tagger.classify(prefix[0], 0, &prefix),
-        TokenClass::Other
-    );
+    assert_eq!(tagger.classify(prefix[0], 0, &prefix), TokenClass::Other);
     // position 1: n-gram [10,20], no earlier → Other
-    assert_eq!(
-        tagger.classify(prefix[1], 1, &prefix),
-        TokenClass::Other
-    );
+    assert_eq!(tagger.classify(prefix[1], 1, &prefix), TokenClass::Other);
     // position 2: n-gram [20,10], no earlier match → Other
-    assert_eq!(
-        tagger.classify(prefix[2], 2, &prefix),
-        TokenClass::Other
-    );
+    assert_eq!(tagger.classify(prefix[2], 2, &prefix), TokenClass::Other);
     // position 3: n-gram [10,20], earlier at j=0 → CopyN(2)
-    assert_eq!(
-        tagger.classify(prefix[3], 3, &prefix),
-        TokenClass::CopyN(2)
-    );
+    assert_eq!(tagger.classify(prefix[3], 3, &prefix), TokenClass::CopyN(2));
     // position 4: n-gram [20,10], earlier at j=1 → CopyN(2)
-    assert_eq!(
-        tagger.classify(prefix[4], 4, &prefix),
-        TokenClass::CopyN(2)
-    );
+    assert_eq!(tagger.classify(prefix[4], 4, &prefix), TokenClass::CopyN(2));
 }
 
 #[test]
@@ -416,25 +371,13 @@ fn copy_ngram_tagger_n3() {
         );
     }
     // position 3: n-gram [2,3,4], no earlier → Other
-    assert_eq!(
-        tagger.classify(prefix[3], 3, &prefix),
-        TokenClass::Other
-    );
+    assert_eq!(tagger.classify(prefix[3], 3, &prefix), TokenClass::Other);
     // position 4: n-gram [3,4,1], no earlier → Other
-    assert_eq!(
-        tagger.classify(prefix[4], 4, &prefix),
-        TokenClass::Other
-    );
+    assert_eq!(tagger.classify(prefix[4], 4, &prefix), TokenClass::Other);
     // position 5: n-gram [4,1,2], no earlier → Other
-    assert_eq!(
-        tagger.classify(prefix[5], 5, &prefix),
-        TokenClass::Other
-    );
+    assert_eq!(tagger.classify(prefix[5], 5, &prefix), TokenClass::Other);
     // position 6: n-gram [1,2,3], earlier at j=0 → CopyN(3)
-    assert_eq!(
-        tagger.classify(prefix[6], 6, &prefix),
-        TokenClass::CopyN(3)
-    );
+    assert_eq!(tagger.classify(prefix[6], 6, &prefix), TokenClass::CopyN(3));
 }
 
 #[test]
@@ -445,10 +388,7 @@ fn copy_ngram_tagger_n1_trivially_matches() {
     // position 0: nothing earlier → Other
     assert_eq!(tagger.classify(prefix[0], 0, &prefix), TokenClass::Other);
     // position 1: token 5 appeared at j=0 → CopyN(1)
-    assert_eq!(
-        tagger.classify(prefix[1], 1, &prefix),
-        TokenClass::CopyN(1)
-    );
+    assert_eq!(tagger.classify(prefix[1], 1, &prefix), TokenClass::CopyN(1));
     // position 2: token 6 not seen earlier → Other
     assert_eq!(tagger.classify(prefix[2], 2, &prefix), TokenClass::Other);
 }
@@ -523,7 +463,11 @@ fn annotate_basic_fixture_per_class_means_and_ratios() {
     // ln(50000) ≈ 10.8198. ratio = 2.0 / 10.8198 ≈ 0.1848.
     let content = report.row_for(TokenClass::Content).unwrap();
     assert_eq!(content.count, 3);
-    assert!(approx(content.mean_gap, 2.0), "content mean = {}", content.mean_gap);
+    assert!(
+        approx(content.mean_gap, 2.0),
+        "content mean = {}",
+        content.mean_gap
+    );
     assert!(approx(content.log_v_tau, 10.819_778));
     assert!(approx(content.gap_to_bound_ratio, 2.0 / 10.819_778));
 
@@ -539,8 +483,11 @@ fn annotate_basic_fixture_per_class_means_and_ratios() {
     let copyn = report.row_for(TokenClass::CopyN(2)).unwrap();
     assert_eq!(copyn.count, 1);
     assert!(approx(copyn.mean_gap, 1.0));
-    assert!(approx(copyn.log_v_tau, 0.693_147_18));
-    assert!(approx(copyn.gap_to_bound_ratio, 1.0 / 0.693_147_18));
+    assert!(approx(copyn.log_v_tau, core::f32::consts::LN_2));
+    assert!(approx(
+        copyn.gap_to_bound_ratio,
+        1.0 / core::f32::consts::LN_2
+    ));
 
     // Other: position 4 → delta 0. No bound provided → log_v_tau = NaN,
     // ratio = NaN.
@@ -548,7 +495,10 @@ fn annotate_basic_fixture_per_class_means_and_ratios() {
     assert_eq!(other.count, 1);
     assert!(approx(other.mean_gap, 0.0));
     assert!(other.log_v_tau.is_nan(), "missing bound → NaN log_v_tau");
-    assert!(other.gap_to_bound_ratio.is_nan(), "missing bound → NaN ratio");
+    assert!(
+        other.gap_to_bound_ratio.is_nan(),
+        "missing bound → NaN ratio"
+    );
 }
 
 #[test]
@@ -627,7 +577,11 @@ fn annotate_deterministic_class_v_tau_1_yields_nan_ratio() {
     let a = [1.0f32, 2.0, 3.0];
     let b = [0.5f32, 1.5, 2.5];
     let gap = PairedLossGap::from_log_probs(&a, &b);
-    let classes = [TokenClass::Content, TokenClass::Content, TokenClass::Content];
+    let classes = [
+        TokenClass::Content,
+        TokenClass::Content,
+        TokenClass::Content,
+    ];
     let mut bounds = std::collections::HashMap::new();
     bounds.insert(TokenClass::Content, ClassSizeBound::for_vocab_size(1));
     let report = gap.annotate_with_class_bounds(&classes, &bounds);
@@ -665,7 +619,10 @@ fn annotate_negative_mean_gap_yields_negative_ratio() {
     let row = report.row_for(TokenClass::Content).unwrap();
     assert!(approx(row.mean_gap, -1.0));
     assert!(approx(row.log_v_tau, 10.0f32.ln()));
-    assert!(row.gap_to_bound_ratio < 0.0, "negative mean → negative ratio");
+    assert!(
+        row.gap_to_bound_ratio < 0.0,
+        "negative mean → negative ratio"
+    );
 }
 
 #[test]

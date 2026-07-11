@@ -1,0 +1,306 @@
+[package]
+name = "katgpt-forward"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+description = "Forward-pass composition context (ForwardContext) — the top-tier join point above katgpt-transformer + katgpt-pruners (Issue 007 Phase F)"
+repository = "https://github.com/katopz/katgpt-rs"
+keywords = ["transformer", "forward", "inference", "context", "modelless"]
+categories = ["data-structures", "science"]
+publish = false  # only katgpt-core ships to crates.io
+
+[dependencies]
+# ForwardContext is the topmost type in the inference DAG — it composes
+# transformer substrate (buffer types + WallPrefixState + TransformerWeights
+# type hint) with pruner handles (CnaModulator/SubstrateMask/HydraSkipPlan).
+# Both katgpt-transformer and katgpt-pruners sit BELOW this crate; neither can
+# host ForwardContext without creating a cycle (katgpt-pruners already depends
+# on katgpt-transformer). See Issue 007 §"The composition-layer pin".
+katgpt-core = { path = "../katgpt-core" }
+katgpt-types = { path = "../katgpt-types" }        # Config, kv_dim, DepthTier, simd (re-exported here as katgpt_core::simd)
+katgpt-transformer = { path = "../katgpt-transformer" }  # WallPrefixState, TransformerWeights
+katgpt-pruners = { path = "../katgpt-pruners", default-features = false }  # CnaModulator, SubstrateMask, HydraSkipPlan
+# katgpt-hla (Issue 007 Phase F.4b, 2026-07-02): HLA cache types + streaming
+# kernels. forward_hla / forward_ahla moved here from root `src/hla/forward.rs`.
+# katgpt-forward → katgpt-hla is safe (no cycle: katgpt-hla depends only on
+# katgpt-types, which katgpt-forward already pulls transitively).
+katgpt-hla = { path = "../katgpt-hla" }
+# DflashCtx<TransformerWeights> impl for ForwardContext lives here (Issue 007
+# Phase F): the impl must travel with the type now that ForwardContext moved
+# out of root, otherwise the orphan rule blocks root's dflash.rs. No cycle —
+# katgpt-speculative depends only on katgpt-core + katgpt-types.
+katgpt-speculative = { path = "../katgpt-speculative" }
+
+rayon = "1.10"
+
+# Plan 394 (2026-07-05): drafter_lora.rs save/load uses BLAKE3 for the
+# integrity envelope (mirrors katgpt-core's `blake3 = "1"` version).
+blake3 = "1"
+
+# Plan 394: step.rs uses `log::debug!` under the `stability_metrics` feature.
+log = "0.4"
+
+[dev-dependencies]
+# Plan 394: drafter_lora.rs tests use tempfile for round-trip save/load
+tempfile = "3"
+# Plan 396: dd_tree.rs tests use fastrand under the `speculative_generator` feature
+fastrand = "2"
+
+[features]
+default = []
+
+# ── Feature gates mirrored from root that ForwardContext fields read ──
+# Each is an empty tracking flag here — it gates a field/impl in this crate.
+# Root forwards its feature to this crate so the cfg blocks resolve when the
+# root feature is enabled. Upstream crates (katgpt-transformer, katgpt-pruners)
+# get their own feature forwarded by the root independently.
+
+# CNA: contrastive neuron attribution runtime modulator (Plan 087).
+cna_steering = ["katgpt-pruners/cna_steering"]
+
+# Sparse MLP active-indices/value buffers (Plan 022).
+sparse_mlp = ["katgpt-core/sparse_mlp"]
+
+# SubstrateGate: per-sequence capability mask for dual sparsity (Plan 216).
+substrate_gate = ["katgpt-pruners/substrate_gate", "sparse_mlp"]
+
+# Delta routing block-delta accumulation (Plan 097).
+delta_routing = ["katgpt-transformer/delta_routing"]
+
+# CODA fused kernels: partial RMS accumulation buffer (Plan 103).
+# Plan 385: also forwards to katgpt-core so `katgpt_core::coda::*` (used by
+# forward_coda) compiles when the feature is enabled.
+coda_fusion = ["katgpt-core/coda_fusion"]
+
+# MLS Multi-Layer Sum aggregation (Plan 104).
+mls_aggregate = []
+
+# Tiled attention repacking buffers (Plan 115).
+tiled_attention = ["katgpt-core/tiled_attention"]
+
+# Training-free loop window buffers (Issue 091).
+tf_loop = []
+
+# Hydra Adaptive Layer Budget: pre-computed skip plan (Research 148, Plan 165).
+hydra_budget = ["katgpt-pruners/hydra_budget"]
+
+# Wall Attention: per-head prefix sum state (Plan 173).
+# Plan 385: also forwards to katgpt-core so `Config.wall_config` field (gated
+# in katgpt-types via katgpt-core) compiles when the feature is enabled —
+# forward_base/forward_coda read `config.wall_config` behind
+# `#[cfg(feature = "wall_attention")]`.
+wall_attention = ["katgpt-transformer/wall_attention", "katgpt-core/wall_attention"]
+
+# TurboQuant incremental dequant reset alias (back-compat for reset_tq_dequant).
+turboquant = []
+
+# ── Plan 385 (2026-07-05): features consumed by the extracted forward trio ──
+# (`forward`, `forward_base`, `forward_coda` moved from root `src/transformer.rs`).
+# Each is a tracking flag here — it gates a cfg block in `src/forward.rs`.
+
+# Free Transformer mid-layer domain conditioning (Plan 038). Gates the
+# `domain_latent: Option<&DomainLatent>` parameter of forward_base/forward_coda
+# AND the mid-layer K/V injection block.
+domain_latent = ["katgpt-core/domain_latent"]
+
+# Kog AI monokernel CPU fusion — RMSNorm gamma folding + QKV interleaving
+# (Plan 160). Gates the `types::rmsnorm_with_gamma` branch in forward_base/coda
+# AND the `attn_qkv_fused` fast path. Forwards to katgpt-transformer so the
+# `attn_norm_gamma` / `mlp_norm_gamma` / `attn_qkv_fused` weight fields are present.
+kog_cpu_fusion = ["katgpt-transformer/kog_cpu_fusion"]
+
+# DenseMesh latent node network (Plan 266, Plan 385 T6). Gates the
+# `dense_mesh_node_transformer` module which consumes
+# `katgpt_transformer::dense_mesh::{traits::DenseNode, types::*}`.
+# Forwarded to katgpt-transformer so the substrate compiles.
+dense_mesh = ["katgpt-transformer/dense_mesh"]
+
+# Stage-specialized decode paths for speculative decoding (Plan 102 TileRT).
+# Gates `forward_decode_stage` + `forward_draft` + `forward_verify` (moved
+# from root `src/transformer.rs` Plan 393). Forwarded to katgpt-transformer
+# so `DecodeStage` + the stage-aware layer-skip helper compile, and to
+# katgpt-pruners so `should_skip_layer_stage` compiles (matches root's
+# forwarding in its `decode_specialize` feature).
+decode_specialize = ["katgpt-transformer/decode_specialize", "katgpt-pruners/decode_specialize"]
+
+# ── Plan 394 (2026-07-05): features consumed by the moved forward-cycle cluster ──
+# (`drafter_lora`, `dflash`, `verifier`, `step`, `prefill` moved from root
+# `src/speculative/`). Each is a tracking flag here — it gates a cfg block in
+# one of those files. Root forwards its feature to this crate so the cfg
+# blocks resolve when the root feature is enabled.
+
+# Drafter LoRA — MTP LoRA drafter training (Plan 117). No upstream forward
+# needed: drafter_lora.rs is fully self-contained.
+mtp_lora_drafter = []
+
+# Domino LoRA causal correction adapter (Plan 231). Forwards to
+# katgpt-speculative so DominoLoraCorrection resolves.
+domino_lora = ["katgpt-speculative/domino_lora"]
+
+# DFlare Pruner-Confidence KV Routing (Plan 174). Forwards to katgpt-core
+# so KvRoutingConfig + the routing cfg block resolve.
+dflare_kv_routing = ["katgpt-core/dflare_kv_routing"]
+
+# DFlare Marginal Fusion (Plan 174). Forwards to katgpt-core so
+# MarginalFusionConfig resolves.
+dflare_fusion = ["katgpt-core/dflare_fusion"]
+
+# Domino Causal Correction (Plan 197). Forwards to katgpt-speculative so
+# PrefixCorrectionTable + prefix_hash resolve.
+domino_correction = ["katgpt-speculative/domino_correction"]
+
+# Self-Learning Selectivity Router (Plan 204). Forwards to katgpt-speculative
+# so SelectivityRouter + excess_kurtosis resolve.
+selectivity_router = ["katgpt-speculative/selectivity_router"]
+
+# SR²AM Configurator bandit (Plan 112). Forwards to katgpt-pruners so
+# ConfiguratorBandit resolves, mirroring root's forwarding.
+sr2am_configurator = ["katgpt-pruners/sr2am_configurator"]
+
+# Per-step execution stability instrumentation (Plan 102). Forwards to
+# katgpt-core so StabilitySnapshot resolves.
+stability_metrics = ["katgpt-core/stability_metrics"]
+
+# MaxSim late-interaction scoring (Plan 080). Forwards to katgpt-speculative
+# so block_score_maxsim resolves.
+maxsim = ["katgpt-speculative/maxsim"]
+
+# Compression-adaptive decode budget (Plan 167). Forwards to katgpt-speculative
+# so block_compression_ratio resolves.
+budget_adaptation = ["katgpt-speculative/budget_adaptation"]
+
+# AcceptanceForecast — entropy-bounded adaptive γ (Issue 023). Empty tracking
+# flag — AcceptanceForecast struct is in katgpt-speculative unconditionally,
+# this gate only controls the verifier.rs field/method that uses it.
+adaptive_gamma_forecast = []
+
+# REST bridge test fixture (Plan 009). Empty tracking flag — only gates the
+# `#[cfg(feature = "rest")] #[cfg(test)]` bridge test in prefill.rs.
+rest = []
+
+# ── Plan 396 (2026-07-05): features consumed by the moved dd_tree.rs ──
+# (`dd_tree.rs` moved from root `src/speculative/`). The 2 feature-gated
+# production fns + the ~2380-LOC test module use these gates. Root forwards
+# its feature to this crate so the cfg blocks resolve.
+
+# SpeculativeGenerator trait + spec_generator module (Plan 193). Forwards to
+# katgpt-speculative so MarginalTokenGenerator + TokenConstraintPruner resolve.
+# Also enables the `fastrand` dev-dep used by the spec_generator tests.
+speculative_generator = ["katgpt-speculative/speculative_generator"]
+
+# Best Buddies Drafting (Plan 199). Forwards to katgpt-speculative so
+# MarginalBestBuddyAligner resolves.
+best_buddies = ["katgpt-speculative/best_buddies"]
+
+# NextLat Belief-State Speculative Drafter (Plan 217). Forwards to
+# katgpt-speculative so BeliefDrafter + LatentDynamicsMLP resolve.
+belief_drafter = ["katgpt-speculative/belief_drafter"]
+
+# DFlare Position-Weighted DDTree Budget (Plan 174). Forwards to katgpt-core
+# so PositionWeightedBudget resolves, and to katgpt-speculative so
+# build_dd_tree_screened_progressive + TreeBuilder::build_screened_progressive resolve.
+dflare_progressive_budget = ["katgpt-core/dflare_progressive_budget", "katgpt-speculative/dflare_progressive_budget"]
+
+# ELF SDE noise injection (Plan 079). Forwards to katgpt-speculative so
+# WidthScaleConfig + best_of_k_rollouts resolve.
+elf_sde = ["katgpt-speculative/elf_sde"]
+
+# Thinking Prune — FrozenBaseGuard schedule (Plan 171). Empty tracking flag —
+# gates build_dd_tree_screened_with_schedule + 2 tests. PrunerSchedule is
+# unconditional in katgpt-pruners, no upstream forward needed.
+thinking_prune = []
+
+# GDSD Advantage-Guided Pruner (Plan 169). Forwards to katgpt-pruners so
+# GdsdPruner + GdsdConfig + identity_advantage resolve (they are gated
+# `gdsd_distill` in the leaf).
+gdsd_distill = ["katgpt-pruners/gdsd_distill"]
+
+# ── Plan 398 (2026-07-05): features consumed by the d2f substrate ──
+# (`d2f_context.rs` extracted from root `src/dllm.rs`). `D2fContext` has 3
+# fields gated behind `rcd_residual` (Plan 258), and the whole module is
+# gated `dllm` to mirror root. Root forwards its features to this crate.
+
+# D2F inference substrate module gate. Empty tracking flag — gates the
+# `pub mod d2f_context` declaration + re-exports in lib.rs.
+dllm = []
+
+# RCD (Residual-Conditioned Diffusion) injection fields in `D2fContext`.
+# Forwards to katgpt-core so the gated struct fields + reset impl resolve.
+# Plan 402 (2026-07-06): also gates `BidirectionalContext.rcd_residual_embeddings` /
+# `.rcd_active` fields in the moved `forward_positions` module.
+# Plan 403 (2026-07-06): also forwards `katgpt-core/critical_interval_gate` so the
+# moved `denoise_loops` module can reach `katgpt_core::dllm_solver::*`
+# (`compute_residual`, `interpolate_residual`, `normalized_entropy`, `RcdConfig`)
+# — that module is gated `critical_interval_gate` in katgpt-core. Root's
+# `rcd_residual` already transitively enables `critical_interval_gate`; this
+# forward mirrors that for the extracted module.
+rcd_residual = ["katgpt-core/rcd_residual", "katgpt-core/critical_interval_gate"]
+
+# D2F 3-State Reuse warm-start fields in `BidirectionalContext`
+# (`tsr_warm_start_embeddings` / `tsr_active`). Empty tracking flag — root
+# forwards its `d2f_3sr_warm_start` feature to this crate so the cfg-gated
+# struct fields + the cfg-gated embedding-override branch in
+# `forward_bidirectional_positions_into` resolve when the root feature is on.
+# Note: this feature transitively enables `rcd_residual` at the root level
+# (see root's feature definition), so the `rcd_active` fallback branch is
+# always available when this is on.
+# Plan 403 (2026-07-06): now forwards to `katgpt-core/d2f_3sr_warm_start` so
+# the moved `denoise_loop_rcd_3sr` can reach `ThreeStateReuseConfig`,
+# `TransitionType`, `classify_transitions`, `compute_gammas`, `warm_start_lerp`
+# (all `d2f_3sr_warm_start`-gated in katgpt-core's `dllm_solver` module). Also
+# implies `rcd_residual` (local) so the `compute_residual` /
+# `interpolate_residual` / `normalized_entropy` / `RcdConfig` paths resolve —
+# the `_3sr` variant composes on top of RCD and calls those helpers too.
+d2f_3sr_warm_start = ["rcd_residual", "katgpt-core/d2f_3sr_warm_start"]
+
+# ── Plan 399 (2026-07-05): features consumed by the moved d2f wrapper cluster ──
+# (`d2f.rs`, `d2f_verifier.rs`, `diffusion_sampler.rs` moved from root
+# `src/speculative/`). Each is a tracking flag here — it gates a cfg block in
+# one of those files. Root forwards its feature to this crate so the cfg
+# blocks resolve when the root feature is enabled.
+
+# Tri-Mode inference — AR + Diffusion + Self-Speculation (Plan 089).
+# Gates `pub mod d2f_verifier` + `pub mod diffusion_sampler` + the tri_mode-
+# gated soft-decode variants in `d2f.rs`. Empty tracking flag — the gate
+# only controls module registration + a handful of cfg blocks.
+tri_mode = []
+
+# DMax Soft Parallel Decode — hybrid embedding D2F enhancement (Plan 109).
+# Gates ~10 functions in `d2f.rs`: SoftDecodeConfig, HybridEmbedding,
+# d2f_decode_block_soft, check_block_convergence, contiguous_prefix_promote,
+# BlockConvergence. Empty tracking flag — all consumed symbols resolve
+# through katgpt_core + this crate.
+dmax_spd = []
+
+# ── Plan 400 (2026-07-05): features consumed by the moved flashar cluster ──
+# (`flashar_anchor.rs`, `flashar_consensus.rs` moved from root
+# `src/speculative/`). Each is a tracking flag here — it gates a cfg block in
+# one of those files. Root forwards its feature to this crate so the cfg
+# blocks resolve when the root feature is enabled.
+
+# FlashAR strided anchor-then-fill D2F (Plan 166 stretch). Gates the
+# `pub mod flashar_anchor` declaration + re-exports. Empty tracking flag —
+# all consumed symbols resolve through katgpt_core + this crate.
+flashar_anchor = []
+
+# FlashAR Consensus Tri-Mode with Ternary Thermal Paths (Plan 166). Gates
+# the `pub mod flashar_consensus` declaration + re-exports. Empty tracking
+# flag — all consumed symbols resolve through katgpt_core + this crate
+# (the optional `ternary_fusion_gate` fn has its own `plasma_path` cfg below).
+flashar_consensus = []
+
+# Bit-plane ternary SIMD matvec — multiplication-free CPU inference (Plan 148).
+# Plan 400: forwarded to katgpt-forward so the moved flashar_consensus.rs's
+# `#[cfg(feature = "plasma_path")]` block (which uses
+# `katgpt_core::{TernaryWeights, simd_ternary_matvec}`) compiles when the root
+# feature is enabled. Forwards to katgpt-core so those symbols resolve.
+plasma_path = ["katgpt-core/plasma_path"]
+
+# ── Plan 401 (2026-07-06): feature consumed by the moved forward_set_causal ──
+# (`forward_set_causal_positions` + 5 of 7 Research 376 T0.2 tests moved from
+# root `src/dllm.rs`). Empty tracking flag — gates the `pub mod forward_set_causal`
+# declaration + re-export. Root forwards its `set_diffusion` feature to this
+# crate so the gate resolves when the root feature is enabled. All consumed
+# symbols (`TransformerWeights`, `Config`, `kv_dim`/`matmul`/`matmul_relu`/
+# `rmsnorm`, `katgpt_core::simd::*`) resolve through existing deps.
+set_diffusion = []

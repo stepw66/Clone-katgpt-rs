@@ -78,7 +78,9 @@ impl SimpleRng {
 }
 
 fn rand_vec(n: usize, rng: &mut SimpleRng, scale: f32) -> Vec<f32> {
-    (0..n).map(|_| (rng.uniform() * 2.0 - 1.0) * scale).collect()
+    (0..n)
+        .map(|_| (rng.uniform() * 2.0 - 1.0) * scale)
+        .collect()
 }
 
 impl MicroGpt {
@@ -130,15 +132,32 @@ fn forward_masked(
     let mut v_all = vec![0.0f32; seq * n_embd];
     for i in 0..seq {
         let h_in = &hidden[i * n_embd..(i + 1) * n_embd];
-        matmul(&mut q_all[i * n_embd..(i + 1) * n_embd], &model.w_q, h_in, n_embd, n_embd);
-        matmul(&mut k_all[i * n_embd..(i + 1) * n_embd], &model.w_k, h_in, n_embd, n_embd);
-        matmul(&mut v_all[i * n_embd..(i + 1) * n_embd], &model.w_v, h_in, n_embd, n_embd);
+        matmul(
+            &mut q_all[i * n_embd..(i + 1) * n_embd],
+            &model.w_q,
+            h_in,
+            n_embd,
+            n_embd,
+        );
+        matmul(
+            &mut k_all[i * n_embd..(i + 1) * n_embd],
+            &model.w_k,
+            h_in,
+            n_embd,
+            n_embd,
+        );
+        matmul(
+            &mut v_all[i * n_embd..(i + 1) * n_embd],
+            &model.w_v,
+            h_in,
+            n_embd,
+            n_embd,
+        );
     }
     let mut attn_out = vec![0.0f32; seq * n_embd];
     let scale = 1.0 / (head_dim as f32).sqrt();
-    let pos_phase = |pi: usize, pj: usize| -> f32 {
-        ((pi.max(pj) - pi.min(pj)) as f32 * 0.1).cos()
-    };
+    let pos_phase =
+        |pi: usize, pj: usize| -> f32 { ((pi.max(pj) - pi.min(pj)) as f32 * 0.1).cos() };
     for i in 0..seq {
         for h in 0..n_head {
             let off = h * head_dim;
@@ -184,7 +203,13 @@ fn forward_masked(
     }
     for i in 0..seq {
         let mut o = vec![0.0f32; n_embd];
-        matmul(&mut o, &model.w_o, &attn_out[i * n_embd..(i + 1) * n_embd], n_embd, n_embd);
+        matmul(
+            &mut o,
+            &model.w_o,
+            &attn_out[i * n_embd..(i + 1) * n_embd],
+            n_embd,
+            n_embd,
+        );
         for d in 0..n_embd {
             hidden[i * n_embd + d] += o[d];
         }
@@ -227,11 +252,7 @@ fn forward_masked(
 // ─── Phase 0 modelless unblock: three-way comparison ────────────────────────
 
 /// Compute AC-GPT conditional logprob using the ORIGINAL mask (doubled signal).
-fn ac_gpt_original_logprob(
-    model: &MicroGpt,
-    base_tokens: &[u32],
-    xc_positions: &[usize],
-) -> f32 {
+fn ac_gpt_original_logprob(model: &MicroGpt, base_tokens: &[u32], xc_positions: &[usize]) -> f32 {
     let prefix = AcPrefix::new(base_tokens, xc_positions);
     prefix.conditional_logprob(|tokens, positions, mask, _loss_mask| {
         let n = tokens.len();
@@ -240,11 +261,7 @@ fn ac_gpt_original_logprob(
 }
 
 /// Compute AC-GPT conditional logprob using the DEDUPLICATED mask (modelless fix).
-fn ac_gpt_dedup_logprob(
-    model: &MicroGpt,
-    base_tokens: &[u32],
-    xc_positions: &[usize],
-) -> f32 {
+fn ac_gpt_dedup_logprob(model: &MicroGpt, base_tokens: &[u32], xc_positions: &[usize]) -> f32 {
     let prefix = AcPrefix::new(base_tokens, xc_positions);
     prefix.conditional_logprob_dedup(|tokens, positions, mask, _loss_mask| {
         let n = tokens.len();
@@ -258,11 +275,7 @@ fn ac_gpt_dedup_logprob(
 /// sequence where position `p` attends to all xc (any position) + positions
 /// <= p. Read the logprob at position p. Sum over all eval positions.
 /// This is `|xe|` forward passes.
-fn iterative_mlm_logprob(
-    model: &MicroGpt,
-    base_tokens: &[u32],
-    xc_positions: &[usize],
-) -> f32 {
+fn iterative_mlm_logprob(model: &MicroGpt, base_tokens: &[u32], xc_positions: &[usize]) -> f32 {
     let positions: Vec<usize> = (0..base_tokens.len()).collect();
     let xc_set = xc_positions;
     let mut total = 0.0f32;
@@ -310,17 +323,38 @@ fn run_phase0() {
     println!("── G1-bias (negative control): original should NOT match iterative ──");
     println!("   |original - iterative|:     {diff_original:.6}");
     println!("   Threshold:                  > 1e-4 (confirms the doubled-signal bias)");
-    println!("   Result:                     {}", if diff_original > 1e-4 { "CONFIRMED ✓ (bias present)" } else { "UNEXPECTED (no bias detected)" });
+    println!(
+        "   Result:                     {}",
+        if diff_original > 1e-4 {
+            "CONFIRMED ✓ (bias present)"
+        } else {
+            "UNEXPECTED (no bias detected)"
+        }
+    );
     println!();
     println!("── G1-modelless (correctness): dedup should match iterative ──");
     println!("   |dedup - iterative|:        {diff_dedup:.6}");
     println!("   Threshold:                  < 1e-4 (modelless correction eliminates bias)");
-    println!("   Result:                     {}", if diff_dedup < 1e-4 { "PASS ✓ (MODELLESS-VALIDABLE)" } else { "FAIL ✗" });
+    println!(
+        "   Result:                     {}",
+        if diff_dedup < 1e-4 {
+            "PASS ✓ (MODELLESS-VALIDABLE)"
+        } else {
+            "FAIL ✗"
+        }
+    );
     println!();
     println!("── G1-dedup-vs-original: correction must change output ──");
     println!("   |dedup - original|:         {diff_dedup_vs_original:.6}");
     println!("   Threshold:                  > 0.0 (correction is non-trivial)");
-    println!("   Result:                     {}", if diff_dedup_vs_original > 0.0 { "CONFIRMED ✓" } else { "UNEXPECTED (no change)" });
+    println!(
+        "   Result:                     {}",
+        if diff_dedup_vs_original > 0.0 {
+            "CONFIRMED ✓"
+        } else {
+            "UNEXPECTED (no change)"
+        }
+    );
     println!();
     println!("═══ Phase 0 Path 2 verdict ─══");
     if diff_dedup < 1e-4 && diff_original > 1e-4 {

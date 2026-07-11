@@ -15,7 +15,6 @@
 //! Gain/cost signals are local latent (per-loop hidden-state deltas). The halt
 //! count L is a deterministic raw scalar safe to sync/replay.
 
-#![cfg(feature = "gain_cost_halt")]
 #![allow(clippy::float_cmp)] // float comparisons in tests against exact constants
 
 // ─────────────────────────────────────────────────────────────────────
@@ -370,9 +369,7 @@ pub fn hidden_erank(hidden: &[f32], s: usize, d: usize, scratch_sv: &mut [f32]) 
 
     // ── 1. Column means ────────────────────────────────────────────
     // mean[j] = (1/S) Σ_k hidden[k*d + j]
-    for slot in means.iter_mut() {
-        *slot = 0.0;
-    }
+    means.fill(0.0);
     for k in 0..s {
         let row = &hidden[k * d..(k + 1) * d];
         for (j, &v) in row.iter().enumerate() {
@@ -421,9 +418,7 @@ pub fn hidden_erank(hidden: &[f32], s: usize, d: usize, scratch_sv: &mut [f32]) 
         // m = d: build Xᵀ X (d×d). Outer product over the sequence length s.
         // Zero-fill first — the `+=` accumulation below only touches the
         // upper triangle before the mirror pass.
-        for slot in gram.iter_mut() {
-            *slot = 0.0;
-        }
+        gram.fill(0.0);
         for k in 0..s {
             let row = &hidden[k * d..(k + 1) * d];
             // Fold this centered row into the upper triangle of gram.
@@ -971,12 +966,16 @@ mod tests {
             let d = h.halt_decision(loop_idx, 0.0, f32::MAX, -1.0);
             assert_ne!(
                 d,
-                HaltDecision::Halt { reason: HaltReason::GainBelowCost },
+                HaltDecision::Halt {
+                    reason: HaltReason::GainBelowCost
+                },
                 "l_min=255 must refuse to halt at loop_idx={loop_idx} even with gain=0, cost=MAX"
             );
             assert_ne!(
                 d,
-                HaltDecision::Halt { reason: HaltReason::Oscillation },
+                HaltDecision::Halt {
+                    reason: HaltReason::Oscillation
+                },
                 "l_min=255 must refuse to halt at loop_idx={loop_idx} even with cos_theta=-1"
             );
             assert_eq!(
@@ -992,7 +991,9 @@ mod tests {
         let d_boundary = h.halt_decision(255, 0.0, f32::MAX, -1.0);
         assert_eq!(
             d_boundary,
-            HaltDecision::Halt { reason: HaltReason::Oscillation },
+            HaltDecision::Halt {
+                reason: HaltReason::Oscillation
+            },
             "at loop_idx == l_min (255), the floor lifts and the halter evaluates normally"
         );
     }

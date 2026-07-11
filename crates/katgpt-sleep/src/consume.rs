@@ -35,8 +35,8 @@
 //! through the live consume() path — when the sleep-time forecast was accurate,
 //! the nearest precomputed slot is the player's true topic.
 
-use katgpt_types::simd::{fast_sigmoid, simd_dot_f32};
 use crate::types::AnticipatedQuerySet;
+use katgpt_types::simd::{fast_sigmoid, simd_dist_sq, simd_dot_f32};
 
 /// How [`consume_with_match_mode`] / [`consume_gate_with_match_mode`] match a
 /// query `q` to an anticipated slot in `c'`.
@@ -49,6 +49,7 @@ use crate::types::AnticipatedQuerySet;
 /// path: when the sleep-time forecast was accurate, the nearest precomputed
 /// slot is the player's true topic.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(u8)]
 pub enum ConsumeMatchMode {
     /// `argmax_i <q, dir_i.direction>` — topic-identification match.
     /// Forecast-independent (depends only on `q` and the static catalog).
@@ -92,16 +93,14 @@ fn find_best_match<const D: usize, const K: usize>(
         }
         ConsumeMatchMode::Precomputed => {
             // argmin_i ||slot_i.precomputed − q||² — forecast-dependent
-            // answer-retrieval match. No sqrt (argmin identical); branch-free
-            // inner accumulation per AGENTS.md hot-loop rules.
+            // answer-retrieval match. No sqrt (argmin identical). Use the
+            // SIMD dist_sq kernel for consistency with the Direction branch
+            // (which uses simd_dot_f32) — one NEON/AVX2 reduction per slot
+            // instead of a scalar accumulate loop.
             let mut best_i = 0usize;
             let mut best_dist = f32::INFINITY;
             for i in 0..K {
-                let mut dist_sq = 0.0f32;
-                for j in 0..D {
-                    let d = c_prime.slots[i].precomputed[j] - q[j];
-                    dist_sq += d * d;
-                }
+                let dist_sq = simd_dist_sq(q, &c_prime.slots[i].precomputed, D);
                 if dist_sq < best_dist {
                     best_dist = dist_sq;
                     best_i = i;
@@ -162,9 +161,12 @@ where
     //    primitive concern.)
     let z = c_prime.slots[best_i].precomputed;
     let fresh = fresh_think(q);
+    // Hoist `1.0 - gate` out of the blend loop (loop-invariant; LLVM usually
+    // hoists it but explicit is guaranteed and clearer).
+    let inv_gate = 1.0 - gate;
     let mut out = [0.0f32; D];
     for j in 0..D {
-        out[j] = gate * z[j] + (1.0 - gate) * fresh[j];
+        out[j] = gate * z[j] + inv_gate * fresh[j];
     }
     out
 }
@@ -218,7 +220,14 @@ pub fn consume<const D: usize, const K: usize, F>(
 where
     F: FnOnce(&[f32; D]) -> [f32; D],
 {
-    consume_with_match_mode(q, c_prime, tau, beta, ConsumeMatchMode::Direction, fresh_think)
+    consume_with_match_mode(
+        q,
+        c_prime,
+        tau,
+        beta,
+        ConsumeMatchMode::Direction,
+        fresh_think,
+    )
 }
 
 /// Cheap gate-only check with an explicit [`ConsumeMatchMode`] (Issue 004):
@@ -328,7 +337,9 @@ mod tests {
         let q = [10.0, 0.0];
         // fresh_think that returns a distinct value so we can detect blend weight.
         // With beta=50, p≈1.0, tau=0.5: gate = sigmoid(50 * 0.5) = sigmoid(25) ≈ 1.0.
-        let out = consume(&q, &artifact, 0.5, 50.0, |fresh_q| [fresh_q[0] * 100.0, 0.0]);
+        let out = consume(&q, &artifact, 0.5, 50.0, |fresh_q| {
+            [fresh_q[0] * 100.0, 0.0]
+        });
         // Precomputed z_0 = c + dir_0 = [20, 0]. Fresh = [1000, 0].
         // gate ≈ 1.0 → out ≈ [20, 0].
         assert!(
@@ -450,18 +461,22 @@ mod tests {
             AnticipatedQueryDir::new([1.0, 0.0]),
             AnticipatedQueryDir::new([0.0, 1.0]),
         ];
-        let artifact = build_artifact_with_precomputed(
-            dirs,
-            [[10.0, 0.0], [0.0, 0.0]],
-            [0.9, 0.5],
-        );
+        let artifact = build_artifact_with_precomputed(dirs, [[10.0, 0.0], [0.0, 0.0]], [0.9, 0.5]);
         let q = [9.0, 0.0];
 
-        let (best_dir, _) = consume_gate_with_match_mode(&q, &artifact, 0.5, 4.0, ConsumeMatchMode::Direction);
-        let (best_pre, _) = consume_gate_with_match_mode(&q, &artifact, 0.5, 4.0, ConsumeMatchMode::Precomputed);
+        let (best_dir, _) =
+            consume_gate_with_match_mode(&q, &artifact, 0.5, 4.0, ConsumeMatchMode::Direction);
+        let (best_pre, _) =
+            consume_gate_with_match_mode(&q, &artifact, 0.5, 4.0, ConsumeMatchMode::Precomputed);
 
-        assert_eq!(best_dir, 0, "Direction mode: q=[9,0] aligns with dir_0=[1,0]");
-        assert_eq!(best_pre, 0, "Precomputed mode: q=[9,0] nearest to slot 0 ([10,0])");
+        assert_eq!(
+            best_dir, 0,
+            "Direction mode: q=[9,0] aligns with dir_0=[1,0]"
+        );
+        assert_eq!(
+            best_pre, 0,
+            "Precomputed mode: q=[9,0] nearest to slot 0 ([10,0])"
+        );
     }
 
     #[test]
@@ -501,8 +516,10 @@ mod tests {
         );
         let q = [0.0, -1.0];
 
-        let (best_dir, _) = consume_gate_with_match_mode(&q, &artifact, 0.5, 4.0, ConsumeMatchMode::Direction);
-        let (best_pre, _) = consume_gate_with_match_mode(&q, &artifact, 0.5, 4.0, ConsumeMatchMode::Precomputed);
+        let (best_dir, _) =
+            consume_gate_with_match_mode(&q, &artifact, 0.5, 4.0, ConsumeMatchMode::Direction);
+        let (best_pre, _) =
+            consume_gate_with_match_mode(&q, &artifact, 0.5, 4.0, ConsumeMatchMode::Precomputed);
 
         assert_eq!(
             best_dir, 0,
@@ -535,14 +552,16 @@ mod tests {
         let fresh = |fq: &[f32; 2]| [fq[0] * 2.0, fq[1] + 0.5];
 
         let out_legacy = consume(&q, &artifact, tau, beta, fresh);
-        let out_mode = consume_with_match_mode(&q, &artifact, tau, beta, ConsumeMatchMode::Direction, fresh);
+        let out_mode =
+            consume_with_match_mode(&q, &artifact, tau, beta, ConsumeMatchMode::Direction, fresh);
         assert_eq!(
             out_legacy, out_mode,
             "consume() and consume_with_match_mode(Direction) must be bit-identical"
         );
 
         let gate_legacy = consume_gate(&q, &artifact, tau, beta);
-        let gate_mode = consume_gate_with_match_mode(&q, &artifact, tau, beta, ConsumeMatchMode::Direction);
+        let gate_mode =
+            consume_gate_with_match_mode(&q, &artifact, tau, beta, ConsumeMatchMode::Direction);
         assert_eq!(
             gate_legacy, gate_mode,
             "consume_gate() and consume_gate_with_match_mode(Direction) must be bit-identical"
@@ -556,16 +575,26 @@ mod tests {
             AnticipatedQueryDir::new([1.0, 0.0]),
             AnticipatedQueryDir::new([0.0, 1.0]),
         ];
-        let artifact = build_artifact_with_precomputed(
-            dirs,
-            [[10.0, 0.0], [0.0, 1.0]],
-            [0.7, 0.6],
-        );
+        let artifact = build_artifact_with_precomputed(dirs, [[10.0, 0.0], [0.0, 1.0]], [0.7, 0.6]);
         let q = [9.1, 0.1];
         let fresh = |fq: &[f32; 2]| [fq[0] + 1.0, fq[1] - 1.0];
 
-        let out1 = consume_with_match_mode(&q, &artifact, 0.5, 4.0, ConsumeMatchMode::Precomputed, fresh);
-        let out2 = consume_with_match_mode(&q, &artifact, 0.5, 4.0, ConsumeMatchMode::Precomputed, fresh);
+        let out1 = consume_with_match_mode(
+            &q,
+            &artifact,
+            0.5,
+            4.0,
+            ConsumeMatchMode::Precomputed,
+            fresh,
+        );
+        let out2 = consume_with_match_mode(
+            &q,
+            &artifact,
+            0.5,
+            4.0,
+            ConsumeMatchMode::Precomputed,
+            fresh,
+        );
         assert_eq!(out1, out2, "Precomputed-mode consume must be deterministic");
     }
 
@@ -576,11 +605,7 @@ mod tests {
             AnticipatedQueryDir::new([1.0, 0.0]),
             AnticipatedQueryDir::new([0.0, 1.0]),
         ];
-        let artifact = build_artifact_with_precomputed(
-            dirs,
-            [[10.0, 0.0], [0.0, 1.0]],
-            [0.9, 0.1],
-        );
+        let artifact = build_artifact_with_precomputed(dirs, [[10.0, 0.0], [0.0, 1.0]], [0.9, 0.1]);
         for q in &[[1.0, 0.0], [0.0, 1.0], [9.0, 0.0], [0.0, -1.0], [5.0, 5.0]] {
             for mode in [ConsumeMatchMode::Direction, ConsumeMatchMode::Precomputed] {
                 let (_, gate) = consume_gate_with_match_mode(q, &artifact, 0.5, 4.0, mode);

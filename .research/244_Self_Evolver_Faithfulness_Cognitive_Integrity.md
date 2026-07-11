@@ -85,6 +85,8 @@ The paper uses Integrated Gradients (IG) at the attention level, but App D.7 val
 
 For our stack: **`AttributionProbe`** = finite-difference sensitivity of consumer output to perturbations of the injected segment. Zero training, zero backprop through base weights — just `f(x + ε·δ) − f(x − ε·δ)` style probing. Hot-path cheap if `ε`-ball is small and we batch.
 
+> **See also: Research 362 — HydraHead path-patching indirect-effect extension.** Research 362 (Plan 358) extends this direct-effect FaithfulnessProbe pattern in three ways: (1) **path patching / sender-receiver indirect effect** (one-step-back attribution — a head can be causally important without writing the signal directly, by feeding a receiver); (2) **span-level logit-difference readout with exponential decay** (Eq 9); (3) application to **per-attention-head outputs** as the intervention target (the `CausalHeadImportance` primitive ranks heads by causal necessity, competing with RTPurbo's attention-mass calibration).
+
 ### 2.3 Three Design Rules (architectural constraints, not code)
 
 Distilled from §5 + Impact Statement, mapped to our latent/raw discipline:

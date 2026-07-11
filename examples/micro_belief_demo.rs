@@ -73,7 +73,10 @@ fn main() {
     println!("\nFamily A (AttractorKernel, seed=42) after {steps} steps:");
     println!("  state[..5] = {:?}", &state_a[..5]);
     for &v in &state_a {
-        assert!(v > -1.0001 && v < 1.0001, "attractor state must stay in (-1,1)");
+        assert!(
+            v > -1.0001 && v < 1.0001,
+            "attractor state must stay in (-1,1)"
+        );
     }
 
     // ── Family B (LatentThought, K=3) — opt-in experiment ─────────────────
@@ -90,11 +93,8 @@ fn main() {
     // ── Snapshot: freeze/thaw artifact (BLAKE3-committed) ──────────────────
     // `from_kernel` takes the serialised weights blob (caller-owned). version is
     // caller-managed (would be incremented by the hot-swap layer on each swap).
-    let snapshot = MicroRecurrentKernelSnapshot::from_kernel(
-        &attractor,
-        attractor.to_snapshot_blob(),
-        1,
-    );
+    let snapshot =
+        MicroRecurrentKernelSnapshot::from_kernel(&attractor, attractor.to_snapshot_blob(), 1);
     println!("\nSnapshot (freeze/thaw, BLAKE3-committed):");
     println!("  family  = {:?}", snapshot.family);
     println!("  dim     = {}", snapshot.dim);
@@ -114,7 +114,9 @@ fn main() {
     assert_eq!(s_a2, s_b2, "G1.6: K=1 LatentThought must equal Attractor");
     println!("\nG1.6 verified: LatentThought(K=1) bit-identical to Attractor (same seed).");
 
-    println!("\nAll lifecycle steps OK. See .benchmarks/276_micro_belief_goat.md for the GOAT verdict.");
+    println!(
+        "\nAll lifecycle steps OK. See .benchmarks/276_micro_belief_goat.md for the GOAT verdict."
+    );
 }
 
 fn norm(v: &[f32]) -> f32 {
@@ -135,6 +137,6 @@ fn hex_short(bytes: &[u8; 32]) -> String {
     for b in &bytes[..8] {
         s.push_str(&format!("{b:02x}"));
     }
-    s.push_str("…");
+    s.push('…');
     s
 }

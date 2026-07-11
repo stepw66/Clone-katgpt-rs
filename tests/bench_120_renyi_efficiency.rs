@@ -13,7 +13,7 @@
 mod tests {
     use std::collections::HashMap;
 
-    use katgpt_rs::tokenizer::{
+    use katgpt_tokenizer::{
         BpeTokenizerImpl, BpeTrainer, SplitTreeBuilder, ToastTokenizer, ToastTokenizerImpl,
     };
 
@@ -408,7 +408,7 @@ mod tests {
                 "H_α should be non-negative finite at α={alpha}"
             );
             assert!(
-                eff >= 0.0 && eff <= 1.0 + 1e-9,
+                (0.0..=1.0 + 1e-9).contains(&eff),
                 "Efficiency should be in [0,1] at α={alpha}"
             );
         }

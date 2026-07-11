@@ -21,11 +21,11 @@
 
 #![cfg(feature = "cgsp")]
 
-use katgpt_rs::cgsp::{
+use katgpt_core::cgsp::{
+    BreakevenDifficultyFilter, CgspConfig, CgspLoop, ColinearityBatchGate, ComplexityWeights,
+    CuriosityPrioritySnapshot, CycleResult, Direction, EntropyCollapse, HlaProjectionGuide,
+    PoolConjecturer, Priority, ScratchBuffers, Target, entropy_nats, sigmoid,
     traits::{HintDeltaBandit, Solver},
-    BreakevenDifficultyFilter, CgspConfig, CgspLoop, ColinearityBatchGate,
-    ComplexityWeights, CuriosityPrioritySnapshot, CycleResult, Direction, EntropyCollapse,
-    HlaProjectionGuide, PoolConjecturer, Priority, ScratchBuffers, Target, entropy_nats, sigmoid,
 };
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -46,7 +46,9 @@ struct VecBandit {
 
 impl VecBandit {
     fn uniform(n: usize) -> Self {
-        Self { prios: vec![1.0 / n as f32; n] }
+        Self {
+            prios: vec![1.0 / n as f32; n],
+        }
     }
 }
 
@@ -69,7 +71,9 @@ impl HintDeltaBandit for VecBandit {
 
 /// Solver: solve-rate grows with target-alignment via a sigmoid of the
 /// dot-product. Deterministic, reproducible, no model weights.
-struct DotSolver { sharpness: f32 }
+struct DotSolver {
+    sharpness: f32,
+}
 
 impl Solver for DotSolver {
     fn attempt(
@@ -155,14 +159,22 @@ fn main() {
         .with_difficulty_filter(BreakevenDifficultyFilter::default())
         .with_batch_gate(ColinearityBatchGate::default());
 
-    println!("  Conjecturer : PoolConjecturer (pool={}, dim={})", pool.len(), pool[0].dim());
+    println!(
+        "  Conjecturer : PoolConjecturer (pool={}, dim={})",
+        pool.len(),
+        pool[0].dim()
+    );
     println!("  Guide       : HlaProjectionGuide (λ=2.0, α=1.0)");
     println!("  Solver      : DotSolver (sharpness=1.0)");
     println!("  Bandit      : VecBandit uniform over 8 arms");
     println!("  Filters     : BreakevenDifficultyFilter + ColinearityBatchGate");
     println!("  Collapse    : EntropyCollapse τ_low=0.30");
-    println!("  Config      : k={}, τ_low={}, exploration_mag={}",
-        lp.config().k, lp.config().tau_low, lp.config().exploration_magnitude);
+    println!(
+        "  Config      : k={}, τ_low={}, exploration_mag={}",
+        lp.config().k,
+        lp.config().tau_low,
+        lp.config().exploration_magnitude
+    );
 
     // ── Section 2: Initial priority table ────────────────────────────────
     separator("Section 2: Initial priority table (uniform)");
@@ -180,8 +192,12 @@ fn main() {
 
     for cycle in 0..100 {
         let r = lp.cycle(&target, &mut scratch);
-        if r.collapse_triggered { collapses_triggered += 1; }
-        if r.batch_degenerate { degenerate_batches += 1; }
+        if r.collapse_triggered {
+            collapses_triggered += 1;
+        }
+        if r.batch_degenerate {
+            degenerate_batches += 1;
+        }
         sum_entropy += r.stats.priority_entropy as f64;
         sum_r_synth += r.stats.mean_r_synth as f64;
         last_result = Some(r);
@@ -189,11 +205,13 @@ fn main() {
         // Spot-check at cycles 1, 10, 50, 100.
         if cycle == 0 || cycle == 9 || cycle == 49 || cycle == 99 {
             let h = entropy_nats(lp.bandit().priorities());
-            println!("  cycle {:>3}: H={h:>5.3}  admitted={}  r_synth={:.4}  collapse={}",
+            println!(
+                "  cycle {:>3}: H={h:>5.3}  admitted={}  r_synth={:.4}  collapse={}",
                 cycle + 1,
                 r.stats.candidates_admitted,
                 r.stats.mean_r_synth,
-                r.collapse_triggered);
+                r.collapse_triggered
+            );
         }
     }
 
@@ -223,18 +241,28 @@ fn main() {
     let snap = lp.snapshot();
     let hash = snap.blake3_hash();
     let hash_hex: String = hash.iter().map(|b| format!("{b:02x}")).collect();
-    let id_hex: String = snap.snapshot_id.iter().map(|b| format!("{b:02x}")).collect();
+    let id_hex: String = snap
+        .snapshot_id
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect();
     println!("  snapshot_id : {id_hex}");
     println!("  pool_size   : {}", snap.pool_size());
     println!("  dim         : {}", snap.dim);
     println!("  blake3      : {hash_hex}");
-    assert!(hash.iter().any(|&b| b != 0), "BLAKE3 should not be all zeros");
+    assert!(
+        hash.iter().any(|&b| b != 0),
+        "BLAKE3 should not be all zeros"
+    );
 
     // Roundtrip: encode → decode → compare priorities.
     let mut buf = Vec::new();
     snap.encode_to(&mut buf);
     let back = CuriosityPrioritySnapshot::decode(&buf).expect("decode");
-    assert_eq!(back.priorities, snap.priorities, "roundtrip must preserve priorities");
+    assert_eq!(
+        back.priorities, snap.priorities,
+        "roundtrip must preserve priorities"
+    );
     println!("  roundtrip   : {} bytes, priorities match ✓", buf.len());
 
     // ── Summary ──────────────────────────────────────────────────────────

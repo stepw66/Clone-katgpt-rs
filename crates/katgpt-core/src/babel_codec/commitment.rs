@@ -1,12 +1,15 @@
 //! BLAKE3 commitment for BabelCodec compressed payloads (Plan 331 Phase 4).
 //!
 //! [`BabelCommitment`] is a `[u8; 32]` BLAKE3 digest newtype over the
-//! compressed bytes. It is the load-bearing piece for the future LatCal
-//! chain-commitment bridge (`.issues/002_deterministic_babeltele_chain_commitment.md`):
-//! because the BT-P8 codec is deterministic, two independent parties
-//! compressing the same input produce byte-identical compressed bytes and thus
-//! identical commitments — enabling trust-minimized commitment of semantic KG
-//! triples at lower byte cost than the uncompressed form.
+//! compressed bytes. It was the load-bearing piece for the proposed LatCal
+//! chain-commitment bridge; that investigation (originally Issue 002) was
+//! closed as moot — Plan 331 G2 FAILED (1.14× vs 2× bar), so the
+//! deterministic-compression → chain-commitment fusion is not viable at the
+//! current compression ratio. The commitment primitive is retained because
+//! BLAKE3 commitment of compressed payloads is independently useful. Because
+//! the BT-P8 codec is deterministic, two independent parties compressing the
+//! same input produce byte-identical compressed bytes and thus identical
+//! commitments — enabling trust-minimized commitment of semantic KG triples.
 //!
 //! # Determinism
 //!
@@ -128,14 +131,20 @@ mod tests {
     fn commitment_differs_for_different_input() {
         let c1 = BabelCommitment::of(b"hello world");
         let c2 = BabelCommitment::of(b"hello world!");
-        assert_ne!(c1, c2, "different inputs must produce different commitments");
+        assert_ne!(
+            c1, c2,
+            "different inputs must produce different commitments"
+        );
     }
 
     #[test]
     fn commitment_matches_returns_true_for_same_input() {
         let payload = b"some compressed bytes";
         let c = BabelCommitment::of(payload);
-        assert!(c.matches(payload), "matches must return true for the original payload");
+        assert!(
+            c.matches(payload),
+            "matches must return true for the original payload"
+        );
     }
 
     #[test]
@@ -153,7 +162,10 @@ mod tests {
     fn commitment_of_empty_input_is_well_defined_and_nonzero() {
         // BLAKE3 of the empty string is a specific known digest.
         let c = BabelCommitment::of(b"");
-        assert!(!c.is_zero(), "empty-input commitment must be a real BLAKE3 digest, not the zero sentinel");
+        assert!(
+            !c.is_zero(),
+            "empty-input commitment must be a real BLAKE3 digest, not the zero sentinel"
+        );
         // Cross-checked against a fresh computation.
         let expected: [u8; 32] = *blake3::hash(b"").as_bytes();
         assert_eq!(c.as_bytes(), &expected);
@@ -171,14 +183,20 @@ mod tests {
     fn commitment_debug_formats_as_hex() {
         let c = BabelCommitment::of(b"abc");
         let s = format!("{c:?}");
-        assert!(s.starts_with("BabelCommitment("), "debug must start with BabelCommitment(: {s}");
+        assert!(
+            s.starts_with("BabelCommitment("),
+            "debug must start with BabelCommitment(: {s}"
+        );
         assert!(s.ends_with(')'), "debug must end with ): {s}");
         // 64 hex chars + 17 prefix + 1 suffix = 82.
         assert_eq!(s.len(), "BabelCommitment(".len() + 64 + 1);
         // Hex chars only in the middle.
         let hex = &s["BabelCommitment(".len()..s.len() - 1];
         for b in hex.bytes() {
-            assert!(b.is_ascii_hexdigit(), "non-hex char in commitment debug: {hex}");
+            assert!(
+                b.is_ascii_hexdigit(),
+                "non-hex char in commitment debug: {hex}"
+            );
         }
     }
 
@@ -220,11 +238,13 @@ mod tests {
     fn commitment_copy_clone_eq_hash() {
         let c1 = BabelCommitment::of(b"clone me");
         let c2 = c1; // Copy
-        let c3 = c1.clone();
+        let c3 = c1;
         assert_eq!(c1, c2);
         assert_eq!(c1, c3);
         // Hash: collect into a HashSet to exercise Hash.
-        let set = core::iter::once(c1).chain(core::iter::once(c2)).collect::<std::collections::HashSet<_>>();
+        let set = core::iter::once(c1)
+            .chain(core::iter::once(c2))
+            .collect::<std::collections::HashSet<_>>();
         assert_eq!(set.len(), 1, "Copy + Hash must dedup identical commitments");
     }
 }

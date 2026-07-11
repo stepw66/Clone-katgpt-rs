@@ -123,13 +123,7 @@ pub trait MicroRecurrentBeliefState: Send + Sync {
     /// # Zero-allocation
     ///
     /// Reads `state` / `directions`, writes `out` — no allocation.
-    fn project_to_scalars(
-        &self,
-        state: &[f32],
-        directions: &[f32],
-        dim: usize,
-        out: &mut [f32],
-    );
+    fn project_to_scalars(&self, state: &[f32], directions: &[f32], dim: usize, out: &mut [f32]);
 
     /// Family identifier (for routing, snapshot versioning).
     fn family(&self) -> RecurrenceFamily;
@@ -159,7 +153,8 @@ pub(crate) fn project_to_scalars_bridge(
     );
     for k_idx in 0..k {
         let row_start = k_idx * dim;
-        let dot = katgpt_types::simd::simd_dot_f32(state, &directions[row_start..row_start + dim], dim);
+        let dot =
+            katgpt_types::simd::simd_dot_f32(state, &directions[row_start..row_start + dim], dim);
         out[k_idx] = fast_sigmoid(dot);
     }
 }
@@ -274,6 +269,10 @@ mod tests {
         let mut out = [0.0f32; 2];
         project_to_scalars_bridge(&state, &directions, dim, &mut out);
         assert!(out[0] > 0.5, "aligned direction should give sigmoid(1)>0.5");
-        assert_eq!(out[1], fast_sigmoid(0.0), "orthogonal direction → sigmoid(0)=0.5");
+        assert_eq!(
+            out[1],
+            fast_sigmoid(0.0),
+            "orthogonal direction → sigmoid(0)=0.5"
+        );
     }
 }

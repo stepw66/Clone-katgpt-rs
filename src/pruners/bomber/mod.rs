@@ -4,12 +4,32 @@
 //! each using progressively more HL technology.
 
 pub mod arena;
+/// Shared blend context — board-state feature extraction (`compute_phi`,
+/// `CONTEXT_DIM`, `sigmoid`). Always compiled with `bomber` so all blend
+/// estimator modules share the same context computation (Plan 436 DRY
+/// extraction from `contextual_bandit.rs`).
+pub mod blend_context;
 pub mod gate_player;
 pub mod players;
 pub mod replay;
 pub mod replay_backward;
 pub mod sonlt_player;
 pub mod systems;
+
+/// Contextual bandit for HLPlayer (Issue 371 Option 1 — T6).
+///
+/// Linear per-arm Q model conditioned on board features. Gated by
+/// `contextual_bandit`; the n-armed bandit stays as the default path so the
+/// GOAT comparison is apples-to-apples.
+#[cfg(feature = "contextual_bandit")]
+pub mod contextual_bandit;
+
+/// Nonlinear modelless blend estimators for HLPlayer (Plan 436 / Issue 428).
+///
+/// Binned and kernel-weighted estimators that learn the context→Q mapping the
+/// linear contextual bandit could not. Gated by `binned_blend` / `kernel_blend`.
+#[cfg(any(feature = "binned_blend", feature = "kernel_blend"))]
+pub mod blend_estimators;
 
 #[cfg(feature = "bomber-agent")]
 pub mod validator_agent;
@@ -42,11 +62,42 @@ pub mod event_log_player;
 #[cfg(feature = "skill_lifecycle")]
 pub mod skill_lifecycle_player;
 
+/// BomberState snapshot — moved here from katgpt-pruners during Plan 005
+/// extraction. Tightly coupled to this module (uses ARENA_H, ArenaGrid, Cell, ...).
+pub mod bomber_state;
+
+/// Bomber-specific SDPG helpers (`from_replay`) — moved here from katgpt-pruners
+/// during Plan 005 because they depend on bomber's `ReplaySample` type.
+///
+/// Gated on `sdpg_bandit` (matching `sdpg_player`) because it imports
+/// `katgpt_pruners::sdpg::*`, which only exists under that feature. Ungated, it
+/// breaks `--all-features` builds of downstream crates (riir-ai, riir-train)
+/// that enable `bomber` without `sdpg_bandit`.
+#[cfg(feature = "sdpg_bandit")]
+pub mod sdpg_helpers;
+
+#[cfg(feature = "bandit")]
+pub use bomber_state::BanditBomberHeuristic;
+pub use bomber_state::{BombSnapshot, BomberHeuristic, BomberState, PlayerSnapshot};
+
 pub use arena::ArenaGrid;
 pub use gate_player::GatePlayer;
 pub use players::{BomberPlayer, GreedyPlayer, HLPlayer, RandomPlayer, ValidatorPlayer};
-pub use sonlt_player::SonltPlayer;
 pub use replay_backward::{BackwardSample, BackwardWalkResult, ReplayBackwardWalker};
+pub use sonlt_player::SonltPlayer;
+
+// `compute_phi` and `CONTEXT_DIM` now live in `blend_context` (always-on).
+// Re-exported here for backward compat with callers that import from `bomber::`.
+pub use blend_context::{CONTEXT_DIM, compute_phi};
+
+#[cfg(feature = "contextual_bandit")]
+pub use contextual_bandit::{ContextualBandit, DEFAULT_LEARNING_RATE};
+
+#[cfg(feature = "binned_blend")]
+pub use blend_estimators::BinnedBlendEstimator;
+
+#[cfg(feature = "kernel_blend")]
+pub use blend_estimators::{KernelBlendEstimator, KernelState};
 
 #[cfg(feature = "bomber-agent")]
 pub use validator_agent::{

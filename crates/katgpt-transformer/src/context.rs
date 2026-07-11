@@ -145,6 +145,17 @@ impl WallPrefixState {
     /// For GQA, multiple Q heads share the same KV head prefix sum.
     /// q: [n_embd] query vector (all heads).
     /// kv_group_lut: maps Q head → KV head.
+    ///
+    /// # GQA exp-cache
+    ///
+    /// In grouped-query attention (n_head > n_kv_head), consecutive Q heads
+    /// typically map to the same KV head (e.g. group size 4 → heads 0..3 all
+    /// hit KV head 0). The prefix-sum exp is identical across that group, so
+    /// we cache `gate_exp_buf` keyed by the last-computed KV head and skip the
+    /// copy + `simd_exp_inplace` on a hit. This turns an O(n_head × hd) exp
+    /// pass into O(n_kv_head × hd) — a real win whenever group_size > 1. The
+    /// cache is invalidated by a sentinel (`u8::MAX`) at function entry, so a
+    /// stale buffer from a previous layer/sequence can never leak in.
     #[inline]
     pub fn rescale_query(
         &mut self,
@@ -155,12 +166,20 @@ impl WallPrefixState {
     ) {
         let hd = self.head_dim;
         let layer_off = layer_idx * self.n_kv_head * hd;
+        // Sentinel that never matches a real KV head index (max n_kv_head is
+        // bounded by config; u8::MAX = 255 is unreachable for any sane model).
+        let mut last_kv_h: u8 = u8::MAX;
         for (h, &kv_h) in kv_group_lut.iter().enumerate().take(n_head) {
             let q_off = h * hd;
             let p_off = layer_off + kv_h as usize * hd;
-            // Copy prefix sums to temp buffer, exp in-place, then element-wise multiply.
-            self.gate_exp_buf[..hd].copy_from_slice(&self.prefix_sums[p_off..p_off + hd]);
-            simd_exp_inplace(&mut self.gate_exp_buf[..hd]);
+            // Cache miss: refill gate_exp_buf = exp(prefix_sums[KV head]).
+            // On a hit (same KV head as the previous Q head), skip the copy +
+            // exp entirely — the buffer already holds the right values.
+            if kv_h != last_kv_h {
+                self.gate_exp_buf[..hd].copy_from_slice(&self.prefix_sums[p_off..p_off + hd]);
+                simd_exp_inplace(&mut self.gate_exp_buf[..hd]);
+                last_kv_h = kv_h;
+            }
             simd_scale_mul_inplace(&mut q[q_off..q_off + hd], &self.gate_exp_buf[..hd], 1.0);
         }
     }
@@ -216,11 +235,11 @@ impl WallPrefixState {
         // Step 5: gate_buf += 1 → gate_buf = 1 + exp(-logit) = softplus(-logit)
         simd_add_scalar_inplace(&mut gate_buf[..hd], 1.0);
 
-        // Step 6: ln + negate + clamp (scalar — ln not yet SIMD-accelerated)
+        // Step 6: ln+negate+clamp (scalar — ln not yet SIMD-accelerated)
         // log_sigmoid(logit) = -ln(1 + exp(-logit)) = -softplus(-logit)
-        for d in 0..hd {
-            let log_sig = -gate_buf[d].ln();
-            gate_buf[d] = log_sig.clamp(-gate_max, 0.0);
+        for slot in gate_buf.iter_mut().take(hd) {
+            let log_sig = -(*slot).ln();
+            *slot = log_sig.clamp(-gate_max, 0.0);
         }
     }
 
@@ -240,7 +259,13 @@ impl WallPrefixState {
     /// means it has decayed.
     ///
     /// Returns `1.0` if prefix sums are not yet computed (no decay).
+    //
+    // The chunk-4 `for dd in 0..4` loops below are intentional: a fixed
+    // 4-element iteration count helps LLVM emit a single SIMD exp+min
+    // reduction (see `simd_exp_inplace`). Converting to iterator form
+    // (clippy::needless_range_loop) would defeat the auto-vectorizer.
     #[inline]
+    #[allow(clippy::needless_range_loop)]
     pub fn min_retention_at_block(
         &self,
         layer_idx: usize,
@@ -262,22 +287,25 @@ impl WallPrefixState {
             return 1.0;
         }
 
-        // Chunk-4 min of exp(prefix * block_span / current)
+        // Chunk-4 min of exp(prefix * block_span / current).
         let block_span = (block_end - block_start) as f32;
         let inv_current = 1.0 / current as f32;
         let mut min_ret: f32 = f32::MAX;
 
-        // Branch-free min reduction: f32::min is a single instruction on most ISAs
-        // (e.g. vminps on x86-64 with SSE4.1, fmin on AArch64 NEON). Replaces the
-        // branchy `if x < m { m = x; }` pattern, removing a predicted-branch stall
-        // when the retention values are similar (the common case for stable blocks).
+        // SIMD exp + branch-free min reduction. The chunk-4 form fills a
+        // 4-element stack buffer with the scaled gate values, runs
+        // `simd_exp_inplace` (one NEON/AVX2 exp approximation pass instead of
+        // 4 scalar libm `expf` calls), then min-reduces the 4 results. The
+        // scalar tail loop handles the `hd % 4` remainder.
         let mut d = 0;
+        let mut buf = [0.0f32; 4];
         while d + 4 <= hd {
             for dd in 0..4 {
-                let gate_accumulated = ps[offset + d + dd];
-                let gate_in_block = gate_accumulated * block_span * inv_current;
-                let retention = gate_in_block.exp();
-                min_ret = min_ret.min(retention);
+                buf[dd] = ps[offset + d + dd] * block_span * inv_current;
+            }
+            simd_exp_inplace(&mut buf);
+            for dd in 0..4 {
+                min_ret = min_ret.min(buf[dd]);
             }
             d += 4;
         }
@@ -299,11 +327,22 @@ impl WallPrefixState {
     /// Returns per-channel mean and variance of the prefix sums.
     /// High-variance channels are "dynamic" (content-dependent) and should
     /// be weighted more heavily in RTPurbo's low-dim projection.
+    ///
+    /// # Implementation
+    ///
+    /// `prefix_sums` is borrowed once into a local `&[_]` rather than re-borrowed
+    /// per element via the old `ps(off, d, &self.prefix_sums)` helper. Hoisting
+    /// the borrow lets LLVM see the contiguous read pattern and fuse the four
+    /// `prefix_sums[off + d + 0..4]` reads into a single SIMD load inside the
+    /// chunk-4 loop. The helper is gone — it was pure indirection.
     #[inline]
     pub fn gate_statistics(&self, layer_idx: usize) -> GateStatistics {
         let hd = self.head_dim;
         let n_heads = self.n_kv_head;
         let layer_off = layer_idx * n_heads * hd;
+        // Hoist the borrow once — avoids re-borrowing `self.prefix_sums` per
+        // element and lets the optimizer see the contiguous access pattern.
+        let prefix_sums = self.prefix_sums.as_slice();
 
         let mut mean = vec![0.0f32; hd];
         let mut variance = vec![0.0f32; hd];
@@ -313,14 +352,14 @@ impl WallPrefixState {
             let off = layer_off + h * hd;
             let mut d = 0;
             while d + 4 <= hd {
-                mean[d] += ps(off, d, &self.prefix_sums);
-                mean[d + 1] += ps(off, d + 1, &self.prefix_sums);
-                mean[d + 2] += ps(off, d + 2, &self.prefix_sums);
-                mean[d + 3] += ps(off, d + 3, &self.prefix_sums);
+                mean[d] += prefix_sums[off + d];
+                mean[d + 1] += prefix_sums[off + d + 1];
+                mean[d + 2] += prefix_sums[off + d + 2];
+                mean[d + 3] += prefix_sums[off + d + 3];
                 d += 4;
             }
             while d < hd {
-                mean[d] += ps(off, d, &self.prefix_sums);
+                mean[d] += prefix_sums[off + d];
                 d += 1;
             }
         }
@@ -337,13 +376,13 @@ impl WallPrefixState {
             let mut d = 0;
             while d + 4 <= hd {
                 for dd in 0..4 {
-                    let diff = ps(off, d + dd, &self.prefix_sums) - mean[d + dd];
+                    let diff = prefix_sums[off + d + dd] - mean[d + dd];
                     variance[d + dd] += diff * diff;
                 }
                 d += 4;
             }
             while d < hd {
-                let diff = ps(off, d, &self.prefix_sums) - mean[d];
+                let diff = prefix_sums[off + d] - mean[d];
                 variance[d] += diff * diff;
                 d += 1;
             }
@@ -356,11 +395,4 @@ impl WallPrefixState {
 
         GateStatistics { mean, variance }
     }
-}
-
-/// Helper for reading prefix_sums with offset + channel index.
-#[cfg(feature = "wall_attention")]
-#[inline(always)]
-fn ps(offset: usize, channel: usize, prefix_sums: &[f32]) -> f32 {
-    prefix_sums[offset + channel]
 }

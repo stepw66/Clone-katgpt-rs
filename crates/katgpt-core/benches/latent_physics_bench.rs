@@ -14,8 +14,8 @@
 
 use std::hint::black_box;
 
-use katgpt_core::sense::SectorProjection;
 use katgpt_core::ActionBridge;
+use katgpt_core::sense::SectorProjection;
 
 /// Ternary direction vectors for 8 sectors, each 8-dimensional.
 /// Each sector covers a ~45° cone — cardinal + ordinal directions encoded

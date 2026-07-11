@@ -282,7 +282,14 @@ pub enum RetrievalHeadRole {
 /// Must pass 6/6 GOAT proofs before default-on promotion.
 ///
 /// Fields ordered by descending alignment to minimize padding:
-/// usize (8B) → f32 (4B) — no padding between groups.
+/// usize (8B) → f32 (4B) → CalibrationMode (1B) — no padding between groups.
+///
+/// # Calibration mode (Plan 358)
+///
+/// [`CalibrationMode::AttentionMass`] is the default (cheaper: 1 forward pass).
+/// [`CalibrationMode::CausalNecessity`] is opt-in — strictly stronger on
+/// workloads with correlated bystanders but ~10–100× more expensive to
+/// calibrate. See `calibrate_from_causal_scores` in `rt_turbo::calibration`.
 #[derive(Clone, Copy, Debug)]
 pub struct RtTurboConfig {
     /// Low-dimensional projection size for pre-RoPE scoring (default: 16).
@@ -301,6 +308,41 @@ pub struct RtTurboConfig {
     /// Cumulative attention mass threshold for dynamic top-p selection (default: 0.9).
     /// Paper ablation: top-p=0.9 preserves >93% attention mass at 97% sparsity.
     pub top_p: f32,
+    /// Which score semantics to use for head calibration (Plan 358). Default:
+    /// `AttentionMass` (cheaper). `CausalNecessity` is opt-in — strictly
+    /// stronger on bystander-heavy workloads but ~10–100× more expensive.
+    /// `AdaptiveCausal` (Proposal 004) is opt-in — cheap-proxy escalate,
+    /// unvalidated, requires per-head OV norms from the caller.
+    pub calibration_mode: CalibrationMode,
+}
+
+/// Head-calibration score source (Plan 358, Research 362).
+///
+/// `#[repr(u8)]` for sync-friendly 1-byte representation.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+#[repr(u8)]
+pub enum CalibrationMode {
+    /// Observational needle attention-mass (RTPurbo Plan 126 default).
+    /// Cheaper: a single forward pass + per-head mass scan.
+    #[default]
+    AttentionMass = 0,
+    /// Causal necessity via activation/path patching IE score (Plan 358).
+    /// Strictly stronger — excludes correlated bystanders — but requires
+    /// `n_heads × n_calibration_samples` patched forward passes. Requires the
+    /// `causal_head_importance` feature on the consuming crate.
+    CausalNecessity = 1,
+    /// Adaptive cheap-proxy escalate (Proposal 004 — OUR INVENTION, not from
+    /// HydraHead). Uses an OV-circuit proxy (`attention_mass / ||OV_out||`)
+    /// to detect bystander suspects, then escalates to Plan 358's causal
+    /// patching only on those `k` suspects instead of all `n_heads`. Pays zero
+    /// patched forwards when there are no bystanders (degenerates to
+    /// `AttentionMass`). Requires the `adaptive_causal_calibration` feature.
+    ///
+    /// **UNVALIDATED.** Promotion to default is blocked on G1 (proxy precision)
+    /// and G2 (cost reduction), both deferred to riir-engine. Unlike the other
+    /// two modes, the caller must supply per-head OV output norms (from a real
+    /// transformer forward) — see `calibrate_from_adaptive_causal`.
+    AdaptiveCausal = 2,
 }
 
 impl Default for RtTurboConfig {
@@ -312,6 +354,7 @@ impl Default for RtTurboConfig {
             block_size: 64,
             retrieval_head_ratio: 0.15,
             top_p: 0.9,
+            calibration_mode: CalibrationMode::default(),
         }
     }
 }
@@ -571,7 +614,11 @@ pub enum ConvergenceSelector {
 /// This means attention kernels are UNCHANGED — they receive pre-rescaled Q and K.
 ///
 /// Only applicable to Wall-trained models (requires W_g gate projection weights).
-#[derive(Clone, Debug)]
+///
+/// The wall on/off switch lives at the parent `Config.wall_config: Option<WallConfig>`
+/// level — `None` means use RoPE/fallback, `Some(_)` means Wall is active. There is
+/// no `use_wall` field on the struct itself (the canonical design since Plan 173).
+#[derive(Clone, Copy, Debug, serde::Serialize, serde::Deserialize)]
 #[cfg(feature = "wall_attention")]
 pub struct WallConfig {
     /// Gate bias initialization value. Default 6.0 = open gate (vanilla attention behavior).
@@ -583,6 +630,11 @@ pub struct WallConfig {
     /// Use key-projected gate variant (derive gate from K projection).
     /// Preferred for zero KV cache overhead — gate is computed from key, not hidden state.
     pub use_key_projected: bool,
+    /// Gate projection dimension = n_kv_heads * head_dim.
+    /// Default 0 = compute from model dims via [`Self::with_dims`] or
+    /// [`Self::validate`]. Set explicitly only when the consumer already knows
+    /// the dim and wants to skip the derivation.
+    pub gate_proj_dim: usize,
 }
 
 #[cfg(feature = "wall_attention")]
@@ -592,6 +644,7 @@ impl Default for WallConfig {
             gate_bias: 6.0,
             gate_max: 0.87,
             use_key_projected: true,
+            gate_proj_dim: 0,
         }
     }
 }
@@ -600,6 +653,34 @@ impl Default for WallConfig {
 impl WallConfig {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Validate config consistency against model dimensions.
+    ///
+    /// Checks:
+    /// - `gate_max` is in the open interval (0, 1) — soft-clamp must produce
+    ///   finite non-degenerate log-gates.
+    /// - `gate_proj_dim` is either unset (0, meaning "derive from dims") or
+    ///   exactly `n_kv_heads * head_dim`.
+    pub fn validate(&self, n_kv_heads: usize, head_dim: usize) -> Result<(), String> {
+        if self.gate_max <= 0.0 || self.gate_max >= 1.0 {
+            return Err(format!("gate_max must be in (0, 1), got {}", self.gate_max));
+        }
+        let expected_dim = n_kv_heads * head_dim;
+        if self.gate_proj_dim != 0 && self.gate_proj_dim != expected_dim {
+            return Err(format!(
+                "gate_proj_dim ({}) must equal n_kv_heads * head_dim ({})",
+                self.gate_proj_dim, expected_dim
+            ));
+        }
+        Ok(())
+    }
+
+    /// Builder: derive `gate_proj_dim` from model dimensions.
+    /// Consumes and returns `self` for chaining.
+    pub fn with_dims(mut self, n_kv_heads: usize, head_dim: usize) -> Self {
+        self.gate_proj_dim = n_kv_heads * head_dim;
+        self
     }
 }
 
@@ -612,7 +693,7 @@ impl WallConfig {
 /// Controls when mid-reasoning early exit triggers and how efficiency rewards
 /// are shaped. Feature-gated behind `collapse_aware_thinking`.
 #[allow(dead_code)]
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct ThinkingBudget {
     /// Maximum thinking tokens before forced termination.
     pub max_tokens: u32,

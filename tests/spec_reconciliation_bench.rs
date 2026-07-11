@@ -6,11 +6,9 @@
 //!
 //! Run: `cargo test --features spec_reconciliation --test spec_reconciliation_bench -- --nocapture`
 
-
-
 use std::time::Instant;
 
-use katgpt_rs::spec_reconciliation::{ReconciliationConfig, SpecReconciler, TrajectoryPoint};
+use katgpt_speculative::spec_reconciliation::{ReconciliationConfig, SpecReconciler, TrajectoryPoint};
 use katgpt_rs::types::Rng;
 
 fn bench_config(k: usize) -> ReconciliationConfig {

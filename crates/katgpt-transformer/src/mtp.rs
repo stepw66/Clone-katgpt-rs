@@ -2,7 +2,7 @@
 //!
 //! Plan 016 / Plan 055 substrate. Pure data + binary loader — no forward logic.
 
-use katgpt_core::simd::simd_dot_f32;
+use katgpt_core::simd::simd_matmul_rows;
 
 /// Project target activation into the drafter's embedding space.
 ///
@@ -27,15 +27,17 @@ pub fn project_target_activation(
         Some(proj_weights) => {
             // proj_weights layout: [drafter_n_embd * target_n_embd]
             // out[i] = sum_j(proj_weights[i * target_n_embd + j] * target_hidden[j])
+            // Delegate to simd_matmul_rows (one NEON/AVX2 dot per row) instead
+            // of hand-rolling the loop — same generated code, less maintenance
+            // surface, and inherits any future simd_matmul_rows tuning.
             let out_len = out_buf.len().min(drafter_n_embd);
-            for (i, out_slot) in out_buf.iter_mut().enumerate().take(out_len) {
-                let row_off = i * target_n_embd;
-                *out_slot = simd_dot_f32(
-                    &proj_weights[row_off..row_off + target_n_embd],
-                    &target_hidden[..target_n_embd],
-                    target_n_embd,
-                );
-            }
+            simd_matmul_rows(
+                &mut out_buf[..out_len],
+                proj_weights,
+                &target_hidden[..target_n_embd],
+                out_len,
+                target_n_embd,
+            );
         }
         // Strategy 2: Truncate/Pad — zero-cost fallback
         None => {
@@ -101,27 +103,17 @@ pub fn load_mtp_projection(path: &std::path::Path) -> Result<MtpProjection, Stri
         return Err(format!("File too small: {file_size} bytes"));
     }
 
-    // Parse header (little-endian)
-    let magic = u32::from_le_bytes(
-        data[0..4]
-            .try_into()
-            .map_err(|_| "header parse error".to_string())?,
-    );
-    let version = u32::from_le_bytes(
-        data[4..8]
-            .try_into()
-            .map_err(|_| "header parse error".to_string())?,
-    );
-    let in_dim = u32::from_le_bytes(
-        data[8..12]
-            .try_into()
-            .map_err(|_| "header parse error".to_string())?,
-    ) as usize;
-    let out_dim = u32::from_le_bytes(
-        data[12..16]
-            .try_into()
-            .map_err(|_| "header parse error".to_string())?,
-    ) as usize;
+    // Parse header (little-endian).
+    // `data[a..a+4]` slices are always exactly 4 bytes (slicing panics on OOB,
+    // not the try_into), and file_size was validated >= header_size + 4 above,
+    // so try_into() to [u8; 4] cannot fail — use expect() to avoid the
+    // per-field String allocation that map_err(|_| "...".to_string()) would
+    // incur on the (impossible) failure path.
+    let magic = u32::from_le_bytes(data[0..4].try_into().expect("static 4-byte slice"));
+    let version = u32::from_le_bytes(data[4..8].try_into().expect("static 4-byte slice"));
+    let in_dim = u32::from_le_bytes(data[8..12].try_into().expect("static 4-byte slice")) as usize;
+    let out_dim =
+        u32::from_le_bytes(data[12..16].try_into().expect("static 4-byte slice")) as usize;
 
     if magic != MTP_PROJ_MAGIC {
         return Err(format!(
@@ -147,16 +139,20 @@ pub fn load_mtp_projection(path: &std::path::Path) -> Result<MtpProjection, Stri
 
     // Verify blake3 checksum
     let payload = &data[..file_size - 4];
+    // `data[file_size-4..]` is always exactly 4 bytes (file_size >= 20 validated
+    // above), and `computed_hash.as_bytes()[..4]` is always exactly 4 bytes
+    // (blake3 output is 32 bytes). try_into() cannot fail — use expect() to
+    // avoid the String allocation on the (impossible) failure path.
     let stored_checksum = u32::from_le_bytes(
         data[file_size - 4..]
             .try_into()
-            .map_err(|_| "checksum parse error".to_string())?,
+            .expect("static 4-byte tail slice"),
     );
     let computed_hash = blake3::hash(payload);
     let computed_checksum = u32::from_le_bytes(
         computed_hash.as_bytes()[..4]
             .try_into()
-            .map_err(|_| "hash parse error".to_string())?,
+            .expect("blake3 output is 32 bytes"),
     );
 
     if computed_checksum != stored_checksum {
@@ -174,10 +170,8 @@ pub fn load_mtp_projection(path: &std::path::Path) -> Result<MtpProjection, Stri
     let weights_offset = header_size;
     let bias_offset = weights_offset + weights_bytes;
 
-    let weights: Vec<f32> =
-        bytemuck::pod_collect_to_vec(&data[weights_offset..bias_offset]);
-    let bias: Vec<f32> =
-        bytemuck::pod_collect_to_vec(&data[bias_offset..file_size - 4]);
+    let weights: Vec<f32> = bytemuck::pod_collect_to_vec(&data[weights_offset..bias_offset]);
+    let bias: Vec<f32> = bytemuck::pod_collect_to_vec(&data[bias_offset..file_size - 4]);
 
     debug_assert_eq!(weights.len(), out_dim * in_dim, "weights count mismatch");
     debug_assert_eq!(bias.len(), out_dim, "bias count mismatch");

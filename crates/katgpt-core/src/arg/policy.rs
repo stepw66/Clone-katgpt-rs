@@ -90,14 +90,14 @@ impl<'a> PolicyConstraints<'a> {
     pub fn is_forbidden(&self, label: LabelId) -> bool {
         // Linear scan is correct here: forbidden lists are typically small (≤32).
         // For larger lists, the caller should pre-build a sorted slice + binary search.
-        self.forbidden_labels.iter().any(|&l| l == label)
+        self.forbidden_labels.contains(&label)
     }
 
     /// Returns `true` if `label` is allowed under the allowlist.
     /// Empty allowlist = permissive (no allowlist enforcement).
     #[inline]
     pub fn is_allowed(&self, label: LabelId) -> bool {
-        self.allowed_labels.is_empty() || self.allowed_labels.iter().any(|&l| l == label)
+        self.allowed_labels.is_empty() || self.allowed_labels.contains(&label)
     }
 }
 
@@ -112,6 +112,7 @@ pub struct PolicyEnvelope<'a> {
 /// Decision returned by [`PolicyEnvelope::evaluate`]: whether to short-circuit
 /// the pipeline and whether constraints must be threaded downstream.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(u8)]
 pub enum ShouldProceed {
     /// Pipeline may continue. Constraints still apply if `state = Restrict`.
     Continue,
@@ -162,9 +163,7 @@ impl<'a> PolicyEnvelope<'a> {
                 };
             }
             // Allowlist enforcement: a non-allowed label under Restrict forces Refocus.
-            if !self.constraints.is_allowed(label)
-                && matches!(self.state, PolicyState::Restrict)
-            {
+            if !self.constraints.is_allowed(label) && matches!(self.state, PolicyState::Restrict) {
                 return PolicyDecision {
                     proceed: ShouldProceed::Refocus,
                     enforce_constraints: true,

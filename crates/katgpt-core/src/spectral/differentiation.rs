@@ -60,12 +60,13 @@
 //! the G4 GOAT gate. (The `FftPlanner` caches FFT plans internally; the first
 //! call for a given `N` populates the cache, subsequent calls hit the cache.)
 
-use rustfft::{num_complex::Complex, Fft, FftPlanner};
+use rustfft::{Fft, FftPlanner, num_complex::Complex};
 
 // ── Errors ───────────────────────────────────────────────────────
 
 /// Errors returned by [`spectral_differentiate_into`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
 pub enum SpecDiffError {
     /// `x.len() < 2` — FFT needs at least 2 samples.
     TooFewSamples,

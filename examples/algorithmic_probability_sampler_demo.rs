@@ -12,7 +12,7 @@
 
 #[cfg(feature = "complexity_prior_sampler")]
 fn main() {
-    use katgpt_rs::screening::{
+    use katgpt_pruners::screening::{
         CompressionPriorSampler, EntropyComplexity, L1Complexity, RleComplexity,
     };
 

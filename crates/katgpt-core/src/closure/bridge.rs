@@ -149,11 +149,7 @@ pub fn motif_embedding_to_tar_score(emb: &[f32]) -> f32 {
 /// gets a distinct linear combination).
 #[inline(always)]
 fn feature_index(p: PrimitiveKind, n: usize) -> usize {
-    if n == 0 {
-        0
-    } else {
-        (p.to_u32() as usize) % n
-    }
+    if n == 0 { 0 } else { (p.to_u32() as usize) % n }
 }
 
 /// Numerically stable logistic sigmoid. Per AGENTS.md: sigmoid, not softmax.
@@ -257,7 +253,9 @@ mod tests {
     #[test]
     fn bridge_pipeline_stays_bounded() {
         let dirs = MotifDirections::from_flat(
-            (0..(DEFAULT_MOTIF_DIRS * 8)).map(|i| (i as f32) * 0.1 - 4.0).collect(),
+            (0..(DEFAULT_MOTIF_DIRS * 8))
+                .map(|i| (i as f32) * 0.1 - 4.0)
+                .collect(),
             DEFAULT_MOTIF_DIRS,
             8,
         )
@@ -265,6 +263,6 @@ mod tests {
         let ptg = build_ptg(0, &[0, 1, 2, 3, 4]);
         let emb = ptg_to_motif_embedding(&ptg, &dirs);
         let scalar = motif_embedding_to_tar_score(&emb);
-        assert!(scalar >= 0.0 && scalar <= 1.0, "scalar={scalar}");
+        assert!((0.0..=1.0).contains(&scalar), "scalar={scalar}");
     }
 }

@@ -16,10 +16,10 @@
 
 #![cfg(feature = "manifold_power_iter_router")]
 
-use katgpt_rs::manifold_power_iter_router::{
+use katgpt_spectral::manifold_power_iter_router::{
     compute_diagnostics, compute_expert_gram_into, gate_sigmoid_topk, manifold_power_iter_router,
 };
-use katgpt_rs::spectral_retract::PowerRetractScratch;
+use katgpt_spectral::spectral_retract::PowerRetractScratch;
 use std::time::{Duration, Instant};
 
 /// Deterministic xorshift64 PRNG.
@@ -102,15 +102,8 @@ fn main() {
             let mut scratch = PowerRetractScratch::new(d);
             let mpi_us = bench_us(3, 10, || {
                 r_work.copy_from_slice(&r_seed);
-                let _res = manifold_power_iter_router(
-                    &mut r_work,
-                    &grams_ref,
-                    n,
-                    d,
-                    1.0,
-                    1,
-                    &mut scratch,
-                );
+                let _res =
+                    manifold_power_iter_router(&mut r_work, &grams_ref, n, d, 1.0, 1, &mut scratch);
                 std::hint::black_box(&_res);
             });
 
@@ -132,14 +125,7 @@ fn main() {
 
             println!(
                 "{:>5} {:>5} {:>12.2} {:>12.2} {:>12.2} {:>12.2} {:>10.3} {:>10.3}",
-                n,
-                d,
-                gram_us,
-                mpi_us,
-                gate_us,
-                total_us,
-                lambda_before,
-                res.lambda_alignment
+                n, d, gram_us, mpi_us, gate_us, total_us, lambda_before, res.lambda_alignment
             );
         }
     }

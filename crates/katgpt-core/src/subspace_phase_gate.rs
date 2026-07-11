@@ -216,6 +216,20 @@ impl JacobianSvdScratch {
         self.svd_work.clear();
         // svd_result is reset by `one_sided_jacobi_svd_into` via `clear_for`.
     }
+
+    /// Read-only access to the internal SOA SVD result. Use after
+    /// [`jacobian_svd_at_into`] to read singular values / vectors without the
+    /// 17-`Vec` allocation that [`jacobian_svd_at`] incurs when converting to
+    /// the owned [`SvdResult`] return type.
+    ///
+    /// This is the **hot-path** accessor: pair it with
+    /// [`jacobian_svd_at_into`] for tight loops that scan many maps. The
+    /// returned `&SvdResultScratch` borrows `self` immutably for the duration
+    /// of the reads.
+    #[inline]
+    pub fn svd_result(&self) -> &SvdResultScratch {
+        &self.svd_result
+    }
 }
 
 /// Result of [`jacobian_svd_at`]. Vectors are owned for simplicity; callers
@@ -372,6 +386,82 @@ pub fn jacobian_svd_at<F>(f: F, x: &[f32], eps: f32, scratch: &mut JacobianSvdSc
 where
     F: Fn(&[f32], &mut [f32]),
 {
+    // Forward-diff + SVD into the internal SOA scratch (zero alloc), then
+    // convert to the owned SvdResult. The conversion allocates 1 + 2·k Vecs
+    // (k = min(m,n)) and dominates small-matrix cost — hot-path callers
+    // should use [`jacobian_svd_at_into`] + [`JacobianSvdScratch::svd_result`]
+    // to skip it entirely.
+    jacobian_svd_at_into(f, x, eps, scratch);
+    let len = scratch.svd_result.len;
+    let singular_values = scratch.svd_result.singular_values[..len].to_vec();
+    let right_singular_vectors: Vec<Vec<f32>> = (0..len)
+        .map(|j| scratch.svd_result.right_singular_vector(j).to_vec())
+        .collect();
+    let left_singular_vectors: Vec<Vec<f32>> = (0..len)
+        .map(|j| scratch.svd_result.left_singular_vector(j).to_vec())
+        .collect();
+    SvdResult {
+        singular_values,
+        right_singular_vectors,
+        left_singular_vectors,
+        rank: scratch.svd_result.rank,
+    }
+}
+
+/// **Zero-allocation** hot-path variant of [`jacobian_svd_at`]: estimate the
+/// Jacobian of `f` at `x` via forward differences and factor it in place,
+/// writing the result into the scratch's internal SOA buffer. Read the result
+/// via [`JacobianSvdScratch::svd_result`] (or the `SvdResultScratch`
+/// accessors: `singular_value`, `right_singular_vector`, `left_singular_vector`).
+///
+/// This is the tight-loop entry point for callers that scan many maps (e.g.
+/// the Plan 301 G1 GOAT sweeps N ∈ {3,5,6,…,200}; riir-neuron-db Plan 002
+/// consolidates many shards). The allocating [`jacobian_svd_at`] is a thin
+/// convenience wrapper around this.
+///
+/// # Allocation profile
+///
+/// After warmup, **zero allocations per call**: all work happens in the
+/// pre-sized `scratch` buffers (`f_x`, `f_x_pert`, `f_x_plus`, `x_pert`,
+/// `jac`, `svd_work`, `svd_result`).
+///
+/// # Latency — depends strongly on the cost of `f` and the Jacobian's rank
+///
+/// The total cost has two components: (1) the Jacobian forward-difference
+/// build (`n+1` calls to `f` for forward diff, `2n+1` for central), and (2)
+/// the one-sided Jacobi SVD of the `m × n` Jacobian. The SVD sweep count
+/// depends on the Jacobian's spectral structure.
+///
+/// Measured latencies at R^8→R^8 (release, 2026 M-series Mac; Issue 043):
+///
+/// | `f` type | `_into` latency | Notes |
+/// |---|---|---|
+/// | Trivial (identity, near-identity) | ~420 ns | SVD converges in 1 sweep; matches the pre-Issue-043 ~455 ns claim |
+/// | Linear full-rank `W·x` | ~3.9 µs | 9 forward-diff evals + ~10 SVD sweeps |
+/// | Linear rank-deficient `W·x` (rank 4 of 8) | ~4 µs post-Issue-043 | Was ~31 µs before the `col_floor_sq` fix (hit `max_sweeps = 60` from borderline null-space pairs) |
+///
+/// The Jacobian build cost scales as `(n+1) × cost(f)` and dominates for
+/// expensive `f` (e.g. a neural-network forward pass). The SVD cost is
+/// ~O(n² × sweeps) per call; ~10 sweeps for well-separated full-rank spectra,
+/// more for degenerate/clustered singular values. The [`jacobian_svd_at`]
+/// allocating wrapper adds ~400 ns (17-`Vec` SOA→owned conversion).
+///
+/// **Pre-Issue-043 caveat:** the original docstring claimed ~455 ns/call
+/// without qualifying the `f`. That figure is the SVD-only floor on a trivial
+/// `f`; it omits both the Jacobian build and the SVD convergence cost on
+/// non-trivial Jacobians. See `.benchmarks/301_subspace_phase_gate_g1.md`
+/// Phase 3 §T3.4 for the full breakdown and Issue 043 for the rank-deficient
+/// regression analysis.
+///
+/// # Panics
+///
+/// Same as [`jacobian_svd_at`]: panics if `x.len() != n` (where `n` was
+/// passed to [`JacobianSvdScratch::with_capacity`]) or if `f` writes a slice
+/// of the wrong length.
+pub fn jacobian_svd_at_into<F>(f: F, x: &[f32], eps: f32, scratch: &mut JacobianSvdScratch)
+where
+    F: Fn(&[f32], &mut [f32]),
+{
     let n = x.len();
     debug_assert_eq!(
         scratch.jac.len() % n,
@@ -433,8 +523,7 @@ where
     }
 
     // Thin SVD of the m × n Jacobian via one-sided Jacobi rotations.
-    // Writes into scratch.svd_result (SOA, reused across calls), then converts
-    // to the owned SvdResult return type.
+    // Writes into scratch.svd_result (SOA, reused across calls). Zero alloc.
     one_sided_jacobi_svd_into(
         &scratch.jac,
         m,
@@ -442,20 +531,6 @@ where
         &mut scratch.svd_result,
         &mut scratch.svd_work,
     );
-    let len = scratch.svd_result.len;
-    let singular_values = scratch.svd_result.singular_values[..len].to_vec();
-    let right_singular_vectors: Vec<Vec<f32>> = (0..len)
-        .map(|j| scratch.svd_result.right_singular_vector(j).to_vec())
-        .collect();
-    let left_singular_vectors: Vec<Vec<f32>> = (0..len)
-        .map(|j| scratch.svd_result.left_singular_vector(j).to_vec())
-        .collect();
-    SvdResult {
-        singular_values,
-        right_singular_vectors,
-        left_singular_vectors,
-        rank: scratch.svd_result.rank,
-    }
 }
 
 // ─── One-sided Jacobi SVD (portable, no native-lapack dep) ─────────────────
@@ -478,6 +553,16 @@ pub struct SvdScratch {
     v: Vec<f32>,
     /// Column norms (singular values during iteration). Length n.
     col_norms_sq: Vec<f32>,
+    /// Singular-value argsort buffer (unsorted σ snapshot). Length n_cols.
+    ///
+    /// Issue 124 (2026-07-10): previously a fixed `[f32; 64]` stack array in
+    /// `one_sided_jacobi_svd_into`, capping `n_cols ≤ 64`. Heap-allocated in
+    /// the reusable scratch so the cap is lifted with zero hot-path cost.
+    sigma_buf: Vec<f32>,
+    /// Permutation buffer (column index argsort by descending σ). Length n_cols.
+    ///
+    /// Issue 124: previously a fixed `[usize; 64]` stack array. See `sigma_buf`.
+    perm_buf: Vec<usize>,
 }
 
 impl SvdScratch {
@@ -487,6 +572,8 @@ impl SvdScratch {
             a: vec![0.0; m_rows * n_cols],
             v: vec![0.0; n_cols * n_cols],
             col_norms_sq: vec![0.0; n_cols],
+            sigma_buf: vec![0.0; n_cols],
+            perm_buf: vec![0; n_cols],
         }
     }
 
@@ -499,6 +586,12 @@ impl SvdScratch {
         }
         for v in &mut self.col_norms_sq {
             *v = 0.0;
+        }
+        for v in &mut self.sigma_buf {
+            *v = 0.0;
+        }
+        for v in &mut self.perm_buf {
+            *v = 0;
         }
     }
 }
@@ -608,6 +701,20 @@ fn one_sided_jacobi_svd_into(
         work.v.len(),
         n * n
     );
+    // Issue 124: argsort buffers live in the scratch (sized once), not on the
+    // stack. Previously fixed `[f32; 64]` / `[usize; 64]` capped n_cols ≤ 64.
+    debug_assert!(
+        work.sigma_buf.len() >= n,
+        "work.sigma_buf len {} < n={}",
+        work.sigma_buf.len(),
+        n
+    );
+    debug_assert!(
+        work.perm_buf.len() >= n,
+        "work.perm_buf len {} < n={}",
+        work.perm_buf.len(),
+        n
+    );
 
     // Reset result for this matrix size (grows buffers if needed, zero-fill).
     result.clear_for(m, n);
@@ -623,6 +730,37 @@ fn one_sided_jacobi_svd_into(
 
     let tol: f32 = 1e-7;
     let max_sweeps = 60;
+
+    // Frobenius-norm scale of the matrix, for the null-space deflation floor
+    // (Issue 008 + Issue 043). On rank-deficient matrices, the (n − rank)
+    // null-space columns converge to ~zero norm during Jacobi sweeps. Pairs of
+    // near-zero columns produce a degenerate per-pair test (rhs → 0) that fires
+    // spurious noise rotations every sweep; skipping pairs where both columns
+    // are below this floor prevents the noise injection and lets the signal
+    // columns converge cleanly.
+    //
+    // Issue 043 (2026-07-07): the original floor `frob_sq * tol²` (= frob_sq *
+    // 1e-14 ≈ 3e-13 for a typical matrix) was too aggressive — borderline
+    // null-space columns with norm² ≈ 1e-12 sat above the floor, passed the
+    // per-pair convergence check (`apq.abs() <= tol * sqrt(app * aqq)` fails
+    // when aqq ≈ 1e-12), and triggered spurious rotations that prevented the
+    // `!rotated` convergence break, burning all `max_sweeps = 60` sweeps. This
+    // made rank-deficient SVD ~8× slower than full-rank (31 µs vs 3.9 µs at
+    // R^8→R^8), affecting HLA (rank 5 in 64-dim), NeuronShard, and Plan 312.
+    //
+    // The raised floor `frob_sq * 1e-10` is consistent with the rank threshold
+    // `sigma_max * 1e-5` at line ~807 (squared = sigma_max² * 1e-10, and
+    // frob_sq ≥ sigma_max²). Columns deflated by this floor are exactly those
+    // that would be counted as rank-deficient in the extraction step. Signal
+    // columns (norm² = σ² ≥ 1 for unit-scaled spectra) are unaffected: even
+    // for an 8-dim flat spectrum, floor = frob_sq * 1e-10 ≤ n * sigma_max² *
+    // 1e-10 = 8e-10 * sigma_max² ≪ sigma_max². Verified: all existing G1
+    // recovery tests pass unchanged (Plan 301 rank-3, Issue 008 wide 3×12).
+    let mut frob_sq: f32 = 0.0;
+    for v in work.a[..m * n].iter() {
+        frob_sq += v * v;
+    }
+    let col_floor_sq: f32 = frob_sq * 1e-10;
 
     for _sweep in 0..max_sweeps {
         // Convergence criterion: break when a full sweep applies no rotation.
@@ -645,6 +783,17 @@ fn one_sided_jacobi_svd_into(
                     app += arp * arp;
                     aqq += arq * arq;
                     apq += arp * arq;
+                }
+                // Null-space deflation (Issue 008): skip pairs where BOTH
+                // columns have norm below the floor (both are null-space). A
+                // rotation between two null-space columns cannot improve the
+                // factorization — it only injects floating-point noise. We use
+                // AND (not OR) so that a near-zero column paired with a signal
+                // column is still rotated (the signal column can absorb the
+                // near-zero column's residual). Essential for wide rank-
+                // deficient matrices (m ≪ n).
+                if app < col_floor_sq && aqq < col_floor_sq {
+                    continue;
                 }
                 if apq.abs() <= tol * (app * aqq).sqrt() {
                     continue; // Already diagonal in this plane.
@@ -678,17 +827,27 @@ fn one_sided_jacobi_svd_into(
     // Extract singular values (column norms of A post-rotation) and sort desc.
     //
     // The raw singular values are column norms of work.a (post-Jacobi-rotation).
-    // We compute them into a stack array (k ≤ 16), argsort by descending value,
-    // then write the sorted triples into the SOA result. Reading from a stack
-    // snapshot avoids the read-then-write aliasing hazard on
-    // `result.singular_values` (writing sorted position `out_j` must not
-    // clobber the source position `perm[out_j']` for a later `out_j'`).
-    let k = m.min(n); // number of singular triples
-    debug_assert!(k <= 16, "one-sided Jacobi result scratch supports k <= 16");
+    // We compute norms for ALL n columns into a stack array, argsort by
+    // descending value, then write the top-k sorted triples into the SOA result.
+    //
+    // **Issue 008 root cause:** the previous extraction iterated only `0..k`
+    // (= `0..min(m,n)`), missing singular values that landed in columns `k..n`
+    // after Jacobi convergence. For wide matrices (m < n, e.g. PCA on a 6×48
+    // data matrix), the m non-zero singular values can end up in ANY of the n
+    // columns — not just the first m. Iterating all n columns and selecting the
+    // top-k fixes the wide-matrix regression bit-for-bit on the G1 example.
+    //
+    // The 64-element cap covers ambient dims up to D=64 (e.g. the Plan 301
+    // Phase 2 GOAT uses D=48). PCA via Jacobian SVD is a documented public-API
+    // use case; the previous k ≤ 16 cap panicked on valid inputs (N ≥ 17, D=48).
+    let k = m.min(n); // number of singular triples to output
 
-    // Stack snapshot of raw (unsorted) singular values.
-    let mut raw_sigma: [f32; 16] = [0.0; 16];
-    for i in 0..k {
+    // Snapshot of raw (unsorted) singular values — one per column (n total).
+    // Issue 124: moved from a fixed `[f32; 64]` stack array to the reusable
+    // heap buffer in `SvdScratch`. The buffer is reused across calls (sized
+    // once in `with_capacity`); only the `n`-length prefix is touched here.
+    let raw_sigma = &mut work.sigma_buf;
+    for i in 0..n {
         let mut s_sq: f32 = 0.0;
         for r in 0..m {
             let ari = work.a[r * n + i];
@@ -697,14 +856,14 @@ fn one_sided_jacobi_svd_into(
         raw_sigma[i] = s_sq.sqrt();
     }
 
-    // Argsort the column indices by descending singular value.
-    let mut perm: [usize; 16] = [0; 16];
-    for i in 0..k {
+    // Argsort ALL n column indices by descending singular value.
+    let perm = &mut work.perm_buf;
+    for i in 0..n {
         perm[i] = i;
     }
-    // Insertion sort by descending singular value — O(k²) but k ≤ 16, and
+    // Insertion sort by descending singular value — O(n²) but n ≤ 64, and
     // branch-predictable for nearly-sorted input (common after convergence).
-    for i in 1..k {
+    for i in 1..n {
         let key_idx = perm[i];
         let key_val = raw_sigma[key_idx];
         let mut j = i;
@@ -891,6 +1050,341 @@ mod tests {
         }
     }
 
+    // ── Phase 3 (G3-precursor): Jacobian SVD validation ──────────────────
+    // Plan 301 T3.1–T3.4. The existing 4×6 smoke test above only checks
+    // singular values on a canonical-axis matrix. These tests cover the
+    // plan-specified R^8×8 dimensionality (matching HLA's 8-dim, open
+    // question Q1), right-singular-vector recovery up to sign (T3.2), the
+    // non-linear sigmoid-map row-space check (T3.3), and a timing gate (T3.4).
+
+    /// Construct a known rank-3 map `f: R^8 → R^8` with **non-canonical**
+    /// orthonormal singular vectors, built from 2×2 rotation blocks at distinct
+    /// angles. Non-canonical bases make right-singular-vector recovery a
+    /// meaningful check — canonical axes would trivially match coordinate
+    /// probes and hide sign/ordering bugs.
+    ///
+    /// `W = Σ_k σ_k · u_k · v_k^T`, with `u_k, v_k ∈ R^8` orthonormal. Each
+    /// lives in a disjoint 2-coordinate block (so they're exactly orthonormal
+    /// by construction, no Gram–Schmidt drift); coordinates 6,7 are zero so
+    /// the map is genuinely rank-3 in R^8.
+    #[allow(clippy::type_complexity)] // test fixture: rank-3 R^8x8 map decomposition tuple
+    fn known_rank3_map_r8x8() -> ([f32; 64], [[f32; 8]; 3], [[f32; 8]; 3], [f32; 3]) {
+        let (c1, s1) = (0.3f32.cos(), 0.3f32.sin());
+        let (c2, s2) = (0.7f32.cos(), 0.7f32.sin());
+        let (c3, s3) = (1.1f32.cos(), 1.1f32.sin());
+        // u-blocks use different angles so U ≠ V (rules out a transpose bug).
+        let (cu1, su1) = (0.5f32.cos(), 0.5f32.sin());
+        let (cu2, su2) = (0.9f32.cos(), 0.9f32.sin());
+        let (cu3, su3) = (1.3f32.cos(), 1.3f32.sin());
+        let u1 = [cu1, su1, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
+        let u2 = [0.0, 0.0, cu2, su2, 0.0, 0.0, 0.0, 0.0];
+        let u3 = [0.0, 0.0, 0.0, 0.0, cu3, su3, 0.0, 0.0];
+        let v1 = [c1, s1, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
+        let v2 = [0.0, 0.0, c2, s2, 0.0, 0.0, 0.0, 0.0];
+        let v3 = [0.0, 0.0, 0.0, 0.0, c3, s3, 0.0, 0.0];
+        let sigmas = [10.0f32, 5.0, 2.0];
+        let mut w = [0.0f32; 64];
+        for j in 0..8 {
+            for i in 0..8 {
+                let acc = sigmas[0] * u1[j] * v1[i]
+                    + sigmas[1] * u2[j] * v2[i]
+                    + sigmas[2] * u3[j] * v3[i];
+                w[j * 8 + i] = acc;
+            }
+        }
+        (w, [u1, u2, u3], [v1, v2, v3], sigmas)
+    }
+
+    /// T3.1 + T3.2 — rank-3 linear map in R^8×8: recovered singular values
+    /// match Σ AND right singular vectors match V up to sign (matched by
+    /// singular-value proximity, since distinct σ ⇒ unique vectors up to sign).
+    #[test]
+    fn jacobian_svd_recovers_rank3_r8x8_singular_values_and_vectors() {
+        let (w, _u, v_true, sigmas) = known_rank3_map_r8x8();
+        let f = |x: &[f32], out: &mut [f32]| {
+            debug_assert_eq!(x.len(), 8);
+            debug_assert_eq!(out.len(), 8);
+            for j in 0..8 {
+                let mut acc = 0.0f32;
+                for i in 0..8 {
+                    acc += w[j * 8 + i] * x[i];
+                }
+                out[j] = acc;
+            }
+        };
+        let x = [0.5f32; 8];
+        let mut scratch = JacobianSvdScratch::with_capacity(8, 8);
+        let result = jacobian_svd_at(f, &x, 1e-4, &mut scratch);
+
+        // T3.1: the spectrum is rank-3. Forward-difference Jacobian estimation
+        // on f32 (eps=1e-4) leaves a ~1e-3 noise floor, so the SVD's internal
+        // `result.rank` field (a tight threshold) can report 4 even though the
+        // 4th singular value is ~0.0005 — a 4000× gap below the 3rd. We verify
+        // rank-3 via the plan's OWN `numerical_rank` primitive (η=0.99): the
+        // top-3 singular values carry 99.99% of the energy, so this robustly
+        // reports 3 independent of the noise floor. (The `result.rank`/internal
+        // threshold discrepancy is a pre-existing SVD behavior, noted in the
+        // benchmark doc; not in scope to re-tune here.)
+        let nr = numerical_rank(&result.singular_values, 0.99);
+        assert_eq!(
+            nr, 3,
+            "numerical_rank(η=0.99) expected 3, got {} (sigmas = {:?})",
+            nr, result.singular_values
+        );
+        // And confirm the spectral gap directly: the 4th singular value (if
+        // present) must be negligible relative to the 3rd.
+        if result.singular_values.len() >= 4 {
+            assert!(
+                result.singular_values[3] < result.singular_values[2] * 1e-2,
+                "no clean rank-3 spectral gap: σ[3]={:.6} vs σ[2]={:.6}",
+                result.singular_values[3],
+                result.singular_values[2]
+            );
+        }
+
+        // T3.2 (singular values): top-3 match {10, 5, 2}.
+        let mut expected = sigmas;
+        expected.sort_by(|a, b| b.partial_cmp(a).unwrap_or(Ordering::Equal));
+        let mut got: Vec<f32> = result.singular_values.iter().take(3).cloned().collect();
+        got.sort_by(|a, b| b.partial_cmp(a).unwrap_or(Ordering::Equal));
+        for (e, g) in expected.iter().zip(got.iter()) {
+            assert!(
+                (e - g).abs() < 0.1,
+                "singular value mismatch: expected ≈ {e}, got {g}"
+            );
+        }
+
+        // T3.2 (right singular vectors): each recovered V column matches its
+        // ground-truth v_k up to sign. Match by nearest singular value, then
+        // require |dot| ≈ 1.
+        assert!(
+            result.right_singular_vectors.len() >= 3,
+            "expected ≥3 right singular vectors, got {}",
+            result.right_singular_vectors.len()
+        );
+        for j in 0..3 {
+            let r = &result.right_singular_vectors[j];
+            let sv = result.singular_values[j];
+            // Find the ground-truth index whose σ is closest to this sv.
+            let k = (0..3)
+                .min_by(|&a, &b| {
+                    (sigmas[a] - sv)
+                        .abs()
+                        .partial_cmp(&(sigmas[b] - sv).abs())
+                        .unwrap_or(Ordering::Equal)
+                })
+                .expect("3 ground-truth sigmas");
+            let dot: f32 = r.iter().zip(v_true[k].iter()).map(|(a, b)| a * b).sum();
+            assert!(
+                dot.abs() > 0.999,
+                "right singular vector {j} (sv={sv:.3}) did not match ground-truth v_{k} \
+                 up to sign: |dot| = {:.4}",
+                dot.abs()
+            );
+        }
+    }
+
+    /// T3.3 — non-linear sigmoid map `f(x) = sigmoid(W x)`. Its Jacobian is
+    /// `diag(sigmoid'(Wx)) · W`; since the diagonal is strictly positive, the
+    /// row space is unchanged, so the SVD must reveal the SAME 3-dim row space
+    /// as W (span of the ground-truth `v_k`). We check each recovered right
+    /// singular vector lies in `span{v1,v2,v3}` via the projector
+    /// `P_true = Σ_k v_k v_k^T`  (‖P_true r‖² ≈ 1).
+    #[test]
+    fn jacobian_svd_sigmoid_map_reveals_row_space() {
+        let (w, _u, v_true, _sigmas) = known_rank3_map_r8x8();
+        let sigmoid = |z: f32| 1.0 / (1.0 + (-z).exp());
+        let f = |x: &[f32], out: &mut [f32]| {
+            debug_assert_eq!(x.len(), 8);
+            debug_assert_eq!(out.len(), 8);
+            for j in 0..8 {
+                let mut acc = 0.0f32;
+                for i in 0..8 {
+                    acc += w[j * 8 + i] * x[i];
+                }
+                out[j] = sigmoid(acc);
+            }
+        };
+        // Choose x with moderate Wx so sigmoid' is bounded away from 0
+        // (keeps the diagonal well-conditioned and the rank-3 structure crisp).
+        let x = [0.1f32; 8];
+        let mut scratch = JacobianSvdScratch::with_capacity(8, 8);
+        let result = jacobian_svd_at(f, &x, 1e-4, &mut scratch);
+
+        // Non-linear map ⇒ rank can drop only if a diagonal entry ≈ 0; with
+        // x=0.1·1 the Wx entries stay well away from saturation, so we still
+        // expect rank 3.
+        assert!(
+            result.rank >= 3,
+            "sigmoid Jacobian expected rank ≥ 3, got {} (sigmas = {:?})",
+            result.rank,
+            result.singular_values
+        );
+
+        // Build P_true = Σ_k v_k v_k^T (8×8) and check every recovered right
+        // singular vector with a non-negligible singular value lies in the row
+        // space of W.
+        let mut p_true = [0.0f32; 64];
+        for v_k in v_true.iter().take(3) {
+            for a in 0..8 {
+                for b in 0..8 {
+                    p_true[a * 8 + b] += v_k[a] * v_k[b];
+                }
+            }
+        }
+        for (j, r) in result.right_singular_vectors.iter().enumerate() {
+            let sv = result.singular_values.get(j).copied().unwrap_or(0.0);
+            if sv < 1e-3 {
+                continue; // skip numerical-zero directions
+            }
+            // P_true · r
+            let mut pr = [0.0f32; 8];
+            for a in 0..8 {
+                for b in 0..8 {
+                    pr[a] += p_true[a * 8 + b] * r[b];
+                }
+            }
+            let norm_pr = pr.iter().map(|v| v * v).sum::<f32>().sqrt();
+            let norm_r = r.iter().map(|v| v * v).sum::<f32>().sqrt();
+            assert!(
+                (norm_pr - norm_r).abs() < 5e-3,
+                "right singular vector {j} (sv={sv:.4}) is NOT in the row space of W: \
+                 ‖P_true r‖={norm_pr:.5} vs ‖r‖={norm_r:.5}"
+            );
+        }
+    }
+
+    /// T3.4 — timing gate: Jacobian SVD on R^8→R^8 (forward diff: 8 map evals
+    /// + thin SVD of an 8×8) must complete in well under the plan's 1µs target
+    ///   in release. The assertion uses a generous bound to stay CI-stable in
+    ///   debug builds; the release-mode number is recorded in
+    ///   `.benchmarks/301_subspace_phase_gate_g1.md` (Phase 3 section).
+    ///
+    /// Measures BOTH paths so the alloc-conversion overhead is visible:
+    /// - `jacobian_svd_at` (with 17-`Vec` SOA→owned conversion)
+    /// - `jacobian_svd_at_into` (zero-alloc hot path, Plan 301 T4.1)
+    ///   Both are printed; the `_into` path is the one the plan's <1µs target
+    ///   applies to (it is the primitive's true hot-path cost). The `_at` path
+    ///   includes caller-facing allocation that the primitive does not own.
+    #[test]
+    fn jacobian_svd_r8x8_latency_gate() {
+        let (w, _u, _v, _sigmas) = known_rank3_map_r8x8();
+        let f = |x: &[f32], out: &mut [f32]| {
+            for j in 0..8 {
+                let mut acc = 0.0f32;
+                for i in 0..8 {
+                    acc += w[j * 8 + i] * x[i];
+                }
+                out[j] = acc;
+            }
+        };
+        let x = [0.5f32; 8];
+        let mut scratch = JacobianSvdScratch::with_capacity(8, 8);
+        // Warmup (first call grows scratch + caches).
+        let _ = jacobian_svd_at(f, &x, 1e-4, &mut scratch);
+        jacobian_svd_at_into(f, &x, 1e-4, &mut scratch);
+
+        // --- Zero-alloc hot path (`jacobian_svd_at_into`) ---
+        // This is the path the plan's <1µs T3.4 target applies to.
+        let iters = 5_000;
+        let start = std::time::Instant::now();
+        for _ in 0..iters {
+            jacobian_svd_at_into(f, &x, 1e-4, &mut scratch);
+        }
+        let elapsed = start.elapsed();
+        let per_call_into_ns = elapsed.as_nanos() as f64 / iters as f64;
+
+        // --- Allocating path (`jacobian_svd_at`) ---
+        // Measures the SOA→owned-`Vec` conversion overhead for comparison.
+        let start = std::time::Instant::now();
+        for _ in 0..iters {
+            let _ = jacobian_svd_at(f, &x, 1e-4, &mut scratch);
+        }
+        let elapsed = start.elapsed();
+        let per_call_alloc_ns = elapsed.as_nanos() as f64 / iters as f64;
+
+        eprintln!(
+            "T3.4 latency: jacobian_svd_at_into={per_call_into_ns:.0} ns/call, \
+             jacobian_svd_at (with alloc)={per_call_alloc_ns:.0} ns/call"
+        );
+        // T3.4 GATE VERDICT (re-measured 2026-07-02 after Plan 301 T4.1
+        // allocation-elimination fix, release): the `_into` hot path passes
+        // the plan's <1000 ns target (the prior 2403 ns/call figure measured
+        // the allocating `_at` path on a slower bench machine). The breakdown
+        // (`.benchmarks/301_*.md` Phase 3) shows ~45% of the `_at` cost was
+        // the 17-`Vec` SOA→owned conversion, which `_into` skips entirely.
+        //
+        // This assertion is a REGRESSION GUARD on the hot path (debug-stable),
+        // NOT the gate: the gate's honest verdict is recorded in the benchmark
+        // doc. The guard catches a catastrophic regression (e.g. an accidental
+        // allocation re-introduced on the hot path) without false-failing on
+        // slow CI / debug builds.
+        assert!(
+            per_call_into_ns < 100_000.0,
+            "R^8→R^8 Jacobian SVD (`_into` hot path) regressed past the debug \
+             regression guard: {per_call_into_ns:.0} ns/call \
+             (plan target <1000 ns release; alloc-path {per_call_alloc_ns:.0} ns/call)"
+        );
+    }
+
+    /// Plan 301 T4.1 — `jacobian_svd_at_into` produces bit-identical singular
+    /// values / vectors to `jacobian_svd_at`. The `_into` path writes into the
+    /// internal SOA scratch; `_at` converts that to owned `Vec`s. Both must
+    /// agree to the last bit on the recovered spectrum.
+    #[test]
+    fn jacobian_svd_at_into_matches_allocating_path() {
+        let (w, _u, _v, _sigmas) = known_rank3_map_r8x8();
+        let f = |x: &[f32], out: &mut [f32]| {
+            for j in 0..8 {
+                let mut acc = 0.0f32;
+                for i in 0..8 {
+                    acc += w[j * 8 + i] * x[i];
+                }
+                out[j] = acc;
+            }
+        };
+        let x = [0.5f32; 8];
+
+        let mut scratch = JacobianSvdScratch::with_capacity(8, 8);
+        let owned = jacobian_svd_at(f, &x, 1e-4, &mut scratch);
+        jacobian_svd_at_into(f, &x, 1e-4, &mut scratch);
+        let soa = scratch.svd_result();
+
+        assert_eq!(soa.len(), owned.singular_values.len());
+        assert_eq!(soa.rank, owned.rank);
+        for j in 0..soa.len() {
+            assert_eq!(
+                soa.singular_value(j).to_bits(),
+                owned.singular_values[j].to_bits(),
+                "singular value {j} differs: _into={} vs _at={}",
+                soa.singular_value(j),
+                owned.singular_values[j]
+            );
+            let rsoa = soa.right_singular_vector(j);
+            let roat = &owned.right_singular_vectors[j];
+            assert_eq!(rsoa.len(), roat.len());
+            for i in 0..rsoa.len() {
+                // Vectors can flip sign as a canonical SVD ambiguity; compare
+                // magnitudes (the singular values are sign-invariant). Both
+                // paths run the same deterministic Jacobi sequence, so the
+                // signs should actually agree — but assert magnitude to be
+                // robust to any future convergence-tie reordering.
+                assert!(
+                    (rsoa[i] - roat[i]).abs() < 1e-6 || (rsoa[i] + roat[i]).abs() < 1e-6,
+                    "right singular vector [{j}][{i}] differs: _into={} vs _at={}",
+                    rsoa[i],
+                    roat[i]
+                );
+            }
+        }
+    }
+
+    // NOTE: the zero-alloc gate for `jacobian_svd_at_into` lives in
+    // `tests/subspace_phase_gate_alloc_check.rs` (separate test binary) —
+    // `#[global_allocator]` is crate-binary-unique and collides with other
+    // test modules in the lib test binary (same convention as
+    // `karc_alloc_check`, `analytic_lattice_alloc_check`, etc.).
+
     #[test]
     fn estimate_intrinsic_dim_participation_ratio() {
         let s = vec![1.0; 4];
@@ -1052,5 +1546,228 @@ mod tests {
         // Accessors return slices of the right length.
         assert_eq!(result.right_singular_vector(0).len(), n_cols);
         assert_eq!(result.left_singular_vector(0).len(), m_rows);
+    }
+
+    // ── Issue 008 regression: wide rank-deficient matrices ──────────────────
+    //
+    // The one-sided Jacobi SVD extraction must scan ALL n columns for singular
+    // values, not just the first min(m,n). On a wide matrix (m ≪ n) the m
+    // non-zero singular values can land in any of the n columns after Jacobi
+    // convergence; the previous extraction only checked columns 0..min(m,n),
+    // missing them and returning a garbage spectrum. This test constructs a
+    // known wide rank-deficient matrix and verifies recovery.
+
+    /// Build a known rank-3 matrix in R^{3×12} (wide: m=3 ≪ n=12, rank=3).
+    /// The 3 non-zero singular values are {10, 5, 2} with non-canonical right
+    /// singular vectors spread across all 12 columns, so the extraction MUST
+    /// scan beyond column 2 (= min(3,12)−1) to find them.
+    fn known_rank3_wide_3x12() -> (Vec<f32>, usize, usize) {
+        let m = 3;
+        let n = 12;
+        // Non-canonical left vectors in R^3 (3×3 identity — m=rank so U is square).
+        let u = [
+            [1.0_f32, 0.0, 0.0],
+            [0.0_f32, 1.0, 0.0],
+            [0.0_f32, 0.0, 1.0],
+        ];
+        // Right singular vectors placed at columns 3, 7, 10 (NOT 0, 1, 2) to
+        // force the extraction to look beyond the first min(m,n) columns.
+        let mut v = [[0.0_f32; 12]; 3];
+        v[0][3] = 1.0; // v1 at column 3
+        v[1][7] = 1.0; // v2 at column 7
+        v[2][10] = 1.0; // v3 at column 10
+        let sigma = [10.0_f32, 5.0, 2.0];
+        let mut w = vec![0.0_f32; m * n];
+        for row in 0..m {
+            for col in 0..n {
+                let mut acc = 0.0;
+                for k in 0..3 {
+                    acc += sigma[k] * u[k][row] * v[k][col];
+                }
+                w[row * n + col] = acc;
+            }
+        }
+        (w, m, n)
+    }
+
+    #[test]
+    fn thin_svd_into_wide_rank_deficient_recovers_singular_values() {
+        // Issue 008: the extraction must scan ALL n columns, not just 0..min(m,n).
+        // On this 3×12 rank-3 matrix, the singular values live at columns 3, 7, 10.
+        // The old extraction (0..min(3,12)=0..3) would miss them entirely.
+        let (m_flat, m_rows, n_cols) = known_rank3_wide_3x12();
+        let mut work = SvdScratch::with_capacity(n_cols, m_rows);
+        let mut result = SvdResultScratch::with_capacity(m_rows, n_cols);
+        thin_svd_into(&m_flat, m_rows, n_cols, &mut result, &mut work);
+
+        // min(3, 12) = 3 singular triples.
+        assert_eq!(
+            result.len(),
+            3,
+            "3×12 matrix should give 3 singular triples"
+        );
+        // The top-3 singular values must be {10, 5, 2} — NOT garbage from the
+        // null-space columns 0, 1, 2.
+        let sv = [
+            result.singular_value(0),
+            result.singular_value(1),
+            result.singular_value(2),
+        ];
+        assert!(
+            (sv[0] - 10.0).abs() < 0.1,
+            "σ1 should be ≈10.0, got {}",
+            sv[0]
+        );
+        assert!(
+            (sv[1] - 5.0).abs() < 0.1,
+            "σ2 should be ≈5.0, got {}",
+            sv[1]
+        );
+        assert!(
+            (sv[2] - 2.0).abs() < 0.1,
+            "σ3 should be ≈2.0, got {}",
+            sv[2]
+        );
+        // Rank-3 (the 3 non-zero singular values).
+        assert_eq!(result.rank, 3, "rank should be 3, got {}", result.rank);
+    }
+
+    // ── Issue 124 regression: the previous `one_sided_jacobi_svd_into` used ─
+    //    fixed `[f32; 64]` / `[usize; 64]` stack arrays for the σ argsort,
+    //    capping `n_cols ≤ 64`. In release builds the `debug_assert!` compiled
+    //    away, so `n_cols > 64` silently wrote OOB. After the heap-allocate fix
+    //    (buffers moved to `SvdScratch`), 128×128 must work without panic.
+    #[test]
+    fn thin_svd_into_128x128_exceeds_old_64_col_cap() {
+        // 128×128 diagonal matrix: σ_i = (128 - i) for i in 0..128.
+        // This exceeds the old 64-col cap (Issue 124).
+        let n = 128;
+        let m = 128;
+        let m_flat: Vec<f32> = (0..m * n)
+            .map(|idx| {
+                let row = idx / n;
+                let col = idx % n;
+                if row == col {
+                    (n - row) as f32
+                } else {
+                    0.0
+                }
+            })
+            .collect();
+        let mut work = SvdScratch::with_capacity(n, m);
+        let mut result = SvdResultScratch::with_capacity(m, n);
+        thin_svd_into(&m_flat, m, n, &mut result, &mut work);
+
+        // All 128 singular triples present.
+        assert_eq!(result.len(), 128, "128×128 should give 128 triples");
+        // The largest singular value is σ = 128 (the (0,0) entry).
+        assert!((result.singular_value(0) - 128.0).abs() < 0.1, "σ_max ≈ 128");
+        // The smallest is σ = 1 (the (127,127) entry).
+        assert!((result.singular_value(127) - 1.0).abs() < 0.1, "σ_min ≈ 1");
+        // Full rank.
+        assert_eq!(result.rank, 128, "full-rank 128×128");
+    }
+
+    // ── Issue 043 regression: rank-deficient SVD must not be slower than ────
+    //    full-rank. Before the `col_floor_sq` fix, borderline null-space
+    //    column pairs triggered spurious noise rotations every sweep, hitting
+    //    `max_sweeps = 60` and making rank-deficient SVD ~8× slower (31 µs vs
+    //    3.9 µs at R^8→R^8). This test guards against that regression.
+    //
+    // The matrix construction is deliberately NON-block-structured (unlike
+    // `known_rank3_map_r8x8`, which uses disjoint 2×2 rotation blocks where
+    // null-space columns converge to EXACTLY zero in one sweep). A generic
+    // rank-deficient matrix has column interactions across all coordinates,
+    // so null-space columns converge gradually and hover at borderline norms
+    // during intermediate sweeps — the exact scenario the floor fix addresses.
+
+    /// Construct a generic rank-`r` 8×8 matrix via W = U_r · Σ_r · V_rᵀ where
+    /// U_r, V_r have entries from irrational-ish sin/cos formulas (deterministic,
+    /// no PRNG dependency). The result is non-axis-aligned and has genuine
+    /// cross-column interactions, so the Jacobi SVD cannot exploit any block
+    /// structure — null-space columns converge gradually, exercising the
+    /// `col_floor_sq` deflation path.
+    fn generic_rank_r_r8x8(r: usize) -> [f32; 64] {
+        debug_assert!(r <= 8);
+        let mut w = [0.0f32; 64];
+        // Distinct singular values so the spectrum is well-separated.
+        let sigma = |k: usize| 1.0 + k as f32; // 1, 2, 3, ..., r
+        for j in 0..8 {
+            for i in 0..8 {
+                let mut acc = 0.0f32;
+                for k in 0..r {
+                    // U entry: sin of an irrational-ish product (no axis alignment).
+                    let u_jk = ((j as f32 + 1.0) * (k as f32 + 1.0) * 0.37).sin();
+                    // V entry: cos of a different irrational-ish product.
+                    let v_ik = ((i as f32 + 1.0) * (k as f32 + 1.0) * 0.23).cos();
+                    acc += sigma(k) * u_jk * v_ik;
+                }
+                w[j * 8 + i] = acc;
+            }
+        }
+        w
+    }
+
+    /// Issue 043 perf regression guard: `thin_svd_into` (the one-sided Jacobi
+    /// SVD that `jacobian_svd_at_into` calls internally) on a rank-4 8×8 matrix
+    /// must not be dramatically slower than on a full-rank 8×8 matrix. Before
+    /// the `col_floor_sq` fix, the ratio was ~8× (31 µs vs 3.9 µs); after the
+    /// fix it should be ≈1×. The guard threshold (3.0×) is generous for
+    /// debug/CI stability while still catching the 8× regression.
+    ///
+    /// We test `thin_svd_into` directly (not `jacobian_svd_at_into`) because
+    /// forward-differencing with `eps=1e-4` introduces ~1e-3 relative noise
+    /// that elevates null-space singular values above the rank threshold — so
+    /// a rank-4 linear map appears as rank-8 through the Jacobian path. The
+    /// SVD convergence regression is independent of how the matrix was built;
+    /// testing the SVD directly isolates the fix.
+    #[test]
+    fn thin_svd_rank_deficient_not_slower_than_full_rank() {
+        let w_full = generic_rank_r_r8x8(8); // full-rank
+        let w_rank4 = generic_rank_r_r8x8(4); // rank-4 (4 null-space columns)
+        let mut work = SvdScratch::with_capacity(8, 8);
+        let mut result = SvdResultScratch::with_capacity(8, 8);
+
+        // Sanity: verify ranks are as expected (catches a construction bug that
+        // would make the perf comparison meaningless).
+        thin_svd_into(&w_full, 8, 8, &mut result, &mut work);
+        assert_eq!(result.rank, 8, "full-rank matrix should be rank 8");
+        thin_svd_into(&w_rank4, 8, 8, &mut result, &mut work);
+        assert_eq!(
+            result.rank, 4,
+            "rank-4 matrix should be rank 4, got {}",
+            result.rank
+        );
+
+        // Warmup both paths.
+        thin_svd_into(&w_full, 8, 8, &mut result, &mut work);
+        thin_svd_into(&w_rank4, 8, 8, &mut result, &mut work);
+
+        let iters = 5_000;
+
+        // Full-rank baseline.
+        let start = std::time::Instant::now();
+        for _ in 0..iters {
+            thin_svd_into(&w_full, 8, 8, &mut result, &mut work);
+        }
+        let ns_full = start.elapsed().as_nanos() as f64 / iters as f64;
+
+        // Rank-deficient (the path that was 8× slower before the fix).
+        let start = std::time::Instant::now();
+        for _ in 0..iters {
+            thin_svd_into(&w_rank4, 8, 8, &mut result, &mut work);
+        }
+        let ns_rank4 = start.elapsed().as_nanos() as f64 / iters as f64;
+
+        let ratio = ns_rank4 / ns_full;
+        eprintln!(
+            "Issue 043 perf guard: full-rank={ns_full:.0} ns/call, rank-4={ns_rank4:.0} ns/call, ratio={ratio:.2}× (threshold 3.0×)"
+        );
+        assert!(
+            ratio < 3.0,
+            "rank-deficient SVD is {ratio:.1}× slower than full-rank (threshold 3.0×). \
+             Before the Issue 043 `col_floor_sq` fix this was ~8×; the fix should bring it to ≈1×. \
+             full-rank={ns_full:.0} ns/call, rank-4={ns_rank4:.0} ns/call."
+        );
     }
 }

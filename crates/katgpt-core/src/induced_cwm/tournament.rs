@@ -289,7 +289,12 @@ where
     ///   per (candidate, candidate, first-mover) in head-to-head.
     /// * `rng_seed` — base RNG seed.
     /// * `mcts_budget` — MCTS iterations per move. Same for every candidate.
-    pub fn new(candidates: Vec<V>, games_per_match: usize, rng_seed: u64, mcts_budget: usize) -> Self {
+    pub fn new(
+        candidates: Vec<V>,
+        games_per_match: usize,
+        rng_seed: u64,
+        mcts_budget: usize,
+    ) -> Self {
         Self {
             candidates,
             games_per_match,
@@ -354,6 +359,9 @@ where
         }
 
         // ── Phase B: round-robin head-to-head ─────────────────────────
+        // dual-row write: head_to_head[i][j] and head_to_head[j][i] both written,
+        // needs two &mut into the same Vec → borrow checker forbids iterator form.
+        #[allow(clippy::needless_range_loop)]
         for i in 0..n {
             for j in (i + 1)..n {
                 let mut i_wins = 0u32;
@@ -364,7 +372,11 @@ where
                 // for first-mover advantage.
                 for g in 0..self.games_per_match {
                     let first_mover_is_i = g < self.games_per_match / 2 + self.games_per_match % 2;
-                    let (i_role, j_role) = if first_mover_is_i { (0u8, 1u8) } else { (1u8, 0u8) };
+                    let (i_role, j_role) = if first_mover_is_i {
+                        (0u8, 1u8)
+                    } else {
+                        (1u8, 0u8)
+                    };
                     let match_seed = self.seed_for_head_to_head(i as u64, j as u64, g as u64);
 
                     let (r_i, r_j) = self.play_head_to_head(
@@ -401,16 +413,19 @@ where
         for i in 1..n {
             let wr = vs_baseline[i].win_rate();
             let tb: f32 = head_to_head[i].iter().sum();
-            if (wr > best_wr)
-                || ((wr - best_wr).abs() < f32::EPSILON && tb > best_tb)
-            {
+            if (wr > best_wr) || ((wr - best_wr).abs() < f32::EPSILON && tb > best_tb) {
                 best_idx = i;
                 best_wr = wr;
                 best_tb = tb;
             }
         }
 
-        TournamentWinner::new(best_idx, &self.candidates[best_idx], vs_baseline, head_to_head)
+        TournamentWinner::new(
+            best_idx,
+            &self.candidates[best_idx],
+            vs_baseline,
+            head_to_head,
+        )
     }
 
     // ── Internals ──────────────────────────────────────────────────────
@@ -635,7 +650,11 @@ where
         };
         for i in 1..n_root {
             let v = root_visits[i];
-            let m = if v > 0 { root_total[i] / v as f32 } else { f32::NEG_INFINITY };
+            let m = if v > 0 {
+                root_total[i] / v as f32
+            } else {
+                f32::NEG_INFINITY
+            };
             if v > best_visits || (v == best_visits && m > best_mean) {
                 best_idx = i;
                 best_visits = v;
@@ -772,7 +791,13 @@ mod tests {
         const GOAL: u32 = 25;
 
         fn new() -> Self {
-            Self { counter: 0, turn: 0, tick: 0, is_terminal: false, winner: 255 }
+            Self {
+                counter: 0,
+                turn: 0,
+                tick: 0,
+                is_terminal: false,
+                winner: 255,
+            }
         }
     }
 
@@ -816,6 +841,7 @@ mod tests {
             }
         }
 
+        #[inline]
         fn is_terminal(&self) -> bool {
             self.is_terminal
         }
@@ -830,13 +856,10 @@ mod tests {
                 // `is_terminal` directly, not via reward).
                 return (self.counter as f32) / (Self::GOAL as f32 * 2.0);
             }
-            if self.winner == player_id {
-                1.0
-            } else {
-                0.0
-            }
+            if self.winner == player_id { 1.0 } else { 0.0 }
         }
 
+        #[inline]
         fn tick(&self) -> u32 {
             self.tick
         }
@@ -1093,12 +1116,7 @@ mod tests {
 
     #[test]
     fn seed_for_match_is_distinct_for_distinct_inputs() {
-        let t = ValueFnTournament::new(
-            vec![RaceHeuristic::Advance(AdvanceHeuristic)],
-            4,
-            42,
-            32,
-        );
+        let t = ValueFnTournament::new(vec![RaceHeuristic::Advance(AdvanceHeuristic)], 4, 42, 32);
         let s00 = t.seed_for_match(0, 0, 0);
         let s01 = t.seed_for_match(0, 0, 1);
         let s10 = t.seed_for_match(1, 0, 0);
@@ -1117,7 +1135,11 @@ mod tests {
         // Run 50 picks; the result must always be in {1, 3}.
         for _ in 0..50 {
             let idx = pick_ucb1(&visits, &total, 10, &mut rng);
-            assert!(idx == 1 || idx == 3, "unvisited idx must be picked; got {}", idx);
+            assert!(
+                idx == 1 || idx == 3,
+                "unvisited idx must be picked; got {}",
+                idx
+            );
         }
     }
 
@@ -1128,6 +1150,9 @@ mod tests {
         let visits = vec![10, 10];
         let total = vec![10.0, 1.0]; // means 1.0 vs 0.1
         let idx = pick_ucb1(&visits, &total, 20, &mut rng);
-        assert_eq!(idx, 0, "higher-mean action must win when exploration term is equal");
+        assert_eq!(
+            idx, 0,
+            "higher-mean action must win when exploration term is equal"
+        );
     }
 }

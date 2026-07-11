@@ -1,47 +1,72 @@
-pub mod budget_compat;
-pub mod acceptance_forecast;
+pub use katgpt_speculative::acceptance_forecast;
+pub use katgpt_speculative::budget_compat;
 
 #[cfg(feature = "belief_drafter")]
-pub mod belief_cache;
+pub use katgpt_speculative::belief_cache;
 #[cfg(feature = "belief_drafter")]
-pub mod belief_drafter;
+pub use katgpt_speculative::belief_drafter;
 
 pub mod dd_tree;
 #[cfg(feature = "dendritic_gate")]
-pub mod dendritic_gate;
-pub mod dflash;
+pub use katgpt_speculative::dendritic_gate;
+// Plan 394 (2026-07-05): `dflash` moved to katgpt-forward. Re-export
+// preserves every historical `katgpt_rs::speculative::dflash::*` path and
+// the `pub use dflash::{...}` re-exports below.
+pub use katgpt_forward::dflash;
 #[cfg(feature = "domino_correction")]
-pub mod domino;
+pub use katgpt_speculative::domino;
 #[cfg(feature = "domino_lora")]
-pub mod domino_lora;
-pub mod drafter_lora;
+pub use katgpt_speculative::domino_lora;
+// Plan 394 (2026-07-05): `drafter_lora` moved to katgpt-forward. Re-export
+// preserves every historical `katgpt_rs::speculative::drafter_lora::*` path
+// and the `pub use drafter_lora::{...}` re-exports below.
+pub use katgpt_forward::drafter_lora;
 #[cfg(feature = "echo_env_predictor")]
-pub mod echo_env;
+pub use katgpt_speculative::echo_env;
+// echo_env_integration moved to katgpt-pruners (Plan 388 Phase 3) — it's the
+// integration glue that wraps EnvPredictorPruner with BanditPruner, and
+// katgpt-pruners is the crate that depends on BOTH katgpt-speculative and
+// the bandit machinery.
 #[cfg(feature = "echo_env_predictor")]
-pub mod echo_env_integration;
+pub use katgpt_pruners::echo_env_integration;
 pub mod prefill;
-pub mod residency_audit;
-pub mod sampling;
-pub mod step;
+pub use katgpt_speculative::residency_audit;
+// Plan 394 (2026-07-05): `step` moved to katgpt-forward. Re-export preserves
+// every historical `katgpt_rs::speculative::step::*` path and the
+// `pub use step::{...}` re-exports below. The deprecated paged variant stays
+// root in `step_paged.rs` (consumes `DDTreeBranchCache` + `forward_paged`).
+pub use katgpt_forward::step;
+pub mod step_paged;
+// Plan 424 T4.3: GDN tree verify speculative step for pure-GDN2 models.
+#[cfg(feature = "gdn_tree_verify")]
+pub mod step_gdn_tree;
 pub mod types;
-pub mod verifier;
+// Plan 394 (2026-07-05): `verifier` moved to katgpt-forward. Re-export
+// preserves every historical `katgpt_rs::speculative::verifier::*` path
+// and the `pub use verifier::{...}` re-exports below.
+pub use katgpt_forward::verifier;
 
-pub mod trust_region;
+pub use katgpt_speculative::trust_region;
 
 #[cfg(feature = "budget_adaptation")]
-pub mod budget;
+pub use katgpt_speculative::budget;
 
 #[cfg(feature = "ppot")]
 pub mod ppot;
 
 #[cfg(feature = "bandit")]
-pub mod flow_pruner;
+pub use katgpt_speculative::flow_pruner;
 
 #[cfg(feature = "peira_distill")]
-pub mod peira_pruner;
+pub use katgpt_speculative::peira_pruner;
 
 #[cfg(feature = "dllm")]
 pub mod d2f;
+
+// Set Diffusion inference decoder (Research 376 Phase 4 T4.1).
+// Substrate for set-causal decoding — generalizes D2F to arbitrary position orderings.
+#[cfg(feature = "set_diffusion")]
+pub mod set_diffusion;
 
 #[cfg(feature = "tri_mode")]
 pub mod d2f_verifier;
@@ -50,13 +75,16 @@ pub mod d2f_verifier;
 pub mod diffusion_sampler;
 
 #[cfg(feature = "lattice_deduction")]
-pub mod alpha;
+pub use katgpt_speculative::alpha;
 
 #[cfg(feature = "parallel_probe")]
-pub mod answer_extract;
+pub use katgpt_speculative::answer_extract;
 
+// Parallel-Probe 2D controller (Plan 133). Plan 389 (2026-07-05): moved to
+// katgpt-speculative. Re-exported here to preserve
+// `katgpt_rs::speculative::parallel_probe::*` paths.
 #[cfg(feature = "parallel_probe")]
-pub mod parallel_probe;
+pub use katgpt_speculative::parallel_probe;
 
 // Re-exports — preserves existing import paths like `speculative::build_dd_tree`
 pub use dd_tree::{
@@ -97,18 +125,22 @@ pub use dd_tree::{
 };
 #[cfg(feature = "elf_sde")]
 pub use dd_tree::{WidthScaleConfig, WidthSelectionMode, best_of_k_rollouts};
+// Plan 394 (2026-07-05): `dflash` symbols now live in katgpt-forward. The
+// re-exports below pull through `katgpt_forward::dflash::*` (via the module
+// re-export above) so existing call sites are unchanged.
 pub use dflash::{
     dflash_predict, dflash_predict_ar, dflash_predict_ar_with, dflash_predict_conditioned,
     dflash_predict_conditioned_with, dflash_predict_parallel, dflash_predict_with,
+};
+#[allow(deprecated)]
+pub use katgpt_core::speculative::sampling::{
+    sample_from_distribution, sample_residual_distribution, sample_residual_distribution_into,
 };
 pub use katgpt_core::traits::DominoPruner;
 pub use prefill::{
     AttentionScorer, BlockAttentionScorer, PrefillScorer, RandomScorer, UniformScorer,
     block_select, block_select_grid, compress_prompt, compress_prompt_blocks, should_compress,
     speculative_prefill, speculative_prefill_adaptive, speculative_prefill_block,
-};
-pub use sampling::{
-    sample_from_distribution, sample_residual_distribution, sample_residual_distribution_into,
 };
 pub use step::{speculative_step, speculative_step_verifier};
 pub use types::{
@@ -119,7 +151,7 @@ pub use types::{
 
 // ── Best Buddies Drafting (Plan 199, feature: best_buddies) ──────
 #[cfg(feature = "best_buddies")]
-pub mod best_buddies;
+pub use katgpt_speculative::best_buddies;
 
 #[cfg(feature = "best_buddies")]
 pub use best_buddies::MarginalBestBuddyAligner;
@@ -156,11 +188,17 @@ pub use types::{ConflictDetector, EntropyConflictDetector, LDT_THETA_ELIM, LdtPr
 // ── SimpleTES re-exports (Plan 086, feature: tes_loop) ────────
 #[cfg(feature = "tes_loop")]
 pub use types::{TesConfig, TesNode, TrajectoryCredit};
+// Plan 394 (2026-07-05): verifier module moved to katgpt-forward. These
+// re-exports now pull through `katgpt_forward::verifier::*` (via the module
+// re-export above) so existing call sites are unchanged.
 pub use verifier::{SimulatedVerifier, SpeculativeVerifier};
 
 pub use verifier::LeviathanVerifier;
 
 // ── Drafter LoRA re-exports (Plan 117: MTP LoRA Drafter) ──────
+// Plan 394 (2026-07-05): module moved to katgpt-forward. These re-exports now
+// pull through `katgpt_forward::drafter_lora::*` (via the module re-export
+// above) so existing call sites are unchanged.
 pub use drafter_lora::{
     DrafterForwardContext, DrafterLoraWeights, TrainingPair, generate_synthetic_pairs,
     generate_training_pairs_from_replays, load_drafter_lora, save_drafter_lora, train_drafter_lora,
@@ -202,6 +240,14 @@ pub use d2f::{
     contiguous_prefix_promote, d2f_decode_block_soft,
 };
 
+// ── Set Diffusion Re-exports (Research 376 Phase 4, feature: set_diffusion) ──
+#[cfg(feature = "set_diffusion")]
+pub use set_diffusion::{
+    CpuSetCausalForward, SetCausalForwardFn, SetDiffusionConfig, SetDiffusionResult,
+    block_causal_gen_steps, mdlm_gen_steps, order_to_gen_steps, set_diffusion_decode,
+    set_diffusion_decode_scheduled,
+};
+
 // ── D2F Drafter Verifier Re-exports (Plan 089, Tri-Mode) ───
 #[cfg(feature = "tri_mode")]
 pub use d2f_verifier::D2fDrafterVerifier;
@@ -222,7 +268,7 @@ pub use budget_compat::{effective_tree_budget, scaled_draft_lookahead};
 
 // ── SpeculativeGenerator Token-Domain (Plan 193 Phase 1) ────────
 #[cfg(feature = "speculative_generator")]
-pub mod spec_generator;
+pub use katgpt_speculative::spec_generator;
 
 #[cfg(feature = "speculative_generator")]
 pub use spec_generator::{
@@ -315,33 +361,36 @@ pub use dd_tree::build_dd_tree_screened_progressive;
 pub use types::PositionWeightedBudget;
 
 // ── Adaptive CoT Thinking Controller (Plan 194, feature: thinking_cot) ──
+// Module moved to katgpt-speculative (Plan 388 Phase 3); root re-exports.
 #[cfg(feature = "thinking_cot")]
-pub mod thinking_controller;
+pub use katgpt_speculative::thinking_controller;
 
 #[cfg(feature = "thinking_cot")]
-pub use thinking_controller::{
+pub use katgpt_speculative::thinking_controller::{
     Rng, ThinkingBanditFrozen, ThinkingConfig, ThinkingController, ThinkingMode, ThinkingSelector,
 };
 
 #[cfg(feature = "vocab_coreset")]
-pub mod vocab_coreset;
+pub use katgpt_speculative::vocab_coreset;
 
 #[cfg(feature = "vocab_coreset")]
 pub use vocab_coreset::{should_use_delta_sparse, vocab_coreset};
 
 // ── AND-OR DDTree Blueprint Decomposition (Plan 190, Research 170) ──
+// blueprint extracted to katgpt-speculative crate (Issue 003).
 #[cfg(feature = "and_or_dtree")]
-pub mod blueprint;
+pub use katgpt_speculative::blueprint;
 
 #[cfg(feature = "and_or_dtree")]
 pub use blueprint::BlueprintPass;
 
 // ── AND-OR DDTree Builder (Plan 190 T2, feature: and_or_dtree) ────
+// Module moved to katgpt-speculative (Plan 388 Phase 3); root re-exports.
 #[cfg(feature = "and_or_dtree")]
-pub mod and_or_builder;
+pub use katgpt_speculative::and_or_builder;
 
 #[cfg(feature = "and_or_dtree")]
-pub use and_or_builder::{AndOrBuilder, Subgoal};
+pub use katgpt_speculative::and_or_builder::{AndOrBuilder, Subgoal};
 
 // ── Trust-Region Adaptive Speculation (Plan 182, Research 162) ──
 pub use trust_region::{
@@ -350,15 +399,17 @@ pub use trust_region::{
 };
 
 // ── AND-OR DDTree Decomposition (Plan 190, feature: and_or_dtree) ──
+// decomp_reviewer extracted to katgpt-speculative crate (Issue 003).
 #[cfg(feature = "and_or_dtree")]
-pub mod decomp_reviewer;
+pub use katgpt_speculative::decomp_reviewer;
 
 #[cfg(feature = "and_or_dtree")]
 pub use decomp_reviewer::DecompositionReviewer;
 
 // ── Correlation Budget Allocation (Plan 200, feature: corr_budget) ──
+// correlation_budget extracted to katgpt-speculative crate (Issue 003).
 #[cfg(feature = "corr_budget")]
-pub mod correlation_budget;
+pub use katgpt_speculative::correlation_budget;
 
 #[cfg(feature = "corr_budget")]
 pub use correlation_budget::CorrelationBudgetAllocator;
@@ -371,7 +422,7 @@ pub use dd_tree::build_dd_tree_screened_flow_budget;
 
 // ── CaDDTree — Cost-Aware Adaptive DDTree Budget Selection (Plan 219) ──
 #[cfg(feature = "caddtree_budget")]
-pub mod caddtree_budget;
+pub use katgpt_speculative::caddtree_budget;
 
 #[cfg(feature = "caddtree_budget")]
 pub use caddtree_budget::{
@@ -379,19 +430,37 @@ pub use caddtree_budget::{
     build_dd_tree_adaptive_screened,
 };
 
-#[cfg(all(feature = "caddtree_budget", feature = "mux_demux", feature = "rcd_residual"))]
+#[cfg(all(
+    feature = "caddtree_budget",
+    feature = "mux_demux",
+    feature = "rcd_residual"
+))]
 pub use caddtree_budget::build_dd_tree_adaptive_mux_residual;
+
+// ── Hardware-Aware Prefix Scheduler — Multi-Request Budget Allocator (Plan 339) ──
+//
+// DSpark §3.2.2 global verification-budget allocator: given R spec-decode
+// requests with per-position survival probabilities a_{r,j} and a profiled
+// SPS(B) engine cost curve, produces per-request prefix lengths ℓ*_r that
+// maximize Θ = τ · SPS(B) via global sort + greedy admission + non-anticipating
+// early-stop (DSpark Appendix A correctness theorem — lossless distribution
+// preservation). Opt-in until a real multi-request batch caller exercises it.
+#[cfg(feature = "hardware_aware_scheduler")]
+pub use katgpt_speculative::prefix_scheduler;
+
+#[cfg(feature = "hardware_aware_scheduler")]
+pub use prefix_scheduler::{HardwareAwarePrefixScheduler, SpsCurve};
 
 // ── Self-Learning Selectivity Router (Plan 204, feature: selectivity_router) ──
 #[cfg(feature = "selectivity_router")]
-pub mod selectivity_router;
+pub use katgpt_speculative::selectivity_router;
 
 #[cfg(feature = "selectivity_router")]
 pub use selectivity_router::{ComputeRoute, ProfileError, SelectivityRouter};
 
 // ── Kurtosis Gate — Polarization-Driven Speculative Decoding (Plan 203b) ──
 #[cfg(feature = "kurtosis_gate")]
-pub mod kurtosis_gate;
+pub use katgpt_speculative::kurtosis_gate;
 
 #[cfg(feature = "kurtosis_gate")]
 pub use kurtosis_gate::{KurtosisGate, excess_kurtosis};
@@ -401,21 +470,23 @@ pub use dd_tree::build_dd_tree_speculative_kurtosis;
 
 // ── Precision-Aware Speculative Generator (Plan 227 Phase 4, feature: precision_aware_draft) ──
 #[cfg(all(feature = "precision_aware_draft", feature = "speculative_generator"))]
-pub mod precision_aware_generator;
+pub use katgpt_speculative::precision_aware_generator;
 
 #[cfg(all(feature = "precision_aware_draft", feature = "speculative_generator"))]
 pub use precision_aware_generator::PrecisionAwareGenerator;
 
 // ── NFCoT FlowBudget — Speculative Depth Allocation (Plan 229 T4, feature: nf_flow_budget) ──
+// nf_flow_budget extracted to katgpt-speculative crate (Issue 003).
 #[cfg(feature = "nf_flow_budget")]
-pub mod nf_flow_budget;
+pub use katgpt_speculative::nf_flow_budget;
 
 #[cfg(feature = "nf_flow_budget")]
 pub use nf_flow_budget::{FlowBudgetAllocator, allocate_budget};
 
 // ── NFCoT FlowScore — Modelless Normalizing Flow Density Scoring (Plan 229, feature: nf_flow_score) ──
+// nf_flow extracted to katgpt-speculative crate (Issue 003).
 #[cfg(feature = "nf_flow_score")]
-pub mod nf_flow;
+pub use katgpt_speculative::nf_flow;
 
 #[cfg(feature = "nf_flow_score")]
 pub use nf_flow::{
@@ -425,21 +496,24 @@ pub use nf_flow::{
 
 // ── NFCoT FlowScore SpeculativeGenerator Integration (Plan 229 T2) ──
 #[cfg(all(feature = "nf_flow_score", feature = "speculative_generator"))]
-pub mod nf_flow_generator;
+pub use katgpt_speculative::nf_flow_generator;
 
 #[cfg(all(feature = "nf_flow_score", feature = "speculative_generator"))]
 pub use nf_flow_generator::{FlowScoredError, FlowScoredGenerator, ScoredToken};
 
 // ── NFCoT FlowGate — Adaptive Acceptance Criterion (Plan 229 T3, feature: nf_flow_gate) ──
+// nf_flow_gate extracted to katgpt-speculative crate (Issue 003).
 #[cfg(feature = "nf_flow_gate")]
-pub mod nf_flow_gate;
+pub use katgpt_speculative::nf_flow_gate;
 
 #[cfg(feature = "nf_flow_gate")]
 pub use nf_flow_gate::NfFlowGate;
 
 // ── VocabChannel Pruner — ROTATE-Derived ConstraintPruner (Plan 228, feature: vocab_channel_pruner) ──
+// Plan 384 (2026-07-05): substrate moved to katgpt-pruners. Root re-exports
+// preserve `katgpt_rs::speculative::vocab_channel_pruner::*` paths.
 #[cfg(feature = "vocab_channel_pruner")]
-pub mod vocab_channel_pruner;
+pub use katgpt_pruners::vocab_channel_pruner;
 
 #[cfg(feature = "vocab_channel_pruner")]
 pub use vocab_channel_pruner::excess_kurtosis as vocab_excess_kurtosis;
@@ -463,15 +537,17 @@ pub use domino::{
 };
 
 // ── NFCoT FlowMUX — Flow Scoring for MUX Trajectories (Plan 229 T6) ──
+// nf_flow_mux extracted to katgpt-speculative crate (Issue 003).
 #[cfg(all(feature = "nf_flow_score", feature = "mux_pruner"))]
-pub mod nf_flow_mux;
+pub use katgpt_speculative::nf_flow_mux;
 
 #[cfg(all(feature = "nf_flow_score", feature = "mux_pruner"))]
 pub use nf_flow_mux::{MuxFlowScore, aggregate_mux_score, score_mux_trajectory};
 
 // ── NFCoT FlowFold — Confidence-Gated Chain Folding (Plan 229 T7) ──
+// nf_flow_fold extracted to katgpt-speculative crate (Issue 003).
 #[cfg(all(feature = "nf_flow_score", feature = "chain_fold"))]
-pub mod nf_flow_fold;
+pub use katgpt_speculative::nf_flow_fold;
 
 #[cfg(all(feature = "nf_flow_score", feature = "chain_fold"))]
 pub use nf_flow_fold::{FoldDecision, evaluate_fold, evaluate_fold_batch};
@@ -483,7 +559,7 @@ pub use nf_flow_fold::{FoldDecision, evaluate_fold, evaluate_fold_batch};
 // density + QGF bonus. Feature-gated on both `nf_flow_score` + `qgf_drafter`,
 // default OFF until GOAT proof.
 #[cfg(all(feature = "nf_flow_score", feature = "qgf_drafter"))]
-pub mod nf_flow_qgf;
+pub use katgpt_speculative::nf_flow_qgf;
 
 #[cfg(all(feature = "nf_flow_score", feature = "qgf_drafter"))]
 pub use nf_flow::{score_with_qgf, score_with_qgf_at, score_with_qgf_batch, select_best_qgf};
@@ -492,8 +568,11 @@ pub use nf_flow::{score_with_qgf, score_with_qgf_at, score_with_qgf_batch, selec
 pub use nf_flow_qgf::NfQgfDrafter;
 
 // ── Deep Manifold Part 2 — Plan 231 (Research 205) ──
+// branch_confidence extracted to katgpt-speculative crate (Issue 003).
+// Module-level re-export preserves `speculative::branch_confidence::*` paths.
 #[cfg(feature = "union_bound_confidence")]
-pub mod branch_confidence;
+pub use katgpt_speculative::branch_confidence;
 
+// pathway_tracker extracted to katgpt-speculative crate (Issue 003).
 #[cfg(feature = "pathway_tracker")]
-pub mod pathway_tracker;
+pub use katgpt_speculative::pathway_tracker;

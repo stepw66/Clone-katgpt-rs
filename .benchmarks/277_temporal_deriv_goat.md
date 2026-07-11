@@ -1,5 +1,13 @@
 # Plan 277 GOAT Scorecard — Temporal Derivative Kernel
 
+> **📍 Migration note (2026-06-28, Issue 007 Phase C follow-up):** The
+> `crates/katgpt-core/benches/reconstruction_bench.rs` references below moved
+> to `riir-ai/crates/riir-engine/benches/reconstruction_bench.rs` (NPC runtime
+> IP — the bench constructs `NpcBrain` which is private runtime code). The
+> reproduction commands should now use `-p riir-engine` with
+> `--features reconstruction_bench`. The historical numbers below remain
+> valid.
+
 **Date:** 2026-06-16
 **Plan:** [277_temporal_derivative_kernel.md](../.plans/277_temporal_derivative_kernel.md)
 **Research:** [243_Temporal_Derivative_Kernel_Neocortical_Learning.md](../.research/243_Temporal_Derivative_Kernel_Neocortical_Learning.md)
@@ -191,7 +199,7 @@ All 4 fusions passed. T6.5 asks whether the "unified surprise bus" pattern (one 
 
 **All four use the same paper-default α-pair (0.3, 0.03).** The unified surprise bus works with a single α-schedule. Per T6.5, this warrants a **Super-GOAT escalation issue** — but per the plan, we do NOT claim Super-GOAT here. That requires a separate validation note.
 
-**Action:** Open `.issues/026_temporal_deriv_super_goat_escalation.md` referencing Research 243 §2.5.
+**Action:** Open (Issue 026 was closed + removed; this benchmark is the canonical record) referencing Research 243 §2.5.
 
 ---
 

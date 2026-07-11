@@ -42,11 +42,13 @@ fn main() {
     }
 
     // ── 2. Per-Layer Decomposition ──────────────────────────────
-    let mut config = VocabChannelConfig::default();
-    config.max_channels = 3;
-    config.top_k_tokens = 10;
-    config.kurtosis_threshold = 0.5;
-    config.max_iterations = 10;
+    let config = VocabChannelConfig {
+        max_channels: 3,
+        top_k_tokens: 10,
+        kurtosis_threshold: 0.5,
+        max_iterations: 10,
+        ..Default::default()
+    };
 
     println!("\n🔧 VocabChannelConfig:");
     println!(
@@ -63,7 +65,7 @@ fn main() {
     );
 
     let mut per_layer_channels: Vec<Vec<Vec<usize>>> = Vec::new();
-    let decomposer = VocabChannelDecomposer::new(config.clone());
+    let _decomposer = VocabChannelDecomposer::new(config.clone());
 
     for layer in 0..n_layers {
         // Create synthetic mlp_w2: neurons respond to specific embedding dimensions

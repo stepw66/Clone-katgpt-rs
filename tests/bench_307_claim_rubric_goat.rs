@@ -10,10 +10,10 @@
 
 #![cfg(feature = "claim_rubric")]
 
-use katgpt_rs::claim_rubric::{
+use katgpt_claim::claim_rubric::FeatureClass;
+use katgpt_claim::claim_rubric::{
     Claim, ClaimValidator, EvidenceItemId, EvidenceItemId::*, EvidenceLevel::*,
 };
-use katgpt_rs::claim_rubric::FeatureClass;
 
 // ──────────────────────────────────────────────────────────────────────────
 // Fixture slices (R287 §2.2 requirements table)
@@ -117,7 +117,10 @@ fn goat_gate_all_pass() {
             BenignShiftControl,
         ]),
     );
-    assert_eq!(g.honest_level, L1, "§4 row 3: FaithfulnessProbe (L2-candidate → honest L1)");
+    assert_eq!(
+        g.honest_level, L1,
+        "§4 row 3: FaithfulnessProbe (L2-candidate → honest L1)"
+    );
 
     // ── R287 §4 row 4: FutureBehaviorProbe → L1 ─────────────────────────
     let g = validator.grade(
@@ -139,7 +142,10 @@ fn goat_gate_all_pass() {
         )
         .with_evidence(L2_ITEMS),
     );
-    assert_eq!(g.honest_level, L2, "§4 row 5: PosteriorGuidedPruner (L1–L2 → honest L2)");
+    assert_eq!(
+        g.honest_level, L2,
+        "§4 row 5: PosteriorGuidedPruner (L1–L2 → honest L2)"
+    );
 
     // ── R287 §4 row 6: HLA evolve_hla → L1 ──────────────────────────────
     let g = validator.grade(
@@ -185,18 +191,17 @@ fn goat_gate_all_pass() {
         )
         .with_evidence(L3_MINUS_PARITY),
     );
-    assert!(g.honest_level < L3, "Prediction without parity cannot reach L3");
+    assert!(
+        g.honest_level < L3,
+        "Prediction without parity cannot reach L3"
+    );
     assert_eq!(g.honest_level, L2);
     assert!(g.missing_for_declared.contains(&PredictControlParity));
 
     // ── Clean L1 claim with L1-safe verb → no violations ───────────────
     let g = validator.grade(
-        &Claim::new(
-            "the probe reads behavior X",
-            FeatureClass::Detection,
-            L1,
-        )
-        .with_evidence(L1_ITEMS),
+        &Claim::new("the probe reads behavior X", FeatureClass::Detection, L1)
+            .with_evidence(L1_ITEMS),
     );
     assert_eq!(g.honest_level, L1);
     assert!(g.vocabulary_violations.is_empty());

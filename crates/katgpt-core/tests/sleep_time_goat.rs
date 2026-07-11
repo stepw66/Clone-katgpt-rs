@@ -20,9 +20,9 @@
 #![cfg(feature = "sleep_time_anticipation")]
 
 use katgpt_core::sleep_time::{
-    consume, consume_gate, AmortizationCostModel, AnticipatedQueryDir, AnticipatedQuerySet,
-    AnticipatedSlot, DotPredictabilityScorer, IdentityFunctorOp, PredictabilityScorer,
-    SleepTimeAnticipator, SleepTimeScratch,
+    AmortizationCostModel, AnticipatedQueryDir, AnticipatedQuerySet, AnticipatedSlot,
+    DotPredictabilityScorer, IdentityFunctorOp, PredictabilityScorer, SleepTimeAnticipator,
+    SleepTimeScratch, consume, consume_gate,
 };
 
 // ─────────────────────────────────────────────────────────────────────
@@ -87,17 +87,24 @@ fn g1_consume_is_deterministic() {
     let artifact = anticipator.anticipate(&c, &dirs, &mut scratch);
 
     let q = [0.5; D];
-    let mk_fresh = |closure_seed: u32| move |fq: &[f32; D]| {
-        let mut z = [0.0f32; D];
-        for j in 0..D {
-            z[j] = fq[j] + closure_seed as f32;
+    let mk_fresh = |closure_seed: u32| {
+        move |fq: &[f32; D]| {
+            let mut z = [0.0f32; D];
+            for j in 0..D {
+                z[j] = fq[j] + closure_seed as f32;
+            }
+            z
         }
-        z
     };
     let out1 = consume(&q, &artifact, 0.5, 4.0, mk_fresh(1));
     let out2 = consume(&q, &artifact, 0.5, 4.0, mk_fresh(1));
     for j in 0..D {
-        assert_eq!(out1[j].to_bits(), out2[j].to_bits(), "dim {} not bit-identical", j);
+        assert_eq!(
+            out1[j].to_bits(),
+            out2[j].to_bits(),
+            "dim {} not bit-identical",
+            j
+        );
     }
 }
 

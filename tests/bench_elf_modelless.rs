@@ -304,7 +304,14 @@ fn bench_d2f_schedule_comparison() {
         let mut fully_activated = 0usize;
 
         for _ in 0..n_trials {
-            let result = d2f_decode_block(&weights, &config, &decode_config, &NoPruner, &NoScreeningPruner, &mut rng);
+            let result = d2f_decode_block(
+                &weights,
+                &config,
+                &decode_config,
+                &NoPruner,
+                &NoScreeningPruner,
+                &mut rng,
+            );
             total_steps += result.steps_used;
             total_confidence += result.confidence_history.last().copied().unwrap_or(0.0);
             if result.state.is_fully_activated() {

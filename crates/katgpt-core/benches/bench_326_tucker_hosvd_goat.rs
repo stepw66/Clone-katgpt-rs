@@ -35,35 +35,11 @@ use katgpt_core::linalg::{
     TuckerConfig, TuckerResultScratch, TuckerScratch, tucker_decompose_into,
     tucker_reconstruct_into,
 };
-use std::alloc::{GlobalAlloc, Layout, System};
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Instant;
 
-// ─── CountingAllocator (G4) ─────────────────────────────────────────────────
-
-struct CountingAllocator;
-
-static ALLOC_COUNT: AtomicUsize = AtomicUsize::new(0);
-
-unsafe impl GlobalAlloc for CountingAllocator {
-    unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
-        ALLOC_COUNT.fetch_add(1, Ordering::Relaxed);
-        unsafe { System.alloc(layout) }
-    }
-    unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
-        unsafe { System.dealloc(ptr, layout) }
-    }
-}
-
-#[global_allocator]
-static A: CountingAllocator = CountingAllocator;
-
-fn alloc_delta<R>(f: impl FnOnce() -> R) -> (R, usize) {
-    let before = ALLOC_COUNT.load(Ordering::Relaxed);
-    let r = f();
-    let after = ALLOC_COUNT.load(Ordering::Relaxed);
-    (r, after - before)
-}
+#[path = "../tests/common/mod.rs"]
+mod common;
+counting_allocator!();
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -102,11 +78,11 @@ fn g1_reconstruction_quality() -> bool {
     let b = [0.7f32, -0.3, 0.0, 0.0];
     let c = [0.4f32, 0.9, 0.0, 0.0];
     let mut x = vec![0.0f32; total];
-    for i0 in 0..4 {
-        for i1 in 0..4 {
-            for i2 in 0..4 {
+    for (i0, &a0) in a.iter().enumerate().take(4) {
+        for (i1, &b1) in b.iter().enumerate().take(4) {
+            for (i2, &c2) in c.iter().enumerate().take(4) {
                 let flat = (i0 * 4 + i1) * 4 + i2;
-                x[flat] = a[i0] * b[i1] * c[i2];
+                x[flat] = a0 * b1 * c2;
             }
         }
     }

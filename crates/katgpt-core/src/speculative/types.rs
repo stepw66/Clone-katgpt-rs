@@ -3,11 +3,13 @@
 //! Origin: moved verbatim from `katgpt-rs/src/speculative/types.rs` (2026-06-28).
 //! The pure-substrate half lives here (data types + configs + algorithms that
 //! depend only on `crate::types::Config` + `crate::traits::*` + std). The
-//! composition half (`SpeculativeContext`, `DDTreeBranchCache` — which need
-//! `katgpt-transformer::{ForwardContext, MultiLayerKVCache, PagedKVCache,
-//! forward_paged}`) and the root-only composition half (`TesConfig` — which
-//! needs `BanditStrategy`; `SelfSpecConfig` — which needs `D2fDecodeConfig`)
-//! stay in their consumer crates as thin shims that re-export from here.
+//! composition half (`SpeculativeContext` — moved to `katgpt-forward` Plan 393
+//! because it composes `ForwardContext` which also lives there;
+//! `DDTreeBranchCache` — which needs `katgpt-transformer::{ForwardContext,
+//! PagedKVCache, forward_paged}`) and the root-only composition half
+//! (`TesConfig` — which needs `BanditStrategy`; `SelfSpecConfig` — which needs
+//! `D2fDecodeConfig`) stay in their consumer crates as thin shims that
+//! re-export from here.
 //!
 //! The companion traits (`ConstraintPruner`, `ScreeningPruner`, `DominoPruner`,
 //! `NoPruner`, `NoScreeningPruner`, `BinaryScreeningPruner`) live in
@@ -110,7 +112,7 @@ impl Ord for TreeNode {
 /// Per-step execution stability metrics (Plan 102: TileRT pipeline).
 /// Zero overhead when `stability_metrics` feature is disabled.
 #[cfg(feature = "stability_metrics")]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct StabilitySnapshot {
     /// Per-phase wall time in nanoseconds: [draft, snapshot, verify, accept_reject]
     pub phase_latencies_ns: [u64; 4],
@@ -221,6 +223,34 @@ pub struct DraftResult {
     pub stability: Option<StabilitySnapshot>,
 }
 
+impl DraftResult {
+    /// Construct a `DraftResult` from marginals and sampled tokens.
+    ///
+    /// All feature-gated diagnostic fields (`routing_overlap`, `cost_snapshot`,
+    /// `stability`) default to `None`. This constructor is the recommended way
+    /// for **consumer crates** (e.g. katgpt-rs root) to build a `DraftResult`
+    /// because it encapsulates the feature gates inside katgpt-core, where
+    /// `#[cfg(feature = "...")]` actually matches the struct definition.
+    ///
+    /// Consumer crates that gate on their own (e.g. root's `domain_latent`)
+    /// can diverge from katgpt-core's feature state due to transitive feature
+    /// activation (katgpt-core's `octree_ctc → sense_composition → domain_latent`
+    /// is ON by default even when root's `domain_latent` is OFF). Using this
+    /// constructor avoids that mismatch (Issue 016).
+    pub fn new(marginals: Vec<Vec<f32>>, sampled_tokens: Vec<usize>) -> Self {
+        Self {
+            marginals,
+            sampled_tokens,
+            #[cfg(feature = "domain_latent")]
+            routing_overlap: None,
+            #[cfg(feature = "spec_cost_model")]
+            cost_snapshot: None,
+            #[cfg(feature = "stability_metrics")]
+            stability: None,
+        }
+    }
+}
+
 // ── Draft Event Streaming (Plan 029, Dynamo Lesson 2) ────────────
 
 /// Reason a drafted branch was rejected during verification.
@@ -323,6 +353,12 @@ pub enum DecodeStrategy {
     /// D2F drafts → AR verifies (self-speculation / tri-mode).
     #[cfg(feature = "tri_mode")]
     SelfSpeculation,
+    /// Set Diffusion — sliding-window set decode with per-step KV commit
+    /// (Research 376 Phase 4 T4.1/T4.2). Generalizes DiscreteDiffusion to
+    /// arbitrary position-set orderings via the position-offset schedule.
+    /// Requires a model trained with the set-causal architecture.
+    #[cfg(feature = "set_diffusion")]
+    SetDiffusion,
 }
 
 impl DecodeStrategy {
@@ -344,6 +380,9 @@ impl DecodeStrategy {
         if n_tokens >= block_size {
             return Self::DiscreteDiffusionSoft;
         }
+        // Set Diffusion is opt-in and requires a set-causal-trained model —
+        // never auto-recommended (caller must explicitly opt in). Falls through
+        // to the D2F / speculative / AR ladder below.
         #[cfg(feature = "dllm")]
         if n_tokens >= block_size {
             return Self::DiscreteDiffusion;
@@ -367,7 +406,7 @@ impl DecodeStrategy {
 ///
 /// γ=0 is identical to current behavior (safe default).
 /// γ>0 increases exploration diversity at potential cost to greedy optimality.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct SdeConfig {
     /// Noise re-injection scale (ELF default: 1.0, our default: 0.0 = disabled).
     pub gamma: f32,
@@ -488,7 +527,7 @@ impl MarginalFusionConfig {
 /// - Low confidence (< low_threshold): use unconditioned KV
 /// - Medium: blend proportional to confidence
 #[cfg(feature = "dflare_kv_routing")]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct KvRoutingConfig {
     /// Above this pruner relevance, use fully conditioned KV.
     pub high_confidence_threshold: f32,
@@ -538,7 +577,7 @@ impl KvRoutingConfig {
 /// `weight(depth) = exp(-depth / gamma)`. More nodes at early depths,
 /// fewer at later depths. Total budget stays the same.
 #[cfg(feature = "dflare_progressive_budget")]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct PositionWeightedBudget {
     /// Exponential decay rate. Higher = more front-loaded.
     /// Typical values: 2, 4, 8.
@@ -598,11 +637,11 @@ impl PositionWeightedBudget {
         if current_total < total_budget {
             let mut remaining = total_budget - current_total;
             // Distribute remainder to earliest depths (highest weight)
-            for i in 0..max_depth {
+            for a in allocation.iter_mut().take(max_depth) {
                 if remaining == 0 {
                     break;
                 }
-                allocation[i] += 1;
+                *a += 1;
                 remaining -= 1;
             }
         } else if current_total > total_budget {
@@ -821,7 +860,7 @@ pub const LDT_THETA_ELIM: f32 = 1.0 / (1.0 + 8.0); // ≈ 0.111
 /// screening threshold, making the pruner conservative: only eliminate
 /// candidates when very confident.
 #[cfg(feature = "lattice_deduction")]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct LdtPruneConfig {
     /// Elimination threshold (default: LDT_THETA_ELIM ≈ 0.111).
     pub theta_elim: f32,
@@ -893,7 +932,7 @@ pub trait ConflictDetector: Send + Sync {
 /// This mirrors LDT's θ_eval_CLS > θ_train_CLS insight: conflict signals
 /// become more trustworthy as the state commits.
 #[cfg(feature = "lattice_deduction")]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct EntropyConflictDetector {
     /// Maximum fraction of candidates that can be pruned in one step.
     /// LDT's conflict threshold θ_cls = 0.6 analog.
@@ -998,7 +1037,7 @@ pub struct RoutingOverlapSnapshot {
 /// Amdahl decomposition of speculative verification cost.
 /// T(K+1)/T(1) = f_sparse * unique_ratio + (1-f_sparse)
 #[cfg(feature = "spec_cost_model")]
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct SpecCostSnapshot {
     /// Fraction of forward pass in sparse MLP operations
     pub f_sparse: f64,
@@ -1072,7 +1111,7 @@ impl TesNode {
 /// This bridges trajectory-level evaluation (SimpleTES) to per-step credit
 /// signals needed for DPO/GRPO training (G-Zero Phase 2).
 #[cfg(feature = "tes_loop")]
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct TrajectoryCredit {
     /// Number of trajectories (C in SimpleTES notation).
     pub num_trajectories: usize,
@@ -1159,7 +1198,7 @@ impl TrajectoryCredit {
             .iter()
             .map(|(idx, score)| (*idx, self.node_weight(*score)))
             .collect();
-        weighted.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(Ordering::Equal));
+        weighted.sort_by(|a, b| b.1.total_cmp(&a.1));
         weighted
     }
 
@@ -1180,10 +1219,7 @@ impl TrajectoryCredit {
 
         // Build scores view without consuming traj_scores — the HashMap stays
         // available for O(1) per-node lookup in the second loop below.
-        let scores: Vec<(usize, f32)> = traj_scores
-            .iter()
-            .map(|(&id, &s)| (id, s))
-            .collect();
+        let scores: Vec<(usize, f32)> = traj_scores.iter().map(|(&id, &s)| (id, s)).collect();
         let credit = Self::from_trajectory_scores(&scores);
 
         // Assign propagated credit to each node based on its trajectory's max score.
@@ -1285,7 +1321,7 @@ mod tests {
     fn test_rejection_reason_variants() {
         #[cfg(not(feature = "kurtosis_gate"))]
         {
-            let reasons = vec![
+            let reasons = [
                 RejectionReason::LowProbability,
                 RejectionReason::ConstraintViolation,
                 RejectionReason::LowRelevance { score: 0.0 },
@@ -1295,7 +1331,7 @@ mod tests {
         }
         #[cfg(feature = "kurtosis_gate")]
         {
-            let reasons = vec![
+            let reasons = [
                 RejectionReason::LowProbability,
                 RejectionReason::ConstraintViolation,
                 RejectionReason::LowRelevance { score: 0.0 },
@@ -1378,6 +1414,34 @@ mod tests {
             let _s3 = s;
             assert_eq!(s, s2);
         }
+
+        // Research 376 Phase 4 T4.2: SetDiffusion variant is Copy like the rest.
+        #[cfg(feature = "set_diffusion")]
+        {
+            let s = DecodeStrategy::SetDiffusion;
+            let s2 = s;
+            let _s3 = s;
+            assert_eq!(s, s2);
+        }
+    }
+
+    // Research 376 Phase 4 T4.2 — SetDiffusion is never auto-recommended.
+    // It requires a set-causal-trained model, so the caller MUST explicitly
+    // opt in by constructing DecodeStrategy::SetDiffusion directly.
+    // recommend() always falls through to the D2F/speculative/AR ladder.
+    #[test]
+    #[cfg(feature = "set_diffusion")]
+    fn test_decode_strategy_set_diffusion_never_recommended() {
+        // Even with enough tokens and a draft model, recommend() must NOT
+        // return SetDiffusion — it requires explicit opt-in.
+        let s = DecodeStrategy::recommend(4, 8, true);
+        assert_ne!(s, DecodeStrategy::SetDiffusion);
+
+        let s = DecodeStrategy::recommend(4, 8, false);
+        assert_ne!(s, DecodeStrategy::SetDiffusion);
+
+        let s = DecodeStrategy::recommend(16, 4, false);
+        assert_ne!(s, DecodeStrategy::SetDiffusion);
     }
 
     // ── EarlyStopGate Tests (Plan 083) ────────────────────────

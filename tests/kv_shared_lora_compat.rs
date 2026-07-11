@@ -10,7 +10,7 @@
 
 use katgpt_core::types::{AttentionProjection, CacheLayout};
 use katgpt_core::types::{Config, kv_dim};
-use katgpt_rs::kv_share::cache_layout;
+use katgpt_kv::kv_share::cache_layout;
 
 #[test]
 fn shared_kv_projection_maps_to_k_only_cache() {

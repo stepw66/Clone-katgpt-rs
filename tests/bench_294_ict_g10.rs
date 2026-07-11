@@ -30,8 +30,8 @@
 
 #![cfg(feature = "ict_branching")]
 
-use katgpt_core::ict::math::{collision_purity, shannon_h1};
 use katgpt_core::ict::AcceptanceForecastH2;
+use katgpt_core::ict::math::{collision_purity, shannon_h1};
 
 const N_SAMPLES: usize = 2000;
 const VOCAB: usize = 16;
@@ -47,7 +47,10 @@ impl Lcg {
         Self { state: seed }
     }
     fn next_u64(&mut self) -> u64 {
-        self.state = self.state.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+        self.state = self
+            .state
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
         self.state
     }
     fn next_f32(&mut self) -> f32 {
@@ -94,31 +97,48 @@ fn generate_workload(rng: &mut Lcg) -> Vec<Sample> {
         if want_decisive {
             // Decisive: one large logit, rest small. softmax puts ~0.5-0.8 on top.
             let top_idx = (rng.next_u64() as usize) % VOCAB;
-            for k in 0..VOCAB {
-                logits[k] = if k == top_idx {
+            for (k, logit_k) in logits.iter_mut().enumerate() {
+                *logit_k = if k == top_idx {
                     2.0 + rng.next_f32() * 1.5 // exp(2.0) ≈ 7.4 → dominant
                 } else {
                     rng.next_std_normal() * 0.3
                 };
             }
             p = softmax(&logits);
-            regime = if p[top_idx] > 0.37 { "decisive" } else { "long-tail" };
+            regime = if p[top_idx] > 0.37 {
+                "decisive"
+            } else {
+                "long-tail"
+            };
         } else {
             // Long-tail: small logits, near-uniform softmax.
-            for k in 0..VOCAB {
-                logits[k] = rng.next_std_normal() * 0.4;
+            for logit_k in logits.iter_mut() {
+                *logit_k = rng.next_std_normal() * 0.4;
             }
             p = softmax(&logits);
             // Verify long-tail: max(p) should be < 0.37 most of the time.
             let max_p = p.iter().cloned().fold(0.0_f32, f32::max);
-            regime = if max_p > 0.37 { "decisive" } else { "long-tail" };
+            regime = if max_p > 0.37 {
+                "decisive"
+            } else {
+                "long-tail"
+            };
         }
         let h1 = shannon_h1(&p);
         let beta = collision_purity(&p);
-        let h2 = if beta > 0.0 { -beta.ln() } else { f32::INFINITY };
+        let h2 = if beta > 0.0 {
+            -beta.ln()
+        } else {
+            f32::INFINITY
+        };
         let noise = rng.next_std_normal() * sigma;
         let alpha_true = a_true - b_true * h2 + noise;
-        out.push(Sample { h1, h2, alpha_true, regime });
+        out.push(Sample {
+            h1,
+            h2,
+            alpha_true,
+            regime,
+        });
     }
     out
 }
@@ -239,9 +259,11 @@ fn g10_h2_forecast_beats_h1_on_long_tail() {
     );
     let n_dec = h1_decisive_xs.len();
     let n_lt = h1_longtail_xs.len();
-    println!("Test split regime mix: decisive={n_dec} ({:.1}%), long-tail={n_lt} ({:.1}%)",
+    println!(
+        "Test split regime mix: decisive={n_dec} ({:.1}%), long-tail={n_lt} ({:.1}%)",
         100.0 * n_dec as f32 / test.len() as f32,
-        100.0 * n_lt as f32 / test.len() as f32);
+        100.0 * n_lt as f32 / test.len() as f32
+    );
     println!();
     println!("Forecaster        a         b");
     let b1_neg = -b1;
@@ -251,22 +273,38 @@ fn g10_h2_forecast_beats_h1_on_long_tail() {
     println!();
     println!("Mean absolute error (lower is better):");
     println!("                  H_1 (Bebop)   H_2 (this)    Δ       winner");
-    println!("  overall:        {mae_h1_all:8.4}      {mae_h2_all:8.4}      {:7.4}   {}",
+    println!(
+        "  overall:        {mae_h1_all:8.4}      {mae_h2_all:8.4}      {:7.4}   {}",
         mae_h1_all - mae_h2_all,
-        if mae_h2_all < mae_h1_all { "H_2" } else { "H_1" });
-    println!("  decisive (>0.37): {mae_h1_dec:8.4}      {mae_h2_dec:8.4}      {:7.4}   {}",
+        if mae_h2_all < mae_h1_all {
+            "H_2"
+        } else {
+            "H_1"
+        }
+    );
+    println!(
+        "  decisive (>0.37): {mae_h1_dec:8.4}      {mae_h2_dec:8.4}      {:7.4}   {}",
         mae_h1_dec - mae_h2_dec,
-        if mae_h2_dec < mae_h1_dec { "H_2" } else { "H_1" });
-    println!("  long-tail (<0.37):{mae_h1_lt:8.4}      {mae_h2_lt:8.4}      {:7.4}   {}",
+        if mae_h2_dec < mae_h1_dec {
+            "H_2"
+        } else {
+            "H_1"
+        }
+    );
+    println!(
+        "  long-tail (<0.37):{mae_h1_lt:8.4}      {mae_h2_lt:8.4}      {:7.4}   {}",
         mae_h1_lt - mae_h2_lt,
-        if mae_h2_lt < mae_h1_lt { "H_2" } else { "H_1" });
+        if mae_h2_lt < mae_h1_lt { "H_2" } else { "H_1" }
+    );
 
     // ── Verdict per Plan 294 T6.2. ──
     println!("\n=== Verdict ===");
     let overall_pass = mae_h2_all < mae_h1_all;
     let longtail_pass = mae_h2_lt < mae_h1_lt;
     if overall_pass && longtail_pass {
-        println!("G10 PASS: H_2 beats H_1 overall ({mae_h2_all:.4} < {mae_h1_all:.4}) AND on long-tail ({mae_h2_lt:.4} < {mae_h1_lt:.4}).");
+        println!(
+            "G10 PASS: H_2 beats H_1 overall ({mae_h2_all:.4} < {mae_h1_all:.4}) AND on long-tail ({mae_h2_lt:.4} < {mae_h1_lt:.4})."
+        );
         println!("  → Bebop R243 Issue 023 should adopt the H_1 → H_2 upgrade.");
     } else if overall_pass {
         println!("G10 PARTIAL: H_2 beats H_1 overall but NOT on long-tail specifically.");

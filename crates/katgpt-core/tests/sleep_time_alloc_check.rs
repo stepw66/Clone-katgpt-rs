@@ -19,30 +19,14 @@
 #![cfg(feature = "sleep_time_anticipation")]
 
 use katgpt_core::sleep_time::{
-    consume, consume_gate, AnticipatedQueryDir, DotPredictabilityScorer, IdentityFunctorOp,
-    SleepTimeAnticipator, SleepTimeScratch,
+    AnticipatedQueryDir, DotPredictabilityScorer, IdentityFunctorOp, SleepTimeAnticipator,
+    SleepTimeScratch, consume, consume_gate,
 };
-use std::alloc::{GlobalAlloc, Layout, System};
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::Ordering;
 
-struct CountingAllocator;
-
-static ALLOC_COUNT: AtomicUsize = AtomicUsize::new(0);
-static DEALLOC_COUNT: AtomicUsize = AtomicUsize::new(0);
-
-unsafe impl GlobalAlloc for CountingAllocator {
-    unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
-        ALLOC_COUNT.fetch_add(1, Ordering::Relaxed);
-        unsafe { System.alloc(layout) }
-    }
-    unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
-        DEALLOC_COUNT.fetch_add(1, Ordering::Relaxed);
-        unsafe { System.dealloc(ptr, layout) }
-    }
-}
-
-#[global_allocator]
-static A: CountingAllocator = CountingAllocator;
+#[path = "common/mod.rs"]
+mod common;
+counting_allocator!();
 
 /// G5 zero-alloc gate for both `consume()` and `consume_gate()`.
 ///
@@ -52,7 +36,7 @@ static A: CountingAllocator = CountingAllocator;
 ///
 /// The plan specifies 100 warmup calls + 100 measured calls. We do 200 warmup
 /// + 1000 measured to be extra strict — the gate is "0 allocs over 100 calls",
-/// so 1000 calls with 0 allocs is a 10× stronger guarantee.
+///   so 1000 calls with 0 allocs is a 10× stronger guarantee.
 #[test]
 fn g5_zero_alloc_after_warmup_both_paths() {
     const D: usize = 8; // HLA dim (matches paper's NPC HLA scale).

@@ -140,7 +140,10 @@ impl<'de, const N: usize> serde::Deserialize<'de> for FixedU32Set<N> {
             fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
                 write!(f, "a sequence of at most {} u32 values", N)
             }
-            fn visit_seq<A: serde::de::SeqAccess<'de>>(self, mut seq: A) -> Result<Self::Value, A::Error> {
+            fn visit_seq<A: serde::de::SeqAccess<'de>>(
+                self,
+                mut seq: A,
+            ) -> Result<Self::Value, A::Error> {
                 let mut arr = [0u32; N];
                 let mut len: u8 = 0;
                 if let Some(first) = seq.next_element::<u8>()? {
@@ -414,10 +417,7 @@ fn enumerate_motifs_for_ptg(ptg: &PrimitiveTransitionGraph) -> HashMap<[u8; 32],
 /// Shared inner routine — fills `out` with motif entries for `ptg`.
 /// Split out from [`enumerate_motifs_for_ptg`] so [`enumerate_subgraph_hashes`]
 /// can reuse the same logic without round-tripping through the map shape.
-fn enumerate_motifs_into(
-    ptg: &PrimitiveTransitionGraph,
-    out: &mut HashMap<[u8; 32], Motif>,
-) {
+fn enumerate_motifs_into(ptg: &PrimitiveTransitionGraph, out: &mut HashMap<[u8; 32], Motif>) {
     let n = ptg.nodes.len();
     if n == 0 {
         return;
@@ -704,7 +704,11 @@ mod tests {
             .iter()
             .find(|m| m.node_count == 3)
             .expect("3-node motif should be discovered");
-        assert!(found.occurrence_count >= 100, "occ={}", found.occurrence_count);
+        assert!(
+            found.occurrence_count >= 100,
+            "occ={}",
+            found.occurrence_count
+        );
         assert_eq!(
             found.task_family_ids.len(),
             3,
@@ -748,10 +752,7 @@ mod tests {
         assert_eq!(miner.recent_ptgs[0].task_family_id, 5);
         // Latest is the last one pushed.
         let last_id = (RING_BUFFER_K + 4) as u32;
-        assert_eq!(
-            miner.recent_ptgs.back().unwrap().task_family_id,
-            last_id
-        );
+        assert_eq!(miner.recent_ptgs.back().unwrap().task_family_id, last_id);
     }
 
     /// The hand-rolled varint encoder in `canonical_hash` must produce
@@ -783,12 +784,8 @@ mod tests {
             n_sorted.sort_unstable();
             e_sorted.sort_unstable();
             let mut hasher = blake3::Hasher::new();
-            hasher.update(
-                &postcard::to_allocvec(&n_sorted[..]).unwrap_or_default(),
-            );
-            hasher.update(
-                &postcard::to_allocvec(&e_sorted[..]).unwrap_or_default(),
-            );
+            hasher.update(&postcard::to_allocvec(&n_sorted[..]).unwrap_or_default());
+            hasher.update(&postcard::to_allocvec(&e_sorted[..]).unwrap_or_default());
             let hash_ref: [u8; 32] = hasher.finalize().into();
             assert_eq!(
                 hash_new, hash_ref,

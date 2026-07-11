@@ -139,12 +139,12 @@ mod tests {
             modulus: 1,
             seed: 0,
         }; K_MAX];
-        for k in 0..K_MAX {
+        for (k, head) in heads.iter_mut().enumerate() {
             // Distinct prime per head: pick primes ≥ 2^20 to make collisions
             // rare on small tables. Real builds use larger primes per slot
             // count, but for unit tests any distinct primes work.
             let prime = pick_prime(k);
-            heads[k] = HashHead {
+            *head = HashHead {
                 n: 20,
                 k: k as u8,
                 modulus: prime,
@@ -264,8 +264,7 @@ mod tests {
 
     /// A 3-element suffix (trigram) of arbitrary canonical ids.
     fn any_trigram() -> impl Strategy<Value = [CanonicalId; 3]> {
-        (any_canonical_id(), any_canonical_id(), any_canonical_id())
-            .prop_map(|(a, b, c)| [a, b, c])
+        (any_canonical_id(), any_canonical_id(), any_canonical_id()).prop_map(|(a, b, c)| [a, b, c])
     }
 
     proptest! {
@@ -347,7 +346,7 @@ mod tests {
         let n_buckets = 256usize;
 
         // LCG matching the G1 bench for determinism.
-        let mut rng_state = 0xC0FFEE_1234u64;
+        let mut rng_state = 0xC0_FF_EE_12_34u64;
         let mut rng = || {
             rng_state = rng_state
                 .wrapping_mul(6364136223846793005)
@@ -358,11 +357,7 @@ mod tests {
         // Per-head per-bucket counts. K_MAX × 256 = 4096 u64s — trivial.
         let mut counts = [[0u64; 256]; K_MAX];
         for _ in 0..n_samples {
-            let suffix = [
-                CanonicalId(rng()),
-                CanonicalId(rng()),
-                CanonicalId(rng()),
-            ];
+            let suffix = [CanonicalId(rng()), CanonicalId(rng()), CanonicalId(rng())];
             let keys = multi_head_hash(&suffix, &heads);
             for k in 0..K_MAX {
                 // Bucket = hash % 256. Taking `% modulus` first and then `%
@@ -385,8 +380,8 @@ mod tests {
         let mut failures = Vec::new();
         for k in 0..K_MAX {
             let mut chi = 0.0f64;
-            for b in 0..n_buckets {
-                let o = counts[k][b] as f64;
+            for &c in &counts[k] {
+                let o = c as f64;
                 let diff = o - expected;
                 chi += diff * diff / expected;
             }

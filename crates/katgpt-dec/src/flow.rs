@@ -372,8 +372,8 @@ mod tests {
         let grad = exterior_derivative(&cx, &pot);
 
         assert_eq!(exact.len(), grad.data.len());
-        for i in 0..exact.len() {
-            let diff = (exact[i] - grad.data[i]).abs();
+        for (i, (e, g)) in exact.iter().zip(&grad.data).enumerate() {
+            let diff = (e - g).abs();
             assert!(
                 diff < TOL,
                 "exact_flow should equal d₀(potential), diff={diff} at edge {i}"
@@ -596,7 +596,7 @@ mod tests {
         // between (3,1) and (5,1) at this vertex is near-balanced, so the x-flow is
         // numerically ~0 — the sign is FP-accumulation-order dependent and must
         // not be asserted strictly positive).
-        let v41 = vectors[1 * w + 4];
+        let v41 = vectors[w + 4]; // row 1, col 4 → vertex (4,1)
         assert!(
             v41[0] >= -1e-6,
             "flow at (4,1) should not point left away from gap, got ({}, {})",
@@ -607,7 +607,7 @@ mod tests {
         // Vertex (3,1) has nearly equal distances to (2,1) and (4,1), so x-flow is small.
         // The wall below pushes the gradient upward. The key property is that the flow
         // does NOT point downward (into the wall).
-        let v31 = vectors[1 * w + 3];
+        let v31 = vectors[w + 3]; // row 1, col 3 → vertex (3,1)
         assert!(
             v31[1] <= 0.0,
             "flow at (3,1) should not push into wall below, got ({}, {})",

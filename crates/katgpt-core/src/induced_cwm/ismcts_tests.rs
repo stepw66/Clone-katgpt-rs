@@ -32,10 +32,10 @@
 
 #![cfg(all(test, feature = "induced_cwm_ismcts"))]
 
-use crate::induced_cwm::{BeliefInferenceFn, InducedCwmKernel};
 use crate::induced_cwm::ismcts::{
     InformationSet, NodeStats, action_hash, ismcts_search_with_inference,
 };
+use crate::induced_cwm::{BeliefInferenceFn, InducedCwmKernel};
 use crate::traits::GameState;
 
 // ── Mock Leduc-style state + kernel ───────────────────────────────────────
@@ -78,11 +78,7 @@ impl LeducState {
 
     /// Resolve a showdown: higher card wins; ties → opponent (house edge).
     fn showdown(my: u8, opp: u8) -> u8 {
-        if my > opp {
-            0
-        } else {
-            1
-        }
+        if my > opp { 0 } else { 1 }
     }
 }
 
@@ -169,6 +165,7 @@ impl GameState for LeducState {
         }
     }
 
+    #[inline]
     fn is_terminal(&self) -> bool {
         self.is_terminal
     }
@@ -180,13 +177,10 @@ impl GameState for LeducState {
             // don't reach terminal within the cap).
             return (self.pot as f32) / (POT_CAP as f32 * 2.0);
         }
-        if self.winner == player_id {
-            1.0
-        } else {
-            0.0
-        }
+        if self.winner == player_id { 1.0 } else { 0.0 }
     }
 
+    #[inline]
     fn tick(&self) -> u32 {
         self.tick
     }
@@ -298,7 +292,10 @@ fn action_hash_is_stable() {
     let a = LeducAction::Raise;
     let b = LeducAction::Raise;
     assert_eq!(action_hash(&a), action_hash(&b));
-    assert_ne!(action_hash(&LeducAction::Fold), action_hash(&LeducAction::Raise));
+    assert_ne!(
+        action_hash(&LeducAction::Fold),
+        action_hash(&LeducAction::Raise)
+    );
 }
 
 // ── G2 gate: ISMCTS picks non-fold action ≥ 70% when P(strong) = 0.7 ───────
@@ -313,7 +310,10 @@ fn ismcts_picks_nonfold_at_least_70pct_when_strong_hand() {
     //   - Raise/Call → showdown: wins with prob 0.3 (when opp is weak).
     // ISMCTS sees Fold's mean ≈ 0, Raise/Call's mean ≈ 0.3. It should pick
     // non-fold ≥ 70% of runs.
-    let belief = LeducBelief { my_card_strength: 1, p_strong: 0.7 };
+    let belief = LeducBelief {
+        my_card_strength: 1,
+        p_strong: 0.7,
+    };
 
     let mut nonfold_count = 0usize;
     let total_runs = 10usize;
@@ -339,13 +339,14 @@ fn ismcts_picks_nonfold_at_least_70pct_when_strong_hand() {
 
 #[test]
 fn ismcts_deterministic_given_seed() {
-    let belief = LeducBelief { my_card_strength: 1, p_strong: 0.5 };
-    let a1 = ismcts_search_with_inference::<LeducState, LeducBelief>(
-        &[], &[], 0, &belief, 16, 12345,
-    );
-    let a2 = ismcts_search_with_inference::<LeducState, LeducBelief>(
-        &[], &[], 0, &belief, 16, 12345,
-    );
+    let belief = LeducBelief {
+        my_card_strength: 1,
+        p_strong: 0.5,
+    };
+    let a1 =
+        ismcts_search_with_inference::<LeducState, LeducBelief>(&[], &[], 0, &belief, 16, 12345);
+    let a2 =
+        ismcts_search_with_inference::<LeducState, LeducBelief>(&[], &[], 0, &belief, 16, 12345);
     assert_eq!(a1, a2, "same seed + same belief → same action");
 }
 
@@ -353,11 +354,13 @@ fn ismcts_deterministic_given_seed() {
 fn ismcts_with_certain_strong_hand_never_folds() {
     // P(strong) = 0.0 → opp is always weak → we always win showdown.
     // ISMCTS must never fold.
-    let belief = LeducBelief { my_card_strength: 1, p_strong: 0.0 };
+    let belief = LeducBelief {
+        my_card_strength: 1,
+        p_strong: 0.0,
+    };
     for seed in 0..5u64 {
-        let action = ismcts_search_with_inference::<LeducState, LeducBelief>(
-            &[], &[], 0, &belief, 16, seed,
-        );
+        let action =
+            ismcts_search_with_inference::<LeducState, LeducBelief>(&[], &[], 0, &belief, 16, seed);
         assert_ne!(
             action,
             LeducAction::Fold,

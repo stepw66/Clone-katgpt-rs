@@ -11,7 +11,7 @@
 //! cargo run --example attn_match_basic --features attn_match --release
 //! ```
 
-use katgpt_rs::attn_match::{
+use katgpt_attn_match::{
     compact::compact,
     types::{AmConfig, KeySelector},
 };
@@ -130,7 +130,11 @@ fn main() {
         "\nSynthetic config: T = {} tokens, d = {} head_dim, n = {} reference queries",
         t_len, d, n
     );
-    println!("Target compaction: t = {} tokens ({:.1}× compression)", t, (t_len as f32 / t as f32));
+    println!(
+        "Target compaction: t = {} tokens ({:.1}× compression)",
+        t,
+        (t_len as f32 / t as f32)
+    );
 
     let (keys, values) = synth_block_kv(t_len, d);
     let queries = synth_queries(n, d, 42);
@@ -166,7 +170,8 @@ fn main() {
 
     println!("\nAll three selectors produce compact (Ck, β, Cv) for the same input.");
     println!("OMP variants produce lower reconstruction error at slight compute cost.");
-    println!("β mean should approach log(T/t) = log({:.1}) = {:.4} for uniform compaction.",
+    println!(
+        "β mean should approach log(T/t) = log({:.1}) = {:.4} for uniform compaction.",
         (t_len as f32 / t as f32),
         ((t_len as f32) / (t as f32)).ln()
     );

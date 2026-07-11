@@ -147,9 +147,7 @@ fn main() {
     let n_values: [usize; 4] = [512, 2048, 8192, 32768];
 
     println!("=== FUNCATTN G4 Linear-in-n Scaling Benchmark (Plan 286 T2.2) ===");
-    println!(
-        "    d={d}, k={k}, basis=Sigmoid (default), alpha=0.5, temperature=0.5"
-    );
+    println!("    d={d}, k={k}, basis=Sigmoid (default), alpha=0.5, temperature=0.5");
     println!(
         "    complexity per call: O(n·d·k + k·d² + d³) = O(n·{nk} + {kdv} + {dcu})",
         nk = d * k,
@@ -230,9 +228,7 @@ fn main() {
 
     println!();
     println!("--- Log-log slope (linear-in-n gate) ---");
-    println!(
-        "    fit window: n ∈ {{2048, 8192, 32768}} (skip n=512, fixed-cost dominated)"
-    );
+    println!("    fit window: n ∈ {{2048, 8192, 32768}} (skip n=512, fixed-cost dominated)");
     let slope = ols_slope(&fit_ns, &fit_best_us);
     println!("    slope of log(time) vs log(n) = {slope:.4}");
     println!("    target: ∈ [0.85, 1.15] (1.0 = perfectly linear in n)");

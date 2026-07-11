@@ -77,14 +77,14 @@ fn g5_zero_alloc_steady_state() {
         }
         std::hint::black_box(&states);
 
-        katgpt_rs::alloc::reset_alloc_stats();
+        katgpt_core::alloc::reset_alloc_stats();
         const MEASURED_ITERS: usize = 1000;
         for _ in 0..MEASURED_ITERS {
             apply_field_to_crowd(&mut states, D, &positions, &zones, &field);
         }
         std::hint::black_box(&states);
 
-        let (count, bytes) = katgpt_rs::alloc::get_alloc_stats();
+        let (count, bytes) = katgpt_core::alloc::get_alloc_stats();
         println!(
             "G5 latent_steering: {count} allocations, {bytes} bytes over {MEASURED_ITERS} \
              crowd-applies ({N_NPCS} NPCs × {D}d, global field)"

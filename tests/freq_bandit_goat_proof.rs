@@ -6,11 +6,11 @@
 
 #![cfg(feature = "freq_bandit")]
 
-use katgpt_rs::freq_bandit::{
+use katgpt_pruners::freq_bandit::{
     FreqTierAdapter, FrequencyBand, FrequencyBandit, sigmoid, sigmoid_band_weights,
     token_stream_spectrum,
 };
-use katgpt_rs::trigger_gate::ComputeTier;
+use katgpt_core::trigger_gate::ComputeTier;
 use katgpt_rs::types::Rng;
 
 fn make_rng() -> Rng {

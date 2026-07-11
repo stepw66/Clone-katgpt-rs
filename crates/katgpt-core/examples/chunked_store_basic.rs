@@ -15,9 +15,7 @@
 //! cargo run --example chunked_store_basic --features chunked_content_store --release
 //! ```
 
-use katgpt_core::{
-    BlobId, ChunkedContentStore, FixedSizeChunker, InMemoryChunkedStore,
-};
+use katgpt_core::{BlobId, ChunkedContentStore, FixedSizeChunker, InMemoryChunkedStore};
 
 /// Hex-encode the first 8 bytes of a BlobId for compact printing.
 fn short_hex(id: &BlobId) -> String {

@@ -232,10 +232,7 @@ mod tests {
     fn transport_operator_identity() {
         let i = TransportOperator::identity(3);
         assert_eq!(i.k, 3);
-        assert_eq!(
-            i.as_slice(),
-            &[1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0]
-        );
+        assert_eq!(i.as_slice(), &[1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0]);
     }
 
     #[test]

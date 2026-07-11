@@ -440,13 +440,7 @@ mod tests {
     /// Reference (cell-by-cell) implementation — used to cross-check the
     /// word-skipping fast path against the obvious baseline for grids that
     /// span multiple words per row and have non-trivial padding bits.
-    fn inflate_reference(
-        blocked: &mut [u64],
-        snapshot: &mut [u64],
-        w: u16,
-        h: u16,
-        radius: u8,
-    ) {
+    fn inflate_reference(blocked: &mut [u64], snapshot: &mut [u64], w: u16, h: u16, radius: u8) {
         let wu = w as usize;
         let hu = h as usize;
         let words_per_row = wu.div_ceil(64);

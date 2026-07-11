@@ -11,7 +11,7 @@
 
 #![cfg(feature = "ega_attn")]
 
-use katgpt_rs::ega_attn::{EgaGate, compute_energy_gate};
+use katgpt_attn::ega_attn::{EgaGate, compute_energy_gate};
 
 // ── Configuration ──────────────────────────────────────────────
 const SEQ_LEN: usize = 32;
@@ -38,8 +38,7 @@ fn matmul_attn_values(attn: &[f32], values: &[f32], seq_len: usize, dim: usize) 
     // Returns: [dim] — attention-weighted sum of values using the last query row.
     let query_row = &attn[(seq_len - 1) * seq_len..seq_len * seq_len];
     let mut out = vec![0.0f32; dim];
-    for j in 0..seq_len {
-        let w = query_row[j];
+    for (j, &w) in query_row.iter().enumerate() {
         let v_off = j * dim;
         for d in 0..dim {
             out[d] += w * values[v_off + d];

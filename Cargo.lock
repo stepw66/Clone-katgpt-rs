@@ -1721,8 +1721,69 @@ dependencies = [
 ]
 
 [[package]]
+name = "katgpt-attn"
+version = "0.1.0"
+dependencies = [
+ "blake3",
+ "fastrand",
+ "katgpt-core",
+ "katgpt-forward",
+ "katgpt-kv",
+ "katgpt-pruners",
+ "katgpt-spectral",
+ "katgpt-transformer",
+ "rustfft",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "katgpt-attn-match"
+version = "0.1.0"
+dependencies = [
+ "blake3",
+ "half",
+ "katgpt-core",
+ "katgpt-kv",
+ "postcard",
+ "rayon",
+ "serde",
+]
+
+[[package]]
+name = "katgpt-backend"
+version = "0.1.0"
+dependencies = [
+ "coreml-native",
+ "coreml-proto",
+ "katgpt-forward",
+ "katgpt-transformer",
+ "katgpt-types",
+ "log",
+ "metal",
+ "prost",
+]
+
+[[package]]
+name = "katgpt-band"
+version = "0.1.0"
+dependencies = [
+ "fastrand",
+ "katgpt-core",
+]
+
+[[package]]
+name = "katgpt-claim"
+version = "0.1.0"
+dependencies = [
+ "blake3",
+ "bytemuck",
+ "katgpt-core",
+]
+
+[[package]]
 name = "katgpt-core"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "ahash",
  "arrayvec",
@@ -1735,6 +1796,7 @@ dependencies = [
  "katgpt-hla",
  "katgpt-micro-belief",
  "katgpt-personality",
+ "katgpt-sense",
  "katgpt-sleep",
  "katgpt-types",
  "log",
@@ -1747,6 +1809,8 @@ dependencies = [
  "serde",
  "serde_json",
  "statrs",
+ "tempfile",
+ "toml",
  "unicode-normalization",
 ]
 
@@ -1755,10 +1819,51 @@ name = "katgpt-dec"
 version = "0.1.0"
 
 [[package]]
+name = "katgpt-deprecated"
+version = "0.1.0"
+dependencies = [
+ "katgpt-core",
+ "log",
+ "postcard",
+]
+
+[[package]]
+name = "katgpt-forward"
+version = "0.1.0"
+dependencies = [
+ "blake3",
+ "fastrand",
+ "katgpt-core",
+ "katgpt-hla",
+ "katgpt-pruners",
+ "katgpt-speculative",
+ "katgpt-transformer",
+ "katgpt-types",
+ "log",
+ "rayon",
+ "tempfile",
+]
+
+[[package]]
 name = "katgpt-hla"
 version = "0.1.0"
 dependencies = [
  "katgpt-types",
+]
+
+[[package]]
+name = "katgpt-kv"
+version = "0.1.0"
+dependencies = [
+ "blake3",
+ "bytemuck",
+ "fastrand",
+ "half",
+ "katgpt-core",
+ "katgpt-spectral",
+ "katgpt-types",
+ "rayon",
+ "serde",
 ]
 
 [[package]]
@@ -1773,6 +1878,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "katgpt-percepta"
+version = "0.1.0"
+dependencies = [
+ "good_lp",
+ "log",
+ "ordered-float",
+]
+
+[[package]]
 name = "katgpt-personality"
 version = "0.1.0"
 dependencies = [
@@ -1782,40 +1896,114 @@ dependencies = [
 ]
 
 [[package]]
+name = "katgpt-proof-cert"
+version = "0.1.0"
+dependencies = [
+ "blake3",
+ "postcard",
+ "serde",
+]
+
+[[package]]
+name = "katgpt-pruners"
+version = "0.1.0"
+dependencies = [
+ "bevy_ecs",
+ "blake3",
+ "bytemuck",
+ "fastrand",
+ "half",
+ "katgpt-core",
+ "katgpt-percepta",
+ "katgpt-speculative",
+ "katgpt-transformer",
+ "katgpt-types",
+ "log",
+ "papaya",
+ "postcard",
+ "rayon",
+ "reqwest",
+ "rustfft",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "wasmi",
+]
+
+[[package]]
+name = "katgpt-quant"
+version = "0.1.0"
+dependencies = [
+ "katgpt-core",
+ "katgpt-transformer",
+]
+
+[[package]]
 name = "katgpt-rs"
 version = "0.2.0"
 dependencies = [
  "bevy_ecs",
  "blake3",
  "bytemuck",
- "coreml-native",
- "coreml-proto",
  "crossterm",
  "fastrand",
  "getrandom 0.2.17",
  "getrandom 0.3.4",
- "good_lp",
  "half",
+ "katgpt-attn",
+ "katgpt-attn-match",
+ "katgpt-backend",
+ "katgpt-band",
+ "katgpt-claim",
  "katgpt-core",
+ "katgpt-deprecated",
+ "katgpt-forward",
+ "katgpt-kv",
+ "katgpt-percepta",
+ "katgpt-proof-cert",
+ "katgpt-pruners",
+ "katgpt-quant",
+ "katgpt-ruliology",
+ "katgpt-sparse",
+ "katgpt-spectral",
+ "katgpt-speculative",
+ "katgpt-tokenizer",
  "katgpt-transformer",
+ "katgpt-validator",
  "log",
- "metal",
- "ordered-float",
  "papaya",
  "plotters",
  "postcard",
- "proc-macro2",
- "prost",
  "ratatui",
  "rayon",
  "reqwest",
  "rustfft",
  "serde",
  "serde_json",
- "syn",
  "tempfile",
  "toml",
+ "uuid",
  "wasmi",
+]
+
+[[package]]
+name = "katgpt-ruliology"
+version = "0.1.0"
+dependencies = [
+ "blake3",
+ "fastrand",
+ "katgpt-core",
+ "katgpt-pruners",
+]
+
+[[package]]
+name = "katgpt-sense"
+version = "0.1.0"
+dependencies = [
+ "blake3",
+ "fastrand",
+ "katgpt-types",
+ "papaya",
 ]
 
 [[package]]
@@ -1827,12 +2015,70 @@ dependencies = [
 ]
 
 [[package]]
+name = "katgpt-sparse"
+version = "0.1.0"
+dependencies = [
+ "fastrand",
+ "katgpt-band",
+ "katgpt-core",
+ "katgpt-spectral",
+]
+
+[[package]]
+name = "katgpt-spectral"
+version = "0.1.0"
+dependencies = [
+ "blake3",
+ "bytemuck",
+ "fastrand",
+ "half",
+ "katgpt-core",
+ "katgpt-transformer",
+ "katgpt-types",
+ "log",
+ "rayon",
+ "serde",
+ "uuid",
+]
+
+[[package]]
+name = "katgpt-speculative"
+version = "0.1.0"
+dependencies = [
+ "blake3",
+ "bytemuck",
+ "fastrand",
+ "half",
+ "katgpt-core",
+ "katgpt-kv",
+ "katgpt-pruners",
+ "katgpt-transformer",
+ "katgpt-types",
+ "papaya",
+ "postcard",
+ "rayon",
+ "safetensors",
+ "serde",
+ "serde_json",
+ "tempfile",
+]
+
+[[package]]
+name = "katgpt-tokenizer"
+version = "0.1.0"
+dependencies = [
+ "good_lp",
+ "serde",
+]
+
+[[package]]
 name = "katgpt-transformer"
 version = "0.1.0"
 dependencies = [
  "arrayvec",
  "blake3",
  "bytemuck",
+ "fastrand",
  "katgpt-core",
  "rayon",
 ]
@@ -1846,6 +2092,16 @@ dependencies = [
  "half",
  "rayon",
  "serde",
+]
+
+[[package]]
+name = "katgpt-validator"
+version = "0.1.0"
+dependencies = [
+ "katgpt-core",
+ "katgpt-tokenizer",
+ "proc-macro2",
+ "syn",
 ]
 
 [[package]]
@@ -3007,6 +3263,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "96b02de82ddbe1b636e6170c21be622223aea188ef2e139be0a5b219ec215323"
 dependencies = [
  "bytemuck",
+]
+
+[[package]]
+name = "safetensors"
+version = "0.4.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "44560c11236a6130a46ce36c836a62936dc81ebf8c36a37947423571be0e55b6"
+dependencies = [
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

@@ -164,11 +164,11 @@ impl MotifAdmitter {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::closure::{
-        FixedU32Set, MotifMiner, OperatorKind, PrimitiveKind, PtgRecorder,
-    };
+    use crate::closure::{FixedU32Set, MotifMiner, OperatorKind, PrimitiveKind, PtgRecorder};
 
-    fn make_search_verify_branch_ptg(task_family_id: u32) -> crate::closure::PrimitiveTransitionGraph {
+    fn make_search_verify_branch_ptg(
+        task_family_id: u32,
+    ) -> crate::closure::PrimitiveTransitionGraph {
         let mut rec = PtgRecorder::new(task_family_id);
         let a = rec.enter(PrimitiveKind::UserDefined(0), 0, None);
         let b = rec.enter(PrimitiveKind::UserDefined(1), 1, Some([1u8; 32]));
@@ -297,8 +297,8 @@ mod tests {
         }
         let motif = Motif {
             subgraph_hash: [
-                0xAB, 0xCD, 0xEF, 0x12, 0u8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-                0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                0xAB, 0xCD, 0xEF, 0x12, 0u8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                0, 0, 0, 0, 0, 0, 0, 0, 0,
             ],
             node_count: 2,
             edge_count: 1,

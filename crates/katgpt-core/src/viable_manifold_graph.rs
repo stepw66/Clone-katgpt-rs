@@ -398,10 +398,7 @@ where
     F: Fn(&[f32], &mut [f32]),
     V: ViabilityPredicate,
 {
-    assert!(
-        dim > 0,
-        "dim must be positive (got {dim})"
-    );
+    assert!(dim > 0, "dim must be positive (got {dim})");
     assert_eq!(
         samples.len() % dim,
         0,
@@ -423,11 +420,7 @@ where
             kept_nodes.extend_from_slice(z);
         }
     }
-    let n_kept = if dim > 0 {
-        kept_nodes.len() / dim
-    } else {
-        0
-    };
+    let n_kept = if dim > 0 { kept_nodes.len() / dim } else { 0 };
 
     // ── Step 2: connect each kept node to its k_nearest kept neighbors ──────
     // For each node a, compute distances to all other nodes, take k nearest,
@@ -462,7 +455,7 @@ where
         }
         // Partial sort: take k smallest. For small k vs n, a full sort is
         // simple and cache-friendly; the paper's grids are ≤10³ nodes.
-        dist_buf.sort_unstable_by(|x, y| x.0.partial_cmp(&y.0).unwrap_or(std::cmp::Ordering::Equal));
+        dist_buf.sort_unstable_by(|x, y| x.0.total_cmp(&y.0));
         for &(_d2, b) in dist_buf.iter().take(k) {
             if build_cfg.edge_midpoint_check {
                 let zb = &kept_nodes[(b as usize) * dim..(b as usize + 1) * dim];
@@ -532,8 +525,7 @@ pub fn manifold_geodesic(g: &SafeManifoldGraph, src: u32, dst: u32) -> Option<Ve
     // BinaryHeap is max-heap; reverse via Reverse to get min-heap on f = g + h.
     // Entry: (OrderedF32(f_score), node). OrderedF32 provides a total order so
     // BinaryHeap works without an `ordered-float` dependency.
-    let mut open: BinaryHeap<std::cmp::Reverse<(Of32, u32)>> =
-        BinaryHeap::with_capacity(n.min(64));
+    let mut open: BinaryHeap<std::cmp::Reverse<(Of32, u32)>> = BinaryHeap::with_capacity(n.min(64));
     open.push(std::cmp::Reverse((Of32(0.0), src)));
 
     while let Some(std::cmp::Reverse((Of32(_f_cur), cur))) = open.pop() {
@@ -640,7 +632,12 @@ impl Ord for Of32 {
 ///
 /// RNG: uses [`fastrand::Rng`] (already a direct dep of katgpt-core). The
 /// caller owns the RNG instance for reproducibility.
-pub fn manifold_random_walk(g: &SafeManifoldGraph, src: u32, m: usize, rng: &mut fastrand::Rng) -> Vec<u32> {
+pub fn manifold_random_walk(
+    g: &SafeManifoldGraph,
+    src: u32,
+    m: usize,
+    rng: &mut fastrand::Rng,
+) -> Vec<u32> {
     let n = g.n_nodes();
     assert!((src as usize) < n, "src out of range: {src} >= {n}");
 
@@ -870,7 +867,10 @@ mod tests {
                 }
             });
         }
-        assert_eq!(count, n, "graph should be connected (BFS reached {count}/{n})");
+        assert_eq!(
+            count, n,
+            "graph should be connected (BFS reached {count}/{n})"
+        );
     }
 
     // ── G3b: predicate = "z[0] > 0.5" → disconnected components ────────────
@@ -910,10 +910,7 @@ mod tests {
         // Connectedness: should be a single component (all kept nodes share
         // z[0] > 0.5), but we verify the boundary is respected more strongly
         // by checking the original 100 samples: count how many have z[0] > 0.5.
-        let expected_kept = samples
-            .chunks(4)
-            .filter(|z| z[0] > 0.5)
-            .count();
+        let expected_kept = samples.chunks(4).filter(|z| z[0] > 0.5).count();
         assert_eq!(
             g.n_nodes(),
             expected_kept,

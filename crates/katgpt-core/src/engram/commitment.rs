@@ -49,7 +49,17 @@ use super::EngramTable;
 /// [`EngramTableId::verify`] recomputes the Merkle root from a live table
 /// and compares. A `false` result indicates tampering or corruption.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[repr(transparent)]
 pub struct EngramTableId(pub [u8; 32]);
+
+// SAFETY: `EngramTableId` is `#[repr(transparent)]` over `[u8; 32]`, which is
+// itself `Pod`. Enables `bytemuck::cast_slice::<EngramTableId, u8>` for bulk
+// (de)serialization on the chain-commit side (`riir-chain/src/engram_commit.rs`),
+// mirroring `KarcShard` / `ArchetypeBlendShard`. Manual impl (not derive)
+// matches the dominant katgpt-core convention (`compaction/audit.rs`,
+// `factorized_action/types.rs`).
+unsafe impl bytemuck::Pod for EngramTableId {}
+unsafe impl bytemuck::Zeroable for EngramTableId {}
 
 impl EngramTableId {
     /// Compute the table's identity from its current contents.
@@ -136,7 +146,7 @@ pub fn build_merkle_root(slots: &[f32], d: usize) -> [u8; 32] {
     // BLAKE3(leaf || [0u8; 32]).
     let zero: [u8; 32] = [0u8; 32];
     while layer.len() > 1 {
-        let mut next: Vec<[u8; 32]> = Vec::with_capacity((layer.len() + 1) / 2);
+        let mut next: Vec<[u8; 32]> = Vec::with_capacity(layer.len().div_ceil(2));
         let mut i = 0;
         while i < layer.len() {
             let left = layer[i];

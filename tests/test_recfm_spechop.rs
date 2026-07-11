@@ -9,13 +9,13 @@
 
 #![cfg(all(feature = "spechop", feature = "recfm"))]
 
-use katgpt_rs::spechop::{CacheSpeculator, CrossHopConfig, HopSpeculator, observation_velocity};
+use katgpt_speculative::spechop::{CacheSpeculator, CrossHopConfig, HopSpeculator, observation_velocity};
 
 // ── P1: Converging observations have decreasing velocity ─────────────
 
 #[test]
 fn proof_p1_converging_observations_decreasing_velocity() {
-    let obs = vec![
+    let obs = [
         "The quick brown fox",
         "The quick brown fox jumps",
         "The quick brown fox jumps over",
@@ -44,7 +44,7 @@ fn proof_p1_converging_observations_decreasing_velocity() {
 
 #[test]
 fn proof_p2_diverging_observations_high_velocity() {
-    let obs = vec!["alpha", "beta", "gamma", "delta"];
+    let obs = ["alpha", "beta", "gamma", "delta"];
 
     let mut velocities = Vec::new();
     for i in 1..obs.len() {

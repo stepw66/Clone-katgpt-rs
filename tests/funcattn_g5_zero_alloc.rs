@@ -73,23 +73,39 @@ fn g5_zero_alloc_steady_state() {
         // `ensure_capacity` is a no-op.
         for _ in 0..50 {
             funcattn_forward(
-                &x_basis, &x_value, &w_basis, &w_q, &w_k, &w_v, &cfg, &mut scratch, &mut out,
+                &x_basis,
+                &x_value,
+                &w_basis,
+                &w_q,
+                &w_k,
+                &w_v,
+                &cfg,
+                &mut scratch,
+                &mut out,
             )
             .expect("warmup forward should succeed");
         }
 
-        katgpt_rs::alloc::reset_alloc_stats();
+        katgpt_core::alloc::reset_alloc_stats();
         const MEASURED_ITERS: usize = 100;
         for _ in 0..MEASURED_ITERS {
             funcattn_forward(
-                &x_basis, &x_value, &w_basis, &w_q, &w_k, &w_v, &cfg, &mut scratch, &mut out,
+                &x_basis,
+                &x_value,
+                &w_basis,
+                &w_q,
+                &w_k,
+                &w_v,
+                &cfg,
+                &mut scratch,
+                &mut out,
             )
             .expect("measured forward should succeed");
         }
         // Sink output so the optimizer cannot elide the call.
         std::hint::black_box(&out);
 
-        let (count, bytes) = katgpt_rs::alloc::get_alloc_stats();
+        let (count, bytes) = katgpt_core::alloc::get_alloc_stats();
         println!(
             "G5 FUNCATTN: {count} allocations, {bytes} bytes over {MEASURED_ITERS} forward calls \
              (d={d}, k={k}, n={n})"
@@ -121,7 +137,15 @@ fn g5_zero_alloc_steady_state() {
         // Warm up.
         for _ in 0..50 {
             let _ = funcattn_forward(
-                &x_basis, &x_value, &w_basis, &w_q, &w_k, &w_v, &cfg, &mut scratch, &mut out,
+                &x_basis,
+                &x_value,
+                &w_basis,
+                &w_q,
+                &w_k,
+                &w_v,
+                &cfg,
+                &mut scratch,
+                &mut out,
             );
         }
         std::hint::black_box(&out);
@@ -135,7 +159,15 @@ fn g5_zero_alloc_steady_state() {
         for _ in 0..REL_ITERS {
             let t0 = Instant::now();
             funcattn_forward(
-                &x_basis, &x_value, &w_basis, &w_q, &w_k, &w_v, &cfg, &mut scratch, &mut out,
+                &x_basis,
+                &x_value,
+                &w_basis,
+                &w_q,
+                &w_k,
+                &w_v,
+                &cfg,
+                &mut scratch,
+                &mut out,
             )
             .expect("release forward should succeed");
             let dt = t0.elapsed().as_micros();

@@ -18,7 +18,7 @@
 //! - **Cross-paradigm diversity**: CA rule 14 competes with FSMs and TMs
 
 #[cfg(feature = "ruliology")]
-use katgpt_rs::ruliology::{
+use katgpt_ruliology::{
     CaStrategy, FsmEnumerator, FsmStrategy, FsmTemplateProposer, IrreducibilityGate,
     RuliologyAbsorbCompress, RuliologyBandit, RuliologyPruner, SimpleProgram, TmStrategy,
     WinMatrix, co_evolve, matching_pennies, prisoners_dilemma,

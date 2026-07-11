@@ -48,6 +48,7 @@ pub enum ChainError {
 }
 
 impl std::fmt::Display for ChainError {
+    #[cold]
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::ChainLengthInvalid { len, max } => {
@@ -149,19 +150,14 @@ pub fn compose_chain_into(
             // tmp = C[1] × C[0]
             matmul_row_major(&ops[1].data, &ops[0].data, scratch, k);
             // for i in 2..n-1: tmp = C[i] × tmp
-            for i in 2..ops.len() - 1 {
+            for op in ops[2..ops.len() - 1].iter() {
                 // out = C[i] × tmp
-                matmul_row_major(&ops[i].data, scratch, &mut out.data, k);
+                matmul_row_major(&op.data, scratch, &mut out.data, k);
                 // tmp = out  (swap roles; avoids a copy by ping-ponging)
                 scratch.copy_from_slice(&out.data);
             }
             // Final step: out = C[n-1] × tmp
-            matmul_row_major(
-                &ops[ops.len() - 1].data,
-                scratch,
-                &mut out.data,
-                k,
-            );
+            matmul_row_major(&ops[ops.len() - 1].data, scratch, &mut out.data, k);
         }
     }
 
@@ -259,7 +255,7 @@ mod tests {
     #[test]
     fn single_op_chain_is_copy() {
         let a = make_2x2(1.0, 2.0, 3.0, 4.0);
-        let out = compose_chain(&[a.clone()]).unwrap();
+        let out = compose_chain(std::slice::from_ref(&a)).unwrap();
         assert_eq!(out.as_slice(), a.as_slice());
     }
 
@@ -293,10 +289,13 @@ mod tests {
         let a = TransportOperator::identity(2);
         let b = TransportOperator::identity(3);
         let err = compose_chain(&[a, b]).unwrap_err();
-        assert_eq!(err, ChainError::DimensionMismatchK {
-            expected: 2,
-            got: 3
-        });
+        assert_eq!(
+            err,
+            ChainError::DimensionMismatchK {
+                expected: 2,
+                got: 3
+            }
+        );
     }
 
     #[test]

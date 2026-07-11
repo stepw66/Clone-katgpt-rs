@@ -29,12 +29,13 @@
 
 use std::time::{Duration, Instant};
 
-use katgpt_rs::dense_mesh::{
+use katgpt_forward::TransformerNode;
+use katgpt_transformer::dense_mesh::{
     DenseEdge, DenseHidden, DenseNode, EdgeBandit, EdgeBanditArm, IdentityEdge, LayerwiseTopology,
-    LoraEdge, MeshConfig, MeshScratch, Topology, TransformerNode,
+    LoraEdge, MeshConfig, MeshScratch, Topology,
 };
 use katgpt_rs::transformer::{
-    forward, forward_batched, ForwardContext, MultiLayerKVCache, TransformerWeights,
+    ForwardContext, MultiLayerKVCache, TransformerWeights, forward, forward_batched,
 };
 use katgpt_rs::types::{Config, Rng};
 
@@ -68,14 +69,12 @@ fn median(samples: &[Duration]) -> Duration {
 /// - Layer 1→2: 2 edges (hidden0 → output, hidden1 → output)
 fn make_diamond_topology(
     node: Box<dyn DenseNode>,
-    layer0_edges: Vec<Box<dyn katgpt_rs::dense_mesh::DenseEdge>>,
+    layer0_edges: Vec<Box<dyn katgpt_transformer::dense_mesh::DenseEdge>>,
 ) -> LayerwiseTopology {
     let topology = Topology::diamond(); // [1, 2, 1]
     assert_eq!(layer0_edges.len(), 2, "diamond needs 2 edges from input");
-    let mut layer1: Vec<Box<dyn katgpt_rs::dense_mesh::DenseEdge>> =
-        Vec::with_capacity(2);
-    layer1.push(Box::new(IdentityEdge::new()));
-    layer1.push(Box::new(IdentityEdge::new()));
+    let layer1: Vec<Box<dyn katgpt_transformer::dense_mesh::DenseEdge>> =
+        vec![Box::new(IdentityEdge::new()), Box::new(IdentityEdge::new())];
     LayerwiseTopology::new(topology, node, vec![layer0_edges, layer1])
         .expect("diamond topology must construct cleanly")
 }
@@ -128,12 +127,20 @@ fn test_dense_mesh_gate3_easy_overhead_vs_vanilla() {
     }
 
     let threshold_release = 1.05;
-    let threshold = if cfg!(debug_assertions) { 10.0 } else { threshold_release };
+    let threshold = if cfg!(debug_assertions) {
+        10.0
+    } else {
+        threshold_release
+    };
     println!();
     println!(
         "Gate 3 overall: threshold ≤ {:.2}× at any scale — {} (measurement only, dense_mesh is experimental)",
         threshold,
-        if any_pass { "✅" } else { "⚠️ above threshold" }
+        if any_pass {
+            "✅"
+        } else {
+            "⚠️ above threshold"
+        }
     );
     // Don't hard-fail — DenseMesh is demoted to experimental (gate 2 failed).
     // Gate 3 is now a measurement, not a gate.
@@ -168,8 +175,8 @@ fn run_gate3_at_scale(config: &Config, config_name: &str) -> bool {
     // the baseline. Same model, same data, only the DenseMesh framework wraps it.
     let node = Box::new(make_node_with_seed(config.clone(), 42, 0, 0));
     let edge = Box::new(IdentityEdge::new());
-    let mesh = LayerwiseTopology::chain_with_edge(node, edge)
-        .expect("chain topology must construct");
+    let mesh =
+        LayerwiseTopology::chain_with_edge(node, edge).expect("chain topology must construct");
     let input = DenseHidden::zeros(1, config.vocab_size);
     let mut scratch = MeshScratch::new(1, config.vocab_size);
     let cfg = MeshConfig::default();
@@ -204,11 +211,6 @@ fn run_gate3_at_scale(config: &Config, config_name: &str) -> bool {
     );
 
     pass
-}
-
-/// Build a `TransformerNode` from an existing config + weights (avoids re-seeding).
-fn make_node(config: Config, weights: TransformerWeights, token: usize, pos: usize) -> TransformerNode {
-    TransformerNode::new(config, weights, token, pos)
 }
 
 /// Build a `TransformerNode` by constructing fresh weights with the given seed.
@@ -270,7 +272,9 @@ fn make_node_with_seed(config: Config, seed: u64, token: usize, pos: usize) -> T
 #[test]
 fn test_dense_mesh_gate4_hard_bound_width4_measured() {
     println!();
-    println!("Gate 4: Hard bound — DenseMesh[1,4,1]+rayon+pooling (Issue 020 Path A+B) vs 1× vanilla");
+    println!(
+        "Gate 4: Hard bound — DenseMesh[1,4,1]+rayon+pooling (Issue 020 Path A+B) vs 1× vanilla"
+    );
     println!();
 
     // Draft scale: rayon overhead dominates — measurement only, no assert.
@@ -280,11 +284,8 @@ fn test_dense_mesh_gate4_hard_bound_width4_measured() {
 
     // Small-target scale: per-forward cost (~100us) dominates rayon spawn
     // overhead (~5us). Path A should beat sequential 5× here — hard assert.
-    let small_passes_bound = run_gate4_at_scale(
-        &Config::small_target(),
-        "Config::small_target()",
-        true,
-    );
+    let small_passes_bound =
+        run_gate4_at_scale(&Config::small_target(), "Config::small_target()", true);
 
     println!();
     if small_passes_bound {
@@ -339,20 +340,17 @@ fn run_gate4_at_scale(config: &Config, config_name: &str, assert_beats_sequentia
     // in layer 1 run in parallel; the single output node runs after. The
     // shared TransformerNode serves all 4 hidden forwards from its per-thread
     // (ctx, cache) pool — no data race.
-    let topology = Topology { widths: vec![1, 4, 1] };
+    let topology = Topology {
+        widths: vec![1, 4, 1],
+    };
     // Fresh TransformerNode with the same seed so weights match the baseline.
     let mut rng_node = Rng::new(42);
     let node_weights = TransformerWeights::new(config, &mut rng_node);
-    let node = Box::new(TransformerNode::new(
-        config.clone(),
-        node_weights,
-        0,
-        0,
-    ));
+    let node = Box::new(TransformerNode::new(config.clone(), node_weights, 0, 0));
 
     // 4 edges from input → hidden layer, 4 edges from hidden → output
-    let mut layer0: Vec<Box<dyn katgpt_rs::dense_mesh::DenseEdge>> = Vec::with_capacity(4);
-    let mut layer1: Vec<Box<dyn katgpt_rs::dense_mesh::DenseEdge>> = Vec::with_capacity(4);
+    let mut layer0: Vec<Box<dyn katgpt_transformer::dense_mesh::DenseEdge>> = Vec::with_capacity(4);
+    let mut layer1: Vec<Box<dyn katgpt_transformer::dense_mesh::DenseEdge>> = Vec::with_capacity(4);
     for _ in 0..4 {
         layer0.push(Box::new(IdentityEdge::new()));
         layer1.push(Box::new(IdentityEdge::new()));
@@ -362,8 +360,10 @@ fn run_gate4_at_scale(config: &Config, config_name: &str, assert_beats_sequentia
 
     let input = DenseHidden::zeros(1, config.vocab_size);
     let mut scratch = MeshScratch::new(1, config.vocab_size);
-    let mut cfg = MeshConfig::default();
-    cfg.enable_vertex_parallelism = true; // Issue 020 Path A+B: rayon + pooled scratch/output
+    let cfg = MeshConfig {
+        enable_vertex_parallelism: true,
+        ..MeshConfig::default()
+    };
 
     for _ in 0..warmup {
         let _ = mesh.forward(&input, &mut scratch, &cfg);
@@ -389,16 +389,24 @@ fn run_gate4_at_scale(config: &Config, config_name: &str, assert_beats_sequentia
         med_m.as_secs_f64() * 1e6,
         ratio,
         expected_sequential_ratio,
-        if passes_bound { "✅ ≤2.5x" } else { "⚠️ >2.5x" }
+        if passes_bound {
+            "✅ ≤2.5x"
+        } else {
+            "⚠️ >2.5x"
+        }
     );
     if ratio < expected_sequential_ratio {
-        println!("    → Path A+B beat sequential {:.0}× (speedup {:.2}× vs seq).",
-                 expected_sequential_ratio,
-                 expected_sequential_ratio / ratio);
+        println!(
+            "    → Path A+B beat sequential {:.0}× (speedup {:.2}× vs seq).",
+            expected_sequential_ratio,
+            expected_sequential_ratio / ratio
+        );
     } else {
-        println!("    → Path A+B slower than sequential {:.0}× — rayon spawn overhead \
+        println!(
+            "    → Path A+B slower than sequential {:.0}× — rayon spawn overhead \
                  (~5us/task) dominates this forward scale.",
-                 expected_sequential_ratio);
+            expected_sequential_ratio
+        );
     }
 
     if assert_beats_sequential {
@@ -475,7 +483,11 @@ fn test_forward_batched_matches_sequential() {
 
     assert_eq!(batched.len(), n_tokens, "one slice per token");
     for (i, slice) in batched.iter().enumerate() {
-        assert_eq!(slice.len(), config.vocab_size, "vocab-sized slice per token");
+        assert_eq!(
+            slice.len(),
+            config.vocab_size,
+            "vocab-sized slice per token"
+        );
         let max_diff = slice
             .iter()
             .zip(seq_logits[i].iter())
@@ -544,7 +556,11 @@ fn test_dense_mesh_gate2_composition_differs_from_single_lora() {
         let out_a: Vec<f32> = s.edge_output.rows().to_vec();
         lora_b.route_into(&input, &mut s);
         let out_b: Vec<f32> = s.edge_output.rows().to_vec();
-        let diff: f32 = out_a.iter().zip(out_b.iter()).map(|(a, b)| (a - b).abs()).sum::<f32>();
+        let diff: f32 = out_a
+            .iter()
+            .zip(out_b.iter())
+            .map(|(a, b)| (a - b).abs())
+            .sum::<f32>();
         assert!(diff > 0.0, "test premise: the two LoRA edges must differ");
     }
 
@@ -584,15 +600,29 @@ fn test_dense_mesh_gate2_composition_differs_from_single_lora() {
         .map(|(a, b)| (a - b).powi(2))
         .sum::<f32>()
         .sqrt();
-    let l2_chain: f32 = out_chain.rows().iter().map(|v| v.powi(2)).sum::<f32>().sqrt();
-    let l2_diamond: f32 = out_diamond.rows().iter().map(|v| v.powi(2)).sum::<f32>().sqrt();
+    let l2_chain: f32 = out_chain
+        .rows()
+        .iter()
+        .map(|v| v.powi(2))
+        .sum::<f32>()
+        .sqrt();
+    let l2_diamond: f32 = out_diamond
+        .rows()
+        .iter()
+        .map(|v| v.powi(2))
+        .sum::<f32>()
+        .sqrt();
 
     println!();
     println!("┌──────────────────────────────────────────────────────────────────────────┐");
     println!("│ Gate 2: Composition — diamond[1,2,1]+2 LoRA vs chain[1,1]+1 LoRA         │");
-    println!("├─────────────────────────────────────────┬────────────────────────────────────────┤");
+    println!(
+        "├─────────────────────────────────────────┬────────────────────────────────────────┤"
+    );
     println!("│ metric                          │ value                                  │");
-    println!("├─────────────────────────────────────────┼────────────────────────────────────────┤");
+    println!(
+        "├─────────────────────────────────────────┼────────────────────────────────────────┤"
+    );
     println!("│ L2 norm (chain output)          │ {:>38.4} │", l2_chain);
     println!("│ L2 norm (diamond output)        │ {:>38.4} │", l2_diamond);
     println!("│ L2 distance (chain vs diamond)  │ {:>38.4} │", l2_diff);
@@ -600,7 +630,9 @@ fn test_dense_mesh_gate2_composition_differs_from_single_lora() {
         "│ relative distance (diff/chain)  │ {:>38.4} │",
         l2_diff / l2_chain.max(1e-9)
     );
-    println!("└─────────────────────────────────────────┴────────────────────────────────────────┘");
+    println!(
+        "└─────────────────────────────────────────┴────────────────────────────────────────┘"
+    );
 
     // Composition-mechanism proof: diamond output must be strictly different
     // from chain. This proves the second LoRA edge contributed signal.
@@ -677,8 +709,8 @@ fn test_dense_mesh_gate5_bandit_convergence() {
     let mut rng = Rng::new(7);
     for _ in 0..500 {
         let arm_idx = bandit.sample();
-        let r = rewards[arm_idx] + (rng.normal() as f32) * 0.05;
-        let r = r.max(0.0).min(1.0);
+        let r = rewards[arm_idx] + rng.normal() * 0.05;
+        let r = r.clamp(0.0, 1.0);
         bandit.update(arm_idx, r);
     }
 
@@ -688,5 +720,8 @@ fn test_dense_mesh_gate5_bandit_convergence() {
         chosen, 1,
         "Gate 5: bandit should converge to the high-reward arm"
     );
-    println!("Gate 5 (bandit convergence): chose arm {} after 500 pulls — ✅ PASS", chosen);
+    println!(
+        "Gate 5 (bandit convergence): chose arm {} after 500 pulls — ✅ PASS",
+        chosen
+    );
 }

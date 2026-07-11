@@ -6,34 +6,11 @@
 //! (per the plan brief, which explicitly allows this fallback).
 
 use katgpt_core::{FourierBasis, KarcForecaster};
-use std::alloc::{GlobalAlloc, Layout, System};
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::Ordering;
 
-/// Wrapping allocator that counts `alloc`/`dealloc` calls. Thread-local would
-/// be cleaner but a single global counter is sufficient for these single-
-/// threaded tests and avoids TLS overhead skewing the measurement.
-struct CountingAllocator;
-
-static ALLOC_COUNT: AtomicUsize = AtomicUsize::new(0);
-static DEALLOC_COUNT: AtomicUsize = AtomicUsize::new(0);
-
-unsafe impl GlobalAlloc for CountingAllocator {
-    unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
-        unsafe {
-            ALLOC_COUNT.fetch_add(1, Ordering::Relaxed);
-            System.alloc(layout)
-        }
-    }
-    unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
-        unsafe {
-            DEALLOC_COUNT.fetch_add(1, Ordering::Relaxed);
-            System.dealloc(ptr, layout);
-        }
-    }
-}
-
-#[global_allocator]
-static A: CountingAllocator = CountingAllocator;
+#[path = "common/mod.rs"]
+mod common;
+counting_allocator!();
 
 #[test]
 fn g3_forecast_into_zero_alloc_after_warmup() {

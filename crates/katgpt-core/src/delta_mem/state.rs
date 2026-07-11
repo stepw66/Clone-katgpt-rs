@@ -28,7 +28,7 @@ use crate::temporal_deriv::TemporalDerivativeKernel;
 pub const DEFAULT_THETA_SURPRISE: f32 = 0.10;
 
 /// Configuration for delta memory state.
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct DeltaMemoryConfig {
     /// Memory rank r (paper default: 8). State is r×r = 64 floats.
     pub rank: usize,
@@ -216,7 +216,54 @@ impl DeltaMemoryState {
     /// Uses pre-allocated `segment_key_buf` / `segment_val_buf` scratch
     /// buffers to avoid hot-path allocation. Bit-identical to the previous
     /// `vec![0.0; rank]` version (same arithmetic, same order).
+    ///
+    /// This is the `Vec<Vec<f32>>`-shaped convenience wrapper. Hot-path
+    /// callers that already hold `&[f32]` rows should prefer
+    /// [`write_segment_slices`](Self::write_segment_slices) to avoid building
+    /// a `Vec<Vec<f32>>` just to satisfy the signature.
     pub fn write_segment(&mut self, keys: &[Vec<f32>], values: &[Vec<f32>]) {
+        if keys.is_empty() {
+            return;
+        }
+
+        self.segment_key_buf.fill(0.0f32);
+        self.segment_val_buf.fill(0.0f32);
+        let inv_n = 1.0 / keys.len() as f32;
+
+        for k in keys {
+            for (j, kj) in k.iter().enumerate() {
+                self.segment_key_buf[j] += kj * inv_n;
+            }
+        }
+        for v in values {
+            for (j, vj) in v.iter().enumerate() {
+                self.segment_val_buf[j] += vj * inv_n;
+            }
+        }
+
+        // SAFETY: `write` only reads key/value (takes `&[f32]`) and mutates
+        // `self.state`/`self.update_count`. It never touches `segment_key_buf`
+        // or `segment_val_buf`, so aliasing here is sound.
+        let key: &[f32] = unsafe {
+            std::slice::from_raw_parts(self.segment_key_buf.as_ptr(), self.segment_key_buf.len())
+        };
+        let val: &[f32] = unsafe {
+            std::slice::from_raw_parts(self.segment_val_buf.as_ptr(), self.segment_val_buf.len())
+        };
+        self.write(key, val);
+    }
+
+    /// Borrowed-slice variant of [`write_segment`](Self::write_segment).
+    ///
+    /// Same semantics (average features over the segment, write once), but
+    /// accepts `&[&[f32]]` so callers that already hold `&[f32]` rows don't
+    /// have to allocate a `Vec<Vec<f32>>` just to call write. This is the
+    /// zero-alloc variant for hot paths.
+    ///
+    /// The loop body is duplicated from `write_segment` (not shared via a
+    /// helper) to keep both paths allocation-free — a shared helper would
+    /// need to re-borrow the `Vec<Vec<f32>>` into `Vec<&[f32]>`, allocating.
+    pub fn write_segment_slices(&mut self, keys: &[&[f32]], values: &[&[f32]]) {
         if keys.is_empty() {
             return;
         }
@@ -257,12 +304,19 @@ impl DeltaMemoryState {
         if recent_errors.is_empty() {
             return;
         }
-        let mean: f32 = recent_errors.iter().sum::<f32>() / recent_errors.len() as f32;
-        let variance: f32 = recent_errors
-            .iter()
-            .map(|e| (e - mean).powi(2))
-            .sum::<f32>()
-            / recent_errors.len() as f32;
+        // Single-pass mean + variance via the sum / sum-of-squares identity
+        // (`Var = E[x²] − E[x]²`). The two-pass form was numerically stabler,
+        // but `variance` here only feeds a heavily-clamped `beta_adjustment`
+        // (`.min(0.05)`), so order-of-magnitude precision is all that matters —
+        // cancellation is irrelevant. One pass beats two on the hot path.
+        let n = recent_errors.len() as f32;
+        let (mut sum, mut sum_sq) = (0.0f32, 0.0f32);
+        for &e in recent_errors {
+            sum += e;
+            sum_sq += e * e;
+        }
+        let mean = sum / n;
+        let variance = (sum_sq / n) - mean * mean;
 
         // Map variance to β adjustment: high variance → increase β
         let beta_adjustment = (variance * 0.1).min(0.05); // Cap adjustment
@@ -343,6 +397,7 @@ impl DeltaMemoryState {
     }
 
     /// Number of updates performed
+    #[inline]
     pub fn update_count(&self) -> usize {
         self.update_count
     }
@@ -371,11 +426,7 @@ impl DeltaMemoryState {
 
     /// Install the surprise gate with custom EMA coefficients.
     /// No-op when `rank != 8`.
-    pub fn enable_surprise_gate_with_alphas(
-        &mut self,
-        alpha_fast: f32,
-        alpha_slow: f32,
-    ) -> bool {
+    pub fn enable_surprise_gate_with_alphas(&mut self, alpha_fast: f32, alpha_slow: f32) -> bool {
         match self.config.rank {
             8 => {
                 self.surprise_gate =
@@ -392,21 +443,25 @@ impl DeltaMemoryState {
     }
 
     /// Set the surprise threshold θ_surprise.
+    #[inline]
     pub fn set_theta_surprise(&mut self, theta: f32) {
         self.theta_surprise = theta;
     }
 
     /// Get the current surprise threshold.
+    #[inline]
     pub fn theta_surprise(&self) -> f32 {
         self.theta_surprise
     }
 
     /// Total writes that reached the gate.
+    #[inline]
     pub fn writes_total(&self) -> u64 {
         self.writes_total
     }
 
     /// Writes suppressed by the gate.
+    #[inline]
     pub fn writes_gated(&self) -> u64 {
         self.writes_gated
     }
@@ -922,10 +977,7 @@ mod tests {
             gated.writes_gated(),
         );
         let pass = suppression >= 0.30 && recall_loss <= 0.05;
-        eprintln!(
-            "G3 OVERALL: {}",
-            if pass { "PASS" } else { "FAIL" }
-        );
+        eprintln!("G3 OVERALL: {}", if pass { "PASS" } else { "FAIL" });
 
         assert!(
             suppression >= 0.30,

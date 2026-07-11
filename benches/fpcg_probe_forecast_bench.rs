@@ -69,9 +69,7 @@ fn main() {
         let direction: Vec<f32> = (0..d_model)
             .map(|i| 1.0 / ((d_model as f32).sqrt()) * if i % 2 == 0 { 1.0 } else { -1.0 })
             .collect();
-        let activation: Vec<f32> = (0..d_model)
-            .map(|i| (i as f32) * 0.01 - 0.5)
-            .collect();
+        let activation: Vec<f32> = (0..d_model).map(|i| (i as f32) * 0.01 - 0.5).collect();
 
         let probe = FutureBehaviorProbe::new(direction.clone(), 0.0, 7, "bench");
         // Cousin: one EmotionDirections direction vector of the same dimension.
@@ -149,7 +147,9 @@ fn main() {
     );
     println!();
     println!("Notes:");
-    println!("  - forecast() = RwLock read-clone + simd_dot_f32 + sigmoid (strictly more work than project).");
+    println!(
+        "  - forecast() = RwLock read-clone + simd_dot_f32 + sigmoid (strictly more work than project)."
+    );
     println!("  - project()  = chunked dot product only (the detection-side cousin, Plan 162).");
     println!("  - The 200ns gate is the relevant one at the d_model a real probe would run at");
     println!("    (paper uses mid-layer residual; 768–4096 is the realistic band).");

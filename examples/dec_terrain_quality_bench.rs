@@ -3,7 +3,7 @@
 //! Measures **route quality** of Hodge-decomposed navigation fields produced by
 //! `DecFlowField` vs A* optimal paths on terrain modified by destructions.
 //!
-//! Run: `cargo run --release --example dec_terrain_quality_bench --features dec_terrain_ai`
+//! Run: `cargo run --release --example dec_terrain_quality_bench --features dec_operators`
 //!
 //! # What This Measures (Plan 261 line 46)
 //!
@@ -200,11 +200,7 @@ fn dec_route_greedy(
 // ── A* via existing pathfinder ───────────────────────────────
 
 /// Build a pathfinder-compatible `Vec<Vec<char>>` grid from a blocked set.
-fn build_char_grid(
-    w: usize,
-    h: usize,
-    blocked: &HashSet<(usize, usize)>,
-) -> Vec<Vec<char>> {
+fn build_char_grid(w: usize, h: usize, blocked: &HashSet<(usize, usize)>) -> Vec<Vec<char>> {
     (0..h)
         .map(|y| {
             (0..w)
@@ -232,8 +228,7 @@ fn astar_route_cost(
 fn measure(scenario: &Scenario) -> Measurement {
     // A* reference (operates on char grid).
     let grid = build_char_grid(W, H, &scenario.blocked);
-    let astar = astar_route_cost(&grid, scenario.start, scenario.goal)
-        .unwrap_or((0, 0));
+    let astar = astar_route_cost(&grid, scenario.start, scenario.goal).unwrap_or((0, 0));
     let (astar_cost, astar_len) = astar;
 
     // DEC: Dijkstra potential → greedy descent.
@@ -435,8 +430,8 @@ fn validate_dec_flow_field(scenario: &Scenario) -> bool {
     let cx = CellComplex::grid_2d(W, H);
     let dist = dijkstra_potential(W, H, scenario.goal, &scenario.blocked);
     let mut pot = CochainField::zeros(0, cx.n_vertices(), 1);
-    for v in 0..cx.n_vertices() {
-        pot.set_scalar(v, dist[v]);
+    for (v, &d) in dist.iter().enumerate() {
+        pot.set_scalar(v, d);
     }
 
     // Pure exact flow (alpha=1) — the goal-seeking gradient channel.
@@ -459,13 +454,13 @@ fn validate_dec_flow_field(scenario: &Scenario) -> bool {
 fn print_aggregate(label: &str, agg: &Aggregate, gate_ratio: f64, gate_success: f64) {
     println!("┌─ {label} ───────────────────────────────────────────");
     println!("│  Scenarios: {}", agg.n);
-    println!(
-        "│  Mean cost ratio (DEC/A*): {:.4}",
-        agg.mean_cost_ratio
-    );
+    println!("│  Mean cost ratio (DEC/A*): {:.4}", agg.mean_cost_ratio);
     println!("│  Max  cost ratio (DEC/A*): {:.4}", agg.max_cost_ratio);
     println!("│  Mean length ratio:        {:.4}", agg.mean_len_ratio);
-    println!("│  Success rate:              {:.2}%", agg.success_rate * 100.0);
+    println!(
+        "│  Success rate:              {:.2}%",
+        agg.success_rate * 100.0
+    );
     if let Some((name, r)) = &agg.worst_case {
         println!("│  Worst case: {name}  ratio={r:.4}");
     }
@@ -510,7 +505,7 @@ fn main() {
     println!();
 
     // ── G1: Open field — sanity (must be exactly optimal) ──────────
-    let open_agg = aggregate(&[open.clone()]);
+    let open_agg = aggregate(std::slice::from_ref(&open));
     print_aggregate("G1: Open field (sanity)", &open_agg, 1.001, 1.0);
     println!();
 
@@ -535,7 +530,10 @@ fn main() {
 
     // ── G4: Obstacle density scaling ───────────────────────────────
     println!("┌─ G4: Obstacle density scaling ──────────────────────────────────");
-    println!("│  {:>8}  {:>8}  {:>10}  {:>10}  {:>10}  {:>12}", "density", "fair_n", "mean_cost", "max_cost", "success%", "mean_len");
+    println!(
+        "│  {:>8}  {:>8}  {:>10}  {:>10}  {:>10}  {:>12}",
+        "density", "fair_n", "mean_cost", "max_cost", "success%", "mean_len"
+    );
     let mut g4_all_pass = true;
     for &density in &[5u8, 10, 15, 20, 25] {
         let scenarios = make_multi_random(15, density);
@@ -556,7 +554,10 @@ fn main() {
             if ratio_ok && success_ok { "✅" } else { "❌" }
         );
     }
-    println!("│  Gate: ratios stable across 5%–25% (fair cases only) → {}", if g4_all_pass { "✅ PASS" } else { "❌ FAIL" });
+    println!(
+        "│  Gate: ratios stable across 5%–25% (fair cases only) → {}",
+        if g4_all_pass { "✅ PASS" } else { "❌ FAIL" }
+    );
     println!("└──────────────────────────────────────────────────────────────────────────");
     println!();
 
@@ -573,11 +574,12 @@ fn main() {
     let g2_pass = g2_agg.max_cost_ratio <= 1.05 && g2_agg.success_rate >= 0.98;
     let g3_pass = g3_agg.max_cost_ratio <= 1.10 && g3_agg.success_rate >= 0.95;
 
-    let mut results = Vec::new();
-    results.push(("G1 Open field", g1_pass));
-    results.push(("G2 Random 10%", g2_pass));
-    results.push(("G3 Wall+gap", g3_pass));
-    results.push(("G4 Density scale", g4_all_pass));
+    let results = vec![
+        ("G1 Open field", g1_pass),
+        ("G2 Random 10%", g2_pass),
+        ("G3 Wall+gap", g3_pass),
+        ("G4 Density scale", g4_all_pass),
+    ];
 
     for (name, pass) in &results {
         println!("  {name}: {}", if *pass { "✅ PASS" } else { "❌ FAIL" });
@@ -588,7 +590,9 @@ fn main() {
     if all_pass {
         println!("  ✅ DEC WINS on quality — promote `dec_terrain_ai` to default feature.");
         println!("     Note: speed gate still blocked by Issue 013 (remove_face O(n) scan).");
-        println!("           Quality is at parity with A*; incremental speed-up pending Issue 013.");
+        println!(
+            "           Quality is at parity with A*; incremental speed-up pending Issue 013."
+        );
     } else {
         println!("  ❌ DEC LOSES on quality — keep `dec_terrain_ai` opt-in.");
         println!("     Failing gates indicate route quality regressions vs A*.");
@@ -608,8 +612,8 @@ fn bench_single_route_timing(open: &Scenario, wall: &Scenario) {
     let cx = CellComplex::grid_2d(W, H);
     let dist = dijkstra_potential(W, H, open.goal, &open.blocked);
     let mut pot = CochainField::zeros(0, cx.n_vertices(), 1);
-    for v in 0..cx.n_vertices() {
-        pot.set_scalar(v, dist[v]);
+    for (v, &d) in dist.iter().enumerate() {
+        pot.set_scalar(v, d);
     }
     let _field = DecFlowField::compute(&cx, &pot, 1.0, 0.0, 0.0);
     let _route = dec_route_greedy(&dist, W, H, open.start, open.goal, &open.blocked);
@@ -666,8 +670,8 @@ fn bench_multi_agent_amortisation(scenario: &Scenario) {
     let cx = CellComplex::grid_2d(W, H);
     let dist = dijkstra_potential(W, H, scenario.goal, &scenario.blocked);
     let mut pot = CochainField::zeros(0, cx.n_vertices(), 1);
-    for v in 0..cx.n_vertices() {
-        pot.set_scalar(v, dist[v]);
+    for (v, &d) in dist.iter().enumerate() {
+        pot.set_scalar(v, d);
     }
     let _field = DecFlowField::compute(&cx, &pot, 1.0, 0.0, 0.0);
     let build_us = build_start.elapsed().as_secs_f64() * 1e6;
@@ -697,9 +701,16 @@ fn bench_multi_agent_amortisation(scenario: &Scenario) {
     let astar_per_agent_us = astar_us / k_agents as f64;
 
     println!("│  DEC  build (shared):     {build_us:>9.1} μs");
-    println!("│  DEC  routing ({k_agents} agents): {route_us:>9.1} μs   per-route: {:>7.2} μs", route_us / k_agents as f64);
-    println!("│  DEC  total:              {dec_total_us:>9.1} μs   per-agent: {dec_per_agent_us:>7.2} μs   reached: {dec_reached}/{k_agents}");
-    println!("│  A*   total:              {astar_us:>9.1} μs   per-agent: {astar_per_agent_us:>7.2} μs   reached: {astar_reached}/{k_agents}");
+    println!(
+        "│  DEC  routing ({k_agents} agents): {route_us:>9.1} μs   per-route: {:>7.2} μs",
+        route_us / k_agents as f64
+    );
+    println!(
+        "│  DEC  total:              {dec_total_us:>9.1} μs   per-agent: {dec_per_agent_us:>7.2} μs   reached: {dec_reached}/{k_agents}"
+    );
+    println!(
+        "│  A*   total:              {astar_us:>9.1} μs   per-agent: {astar_per_agent_us:>7.2} μs   reached: {astar_reached}/{k_agents}"
+    );
     if astar_per_agent_us > 0.0 {
         let speedup = astar_per_agent_us / dec_per_agent_us.max(1e-9);
         let breakeven = (build_us / astar_per_agent_us.max(1e-9)).ceil() as u64;

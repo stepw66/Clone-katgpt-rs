@@ -30,7 +30,7 @@ use fastrand::Rng;
 
 use katgpt_rs::pruners::fft::arena_runner::{FftArenaConfig, run_fft_battle};
 use katgpt_rs::pruners::fft::players::HLFFTPlayer;
-use katgpt_rs::pruners::fft::{FftLoRAPlayer, FftPlayer, Team, TURN_LIMIT};
+use katgpt_rs::pruners::fft::{FftLoRAPlayer, FftPlayer, TURN_LIMIT, Team};
 
 // ── Constants ────────────────────────────────────────────────────
 
@@ -52,8 +52,7 @@ struct Cli {
 
 fn parse_args() -> Cli {
     let args: Vec<String> = std::env::args().collect();
-    let default_lora =
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(DEFAULT_LORA_REL);
+    let default_lora = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(DEFAULT_LORA_REL);
     let mut cli = Cli {
         lora_path: default_lora,
         games: DEFAULT_GAMES,
@@ -101,7 +100,10 @@ fn main() {
     println!();
     println!("  LoRA:    {}", cli.lora_path.display());
     println!("  Games:   {}", cli.games);
-    println!("  Target:  Party win rate ≥ {:.0}%", SONLT_TARGET_WIN_RATE * 100.0);
+    println!(
+        "  Target:  Party win rate ≥ {:.0}%",
+        SONLT_TARGET_WIN_RATE * 100.0
+    );
     println!();
 
     // Build party (SON-LT) — all 4 units share the same LoRA adapter.
@@ -124,10 +126,17 @@ fn main() {
     };
 
     // Report LoRA load status from player 0.
-    let lora_active = party[0].as_any_mut().downcast_ref::<FftLoRAPlayer>().map_or(false, |p| p.lora_active());
+    let lora_active = party[0]
+        .as_any_mut()
+        .downcast_ref::<FftLoRAPlayer>()
+        .is_some_and(|p| p.lora_active());
     println!(
         "  LoRA active: {}",
-        if lora_active { "yes ✓" } else { "NO — running in heuristic-fallback mode" }
+        if lora_active {
+            "yes ✓"
+        } else {
+            "NO — running in heuristic-fallback mode"
+        }
     );
     println!();
 

@@ -141,6 +141,7 @@ impl PhaseRotationGate {
 
 /// Errors returned by the phase-rotation entry points.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
 pub enum PhaseRotationError {
     /// `a.len() != b.len()` or `out.len() != a.len()` — the two halves and the
     /// output must agree on the channel count.
@@ -581,13 +582,22 @@ mod tests {
         let a = [1.0f32, 1.0, 1.0, 1.0];
         let b = [2.0f32, 2.0, 2.0, 2.0];
         // Per-channel α: [0, π/4, π/2, π/4].
-        let alpha = [0.0f32, core::f32::consts::FRAC_PI_4, FRAC_PI_2, core::f32::consts::FRAC_PI_4];
+        let alpha = [
+            0.0f32,
+            core::f32::consts::FRAC_PI_4,
+            FRAC_PI_2,
+            core::f32::consts::FRAC_PI_4,
+        ];
         let cos_alpha: Vec<f32> = alpha.iter().map(|&a| a.cos()).collect();
         let sin_alpha: Vec<f32> = alpha.iter().map(|&a| a.sin()).collect();
         let mut out = [0.0f32; 4];
         phase_rotation_gate_into(&a, &b, &cos_alpha, &sin_alpha, &mut out).unwrap();
         // Channel 0: α=0 → out = a[0] = 1.
-        assert!((out[0] - 1.0).abs() < 1e-6, "channel 0 α=0: out = {}", out[0]);
+        assert!(
+            (out[0] - 1.0).abs() < 1e-6,
+            "channel 0 α=0: out = {}",
+            out[0]
+        );
         // Channel 1: α=π/4 → out = (1+2)/√2 = 3/√2 ≈ 2.121.
         let expected_1 = (1.0f32 + 2.0) * core::f32::consts::FRAC_1_SQRT_2;
         assert!(
@@ -670,8 +680,16 @@ mod tests {
         let mut sin2 = 0.0f32;
         compute_phase_from_projection(&state, &direction, 4.0, &mut cos1, &mut sin1).unwrap();
         compute_phase_from_projection(&state, &direction, 4.0, &mut cos2, &mut sin2).unwrap();
-        assert_eq!(cos1.to_bits(), cos2.to_bits(), "cos α must be bit-identical");
-        assert_eq!(sin1.to_bits(), sin2.to_bits(), "sin α must be bit-identical");
+        assert_eq!(
+            cos1.to_bits(),
+            cos2.to_bits(),
+            "cos α must be bit-identical"
+        );
+        assert_eq!(
+            sin1.to_bits(),
+            sin2.to_bits(),
+            "sin α must be bit-identical"
+        );
     }
 
     #[test]
@@ -690,8 +708,9 @@ mod tests {
         let mut scratch = PhaseRotationScratch::new(d);
         let a = vec![1.0f32; d];
         let b = vec![0.5f32; d];
-        let cos_alpha = vec![0.7071f32; d];
-        let sin_alpha = vec![0.7071f32; d];
+        let inv_sqrt2 = core::f32::consts::FRAC_1_SQRT_2;
+        let cos_alpha = vec![inv_sqrt2; d];
+        let sin_alpha = vec![inv_sqrt2; d];
         let mut out = vec![0.0f32; d];
 
         // Mix hot path — scratch is not even borrowed here (it doesn't need it).
@@ -742,8 +761,8 @@ mod tests {
         let direction = [1.0f32; 8]; // wrong
         let mut cos_a = 0.0f32;
         let mut sin_a = 0.0f32;
-        let err =
-            compute_phase_from_projection(&state, &direction, 4.0, &mut cos_a, &mut sin_a).unwrap_err();
+        let err = compute_phase_from_projection(&state, &direction, 4.0, &mut cos_a, &mut sin_a)
+            .unwrap_err();
         assert_eq!(err, PhaseRotationError::ProjectionShapeMismatch);
     }
 
@@ -797,7 +816,9 @@ mod tests {
         // amplification of sin's libm error.
         let d = 64;
         let state: Vec<f32> = (0..d).map(|i| (i as f32 - 32.0) * 0.1).collect();
-        let directions: Vec<f32> = (0..d).map(|i| if i % 2 == 0 { 1.0 } else { -1.0 }).collect();
+        let directions: Vec<f32> = (0..d)
+            .map(|i| if i % 2 == 0 { 1.0 } else { -1.0 })
+            .collect();
         let sharpness = 4.0f32;
 
         let mut cos_safe = vec![0.0f32; d];

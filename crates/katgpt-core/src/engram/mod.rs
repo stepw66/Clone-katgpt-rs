@@ -22,7 +22,7 @@
 //!
 //! Every step is **zero-allocation** in the hot path: callers provide scratch
 //! + out buffers, lookups index a flat `Box<[f32]>` row-major array directly
-//! by `hash mod N`.
+//!   by `hash mod N`.
 //!
 //! # Phase status (this file)
 //!
@@ -69,9 +69,41 @@ mod forward;
 mod hash;
 mod hotswap;
 mod kernel;
+mod staging;
 mod table;
 mod tokenizer;
 
+// Issue 039 — whole-architecture commitment root. Sibling to `commitment.rs`,
+// gated one layer deeper than its siblings: it depends on `EngramTableId`
+// from `commitment.rs` AND needs `engram` itself compiled (so the feature
+// implies `engram`).
+//
+// # Layering (per-component roots → architecture root → chain SyncBlock)
+//
+// ```text
+//   ┌─ closure::commitment(&PrimitiveTransitionGraph) ─────────── [u8;32]
+//   │
+//   ├─ EngramTableId::from_table(&EngramTable) ─────────────────── [u8;32]
+//   │
+//   ├─ NeuronShard::merkle_root (riir-neuron-db, chain-set) ────── [u8;32]
+//   │
+//   ├─ FunctorSignatureSet (caller-supplied; EngramTableId if in ── [u8;32]
+//   │                       an engram table, [0u8;32] if absent)
+//   │
+//   └──► CognitiveArchitectureRoot::from_parts(roots, tick, npc_id) ─► [u8;32]
+//                                          │
+//                                          └─► (riir-chain, deferred) SyncBlock field
+// ```
+//
+// The primitive only ships the hashing layer — the chain SyncBlock consumer
+// is a riir-chain/.issues/* follow-up.
+//
+// DEFAULT-ON (Issue 039 T5, 2026-07-04): all GOAT gates pass. Pure modelless.
+#[cfg(feature = "cognitive_architecture_root")]
+mod architecture_root;
+
+#[cfg(feature = "cognitive_architecture_root")]
+pub use architecture_root::{CognitiveArchitectureRoot, verify_parts};
 pub use cache::{
     CacheResult, CacheTier, ColdFetcher, ZipfianCacheHierarchy, ZipfianStats, ZipfianStatsSnapshot,
 };
@@ -83,6 +115,7 @@ pub use hotswap::EngramHotSwap;
 pub use kernel::{
     SigmoidFusionConfig, rmsnorm_into, sigmoid_fuse_into, sigmoid_fuse_multi_branch_into,
 };
+pub use staging::{StagingEngramTable, StagingError};
 pub use table::{EngramTableBuilder, InMemoryEngramTable};
 pub use tokenizer::{
     SurjectiveMap, SurjectiveMapLoadError, TokenizerSpec, build_surjective_map, compress_token,

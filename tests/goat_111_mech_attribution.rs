@@ -173,7 +173,7 @@ fn p3_synthetic_catalyst_data_improves_metrics_vs_random() {
         "<data><item>gamma</item><item>delta</item></data>",
         "<data><item>epsilon</item><item>zeta</item></data>",
     ];
-    let sample_refs: Vec<&str> = original_samples.iter().copied().collect();
+    let sample_refs: Vec<&str> = original_samples.to_vec();
 
     // Extract templates
     let templates = extract_template(&sample_refs, &config);
@@ -252,7 +252,7 @@ fn p4_cross_domain_template_transfer_structural_similarity() {
         "<record><name>Bob</name><age>25</age></record>",
         "<record><name>Carol</name><age>35</age></record>",
     ];
-    let a_refs: Vec<&str> = domain_a_samples.iter().copied().collect();
+    let a_refs: Vec<&str> = domain_a_samples.to_vec();
     let templates_a = extract_template(&a_refs, &config);
 
     // Domain B: also XML but different content

@@ -11,10 +11,10 @@
 mod tests {
     use std::collections::HashMap;
 
-    use katgpt_rs::percepta::compile::{compile_rust_program, find_rustc, rust_template};
-    use katgpt_rs::percepta::graph::types::{Expression, GraphBuilder};
-    use katgpt_rs::percepta::runner::Runner;
-    use katgpt_rs::percepta::wasm::interpreter::{self, Opcode, ProgramInstruction};
+    use katgpt_percepta::compile::{compile_rust_program, find_rustc, rust_template};
+    use katgpt_percepta::graph::types::{Expression, GraphBuilder};
+    use katgpt_percepta::runner::Runner;
+    use katgpt_percepta::wasm::interpreter::{self, Opcode, ProgramInstruction};
 
     // ── Helpers ──────────────────────────────────────────────────
 
@@ -30,7 +30,7 @@ mod tests {
 
     /// Build the universal WASM interpreter graph for evaluation.
     fn build_universal_graph() -> (
-        katgpt_rs::percepta::graph::types::ProgramGraph,
+        katgpt_percepta::graph::types::ProgramGraph,
         HashMap<String, Expression>,
         HashMap<String, Expression>,
     ) {
@@ -44,7 +44,7 @@ mod tests {
     fn build_specialized_graph(
         program: &[ProgramInstruction],
     ) -> (
-        katgpt_rs::percepta::graph::types::ProgramGraph,
+        katgpt_percepta::graph::types::ProgramGraph,
         HashMap<String, Expression>,
         HashMap<String, Expression>,
     ) {
@@ -122,16 +122,9 @@ mod tests {
             build_specialized_graph(&program);
 
         // Create a token prefix from the program
-        let prefix: Vec<String> = program
+        let _prefix: Vec<String> = program
             .iter()
-            .enumerate()
-            .map(|(i, inst)| {
-                if i == 0 {
-                    format!("inst_{}", inst.opcode as usize)
-                } else {
-                    format!("inst_{}", inst.opcode as usize)
-                }
-            })
+            .map(|inst| format!("inst_{}", inst.opcode as usize))
             .collect();
 
         // For the evaluator, we need the proper prefix format
@@ -261,7 +254,7 @@ mod tests {
 
                 // Should produce output
                 assert!(
-                    !output.is_empty() || tokens.len() > 0,
+                    !output.is_empty() || !tokens.is_empty(),
                     "Graph evaluator should produce output"
                 );
 
@@ -273,7 +266,7 @@ mod tests {
                     // Graph evaluator runs in exact arithmetic mode, output may differ
                     // from expected due to tokenization differences — verify it produces
                     // SOME output rather than matching exactly
-                    assert!(tokens.len() > 0, "Should produce at least some tokens");
+                    assert!(!tokens.is_empty(), "Should produce at least some tokens");
                 }
             }
             Err(e) => {
@@ -316,7 +309,7 @@ mod tests {
                 println!("Transformer output: \"{transformer_output}\"");
                 println!("Transformer tokens: {}", gen_result.tokens.len());
                 assert!(
-                    gen_result.tokens.len() > 0,
+                    !gen_result.tokens.is_empty(),
                     "Transformer should produce tokens"
                 );
             }
@@ -339,7 +332,7 @@ mod tests {
                 let eval_output = extract_output(&tokens);
                 println!("Evaluator output: \"{eval_output}\"");
                 println!("Evaluator tokens: {}", tokens.len());
-                assert!(tokens.len() > 0, "Evaluator should produce tokens");
+                assert!(!tokens.is_empty(), "Evaluator should produce tokens");
             }
             Err(e) => {
                 println!("Evaluator error: {e}");
@@ -398,11 +391,11 @@ mod tests {
 
         // Core assertions
         assert!(
-            universal_graph.all_dims.len() > 0,
+            !universal_graph.all_dims.is_empty(),
             "Universal graph should have dimensions"
         );
         assert!(
-            specialized_graph.all_dims.len() > 0,
+            !specialized_graph.all_dims.is_empty(),
             "Specialized graph should have dimensions"
         );
     }

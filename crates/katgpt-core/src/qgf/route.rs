@@ -21,6 +21,7 @@
 ///
 /// Chosen by [`route_for`] based on action-space size and batch size.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(u8)]
 pub enum QgfComputeRoute {
     /// CPU SIMD path — reuse existing `simd::dot_f32_i8` + `simd::fast_sigmoid`.
     /// Optimal for small action spaces and small batches.

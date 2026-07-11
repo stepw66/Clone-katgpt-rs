@@ -18,9 +18,7 @@
 //! want a stable code shape regardless of feature can branch on a `cfg!` at
 //! the call site — no code is generated when the feature is off.
 
-use super::{
-    OperatorKind, PrimitiveKind, PrimitiveTransitionGraph, PtgEdge, PtgNode,
-};
+use super::{OperatorKind, PrimitiveKind, PrimitiveTransitionGraph, PtgEdge, PtgNode};
 
 /// Index of a node inside a [`PrimitiveTransitionGraph::nodes`].
 ///
@@ -185,7 +183,11 @@ mod tests {
         let mut rec = PtgRecorder::new(0);
         for i in 0..10u32 {
             // Alternate Some/None to exercise both paths.
-            let blake = if i % 2 == 0 { Some([i as u8; 32]) } else { None };
+            let blake = if i % 2 == 0 {
+                Some([i as u8; 32])
+            } else {
+                None
+            };
             let id = rec.enter(PrimitiveKind::UserDefined(i), i, blake);
             assert_eq!(id, i, "id must equal index");
         }

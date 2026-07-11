@@ -26,7 +26,9 @@
 //! - Latent-to-latent preferred (sigmoid not softmax): N/A (pure summation).
 //! - Freeze/thaw over fine-tuning: YES (no weight mutation).
 //! - Zero allocations in wrapper code: YES (all Vecs come from delegated ops
-//!   or the pre-built coboundary index).
+//!   or the pre-built coboundary index). Exception: [`line_integral`] builds a
+//!   one-shot vertex-pair lookup (HashMap) to turn its O(P×|B₁|) edge scan into
+//!   O(P+|B₁|); see its docs for the trade-off.
 
 use crate::hodge::hodge_decompose;
 use crate::operators::codifferential;
@@ -138,6 +140,56 @@ pub fn boundary_flux_mass(
     (mass, error_bound)
 }
 
+/// Pre-computed-decomposition variant of [`boundary_flux_mass`].
+///
+/// Same result, but the caller passes an already-computed
+/// [`HodgeComponents`](crate::hodge::HodgeComponents) so the per-call
+/// `hodge_decompose` (CG solver, `O(E · iters)`) is skipped.
+///
+/// # When to use this
+///
+/// Per the function-level doc on [`boundary_flux_mass`], the decomposition
+/// depends only on `(cx, field)` — not on `region_cells`. If a caller issues
+/// many region queries against the same field on the same complex (the common
+/// case for per-tick belief-region mass checks), compute the decomposition
+/// once and reuse it across all queries. This turns an `O(Q · E · iters)` total
+/// cost into `O(E · iters + Q · |B_{k+1}|)`.
+///
+/// # Arguments
+/// * `cx` — Cell complex (must be the same one `decomp` was built against).
+/// * `region_cells` — Indices of (k+1)-cells defining the region.
+/// * `field` — k-cochain (must be the same field `decomp` was built against).
+/// * `decomp` — Pre-computed Hodge decomposition of `field` on `cx`.
+///
+/// # Returns
+/// `(mass, error_bound)` — identical to [`boundary_flux_mass`].
+///
+/// # Panics (debug)
+/// Debug-asserts that `decomp` was built for `field` (same rank, cell count,
+/// dimension). Mismatches silently produce wrong results in release builds.
+pub fn boundary_flux_mass_with_decomp(
+    cx: &CellComplex,
+    region_cells: &[u32],
+    field: &CochainField,
+    decomp: &crate::hodge::HodgeComponents,
+) -> (f32, f32) {
+    let mass = boundary_flux_mass_only(cx, region_cells, field);
+    debug_assert_eq!(
+        decomp.harmonic.rank, field.rank,
+        "boundary_flux_mass_with_decomp: decomp rank {} != field rank {}",
+        decomp.harmonic.rank, field.rank
+    );
+    debug_assert_eq!(
+        decomp.harmonic.n_cells(),
+        field.n_cells(),
+        "boundary_flux_mass_with_decomp: decomp cell count {} != field cell count {}",
+        decomp.harmonic.n_cells(),
+        field.n_cells()
+    );
+    let error_bound: f32 = decomp.harmonic.data.iter().copied().map(f32::abs).sum();
+    (mass, error_bound)
+}
+
 /// Boundary-flux mass only (no error bound).
 ///
 /// Same as [`boundary_flux_mass`] but skips the `hodge_decompose` call.
@@ -169,10 +221,58 @@ pub fn boundary_flux_mass_only(
 
     // Single allocation: boolean region-membership marker, sized to the complex.
     let mut in_region = vec![false; n_region_cells];
+    boundary_flux_mass_only_scratched(cx, region_cells, field, &mut in_region)
+}
+
+/// Zero-alloc variant of [`boundary_flux_mass_only`] that takes a caller-owned
+/// `in_region` scratch buffer instead of allocating one per call.
+///
+/// # When to use this
+///
+/// The allocating [`boundary_flux_mass_only`] builds a fresh `Vec<bool>` sized
+/// to `cx.n_cells(k+1)` on every call. For per-tick belief-region mass checks
+/// that fire many region queries against the same complex, hoist the buffer
+/// to the caller and reuse it across calls — this variant does zero allocation
+/// in steady state.
+///
+/// # Arguments
+/// * `cx` — Cell complex.
+/// * `region_cells` — Indices of (k+1)-cells defining the region.
+/// * `field` — k-cochain (dim=1).
+/// * `in_region` — Caller-owned scratch buffer. Resized to `cx.n_cells(k+1)`
+///   if smaller; the first `n_cells(k+1)` entries are overwritten, any extra
+///   capacity is left untouched. Reuse across calls for zero alloc.
+///
+/// # Returns `0.0` for an empty region.
+pub fn boundary_flux_mass_only_scratched(
+    cx: &CellComplex,
+    region_cells: &[u32],
+    field: &CochainField,
+    in_region: &mut Vec<bool>,
+) -> f32 {
+    if region_cells.is_empty() {
+        return 0.0;
+    }
+
+    let k = field.rank;
+    debug_assert_eq!(
+        field.dim, 1,
+        "boundary_flux_mass_only_scratched: field must be dim=1 (scalar per cell), got dim {}",
+        field.dim
+    );
+
+    let n_region_cells = cx.n_cells(k + 1);
+
+    // Reuse the caller's buffer; grow if needed (no-op in steady state).
+    in_region.resize(n_region_cells, false);
+    // Safety: `bool` has no Drop side-effects, so leaving the tail of a
+    // previous (larger) call's marks in place would silently corrupt this
+    // call's membership test — we must clear the prefix we're about to use.
+    in_region[..n_region_cells].fill(false);
     for &cell in region_cells {
         debug_assert!(
             (cell as usize) < n_region_cells,
-            "boundary_flux_mass_only: region cell {cell} >= n_cells({}) = {n_region_cells}",
+            "boundary_flux_mass_only_scratched: region cell {cell} >= n_cells({}) = {n_region_cells}",
             k + 1
         );
         in_region[cell as usize] = true;
@@ -317,31 +417,44 @@ pub fn line_integral(cx: &CellComplex, edge_field: &CochainField, path: &[u32]) 
     );
 
     let entries = cx.boundary_entries(0);
-    let mut total = 0.0f32;
 
+    // Build a vertex-pair → (edge, sign_for_second_vertex) lookup once, so the
+    // per-window edge scan becomes O(1). The previous loop was O(P×E); this is
+    // O(E) build + O(P) walk = O(E + P). B₁ entries from grid_2d are paired:
+    // (tail, e, −1), (head, e, +1).
+    //
+    // NOTE: this is the one wrapper that allocates (a HashMap). The trade-off
+    // is documented: for large cell complexes and non-trivial paths the
+    // O(P×E)→O(P+|E|) win dominates the one-shot HashMap build. Callers on a
+    // strict zero-alloc budget should pre-build their own lookup and call the
+    // DEC operators directly.
+    let mut edge_lookup: std::collections::HashMap<(usize, usize), (usize, i8)> =
+        std::collections::HashMap::with_capacity(entries.len() / 2);
+    for pair in entries.chunks_exact(2) {
+        let (v0, e0, _s0) = pair[0];
+        let (v1, e1, _s1) = pair[1];
+        debug_assert_eq!(e0, e1, "B₁ entries must be paired by edge index");
+        // Store both directions so a single lookup resolves the edge regardless
+        // of traversal orientation. Value carries the sign of the *second*
+        // vertex in the key, matching the original `sign_b` resolution.
+        edge_lookup.insert((v0, v1), (e0, pair[1].2));
+        edge_lookup.insert((v1, v0), (e0, pair[0].2));
+    }
+
+    let mut total = 0.0f32;
     for window in path.windows(2) {
         let a = window[0] as usize;
         let b = window[1] as usize;
         if a == b {
             continue;
         }
-
-        // B₁ entries from grid_2d are paired: (tail, e, −1), (head, e, +1).
-        // Iterate pairs to find the edge connecting a and b.
-        for pair in entries.chunks_exact(2) {
-            let (v0, e0, _s0) = pair[0];
-            let (v1, e1, _s1) = pair[1];
-            debug_assert_eq!(e0, e1, "B₁ entries must be paired by edge index");
-
-            if (v0 == a && v1 == b) || (v0 == b && v1 == a) {
-                // Found edge e connecting a and b.
-                // Contribution = field[e] · sign(b, e):
-                //   b is head (sign=+1) → traversal along orientation → +field
-                //   b is tail (sign=−1) → traversal against orientation → −field
-                let sign_b = if v0 == b { pair[0].2 } else { pair[1].2 };
-                total += sign_b as f32 * edge_field.scalar(e0);
-                break;
-            }
+        // O(1) edge lookup. Missing key == no connecting edge → contribute 0
+        // (matches the original silent-scan-failure semantics).
+        if let Some(&(e, sign_b)) = edge_lookup.get(&(a, b)) {
+            // Contribution = field[e] · sign(b, e):
+            //   b is head (sign=+1) → traversal along orientation → +field
+            //   b is tail (sign=−1) → traversal against orientation → −field
+            total += sign_b as f32 * edge_field.scalar(e);
         }
     }
 
@@ -394,7 +507,8 @@ pub fn line_integral(cx: &CellComplex, edge_field: &CochainField, path: &[u32]) 
 /// clockwise circulation == −counterclockwise circulation.
 ///
 /// # Complexity
-/// `O(loop_len × |B₁|)` — same as [`line_integral`] (it delegates).
+/// `O(loop_len + |B₁|)` — same as [`line_integral`] (it delegates; the
+/// one-shot vertex-pair lookup build is `O(|B₁|)`).
 ///
 /// # Example
 ///

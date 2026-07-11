@@ -1,0 +1,49 @@
+[package]
+name = "katgpt-sparse"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+description = "Sparse task-vector family — SOPTV/SPLAT (Plan 264/265). Sparse Off-Principal Task Vector storage + specialist projection. Extracted from katgpt-rs root per Proposal 003 Phase 11 (2026-07-04)."
+repository = "https://github.com/katopz/katgpt-rs"
+keywords = ["sparse", "task-vector", "soptv", "splat", "modelless"]
+categories = ["algorithms", "science"]
+publish = false  # only katgpt-core ships to crates.io
+
+[dependencies]
+# katgpt-core: provides `simd::simd_sum_sq` (sparse_task_vector relative_norm_vs)
+# and `sigmoid` (specialist_projection). Always-on.
+katgpt-core = { path = "../katgpt-core" }
+# katgpt-band: provides `band_conditioner::ComputeTarget` (5-variant enum consumed
+# by specialist_projection). Optional — only needed when `specialist_projection`
+# feature is on.
+katgpt-band = { path = "../katgpt-band", optional = true }
+
+[dev-dependencies]
+# katgpt-spectral: needed only for the gauge_invariant parity test in
+# sparse_task_vector.rs (test_compose_gauge_invariant_matches_full_compose).
+# Production `compose_gauge_invariant` is self-contained. The dev-dep must
+# enable `gauge_invariant` so the module is present when the test runs.
+katgpt-spectral = { path = "../katgpt-spectral", features = ["gauge_invariant"] }
+# fastrand: deterministic RNG for sparse_task_vector unit tests.
+fastrand = "2"
+
+[features]
+default = ["sparse_task_vector", "specialist_projection"]
+
+# Sparse Off-Principal Task Vector storage — OPD-grounded sparse delta format
+# (Plan 264 Phase 1, Research 231, GOAT G1–G2 PASS 2.9–5.7× storage reduction).
+# DEFAULT-ON in root.
+sparse_task_vector = []
+
+# Fusion B: SPLAT specialist latent projection (Plan 265 Phase 2).
+# DEFAULT-ON (T5.3, 2026-07-02): G4-G6 pass.
+# Pulls in sparse_task_vector (intra-crate) + katgpt-band/band_conditioner
+# (cross-crate edge for ComputeTarget enum).
+specialist_projection = ["sparse_task_vector", "dep:katgpt-band", "katgpt-band/band_conditioner"]
+
+# Gauge-invariant adapter composition — LoRA-Muon distillation (Plan 270).
+# Gates the `compose_gauge_invariant` impl block on SparseTaskVector. The actual
+# impl is self-contained (no katgpt-spectral dep at prod runtime); the test
+# `test_compose_gauge_invariant_matches_full_compose` consumes
+# `katgpt_spectral::gauge_invariant` for parity verification (dev-dep only).
+gauge_invariant = []

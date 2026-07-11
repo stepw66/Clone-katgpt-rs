@@ -379,8 +379,8 @@ pub(crate) fn has_escape_route(
     blast_range: u32,
     existing_bombs: &[KnownBomb],
 ) -> bool {
-    use std::collections::VecDeque;
     use super::{ARENA_H, ARENA_W};
+    use std::collections::VecDeque;
 
     let max_steps = blast_range as i32 + 1;
     // Fixed-size visited bitmap for the 13×13 arena — replaces HashSet allocation
@@ -577,8 +577,8 @@ pub(crate) fn escape_distance(
     bombs: &[KnownBomb],
     blocked: &[KnownBomb],
 ) -> Option<i32> {
-    use std::collections::VecDeque;
     use super::{ARENA_H, ARENA_W};
+    use std::collections::VecDeque;
 
     if !in_blast_zone(pos, grid, bombs) {
         return Some(0);
@@ -664,10 +664,8 @@ pub(crate) fn score_action(
 
             // In blast zone — use escape distance for directional guidance
             if in_blast_zone(target, grid, bombs) {
-                let current_dist =
-                    escape_distance(pos, grid, bombs, bombs).unwrap_or(i32::MAX);
-                let target_dist =
-                    escape_distance(target, grid, bombs, bombs).unwrap_or(i32::MAX);
+                let current_dist = escape_distance(pos, grid, bombs, bombs).unwrap_or(i32::MAX);
+                let target_dist = escape_distance(target, grid, bombs, bombs).unwrap_or(i32::MAX);
                 return if target_dist < current_dist {
                     10.0 - target_dist as f32 * 0.5 // Moving toward safety
                 } else if target_dist > current_dist {
@@ -1066,7 +1064,9 @@ impl BomberPlayer for ValidatorPlayer {
         let in_danger = in_blast_zone(pos, grid, &self.known_bombs);
         // O(bombs) linear helper — replaces per-call HashSet allocation.
         let is_blocked = |x: i32, y: i32| {
-            self.known_bombs.iter().any(|(p, _, _)| p.0 == x && p.1 == y)
+            self.known_bombs
+                .iter()
+                .any(|(p, _, _)| p.0 == x && p.1 == y)
         };
 
         let mut best = BomberAction::Wait;
@@ -1178,6 +1178,44 @@ pub struct HLPlayer {
     total_pulls: u32,
     compressed: [bool; ACTION_COUNT],
     round_actions: Vec<BomberAction>,
+    /// Per-tick shaped reward for each action in `round_actions` (Issue 371
+    /// Option 2). Parallel Vec — `round_rewards[i]` is the shaped reward for
+    /// `round_actions[i]`. Computed at decision time (when board state is
+    /// available) and consumed by `update_outcome` to fix the
+    /// credit-assignment dilution (T3 evidence #3): instead of distributing
+    /// one `base_reward` uniformly, each tick carries a blast-zone-shaped
+    /// signal so the n-armed bandit can learn context-dependent safety.
+    round_rewards: Vec<f32>,
+    /// Per-tick board-state context vector for each action in `round_actions`
+    /// (Issue 371 Option 1 — T6). Parallel Vec — `round_contexts[i]` is the
+    /// 7-dim context `φ(s)` at the moment `round_actions[i]` was chosen.
+    /// Consumed by `update_outcome` so the contextual bandit can update
+    /// `θ_a` per (arm, context) instead of per-arm — the principled fix for
+    /// T3 evidence #3 (the n-armed bandit cannot learn context-dependent
+    /// safety because the same action gets the same Q regardless of board
+    /// state).
+    #[cfg(any(feature = "contextual_bandit", feature = "binned_blend", feature = "kernel_blend"))]
+    round_contexts: Vec<[f32; super::blend_context::CONTEXT_DIM]>,
+    /// Linear contextual bandit (Issue 371 Option 1 — T6). When present,
+    /// replaces the n-armed `arm_q` lookup in `select_action`'s centered blend
+    /// and the `update_arm_q` call in `update_outcome`. The n-armed fields
+    /// (`q_values`, `visits`, ...) stay for `compress_cycle` / `compress_report`
+    /// diagnostics and `SharedBanditStats` compat — they are not updated when
+    /// the contextual bandit is active.
+    #[cfg(feature = "contextual_bandit")]
+    contextual_bandit: super::contextual_bandit::ContextualBandit,
+    /// Binned nonlinear blend estimator (Plan 436 / Issue 428). When present,
+    /// replaces the n-armed `arm_q` lookup with a per-(bin, arm) Q table
+    /// conditioned on blast_proximity. Mutually exclusive with `kernel_blend`
+    /// and `contextual_bandit` in practice.
+    #[cfg(feature = "binned_blend")]
+    binned_blend: super::blend_estimators::BinnedBlendEstimator,
+    /// Kernel nonlinear blend estimator (Plan 436 / Issue 428). When present,
+    /// replaces the n-armed `arm_q` lookup with a Nadaraya-Watson weighted
+    /// average over observed (context, arm, reward) triples. Mutually exclusive
+    /// with `binned_blend` and `contextual_bandit` in practice.
+    #[cfg(feature = "kernel_blend")]
+    kernel_blend: super::blend_estimators::KernelBlendEstimator,
     last_dir: Option<BomberAction>,
     /// Shared bandit stats for multi-agent cooperative learning.
     /// When `Some`, Q-values/visits/compressed are delegated here.
@@ -1186,6 +1224,17 @@ pub struct HLPlayer {
     /// Shared trial log for multi-agent episode recording (Issue 051 T4).
     #[cfg(feature = "bandit")]
     shared_log: Option<SharedTrialLog>,
+    /// LoRA adapter for learned action re-weighting (Issue 018 follow-up).
+    /// When `Some`, replaces pure heuristic base with LoRA-blended scores.
+    #[cfg(feature = "bomber-wasm")]
+    lora: Option<LoraAdapter>,
+    /// WASM validator for sandboxed safety checks (Issue 018 follow-up).
+    /// When `Some`, replaces native `is_safe_action` with WASM-backed check.
+    #[cfg(feature = "bomber-wasm")]
+    wasm: Option<super::wasm_pruner::BomberWasmPruner>,
+    /// Reusable LoRA scratch buffer (rank-sized, zero-alloc across calls).
+    #[cfg(feature = "bomber-wasm")]
+    lora_buf: Vec<f32>,
 }
 
 impl HLPlayer {
@@ -1200,11 +1249,70 @@ impl HLPlayer {
             total_pulls: 0,
             compressed: [false; ACTION_COUNT],
             round_actions: Vec::new(),
+            round_rewards: Vec::new(),
+            #[cfg(any(feature = "contextual_bandit", feature = "binned_blend", feature = "kernel_blend"))]
+            round_contexts: Vec::new(),
+            #[cfg(feature = "contextual_bandit")]
+            contextual_bandit: super::contextual_bandit::ContextualBandit::default(),
+            #[cfg(feature = "binned_blend")]
+            binned_blend: super::blend_estimators::BinnedBlendEstimator::default(),
+            #[cfg(feature = "kernel_blend")]
+            kernel_blend: super::blend_estimators::KernelBlendEstimator::default(),
             last_dir: None,
             #[cfg(feature = "bandit")]
             shared_stats: None,
             #[cfg(feature = "bandit")]
             shared_log: None,
+            #[cfg(feature = "bomber-wasm")]
+            lora: None,
+            #[cfg(feature = "bomber-wasm")]
+            wasm: None,
+            #[cfg(feature = "bomber-wasm")]
+            lora_buf: Vec::new(),
+        }
+    }
+
+    /// Create HLPlayer with LoRA + WASM artifacts loaded (the "Full HL" stack).
+    ///
+    /// Mirrors `LoraWasmPlayer::new_with_secrets`: loads the LoRA adapter and
+    /// WASM validator from file paths. On any load failure, silently falls
+    /// back to heuristic-only mode (the player still works, just without the
+    /// model delta and sandboxed safety).
+    ///
+    /// Only loads the first LoRA adapter — multi-adapter L2+ files have layers
+    /// 1+ silently dropped. See `LoraAdapter::load_first` for the limitation.
+    #[cfg(feature = "bomber-wasm")]
+    pub fn new_with_secrets(id: u8, lora_path: &str, wasm_path: &str) -> Self {
+        let lora = LoraAdapter::load_first(std::path::Path::new(lora_path)).ok();
+        let wasm = super::wasm_pruner::BomberWasmPruner::load_from_file(wasm_path).ok();
+        let buf_size = lora.as_ref().map_or(0, |l| l.rank);
+        Self {
+            _id: id,
+            known_bombs: Vec::new(),
+            known_powerups: Vec::new(),
+            known_opponents: Vec::new(),
+            q_values: [0.0; ACTION_COUNT],
+            visits: [0; ACTION_COUNT],
+            total_pulls: 0,
+            compressed: [false; ACTION_COUNT],
+            round_actions: Vec::new(),
+            round_rewards: Vec::new(),
+            #[cfg(any(feature = "contextual_bandit", feature = "binned_blend", feature = "kernel_blend"))]
+            round_contexts: Vec::new(),
+            #[cfg(feature = "contextual_bandit")]
+            contextual_bandit: super::contextual_bandit::ContextualBandit::default(),
+            #[cfg(feature = "binned_blend")]
+            binned_blend: super::blend_estimators::BinnedBlendEstimator::default(),
+            #[cfg(feature = "kernel_blend")]
+            kernel_blend: super::blend_estimators::KernelBlendEstimator::default(),
+            last_dir: None,
+            #[cfg(feature = "bandit")]
+            shared_stats: None,
+            #[cfg(feature = "bandit")]
+            shared_log: None,
+            lora,
+            wasm,
+            lora_buf: vec![0.0; buf_size],
         }
     }
 
@@ -1232,9 +1340,24 @@ impl HLPlayer {
             total_pulls: 0,
             compressed: [false; ACTION_COUNT],
             round_actions: Vec::new(),
+            round_rewards: Vec::new(),
+            #[cfg(any(feature = "contextual_bandit", feature = "binned_blend", feature = "kernel_blend"))]
+            round_contexts: Vec::new(),
+            #[cfg(feature = "contextual_bandit")]
+            contextual_bandit: super::contextual_bandit::ContextualBandit::default(),
+            #[cfg(feature = "binned_blend")]
+            binned_blend: super::blend_estimators::BinnedBlendEstimator::default(),
+            #[cfg(feature = "kernel_blend")]
+            kernel_blend: super::blend_estimators::KernelBlendEstimator::default(),
             last_dir: None,
             shared_stats: Some(stats),
             shared_log,
+            #[cfg(feature = "bomber-wasm")]
+            lora: None,
+            #[cfg(feature = "bomber-wasm")]
+            wasm: None,
+            #[cfg(feature = "bomber-wasm")]
+            lora_buf: Vec::new(),
         }
     }
 
@@ -1353,7 +1476,66 @@ impl HLPlayer {
             + if killed_opponent { 0.5 } else { 0.0 }
             + collected_powerups as f32 * 0.2;
 
-        // Decay-based credit assignment: recent actions get more weight
+        // Decay-based credit assignment: recent actions get more weight.
+        //
+        // Issue 371 Option 2 — per-tick reward shaping. Instead of distributing
+        // one `base_reward` uniformly across all actions, each tick carries its
+        // own blast-zone-shaped reward (`round_rewards[i]`, computed at decision
+        // time in `select_action`). This fixes the credit-assignment dilution
+        // (T3 evidence #3): a move that walked into a blast zone gets a direct
+        // negative signal regardless of whether HL survived the round, so the
+        // bandit can learn context-dependent safety without a contextual
+        // (state-conditioned) Q implementation.
+        //
+        // Issue 371 Option 1 (T6) — contextual bandit update. When active,
+        // each (action, context) pair updates θ_a via online LMS instead of
+        // the n-armed running-average update below. This is the principled
+        // fix: the same action gets different θ-updates depending on the board
+        // state it was taken in.
+        #[cfg(feature = "contextual_bandit")]
+        {
+            for (i, action) in self.round_actions.iter().enumerate() {
+                let tick_reward = self.round_rewards.get(i).copied().unwrap_or(0.0);
+                let phi = match self.round_contexts.get(i) {
+                    Some(p) => *p,
+                    None => continue,
+                };
+                let combined = base_reward + tick_reward;
+                let idx = action_index(action);
+                self.contextual_bandit.update(idx, &phi, combined);
+            }
+        }
+
+        // Plan 436 / Issue 428 — nonlinear blend estimator updates. Same
+        // pattern as the contextual bandit: iterate this round's (action,
+        // context, reward) triples and update the estimator per-tick.
+        #[cfg(feature = "binned_blend")]
+        {
+            for (i, action) in self.round_actions.iter().enumerate() {
+                let tick_reward = self.round_rewards.get(i).copied().unwrap_or(0.0);
+                let phi = match self.round_contexts.get(i) {
+                    Some(p) => *p,
+                    None => continue,
+                };
+                let combined = base_reward + tick_reward;
+                let idx = action_index(action);
+                self.binned_blend.update(&phi, idx, combined);
+            }
+        }
+        #[cfg(feature = "kernel_blend")]
+        {
+            for (i, action) in self.round_actions.iter().enumerate() {
+                let tick_reward = self.round_rewards.get(i).copied().unwrap_or(0.0);
+                let phi = match self.round_contexts.get(i) {
+                    Some(p) => *p,
+                    None => continue,
+                };
+                let combined = base_reward + tick_reward;
+                let idx = action_index(action);
+                self.kernel_blend.update(&phi, idx, combined);
+            }
+        }
+
         let total = self.round_actions.len();
         let mut action_rewards = [0.0f32; ACTION_COUNT];
         let mut action_weights = [0.0f32; ACTION_COUNT];
@@ -1361,8 +1543,11 @@ impl HLPlayer {
         for (i, action) in self.round_actions.iter().enumerate() {
             // Exponential decay: later actions get exponentially more credit
             let recency = 0.5_f32.powi((total - 1 - i) as i32);
+            // Per-tick shaped reward (defensive: default 0.0 if Vec lengths
+            // ever diverge — they should always be parallel).
+            let tick_reward = self.round_rewards.get(i).copied().unwrap_or(0.0);
             let idx = action_index(action);
-            action_rewards[idx] += base_reward * recency;
+            action_rewards[idx] += (base_reward + tick_reward) * recency;
             action_weights[idx] += recency;
         }
 
@@ -1509,12 +1694,74 @@ impl HLPlayer {
             total_pulls: frozen.total_pulls,
             compressed: frozen.compressed.map(|c| c != 0),
             round_actions: Vec::new(),
+            round_rewards: Vec::new(),
+            #[cfg(any(feature = "contextual_bandit", feature = "binned_blend", feature = "kernel_blend"))]
+            round_contexts: Vec::new(),
+            #[cfg(feature = "contextual_bandit")]
+            contextual_bandit: super::contextual_bandit::ContextualBandit::default(),
+            #[cfg(feature = "binned_blend")]
+            binned_blend: super::blend_estimators::BinnedBlendEstimator::default(),
+            #[cfg(feature = "kernel_blend")]
+            kernel_blend: super::blend_estimators::KernelBlendEstimator::default(),
             last_dir: None,
             #[cfg(feature = "bandit")]
             shared_stats: None,
             #[cfg(feature = "bandit")]
             shared_log: None,
+            #[cfg(feature = "bomber-wasm")]
+            lora: None,
+            #[cfg(feature = "bomber-wasm")]
+            wasm: None,
+            #[cfg(feature = "bomber-wasm")]
+            lora_buf: Vec::new(),
         })
+    }
+
+    /// Check if action is safe — WASM validator if loaded, native otherwise.
+    ///
+    /// When `self.wasm` is `Some`, delegates to the sandboxed WASM validator
+    /// (stricter, external-process isolation). Otherwise falls back to the
+    /// native `is_safe_action` check. Mirrors `LoraWasmPlayer::is_action_safe`.
+    #[cfg(feature = "bomber-wasm")]
+    fn check_safety(&self, action: &BomberAction, grid: &ArenaGrid, pos: GridPos) -> bool {
+        match &self.wasm {
+            Some(wasm) => wasm.is_safe_action(
+                action_index(action),
+                grid,
+                pos.x,
+                pos.y,
+                self._id,
+                &self.known_bombs,
+            ),
+            None => is_safe_action(action, grid, pos, &self.known_bombs),
+        }
+    }
+
+    /// Native-only safety check (no WASM feature compiled).
+    #[cfg(not(feature = "bomber-wasm"))]
+    fn check_safety(&self, action: &BomberAction, grid: &ArenaGrid, pos: GridPos) -> bool {
+        is_safe_action(action, grid, pos, &self.known_bombs)
+    }
+
+    /// Export the kernel estimator's learned state for sharing between NPCs.
+    ///
+    /// Story 3 (Plan 437): Cohort B exports its kernel state after the learning
+    /// phase. Cohort C imports it to inherit B's accumulated experience
+    /// without playing those rounds itself (sharing substitutes for learning).
+    ///
+    /// Returns `None` if `kernel_blend` is not active.
+    #[cfg(feature = "kernel_blend")]
+    pub fn export_kernel_state(&self) -> Option<super::blend_estimators::KernelState> {
+        Some(self.kernel_blend.export_state())
+    }
+
+    /// Import a shared kernel state, replacing this player's learned state.
+    ///
+    /// Story 3 (Plan 437): Cohort C calls this after receiving Cohort B's
+    /// exported state. The receiver immediately benefits from B's experience.
+    #[cfg(feature = "kernel_blend")]
+    pub fn import_kernel_state(&mut self, state: &super::blend_estimators::KernelState) {
+        self.kernel_blend.import_state(state);
     }
 }
 
@@ -1532,7 +1779,9 @@ impl BomberPlayer for HLPlayer {
 
         // O(bombs) linear helper — replaces per-call HashSet allocation.
         let is_blocked = |x: i32, y: i32| {
-            self.known_bombs.iter().any(|(p, _, _)| p.0 == x && p.1 == y)
+            self.known_bombs
+                .iter()
+                .any(|(p, _, _)| p.0 == x && p.1 == y)
         };
 
         // Find nearest opponent and their predicted trajectory
@@ -1546,8 +1795,46 @@ impl BomberPlayer for HLPlayer {
         let predicted_opponent =
             nearest_info.and_then(|(_, op, prev)| predict_direction(*op, *prev));
 
-        // Compute blended scores: 85% policy + 15% bandit Q-value
+        // Issue 018 follow-up: LoRA-blended base scores (if adapter loaded).
+        // When `Some`, replaces pure heuristic with 70% heuristic + 30% LoRA
+        // correction (see `lora_score_actions`). Strategy bonus is added later.
+        #[cfg(feature = "bomber-wasm")]
+        let lora_scores = self.lora.as_ref().and_then(|lora| {
+            lora_score_actions(
+                lora,
+                grid,
+                pos,
+                &self.known_bombs,
+                &self.known_powerups,
+                self.last_dir,
+                &mut self.lora_buf,
+            )
+        });
+
+        // Compute action scores: heuristic (+ LoRA blend when loaded) + strategy bonus
+        // + centered bandit Q-value blend (Issue 371: re-enabled, weight 2.0).
         let mut scores: [(BomberAction, f32); ACTION_COUNT] = ALL_ACTIONS.map(|a| (a, 0.0));
+
+        // Compute the board-state context vector φ(s) once per tick. Used by all
+        // blend estimators (contextual_bandit, binned_blend, kernel_blend) so
+        // the same action gets different Q-values in safe vs dangerous board
+        // states — the principled fix for T3 evidence #3.
+        #[cfg(any(feature = "contextual_bandit", feature = "binned_blend", feature = "kernel_blend"))]
+        let phi = super::blend_context::compute_phi(
+            pos,
+            grid,
+            &self.known_bombs,
+            &self.known_powerups,
+            nearest_opponent,
+        );
+
+        // Plan 436 / Issue 428: compute blend estimator Qs once per tick when
+        // the nonlinear estimators are active. These replace the per-arm
+        // n-armed Q lookup with a context-conditioned Q.
+        #[cfg(feature = "kernel_blend")]
+        let blend_q = self.kernel_blend.predict_all(&phi);
+        #[cfg(all(feature = "binned_blend", not(feature = "kernel_blend")))]
+        let blend_q = self.binned_blend.predict_all(&phi);
 
         for (i, action) in ALL_ACTIONS.iter().enumerate() {
             // Skip compressed (hard-blocked) arms
@@ -1565,6 +1852,13 @@ impl BomberPlayer for HLPlayer {
                 self.last_dir,
             );
 
+            // Issue 018 follow-up: use LoRA-blended score as base if available
+            #[cfg(feature = "bomber-wasm")]
+            let h = match &lora_scores {
+                Some(s) => s[i],
+                None => h,
+            };
+
             // Domain hard block (unwalkable, unsafe bomb) overrides everything
             if h == f32::NEG_INFINITY {
                 scores[i] = (*action, h);
@@ -1577,7 +1871,7 @@ impl BomberPlayer for HLPlayer {
                 action,
                 BomberAction::Up | BomberAction::Down | BomberAction::Left | BomberAction::Right
             );
-            if !is_move && !is_safe_action(action, grid, pos, &self.known_bombs) {
+            if !is_move && !self.check_safety(action, grid, pos) {
                 scores[i] = (*action, f32::NEG_INFINITY);
                 continue;
             }
@@ -1650,16 +1944,94 @@ impl BomberPlayer for HLPlayer {
                 }
             }
 
-            // Bandit Q-value component (default 0.0 for unvisited arms)
-            let _bandit_q = if self.arm_visits(i) > 0 {
-                self.arm_q(i)
+            // Bandit Q-value blend (Issue 371: re-enabled, centered, weight 2.0).
+            // Reward arms with Q > 0.5, penalize Q < 0.5. Unvisited arms are neutral
+            // (treated as Q = 0.5) so the bandit doesn't suppress early exploration.
+            //
+            // Priority chain (mutually exclusive in practice):
+            //   1. kernel_blend  (Plan 436 / Issue 428) — Nadaraya-Watson
+            //   2. binned_blend  (Plan 436 / Issue 428) — per-bin empirical Q
+            //   3. contextual_bandit (Issue 371 T6) — linear per-arm model
+            //   4. n-armed bandit (default) — context-independent average Q
+            #[cfg(feature = "kernel_blend")]
+            let bandit_term = if !self.kernel_blend.is_cold(i) {
+                (blend_q[i] - 0.5) * 2.0
+            } else {
+                0.0
+            };
+            #[cfg(all(feature = "binned_blend", not(feature = "kernel_blend")))]
+            let bandit_term = if !self.binned_blend.is_cold(i) {
+                (blend_q[i] - 0.5) * 2.0
+            } else {
+                0.0
+            };
+            #[cfg(all(feature = "contextual_bandit", not(feature = "binned_blend"), not(feature = "kernel_blend")))]
+            let bandit_term = if !self.contextual_bandit.is_cold(i) {
+                let q = self.contextual_bandit.predict(i, &phi);
+                (q - 0.5) * 2.0
+            } else {
+                0.0
+            };
+            #[cfg(not(any(feature = "contextual_bandit", feature = "binned_blend", feature = "kernel_blend")))]
+            let bandit_term = if self.arm_visits(i) > 0 {
+                (self.arm_q(i) - 0.5) * 2.0
             } else {
                 0.0
             };
 
-            // Pure heuristic + strategy bonus (bandit noise removed — too sparse at this scale)
-            scores[i] = (*action, h + strategy_bonus);
+            scores[i] = (*action, h + strategy_bonus + bandit_term);
         }
+
+        // Per-tick reward shaping (Issue 371 Option 2).
+        //
+        // Computes a blast-zone-shaped reward for a candidate action at the
+        // current board state. This is recorded alongside the action in
+        // `round_rewards` and consumed by `update_outcome` so the n-armed
+        // bandit learns per-tick danger instead of a uniform round-level
+        // reward. Fixes the credit-assignment dilution (T3 evidence #3):
+        // a move that walks into a blast zone now gets a direct negative
+        // signal, regardless of whether HL survives the round.
+        //
+        // `bombs` is passed as a parameter (not captured) so the closure
+        // doesn't hold an immutable borrow of `self` that would conflict
+        // with the later `self.known_bombs.push(...)` / `self.round_rewards.push(...)`.
+        let currently_in_blast = in_blast_zone(pos, grid, &self.known_bombs);
+        let shape_tick = |action: BomberAction, bombs: &[KnownBomb]| -> f32 {
+            match action {
+                BomberAction::Up
+                | BomberAction::Down
+                | BomberAction::Left
+                | BomberAction::Right => {
+                    let target = move_target(&action, pos);
+                    let target_in_blast = in_blast_zone(target, grid, bombs);
+                    if target_in_blast && !currently_in_blast {
+                        -0.5 // entered danger
+                    } else if !target_in_blast && currently_in_blast {
+                        0.5 // escaped danger
+                    } else {
+                        0.0 // neutral
+                    }
+                }
+                BomberAction::Bomb => {
+                    // Placing a bomb with no escape route is dangerous;
+                    // `has_escape_route` does a BFS for a safe cell reachable
+                    // within blast_range+1 steps. Penalty when trapped.
+                    if !has_escape_route(grid, pos, (pos.x, pos.y), DEFAULT_BLAST_RANGE, bombs) {
+                        -0.3
+                    } else {
+                        0.0
+                    }
+                }
+                BomberAction::Wait => {
+                    // Waiting inside a blast zone is fatal.
+                    if currently_in_blast { -0.5 } else { 0.0 }
+                }
+                BomberAction::Detonate => {
+                    // Detonating while in own blast zone is fatal.
+                    if currently_in_blast { -0.5 } else { 0.0 }
+                }
+            }
+        };
 
         // ε-greedy: 10% explore (only safe moves — less random than Greedy's 20%)
         if rng.f32() < 0.10 {
@@ -1688,6 +2060,10 @@ impl BomberPlayer for HLPlayer {
                 let pick = safe_explore[rng.usize(0..safe_explore.len())];
                 let action = scores[pick].0;
                 self.round_actions.push(action);
+                self.round_rewards
+                    .push(shape_tick(action, &self.known_bombs));
+                #[cfg(any(feature = "contextual_bandit", feature = "binned_blend", feature = "kernel_blend"))]
+                self.round_contexts.push(phi);
                 self.last_dir = Some(action);
                 return action;
             }
@@ -1707,6 +2083,9 @@ impl BomberPlayer for HLPlayer {
         }
 
         self.round_actions.push(best);
+        self.round_rewards.push(shape_tick(best, &self.known_bombs));
+        #[cfg(any(feature = "contextual_bandit", feature = "binned_blend", feature = "kernel_blend"))]
+        self.round_contexts.push(phi);
         if matches!(
             best,
             BomberAction::Up | BomberAction::Down | BomberAction::Left | BomberAction::Right
@@ -1729,6 +2108,9 @@ impl BomberPlayer for HLPlayer {
         self.known_powerups.clear();
         self.known_opponents.clear();
         self.round_actions.clear();
+        self.round_rewards.clear();
+        #[cfg(any(feature = "contextual_bandit", feature = "binned_blend", feature = "kernel_blend"))]
+        self.round_contexts.clear();
         self.last_dir = None;
         // NOTE: Q-values, visits, compressed persist across rounds (bandit memory)
     }
@@ -1805,7 +2187,9 @@ impl BomberPlayer for LoraPlayer {
 
         // O(bombs) linear helper — replaces per-call HashSet allocation.
         let is_blocked = |x: i32, y: i32| {
-            self.known_bombs.iter().any(|(p, _, _)| p.0 == x && p.1 == y)
+            self.known_bombs
+                .iter()
+                .any(|(p, _, _)| p.0 == x && p.1 == y)
         };
 
         // Try LoRA scoring first
@@ -2033,7 +2417,9 @@ impl BomberPlayer for LoraWasmPlayer {
         let in_danger = in_blast_zone(pos, grid, &self.known_bombs);
         // O(bombs) linear helper — replaces per-call HashSet allocation.
         let is_blocked = |x: i32, y: i32| {
-            self.known_bombs.iter().any(|(p, _, _)| p.0 == x && p.1 == y)
+            self.known_bombs
+                .iter()
+                .any(|(p, _, _)| p.0 == x && p.1 == y)
         };
 
         // Try LoRA scoring
@@ -2219,7 +2605,9 @@ impl BomberPlayer for NNPlayer {
         let in_danger = in_blast_zone(pos, grid, &self.known_bombs);
         // O(bombs) linear helper — replaces per-call HashSet allocation.
         let is_blocked = |x: i32, y: i32| {
-            self.known_bombs.iter().any(|(p, _, _)| p.0 == x && p.1 == y)
+            self.known_bombs
+                .iter()
+                .any(|(p, _, _)| p.0 == x && p.1 == y)
         };
 
         let mut best = BomberAction::Wait;

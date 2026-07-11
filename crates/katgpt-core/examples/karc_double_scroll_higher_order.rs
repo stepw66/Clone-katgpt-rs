@@ -22,8 +22,8 @@
 //! is tracked as future work.
 
 use katgpt_core::{
-    chunked_gram_into, feature_expand_higher_order, higher_order_feature_count,
-    linalg::ridge_solve_direct_f64, ChebyshevBasis, KarcForecaster,
+    ChebyshevBasis, KarcForecaster, chunked_gram_into, feature_expand_higher_order,
+    higher_order_feature_count, linalg::ridge_solve_direct_f64,
 };
 
 // ── Double-scroll ODE parameters (paper §A.1) ─────────────────────────────
@@ -51,11 +51,17 @@ fn rk4_step(state: &mut [f64; 3], dt: f64) {
     let mut k4 = [0.0; 3];
     let mut tmp = [0.0; 3];
     double_scroll_rhs(state, &mut k1);
-    for j in 0..3 { tmp[j] = state[j] + 0.5 * dt * k1[j]; }
+    for j in 0..3 {
+        tmp[j] = state[j] + 0.5 * dt * k1[j];
+    }
     double_scroll_rhs(&tmp, &mut k2);
-    for j in 0..3 { tmp[j] = state[j] + 0.5 * dt * k2[j]; }
+    for j in 0..3 {
+        tmp[j] = state[j] + 0.5 * dt * k2[j];
+    }
     double_scroll_rhs(&tmp, &mut k3);
-    for j in 0..3 { tmp[j] = state[j] + dt * k3[j]; }
+    for j in 0..3 {
+        tmp[j] = state[j] + dt * k3[j];
+    }
     double_scroll_rhs(&tmp, &mut k4);
     for j in 0..3 {
         state[j] += dt / 6.0 * (k1[j] + 2.0 * k2[j] + 2.0 * k3[j] + k4[j]);
@@ -64,12 +70,16 @@ fn rk4_step(state: &mut [f64; 3], dt: f64) {
 
 fn rk4_step_substepped(state: &mut [f64; 3], dt: f64, substeps: usize) {
     let dt_sub = dt / substeps as f64;
-    for _ in 0..substeps { rk4_step(state, dt_sub); }
+    for _ in 0..substeps {
+        rk4_step(state, dt_sub);
+    }
 }
 
 fn generate_double_scroll(n: usize, dt: f64, transient: usize, substeps: usize) -> Vec<f32> {
     let mut state: [f64; 3] = [0.1, 0.0, 0.0];
-    for _ in 0..transient { rk4_step_substepped(&mut state, dt, substeps); }
+    for _ in 0..transient {
+        rk4_step_substepped(&mut state, dt, substeps);
+    }
     let mut out = Vec::with_capacity(n * 3);
     for _ in 0..n {
         rk4_step_substepped(&mut state, dt, substeps);
@@ -86,17 +96,25 @@ fn nrmse(pred: &[f32], truth: &[f32], dim: usize) -> f32 {
     let mut stds = [0.0f32; 8];
     for d in 0..dim {
         let mut mean = 0.0f64;
-        for i in 0..n { mean += truth[i * dim + d] as f64; }
+        for i in 0..n {
+            mean += truth[i * dim + d] as f64;
+        }
         mean /= n as f64;
         let mut var = 0.0f64;
-        for i in 0..n { let dx = truth[i * dim + d] as f64 - mean; var += dx * dx; }
+        for i in 0..n {
+            let dx = truth[i * dim + d] as f64 - mean;
+            var += dx * dx;
+        }
         var /= n as f64;
         stds[d] = var.sqrt() as f32;
     }
     let mut sum = 0.0f32;
     for d in 0..dim {
         let mut err_sq = 0.0f32;
-        for i in 0..n { let e = pred[i * dim + d] - truth[i * dim + d]; err_sq += e * e; }
+        for i in 0..n {
+            let e = pred[i * dim + d] - truth[i * dim + d];
+            err_sq += e * e;
+        }
         sum += (err_sq / n as f32).sqrt() / stds[d].max(1e-12);
     }
     sum / dim as f32
@@ -108,10 +126,15 @@ fn mean_sigma(truth: &[f32], dim: usize) -> f32 {
     let mut sum_std = 0.0f32;
     for d in 0..dim {
         let mut mean = 0.0f64;
-        for i in 0..n { mean += truth[i * dim + d] as f64; }
+        for i in 0..n {
+            mean += truth[i * dim + d] as f64;
+        }
         mean /= n as f64;
         let mut var = 0.0f64;
-        for i in 0..n { let dx = truth[i * dim + d] as f64 - mean; var += dx * dx; }
+        for i in 0..n {
+            let dx = truth[i * dim + d] as f64 - mean;
+            var += dx * dx;
+        }
         var /= n as f64;
         sum_std += var.sqrt() as f32;
     }
@@ -128,7 +151,9 @@ fn threshold_time(pred: &[f32], truth: &[f32], dim: usize, eps: f32, sigma: f32)
             let e = pred[i * dim + d] - truth[i * dim + d];
             err_sq += e * e;
         }
-        if err_sq.sqrt() > bound { return i; }
+        if err_sq.sqrt() > bound {
+            return i;
+        }
     }
     n
 }
@@ -148,8 +173,14 @@ const LR_RANK: usize = 8; // low-rank target rank
 
 fn main() {
     println!("KARC Phase 2 benchmark: higher-order + low-rank on double-scroll");
-    println!("  params: D={}, M={}, K={}, R={}, r={}", D, M, K, R, LR_RANK);
-    println!("  N_train={}, dt={}, Lyapunov time ≈ {} units", N_TRAIN, DT, LYAPUNOV_TIME_UNITS);
+    println!(
+        "  params: D={}, M={}, K={}, R={}, r={}",
+        D, M, K, R, LR_RANK
+    );
+    println!(
+        "  N_train={}, dt={}, Lyapunov time ≈ {} units",
+        N_TRAIN, DT, LYAPUNOV_TIME_UNITS
+    );
 
     // Generate trajectory.
     let traj_raw = generate_double_scroll(N_TRAIN + K + 50, DT, 1000, SUBSTEPS);
@@ -162,8 +193,12 @@ fn main() {
         let mut hi = f32::NEG_INFINITY;
         for i in 0..(traj.len() / D) {
             let v = traj[i * D + d];
-            if v < lo { lo = v; }
-            if v > hi { hi = v; }
+            if v < lo {
+                lo = v;
+            }
+            if v > hi {
+                hi = v;
+            }
         }
         let range = (hi - lo).max(1e-6);
         offset[d] = (hi + lo) * 0.5;
@@ -184,10 +219,14 @@ fn main() {
         let mut delay = [0.0f32; K * D];
         for lag in 0..K {
             let idx = t - lag;
-            for d in 0..D { delay[lag * D + d] = traj[idx * D + d]; }
+            for d in 0..D {
+                delay[lag * D + d] = traj[idx * D + d];
+            }
         }
         let mut target = [0.0f32; D];
-        for d in 0..D { target[d] = traj[(t + 1) * D + d]; }
+        for d in 0..D {
+            target[d] = traj[(t + 1) * D + d];
+        }
         f1.accumulate_pair(&delay, &target);
     }
     let lambda = 5e-3f32;
@@ -214,38 +253,56 @@ fn main() {
     let mut row_buf = vec![0.0f32; d_h_ho];
     {
         let basis = ChebyshevBasis::<M>::new();
-        let mut pair_idx = 0;
-        for t in (K - 1)..(n_total - 1) {
+        for (pair_idx, t) in ((K - 1)..(n_total - 1)).enumerate() {
             let mut delay = [0.0f32; K * D];
             for lag in 0..K {
                 let idx = t - lag;
-                for d in 0..D { delay[lag * D + d] = traj[idx * D + d]; }
+                for d in 0..D {
+                    delay[lag * D + d] = traj[idx * D + d];
+                }
             }
             feature_expand_higher_order::<ChebyshevBasis<M>, M, R>(&delay, &basis, &mut row_buf);
             features_ho[pair_idx * d_h_ho..(pair_idx + 1) * d_h_ho].copy_from_slice(&row_buf);
-            for d in 0..D { targets_ho[pair_idx * D + d] = traj[(t + 1) * D + d]; }
-            pair_idx += 1;
+            for d in 0..D {
+                targets_ho[pair_idx * D + d] = traj[(t + 1) * D + d];
+            }
         }
     }
     // Chunked Gram (no lambda — low_rank_fit / the direct solve adds it).
     let feature_iter = (0..n_pairs).map(|i| &features_ho[i * d_h_ho..(i + 1) * d_h_ho] as &[f32]);
     chunked_gram_into(feature_iter, &mut gram_ho, 0.0, d_h_ho);
     // Cov = X^T Y.
-    for i in 0..d_h_ho { for d in 0..D { cov_ho[i * D + d] = 0.0; } }
+    for i in 0..d_h_ho {
+        for d in 0..D {
+            cov_ho[i * D + d] = 0.0;
+        }
+    }
     for p in 0..n_pairs {
         let row = &features_ho[p * d_h_ho..(p + 1) * d_h_ho];
         let target = &targets_ho[p * D..(p + 1) * D];
         for i in 0..d_h_ho {
             let ri = row[i] as f64;
-            for d in 0..D { cov_ho[i * D + d] += ri * target[d] as f64; }
+            for d in 0..D {
+                cov_ho[i * D + d] += ri * target[d] as f64;
+            }
         }
     }
     // Direct ridge solve: W^T = (G + λI)^{-1} Cov  (f64).
-    for i in 0..d_h_ho { gram_ho[i * d_h_ho + i] += lambda64; }
+    for i in 0..d_h_ho {
+        gram_ho[i * d_h_ho + i] += lambda64;
+    }
     let mut chol_ho = vec![0.0f64; d_h_ho * d_h_ho];
     let mut z_ho = vec![0.0f64; d_h_ho * D];
     let mut wt_ho = vec![0.0f64; d_h_ho * D];
-    ridge_solve_direct_f64(&mut wt_ho, &mut chol_ho, &mut z_ho, &gram_ho, &cov_ho, d_h_ho, D);
+    ridge_solve_direct_f64(
+        &mut wt_ho,
+        &mut chol_ho,
+        &mut z_ho,
+        &gram_ho,
+        &cov_ho,
+        d_h_ho,
+        D,
+    );
     // Wout (D × d_h_ho, f32) = transpose of W^T.
     let mut wout_ho = vec![0.0f32; D * d_h_ho];
     for d in 0..D {
@@ -257,7 +314,14 @@ fn main() {
     // full G1 gate (NRMSE over 1 LT + threshold at ε=0.1).
     let horizon_20lt = (20.0 * SAMPLES_PER_LT).ceil() as usize;
     let (pred_ho, truth_ho) = autonomous_rollout_higher_order(
-        &wout_ho, &traj, &traj_raw, &scale, &offset, n_total, d_h_ho, horizon_20lt,
+        &wout_ho,
+        &traj,
+        &traj_raw,
+        &scale,
+        &offset,
+        n_total,
+        d_h_ho,
+        horizon_20lt,
     );
     let n_one_lt = (1.0 * SAMPLES_PER_LT).ceil() as usize;
     let nrmse_2 = nrmse(&pred_ho[..n_one_lt * D], &truth_ho[..n_one_lt * D], D);
@@ -265,25 +329,57 @@ fn main() {
     let thr_sample_ho = threshold_time(&pred_ho, &truth_ho, D, 0.1, sigma_ho);
     let thr_lt_ho = thr_sample_ho as f64 / SAMPLES_PER_LT;
     println!("  NRMSE(1 LT) = {:.6e}", nrmse_2);
-    println!("  threshold (ε=0.1): {} samples = {:.2} LT", thr_sample_ho, thr_lt_ho);
+    println!(
+        "  threshold (ε=0.1): {} samples = {:.2} LT",
+        thr_sample_ho, thr_lt_ho
+    );
     println!("  σ(u) mean per-coord: {:.4}", sigma_ho);
-    println!("  G1 NRMSE  ≤ 1.0e-3 : {}", if nrmse_2 <= 1.0e-3 { "PASS ✅" } else { "FAIL ❌" });
-    println!("  G1 thresh ≥ 8 LT   : {}", if thr_lt_ho >= 8.0 { "PASS ✅" } else { "FAIL ❌" });
+    println!(
+        "  G1 NRMSE  ≤ 1.0e-3 : {}",
+        if nrmse_2 <= 1.0e-3 {
+            "PASS ✅"
+        } else {
+            "FAIL ❌"
+        }
+    );
+    println!(
+        "  G1 thresh ≥ 8 LT   : {}",
+        if thr_lt_ho >= 8.0 {
+            "PASS ✅"
+        } else {
+            "FAIL ❌"
+        }
+    );
     println!("  paper reference: NRMSE 5.3e-4, threshold 16.7 LT");
 
     // ── Config 3: First-order low-rank r=8 ──
     println!("\n── Config 3: first-order low-rank r={} (ALS) ──", LR_RANK);
-    f1.fit_low_rank(LR_RANK, lambda, 100, 1e-10).expect("fit_low_rank");
+    f1.fit_low_rank(LR_RANK, lambda, 100, 1e-10)
+        .expect("fit_low_rank");
     let nrmse_3 = autonomous_rollout_low_rank(&mut f1, &traj, &traj_raw, &scale, &offset, n_total);
-    println!("  d_h = {}, r = {}, NRMSE(1 LT) = {:.6e}", K * D * M, LR_RANK, nrmse_3);
+    println!(
+        "  d_h = {}, r = {}, NRMSE(1 LT) = {:.6e}",
+        K * D * M,
+        LR_RANK,
+        nrmse_3
+    );
 
     // ── Summary ──
     println!("\n── T2.5 summary ────────────────────────────────────────────");
     println!("  first-order full-rank:  NRMSE = {:.6e}", nrmse_1);
-    println!("  higher-order R=2 full:  NRMSE = {:.6e}  (paper headline 5.3e-4)", nrmse_2);
-    println!("  first-order low-rank:   NRMSE = {:.6e}  (r={})", nrmse_3, LR_RANK);
+    println!(
+        "  higher-order R=2 full:  NRMSE = {:.6e}  (paper headline 5.3e-4)",
+        nrmse_2
+    );
+    println!(
+        "  first-order low-rank:   NRMSE = {:.6e}  (r={})",
+        nrmse_3, LR_RANK
+    );
     let ratio = nrmse_3 / nrmse_1.max(1e-12);
-    println!("  low-rank / full-rank ratio: {:.3}× (target ≤ 1.5×)", ratio);
+    println!(
+        "  low-rank / full-rank ratio: {:.3}× (target ≤ 1.5×)",
+        ratio
+    );
     if ratio <= 1.5 {
         println!("  T2.5 gate: PASS ✅");
     } else {
@@ -305,7 +401,9 @@ fn autonomous_rollout_nrmse(
     let mut delay = [0.0f32; K * D];
     for lag in 0..K {
         let idx = seed_t - lag;
-        for d in 0..D { delay[lag * D + d] = traj[idx * D + d]; }
+        for d in 0..D {
+            delay[lag * D + d] = traj[idx * D + d];
+        }
     }
     let mut true_state: [f64; 3] = [
         traj_raw[seed_t * D] as f64,
@@ -322,7 +420,9 @@ fn autonomous_rollout_nrmse(
         truth.push(true_state[2] as f32);
         let mut out_norm = [0.0f32; D];
         f.forecast_into(&cur_delay, &mut out_norm);
-        for d in 0..D { pred.push(out_norm[d] / scale[d] + offset[d]); }
+        for d in 0..D {
+            pred.push(out_norm[d] / scale[d] + offset[d]);
+        }
         let mut new_delay = [0.0f32; K * D];
         new_delay[..D].copy_from_slice(&out_norm);
         new_delay[D..].copy_from_slice(&cur_delay[..(K - 1) * D]);
@@ -333,6 +433,7 @@ fn autonomous_rollout_nrmse(
 
 /// Autonomous rollout with an external Wout matrix (higher-order full-rank).
 /// Returns `(pred, truth)` over `horizon` steps in RAW (un-normalized) space.
+#[allow(clippy::too_many_arguments)] // example helper: 8 params match the higher-order RC rollout signature
 fn autonomous_rollout_higher_order(
     wout: &[f32],
     traj: &[f32],
@@ -347,7 +448,9 @@ fn autonomous_rollout_higher_order(
     let mut delay = [0.0f32; K * D];
     for lag in 0..K {
         let idx = seed_t - lag;
-        for d in 0..D { delay[lag * D + d] = traj[idx * D + d]; }
+        for d in 0..D {
+            delay[lag * D + d] = traj[idx * D + d];
+        }
     }
     let mut true_state: [f64; 3] = [
         traj_raw[seed_t * D] as f64,
@@ -369,10 +472,14 @@ fn autonomous_rollout_higher_order(
         // out = Wout · psi.
         for d in 0..D {
             let mut s = 0.0f32;
-            for j in 0..d_h_ho { s += wout[d * d_h_ho + j] * psi[j]; }
+            for j in 0..d_h_ho {
+                s += wout[d * d_h_ho + j] * psi[j];
+            }
             out_norm[d] = s;
         }
-        for d in 0..D { pred.push(out_norm[d] / scale[d] + offset[d]); }
+        for d in 0..D {
+            pred.push(out_norm[d] / scale[d] + offset[d]);
+        }
         let mut new_delay = [0.0f32; K * D];
         new_delay[..D].copy_from_slice(&out_norm);
         new_delay[D..].copy_from_slice(&cur_delay[..(K - 1) * D]);
@@ -395,7 +502,9 @@ fn autonomous_rollout_low_rank(
     let mut delay = [0.0f32; K * D];
     for lag in 0..K {
         let idx = seed_t - lag;
-        for d in 0..D { delay[lag * D + d] = traj[idx * D + d]; }
+        for d in 0..D {
+            delay[lag * D + d] = traj[idx * D + d];
+        }
     }
     let mut true_state: [f64; 3] = [
         traj_raw[seed_t * D] as f64,
@@ -412,7 +521,9 @@ fn autonomous_rollout_low_rank(
         truth.push(true_state[2] as f32);
         let mut out_norm = [0.0f32; D];
         f.forecast_low_rank_into(&cur_delay, &mut out_norm);
-        for d in 0..D { pred.push(out_norm[d] / scale[d] + offset[d]); }
+        for d in 0..D {
+            pred.push(out_norm[d] / scale[d] + offset[d]);
+        }
         let mut new_delay = [0.0f32; K * D];
         new_delay[..D].copy_from_slice(&out_norm);
         new_delay[D..].copy_from_slice(&cur_delay[..(K - 1) * D]);

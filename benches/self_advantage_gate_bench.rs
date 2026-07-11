@@ -32,7 +32,7 @@
 
 #![cfg(feature = "self_advantage_gate")]
 
-use katgpt_rs::pruners::self_advantage::{self_advantage, AdvantageMarginGate};
+use katgpt_rs::pruners::self_advantage::{AdvantageMarginGate, self_advantage};
 use std::time::{Duration, Instant};
 
 // ── Constants ────────────────────────────────────────────────────
@@ -378,7 +378,11 @@ fn main() {
     );
     println!(
         "  G4 (robust across vocabs 8..1024):           {}",
-        if all_g1_pass && all_g2_pass { "✅ PASS" } else { "❌ FAIL" }
+        if all_g1_pass && all_g2_pass {
+            "✅ PASS"
+        } else {
+            "❌ FAIL"
+        }
     );
     println!();
 

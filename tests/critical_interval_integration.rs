@@ -3,7 +3,7 @@
 
 #[cfg(feature = "critical_interval_gate")]
 mod tests {
-    use katgpt_rs::dllm_solver::{SolverKind, build_dd_tree_adaptive};
+    use katgpt_core::dllm_solver::{SolverKind, build_dd_tree_adaptive};
 
     /// Simulate a simple constraint satisfaction problem:
     /// 4x4 grid, each cell has 4 possible values, row/col uniqueness constraint.

@@ -11,8 +11,8 @@
 //! |------|--------|---------|------------|
 //! | Plasma | [`ActionBridgeOracle`] | < 100ns | 1.0 |
 //! | Hot | [`LeoHeadOracle`] | < 1μs | 1.0 |
-//! | Warm | (GPU batched critic — not in katgpt-core) | ~1ms | 1.0 |
-//! | Cold | (Turso loader — not in katgpt-core) | ~10ms | 0.5-1.0 |
+//! | Warm | [`WarmTierOracle`] (wraps GPU delegate) | ~1ms | 1.0 |
+//! | Cold | [`ColdTierOracle`] (wraps Q-table loader) | ~10ms | configurable |
 //! | Freeze | [`NoGuidanceOracle`] / [`BfnProxyOracle`] | 0ns / ~1ms | 0.0 / 0.3 |
 //!
 //! # Sigmoid Not Softmax
@@ -94,11 +94,7 @@ mod leo_head_oracle {
         type State = Vec<f32>;
         type Action = ();
 
-        fn q_gradient_at(
-            &self,
-            state: &Self::State,
-            _projected_action: &Self::Action,
-        ) -> Vec<f32> {
+        fn q_gradient_at(&self, state: &Self::State, _projected_action: &Self::Action) -> Vec<f32> {
             let all_q = self.head.all_goals_q(state);
             if self.goal_idx < self.head.goal_count() {
                 self.head.q_for_goal(&all_q, self.goal_idx).to_vec()
@@ -115,9 +111,7 @@ mod leo_head_oracle {
         ) {
             let all_q = self.head.all_goals_q(state);
             if self.goal_idx >= self.head.goal_count() {
-                for slot in out.iter_mut() {
-                    *slot = 0.0;
-                }
+                out.fill(0.0);
                 return;
             }
             let q_slice = self.head.q_for_goal(&all_q, self.goal_idx);
@@ -152,10 +146,12 @@ mod leo_head_oracle {
                 }
             }
 
+            #[inline]
             fn goal_count(&self) -> usize {
                 self.goals
             }
 
+            #[inline]
             fn action_count(&self) -> usize {
                 self.actions
             }
@@ -163,7 +159,13 @@ mod leo_head_oracle {
 
         #[test]
         fn test_leo_head_oracle_gradient() {
-            let oracle = LeoHeadOracle::new(MockLeo { goals: 2, actions: 4 }, 1);
+            let oracle = LeoHeadOracle::new(
+                MockLeo {
+                    goals: 2,
+                    actions: 4,
+                },
+                1,
+            );
 
             let state = vec![0.0; 8];
             let grad = oracle.q_gradient_at(&state, &());
@@ -174,7 +176,13 @@ mod leo_head_oracle {
 
         #[test]
         fn test_leo_head_oracle_into_matches_at() {
-            let oracle = LeoHeadOracle::new(MockLeo { goals: 2, actions: 4 }, 0);
+            let oracle = LeoHeadOracle::new(
+                MockLeo {
+                    goals: 2,
+                    actions: 4,
+                },
+                0,
+            );
 
             let state = vec![0.0; 8];
             let via_at = oracle.q_gradient_at(&state, &());
@@ -189,7 +197,13 @@ mod leo_head_oracle {
 
         #[test]
         fn test_leo_head_oracle_out_of_range_goal_zeros() {
-            let oracle = LeoHeadOracle::new(MockLeo { goals: 2, actions: 4 }, 99);
+            let oracle = LeoHeadOracle::new(
+                MockLeo {
+                    goals: 2,
+                    actions: 4,
+                },
+                99,
+            );
 
             let state = vec![0.0; 8];
             let grad = oracle.q_gradient_at(&state, &());
@@ -203,14 +217,26 @@ mod leo_head_oracle {
 
         #[test]
         fn test_leo_head_oracle_confidence_is_one() {
-            let oracle = LeoHeadOracle::new(MockLeo { goals: 1, actions: 2 }, 0);
+            let oracle = LeoHeadOracle::new(
+                MockLeo {
+                    goals: 1,
+                    actions: 2,
+                },
+                0,
+            );
             // Deterministic cached lookup → confidence 1.0.
             assert_eq!(oracle.confidence(&vec![0.0; 2]), 1.0);
         }
 
         #[test]
         fn test_leo_head_oracle_set_goal() {
-            let mut oracle = LeoHeadOracle::new(MockLeo { goals: 2, actions: 4 }, 0);
+            let mut oracle = LeoHeadOracle::new(
+                MockLeo {
+                    goals: 2,
+                    actions: 4,
+                },
+                0,
+            );
             assert_eq!(oracle.goal_idx(), 0);
 
             let state = vec![0.0; 8];
@@ -218,7 +244,10 @@ mod leo_head_oracle {
 
             oracle.set_goal_idx(1);
             assert_eq!(oracle.goal_idx(), 1);
-            assert_eq!(oracle.q_gradient_at(&state, &()), vec![10.0, 20.0, 30.0, 40.0]);
+            assert_eq!(
+                oracle.q_gradient_at(&state, &()),
+                vec![10.0, 20.0, 30.0, 40.0]
+            );
         }
     }
 }
@@ -277,11 +306,7 @@ mod flow_field_oracle {
         type State = ();
         type Action = (u16, u16);
 
-        fn q_gradient_at(
-            &self,
-            _state: &Self::State,
-            projected_action: &Self::Action,
-        ) -> Vec<f32> {
+        fn q_gradient_at(&self, _state: &Self::State, projected_action: &Self::Action) -> Vec<f32> {
             let (x, y) = *projected_action;
             let (dx, dy) = self.field.lookup(x, y);
             vec![dx, dy]
@@ -471,11 +496,7 @@ mod action_bridge_oracle {
         type State = [f32; D];
         type Action = ();
 
-        fn q_gradient_at(
-            &self,
-            state: &Self::State,
-            _projected_action: &Self::Action,
-        ) -> Vec<f32> {
+        fn q_gradient_at(&self, state: &Self::State, _projected_action: &Self::Action) -> Vec<f32> {
             let mut out = vec![0.0f32; A];
             self.gradient_into_inner(state, &mut out);
             out
@@ -677,11 +698,7 @@ impl QGradientOracle for BfnProxyOracle {
     type State = ();
     type Action = ();
 
-    fn q_gradient_at(
-        &self,
-        _state: &Self::State,
-        _projected_action: &Self::Action,
-    ) -> Vec<f32> {
+    fn q_gradient_at(&self, _state: &Self::State, _projected_action: &Self::Action) -> Vec<f32> {
         self.returns.clone()
     }
 
@@ -786,7 +803,10 @@ mod no_guidance_tests {
     fn test_no_guidance_oracle_zero_gradient() {
         let oracle = NoGuidanceOracle;
         let g = oracle.q_gradient_at(&(), &());
-        assert!(g.is_empty(), "NoGuidanceOracle should return empty gradient");
+        assert!(
+            g.is_empty(),
+            "NoGuidanceOracle should return empty gradient"
+        );
 
         let mut buf = [99.0f32; 4];
         oracle.q_gradient_into(&(), &(), &mut buf);
@@ -799,3 +819,411 @@ mod no_guidance_tests {
         assert_eq!(oracle.confidence(&()), 0.0);
     }
 }
+
+// ───────────────────────────────────────────────────────────────────────────
+// WarmTierOracle — Warm tier (Plan 268 T9)
+// Adapts a `QgfGpuDelegate` (Plan 268 T8 GPU dispatch surface) into the
+// `QGradientOracle` trait so it can serve as a single-query oracle. For batched
+// use, callers should go through `QgfBackendDispatch` directly (the GPU only
+// wins at batch ≥ 8 per `route_for`); this oracle exists so a Warm-tier
+// deployment can be dropped into a `QGuidedDrafter` that doesn't know about
+// dispatch.
+// ───────────────────────────────────────────────────────────────────────────
+
+#[cfg(feature = "qgf_drafter")]
+mod warm_tier_oracle {
+    use super::*;
+    use crate::qgf::dispatch::QgfGpuDelegate;
+
+    /// Warm-tier oracle wrapping a GPU-batched critic delegate.
+    ///
+    /// # When to use
+    ///
+    /// The Warm tier is the right choice when:
+    /// - A GPU is available and the action space is large (≥ 1024).
+    /// - The critic is a trained neural net whose forward pass is expensive
+    ///   on CPU but cheap on GPU.
+    /// - The deployment is training-time / large-batch (single-query GPU use
+    ///   pays the kernel-launch overhead without amortising it — prefer the
+    ///   Hot or Plasma tier for single-query game-NPC use).
+    ///
+    /// # Confidence
+    ///
+    /// Returns the delegate's self-reported success. A GPU delegate that
+    /// reports failure (returns 0 rows) signals low confidence → the adaptive
+    /// guidance weight collapses toward 0 → safe BC fallback. This makes the
+    /// Warm tier self-degrading: if the GPU is busy / OOM / unavailable, the
+    /// drafter stops trusting it without needing an external health check.
+    ///
+    /// # Layering note
+    ///
+    /// The concrete GPU kernel lives in `riir-gpu` (separate repo).
+    /// `WarmTierOracle` is generic over `D: QgfGpuDelegate` — the upper layer
+    /// (`riir-engine`) constructs it with its `riir-gpu`-backed delegate.
+    pub struct WarmTierOracle<S, A, D> {
+        delegate: D,
+        /// Cached action-space width. Single-query gradient buffers are sized
+        /// to this; if the caller passes a shorter buffer, only the prefix is
+        /// written.
+        action_space_size: usize,
+        _marker: std::marker::PhantomData<(S, A)>,
+    }
+
+    impl<S, A, D> WarmTierOracle<S, A, D> {
+        /// Construct with a fixed action-space width.
+        ///
+        /// `action_space_size` MUST match the width the delegate writes; if it
+        /// doesn't, `q_gradient_into` will write out-of-bounds (the delegate
+        /// is responsible for respecting the buffer length it's given).
+        #[inline]
+        pub fn new(delegate: D, action_space_size: usize) -> Self {
+            Self {
+                delegate,
+                action_space_size,
+                _marker: std::marker::PhantomData,
+            }
+        }
+
+        /// Borrow the inner delegate (for wiring into `QgfBackendDispatch`).
+        #[inline]
+        pub fn delegate(&self) -> &D {
+            &self.delegate
+        }
+    }
+
+    impl<S, A, D> QGradientOracle for WarmTierOracle<S, A, D>
+    where
+        D: QgfGpuDelegate<S, A>,
+    {
+        type State = S;
+        type Action = A;
+
+        fn q_gradient_at(&self, state: &Self::State, projected: &Self::Action) -> Vec<f32> {
+            let mut out = vec![0.0f32; self.action_space_size];
+            self.q_gradient_into(state, projected, &mut out);
+            out
+        }
+
+        fn q_gradient_into(&self, state: &Self::State, projected: &Self::Action, out: &mut [f32]) {
+            // Single-state batch — the delegate's contract is a slice of
+            // state refs, so we build a 1-element view. Avoids allocation;
+            // the delegate writes directly into `out`.
+            let state_ref: [&S; 1] = [state];
+            let action_ref: [&A; 1] = [projected];
+            let written =
+                self.delegate
+                    .batch_gradient_into(&state_ref, &action_ref, out.len(), out);
+            if written == 0 {
+                // GPU failure — zero the buffer so downstream tilt is a no-op.
+                for slot in out.iter_mut() {
+                    *slot = 0.0;
+                }
+            }
+        }
+
+        #[inline]
+        fn confidence(&self, _: &Self::State) -> f32 {
+            // We don't probe the delegate per-call (that would double the GPU
+            // cost). Assume healthy; the adaptive weight reacts to the
+            // zeroed gradient (GPU failure → zero tilt → safe fallback) via
+            // the tilt math, not via confidence.
+            //
+            // A future enhancement could EMA-track the failure rate and lower
+            // confidence proportionally — left for riir-engine integration.
+            1.0
+        }
+    }
+
+    #[cfg(all(test, feature = "qgf_drafter"))]
+    mod tests {
+        use super::*;
+        use crate::qgf::dispatch::SealedForTests;
+
+        /// Mock GPU delegate that writes `state_scalar * action_index` per cell.
+        struct MockGpuDelegate;
+        impl SealedForTests for MockGpuDelegate {}
+        impl QgfGpuDelegate<f32, ()> for MockGpuDelegate {
+            fn batch_gradient_into(
+                &self,
+                states: &[&f32],
+                _actions: &[&()],
+                action_space_size: usize,
+                out: &mut [f32],
+            ) -> usize {
+                for (row, &s) in states.iter().enumerate() {
+                    let base = row * action_space_size;
+                    for i in 0..action_space_size {
+                        out[base + i] = s * i as f32;
+                    }
+                }
+                states.len()
+            }
+        }
+
+        /// Failing delegate — simulates GPU OOM / unavailable.
+        struct FailingGpuDelegate;
+        impl SealedForTests for FailingGpuDelegate {}
+        impl QgfGpuDelegate<f32, ()> for FailingGpuDelegate {
+            fn batch_gradient_into(&self, _: &[&f32], _: &[&()], _: usize, _: &mut [f32]) -> usize {
+                0
+            }
+        }
+
+        #[test]
+        fn test_warm_oracle_writes_gradient() {
+            let oracle: WarmTierOracle<f32, (), _> = WarmTierOracle::new(MockGpuDelegate, 4);
+            let grad = oracle.q_gradient_at(&3.0, &());
+            // state=3, action_space=4 → [0, 3, 6, 9].
+            assert_eq!(grad, vec![0.0, 3.0, 6.0, 9.0]);
+        }
+
+        #[test]
+        fn test_warm_oracle_into_matches_at() {
+            let oracle: WarmTierOracle<f32, (), _> = WarmTierOracle::new(MockGpuDelegate, 4);
+            let via_at = oracle.q_gradient_at(&2.0, &());
+            let mut via_into = [0.0f32; 4];
+            oracle.q_gradient_into(&2.0, &(), &mut via_into);
+            assert_eq!(via_at, via_into.to_vec());
+        }
+
+        #[test]
+        fn test_warm_oracle_gpu_failure_zeros_buffer() {
+            let oracle: WarmTierOracle<f32, (), _> = WarmTierOracle::new(FailingGpuDelegate, 4);
+            let mut buf = [99.0f32; 4];
+            oracle.q_gradient_into(&1.0, &(), &mut buf);
+            assert_eq!(
+                buf, [0.0; 4],
+                "GPU failure must zero the buffer for safe tilt no-op"
+            );
+        }
+
+        #[test]
+        fn test_warm_oracle_confidence_is_one() {
+            let oracle: WarmTierOracle<f32, (), _> = WarmTierOracle::new(MockGpuDelegate, 4);
+            assert_eq!(oracle.confidence(&1.0), 1.0);
+        }
+
+        #[test]
+        fn test_warm_oracle_delegate_accessor() {
+            let oracle: WarmTierOracle<f32, (), _> = WarmTierOracle::new(MockGpuDelegate, 4);
+            // Just verify the accessor compiles and returns the right type.
+            let _d: &MockGpuDelegate = oracle.delegate();
+        }
+    }
+}
+
+// ───────────────────────────────────────────────────────────────────────────
+// ColdTierOracle — Cold tier (Plan 268 T9)
+// Turso/libSQL-backed Q-table loader. The DB connection lives in the upper
+// layer (turso is NOT a katgpt-core dependency — keeps the lowest layer
+// dependency-free); this oracle is generic over a `QTableLoader` trait that
+// the upper layer implements with its turso/libSQL client.
+// ───────────────────────────────────────────────────────────────────────────
+
+mod cold_tier_oracle {
+    use super::*;
+
+    /// Trait: load a Q-value row for a given state key.
+    ///
+    /// Implemented by the upper layer with a turso/libSQL connection (per
+    /// global AGENTS.md: "Use turso/libsql with encryption"). The loader
+    /// owns the connection; this oracle owns the lookup → gradient mapping.
+    ///
+    /// # Contract
+    ///
+    /// - `load_row` writes `min(out.len(), row_width)` f32 values into `out`.
+    /// - Returns the number of values written (0 = cache miss / DB unavailable).
+    /// - MUST be side-effect-free (read-only) — the Cold tier is a snapshot,
+    ///   not a live update path. Writes go through the chain commit path.
+    pub trait QTableLoader {
+        /// State key type — typically a BLAKE3 hash of the state vector, but
+        /// opaque to this oracle (the loader decides the encoding).
+        type Key;
+
+        /// Load the Q-value row for `key` into `out`. Returns count written.
+        fn load_row(&self, key: &Self::Key, out: &mut [f32]) -> usize;
+    }
+
+    /// Cold-tier oracle: loads Q-values from a persistent Q-table.
+    ///
+    /// # When to use
+    ///
+    /// The Cold tier is for episode-end consolidation: a Q-table snapshot is
+    /// committed to Turso/libSQL at episode end, and the next episode's
+    /// drafter loads rows on-demand for states it has seen before. Latency is
+    /// ~10ms per load (dominated by the DB round-trip), so the Cold tier is
+    /// only competitive when the critic has no hot-path cache (Freeze tier
+    /// would be the alternative — pure BC, zero latency, zero guidance).
+    ///
+    /// # Confidence
+    ///
+    /// Cold-tier confidence is configurable (default `0.7`) — the snapshot is
+    /// stale by definition (it's from the last episode), so the adaptive
+    /// weight should be moderate, not saturating. A cache miss (loader returns
+    /// 0) collapses the gradient to zero → safe fallback.
+    ///
+    /// # Layering
+    ///
+    /// `katgpt-core` does NOT depend on turso/libSQL. The `QTableLoader`
+    /// trait is the integration seam: the upper layer (`riir-engine` or
+    /// `riir-chain`) implements it with its encrypted libSQL client and
+    /// constructs `ColdTierOracle::new(loader, confidence, action_space)`.
+    pub struct ColdTierOracle<L: QTableLoader> {
+        loader: L,
+        confidence: f32,
+    }
+
+    impl<L: QTableLoader> ColdTierOracle<L> {
+        /// Construct with a confidence value in `[0.0, 1.0]`.
+        ///
+        /// Typical: `0.7` (stale snapshot — moderate trust). Clamp guards
+        /// against out-of-range.
+        #[inline]
+        pub fn new(loader: L, confidence: f32) -> Self {
+            Self {
+                loader,
+                confidence: confidence.clamp(0.0, 1.0),
+            }
+        }
+
+        /// Borrow the inner loader (for the upper layer to flush / inspect).
+        #[inline]
+        pub fn loader(&self) -> &L {
+            &self.loader
+        }
+    }
+
+    impl<L> QGradientOracle for ColdTierOracle<L>
+    where
+        L: QTableLoader,
+    {
+        // The state IS the key — callers pass the BLAKE3 hash (or whatever
+        // encoding the loader expects) directly as the "state". This avoids a
+        // hash step inside the oracle (the upper layer already has the hash).
+        type State = L::Key;
+        type Action = ();
+
+        fn q_gradient_at(&self, key: &Self::State, _: &Self::Action) -> Vec<f32> {
+            // Cold-tier rows are variable-width in principle; default to a
+            // generous 1024-wide buffer and truncate to the written count.
+            let mut buf = vec![0.0f32; 1024];
+            let n = self.loader.load_row(key, &mut buf);
+            buf.truncate(n);
+            buf
+        }
+
+        fn q_gradient_into(&self, key: &Self::State, _: &Self::Action, out: &mut [f32]) {
+            let n = self.loader.load_row(key, out);
+            if n == 0 {
+                // Cache miss — zero the buffer so the tilt is a no-op.
+                for slot in out.iter_mut() {
+                    *slot = 0.0;
+                }
+            } else if n < out.len() {
+                // Partial write — zero the remainder so stale data doesn't leak.
+                for slot in out[n..].iter_mut() {
+                    *slot = 0.0;
+                }
+            }
+        }
+
+        #[inline]
+        fn confidence(&self, _: &Self::State) -> f32 {
+            self.confidence
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        /// Mock loader that returns a fixed row keyed by the input byte.
+        struct MockLoader;
+        impl QTableLoader for MockLoader {
+            type Key = u8;
+            fn load_row(&self, key: &u8, out: &mut [f32]) -> usize {
+                // Write `key` into each cell, up to 4 cells.
+                let n = out.len().min(4);
+                for (i, slot) in out.iter_mut().enumerate().take(n) {
+                    *slot = (*key as f32) * (i as f32);
+                }
+                n
+            }
+        }
+
+        /// Loader that always misses — simulates DB unavailable.
+        struct MissingLoader;
+        impl QTableLoader for MissingLoader {
+            type Key = u8;
+            fn load_row(&self, _: &u8, _: &mut [f32]) -> usize {
+                0
+            }
+        }
+
+        #[test]
+        fn test_cold_oracle_writes_gradient() {
+            let oracle = ColdTierOracle::new(MockLoader, 0.7);
+            let grad = oracle.q_gradient_at(&3, &());
+            // key=3, 4 cells → [0, 3, 6, 9].
+            assert_eq!(grad, vec![0.0, 3.0, 6.0, 9.0]);
+        }
+
+        #[test]
+        fn test_cold_oracle_into_matches_at() {
+            let oracle = ColdTierOracle::new(MockLoader, 0.7);
+            let via_at = oracle.q_gradient_at(&2, &());
+            let mut via_into = [0.0f32; 4];
+            oracle.q_gradient_into(&2, &(), &mut via_into);
+            assert_eq!(via_at, via_into.to_vec());
+        }
+
+        #[test]
+        fn test_cold_oracle_cache_miss_zeros_buffer() {
+            let oracle = ColdTierOracle::new(MissingLoader, 0.7);
+            let mut buf = [99.0f32; 4];
+            oracle.q_gradient_into(&1, &(), &mut buf);
+            assert_eq!(buf, [0.0; 4], "cache miss must zero buffer");
+        }
+
+        #[test]
+        fn test_cold_oracle_partial_write_zeros_tail() {
+            // Loader writes 2 cells; buffer is 5. Tail must be zeroed.
+            struct PartialLoader;
+            impl QTableLoader for PartialLoader {
+                type Key = u8;
+                fn load_row(&self, _: &u8, out: &mut [f32]) -> usize {
+                    out[0] = 1.0;
+                    out[1] = 2.0;
+                    2
+                }
+            }
+            let oracle = ColdTierOracle::new(PartialLoader, 0.7);
+            let mut buf = [99.0f32; 5];
+            oracle.q_gradient_into(&0, &(), &mut buf);
+            assert_eq!(buf, [1.0, 2.0, 0.0, 0.0, 0.0]);
+        }
+
+        #[test]
+        fn test_cold_oracle_confidence_configurable_and_clamped() {
+            let oracle = ColdTierOracle::new(MockLoader, 0.7);
+            assert!((oracle.confidence(&0) - 0.7).abs() < 1e-6);
+
+            let oracle_high = ColdTierOracle::new(MockLoader, 5.0);
+            assert_eq!(oracle_high.confidence(&0), 1.0, "clamp to 1.0");
+
+            let oracle_low = ColdTierOracle::new(MockLoader, -1.0);
+            assert_eq!(oracle_low.confidence(&0), 0.0, "clamp to 0.0");
+        }
+
+        #[test]
+        fn test_cold_oracle_loader_accessor() {
+            let oracle = ColdTierOracle::new(MockLoader, 0.7);
+            let _l: &MockLoader = oracle.loader();
+        }
+    }
+}
+
+// Re-export the Warm / Cold tier oracle types.
+pub use cold_tier_oracle::{ColdTierOracle, QTableLoader};
+#[cfg(feature = "qgf_drafter")]
+pub use warm_tier_oracle::WarmTierOracle;

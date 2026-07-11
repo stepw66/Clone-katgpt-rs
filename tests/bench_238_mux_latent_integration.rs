@@ -6,13 +6,13 @@
 //! raw tokens through compression, expansion, prefill planning, budget
 //! enforcement, and selective retrieval.
 
-use katgpt_rs::mux_latent::{
+use katgpt_core::mux_latent::{
     CompressionRatio, LatentContextBuffer, LatentPrefillAdapter, MuxLatentConfig, MuxLatentEncoder,
     expand_all, expand_segment, forward_prefill_with_compression, select_segments_to_expand,
 };
 
 #[cfg(feature = "lclm_adaptive_lod")]
-use katgpt_rs::mux_latent::SpectralLOD;
+use katgpt_core::mux_latent::SpectralLOD;
 
 // ── Helpers ────────────────────────────────────────────────────────
 
@@ -34,9 +34,7 @@ fn make_mixed_tokens() -> Vec<u32> {
             }
         } else {
             // Repetitive: same token repeated
-            for _ in 0..128 {
-                tokens.push(42);
-            }
+            tokens.extend(std::iter::repeat_n(42, 128));
         }
     }
     tokens
@@ -160,8 +158,16 @@ fn compress_then_prefill_plan() {
         );
     }
     // summary should report both latent and raw counts
-    assert!(meta.summary.latent_slots > 0, "summary.latent_slots should be > 0");
-    assert!(meta.summary.effective_entries < tokens.len(), "summary.effective_entries ({}) should be < tokens.len() ({})", meta.summary.effective_entries, tokens.len());
+    assert!(
+        meta.summary.latent_slots > 0,
+        "summary.latent_slots should be > 0"
+    );
+    assert!(
+        meta.summary.effective_entries < tokens.len(),
+        "summary.effective_entries ({}) should be < tokens.len() ({})",
+        meta.summary.effective_entries,
+        tokens.len()
+    );
 }
 
 // ── Test 3: Buffer budget enforcement ──────────────────────────────
@@ -273,7 +279,7 @@ fn adaptive_vs_fixed_compression() {
         .segments
         .iter()
         .filter_map(|seg| match seg {
-            katgpt_rs::mux_latent::LatentSegment::Compressed {
+            katgpt_core::mux_latent::LatentSegment::Compressed {
                 original_tokens, ..
             } => Some(original_tokens.len()),
             _ => None,
@@ -285,7 +291,7 @@ fn adaptive_vs_fixed_compression() {
     let fixed_all_same = fixed_ctx
         .segments
         .iter()
-        .all(|seg| matches!(seg, katgpt_rs::mux_latent::LatentSegment::Compressed { .. }));
+        .all(|seg| matches!(seg, katgpt_core::mux_latent::LatentSegment::Compressed { .. }));
     assert!(
         fixed_all_same,
         "fixed X8 should have all compressed segments"

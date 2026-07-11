@@ -33,8 +33,8 @@ use fastrand::Rng;
 
 use katgpt_rs::pruners::bomber::arena::{EMPTY_ARENA, PILLAR_HEAVY_ARENA, STANDARD_ARENA};
 use katgpt_rs::pruners::bomber::{
-    ArenaGrid, BomberPlayer, GameEvent, GreedyPlayer, GridPos, HLPlayer, RandomPlayer,
-    SonltPlayer, init_world, init_world_with_arena, run_tick, spawn_players,
+    ArenaGrid, BomberPlayer, GameEvent, GreedyPlayer, GridPos, HLPlayer, RandomPlayer, SonltPlayer,
+    init_world, init_world_with_arena, run_tick, spawn_players,
 };
 
 // ── Config ─────────────────────────────────────────────────────
@@ -323,7 +323,10 @@ fn main() {
     let mut players: Vec<Box<dyn BomberPlayer>> = vec![
         Box::new(RandomPlayer::new(0)),
         Box::new(GreedyPlayer::new(1)),
-        Box::new(SonltPlayer::new_with_lora(2, lora_path.to_str().unwrap_or(""))),
+        Box::new(SonltPlayer::new_with_lora(
+            2,
+            lora_path.to_str().unwrap_or(""),
+        )),
         Box::new(HLPlayer::new(3)),
     ];
 
@@ -455,12 +458,17 @@ fn main() {
         println!("     The SON-LT LoRA adapter generalizes to live arena play.");
     } else if beats_hl {
         println!("  ⚠ PARTIAL: SON-LT beats HL but below {SONLT_TARGET_SCORE:.0} target");
-        println!("     avg_score={:.1} vs target {SONLT_TARGET_SCORE:.0}",
-            stats[2].avg_score());
+        println!(
+            "     avg_score={:.1} vs target {SONLT_TARGET_SCORE:.0}",
+            stats[2].avg_score()
+        );
     } else {
         println!("  ❌ GOAT NOT PASSED: SON-LT did not meet the target");
-        println!("     avg_score={:.1}, HL={:.1}, target={SONLT_TARGET_SCORE:.0}",
-            stats[2].avg_score(), stats[3].avg_score());
+        println!(
+            "     avg_score={:.1}, HL={:.1}, target={SONLT_TARGET_SCORE:.0}",
+            stats[2].avg_score(),
+            stats[3].avg_score()
+        );
     }
 
     println!();

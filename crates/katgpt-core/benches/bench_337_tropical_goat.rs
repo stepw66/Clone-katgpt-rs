@@ -36,7 +36,7 @@
 use katgpt_core::algebra::tropical::{
     tropical_dot_into, tropical_exterior_derivative, tropical_line_integral,
 };
-use katgpt_core::dec::{exterior_derivative, line_integral, CellComplex, CochainField};
+use katgpt_core::dec::{CellComplex, CochainField, exterior_derivative, line_integral};
 
 // ─── Deterministic PRNG (xorshift32) — reproducible across runs ─────────────
 
@@ -187,16 +187,14 @@ fn run_substrate_1(rng_seed: u32) -> Substrate1Result {
     assert_eq!(max_flux.data.len(), n_edges);
 
     // Rank edges by abs(sum-flux) desc → top-3 edge indices.
-    let mut sum_ranked: Vec<(usize, f32)> = (0..n_edges)
-        .map(|e| (e, sum_flux.data[e].abs()))
-        .collect();
+    let mut sum_ranked: Vec<(usize, f32)> =
+        (0..n_edges).map(|e| (e, sum_flux.data[e].abs())).collect();
     sum_ranked.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
     let top3_sum: Vec<usize> = sum_ranked.iter().take(3).map(|(e, _)| *e).collect();
 
     // Rank edges by abs(max-flux) desc → top-3 edge indices.
-    let mut max_ranked: Vec<(usize, f32)> = (0..n_edges)
-        .map(|e| (e, max_flux.data[e].abs()))
-        .collect();
+    let mut max_ranked: Vec<(usize, f32)> =
+        (0..n_edges).map(|e| (e, max_flux.data[e].abs())).collect();
     max_ranked.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
     let top3_max: Vec<usize> = max_ranked.iter().take(3).map(|(e, _)| *e).collect();
 
@@ -358,11 +356,9 @@ fn main() {
     println!(
         "    verdict:               {}{}",
         if s1.pass { "PASS" } else { "FAIL" },
-        if s1.stretch { " (STRETCH)" } else if s1.pass { "" } else { "" }
+        if s1.stretch { " (STRETCH)" } else { "" }
     );
-    println!(
-        "    thresholds:            PASS |Δ△|≥1, STRETCH |Δ△|≥2"
-    );
+    println!("    thresholds:            PASS |Δ△|≥1, STRETCH |Δ△|≥2");
     println!();
 
     // ── Substrate 2: HLA pairs coherence Spearman ──
@@ -372,7 +368,7 @@ fn main() {
     println!(
         "    verdict:               {}{}",
         if s2.pass { "PASS" } else { "FAIL" },
-        if s2.stretch { " (STRETCH)" } else if s2.pass { "" } else { "" }
+        if s2.stretch { " (STRETCH)" } else { "" }
     );
     println!("    thresholds:            PASS ρ<0.85, STRETCH ρ<0.70");
     println!();
@@ -384,7 +380,7 @@ fn main() {
     println!(
         "    verdict:               {}{}",
         if s3.pass { "PASS" } else { "FAIL" },
-        if s3.stretch { " (STRETCH)" } else if s3.pass { "" } else { "" }
+        if s3.stretch { " (STRETCH)" } else { "" }
     );
     println!("    thresholds:            PASS ρ<0.85, STRETCH ρ<0.70");
     println!();
@@ -401,12 +397,21 @@ fn main() {
         "  G1 NON-REDUNDANCY VERDICT: {}/3 substrates PASS  →  {}",
         pass_count, verdict
     );
-    println!("    S1 (DEC cochain):    {} (|Δ△|={})",
-        if s1.pass { "PASS" } else { "FAIL" }, s1.sym_diff);
-    println!("    S2 (HLA pairs):      {} (ρ={:+.4})",
-        if s2.pass { "PASS" } else { "FAIL" }, s2.spearman);
-    println!("    S3 (path bottleneck):{} (ρ={:+.4})",
-        if s3.pass { "PASS" } else { "FAIL" }, s3.spearman);
+    println!(
+        "    S1 (DEC cochain):    {} (|Δ△|={})",
+        if s1.pass { "PASS" } else { "FAIL" },
+        s1.sym_diff
+    );
+    println!(
+        "    S2 (HLA pairs):      {} (ρ={:+.4})",
+        if s2.pass { "PASS" } else { "FAIL" },
+        s2.spearman
+    );
+    println!(
+        "    S3 (path bottleneck):{} (ρ={:+.4})",
+        if s3.pass { "PASS" } else { "FAIL" },
+        s3.spearman
+    );
     if pass_count >= 2 {
         println!("  → Non-redundant. Proceed to Phase 3 (promote toward default).");
     } else if pass_count == 1 {

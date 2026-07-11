@@ -4,7 +4,9 @@
 //! 1. NEON/SIMD dense vs sparse matmul throughput
 //! 2. PlasmaPath bit-plane ternary SIMD matvec (feature-gated)
 //! 3. Zero-alloc forward pass throughput
-//! 4. Minkowski lattice embedding lookup
+//! 4. Coordinate quantization (lattice index step)
+//!
+//! _Root-resident by design (Issue 033 §C, Option C)._ Calls `crate::transformer::forward` for zero-alloc forward throughput benchmark. Benchmark harness is engine-tier by nature.
 
 use super::{BenchCategory, BenchResult};
 use crate::transformer::{ForwardContext, MultiLayerKVCache, TransformerWeights, forward};
@@ -153,8 +155,8 @@ fn bench_matmul(_results: &mut Vec<BenchResult>) {
 
 #[cfg(feature = "plasma_path")]
 fn bench_plasma_path(results: &mut Vec<BenchResult>) {
-    use crate::simd::simd_ternary_matvec;
     use crate::types::TernaryWeights;
+    use katgpt_core::simd::simd_ternary_matvec;
 
     println!("── PlasmaPath Ternary SIMD Matvec ─────────────────────────");
 
@@ -257,10 +259,20 @@ fn bench_forward_pass(results: &mut Vec<BenchResult>) {
 // ---------------------------------------------------------------------------
 
 fn bench_lattice_lookup(results: &mut Vec<BenchResult>) {
-    println!("── Minkowski Lattice Embedding Lookup ─────────────────────");
+    println!("── Coordinate Quantization (Lattice Index Step) ──────────");
 
-    let warmup = 100;
-    let iters = 5000;
+    // This benchmarks the coordinate-to-lattice-index mapping:
+    //   idx[i] = (coord[i] * scale).floor() as usize
+    // which is the hot inner loop of Minkowski lattice embedding lookup.
+    // It does NOT call the full MinkowskiLattice::lattice_point (that lives in
+    // katgpt-deprecated and uses C64). This measures the quantization step in
+    // isolation — the part that runs in real-valued SIMD code.
+    //
+    // Iteration count is high (50K) because each iteration is trivially cheap
+    // (~4ns for dim=8). Lower counts (5K) produced >25% run-to-run variance
+    // due to CPU frequency scaling swamping the measured time.
+    let warmup = 1000;
+    let iters = 50_000;
     let dims = [8, 16, 32];
     let scale = 10.0f32;
 

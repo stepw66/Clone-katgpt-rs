@@ -72,7 +72,7 @@ impl LabelSet {
     /// Returns `true` if the set contains `label`.
     #[inline]
     pub fn contains(&self, label: LabelId) -> bool {
-        self.as_slice().iter().any(|&l| l == label)
+        self.as_slice().contains(&label)
     }
 
     /// View as a borrowed slice.
@@ -92,6 +92,27 @@ impl LabelSet {
         }
         self.ids[self.len()] = label;
         self.len += 1;
+        true
+    }
+
+    /// Remove `label` in place via a single `copy_within` shift — no rebuild,
+    /// no per-element `insert` re-scan. Returns `true` if the label was present.
+    ///
+    /// Replaces the prior `remove_from_set` helper, which rebuilt the whole set
+    /// (O(n) copy with an O(n) `contains` inside each `insert` → O(n²)).
+    #[inline]
+    pub fn remove(&mut self, label: LabelId) -> bool {
+        let len = self.len();
+        // Find the slot with a single linear scan (n ≤ LABEL_SET_CAPACITY = 32).
+        let Some(pos) = self.ids[..len].iter().position(|&l| l == label) else {
+            return false;
+        };
+        // Shift the tail down one slot in place; the vacated tail slot is left
+        // stale but is now past `len` so it is unreachable.
+        if pos + 1 < len {
+            self.ids.copy_within(pos + 1..len, pos);
+        }
+        self.len -= 1;
         true
     }
 
@@ -232,6 +253,15 @@ impl<'a> TaxonomyValidator<'a> {
         let mut valid = LabelSet::new();
         let cands = candidates.as_slice();
 
+        // Cache the resolved node for each *accepted* candidate so the binary
+        // search runs exactly once per candidate across all three passes
+        // (previously up to 3×: once in pass 1, again per element in pass 2,
+        // again per element in pass 3). `LabelSet` is bounded by
+        // LABEL_SET_CAPACITY, so this is a fixed stack array — zero allocation.
+        // Indexed parallel to `scratch.accepted` (same push order).
+        let mut accepted_nodes: [Option<&TaxonomyNode>; LABEL_SET_CAPACITY] =
+            [None; LABEL_SET_CAPACITY];
+
         // Pass 1: existence check + collect accepted nodes into scratch.accepted
         // (reusable buffer — no per-call allocation). Bounded by LABEL_SET_CAPACITY.
         let accepted = &mut scratch.accepted;
@@ -241,14 +271,9 @@ impl<'a> TaxonomyValidator<'a> {
                 Some(node) => {
                     // Removed labels must be redirected upstream — reject here.
                     // (LifecycleState check is layered on top in arg_runtime.)
-                    if node.kind == TaxonomyKind::Leaf && node.parent_id.is_none() {
-                        // Top-level leaves without parent are allowed (root-level leaves).
-                        accepted.push(c);
-                        valid.insert(c);
-                    } else {
-                        accepted.push(c);
-                        valid.insert(c);
-                    }
+                    accepted_nodes[accepted.len()] = Some(node);
+                    accepted.push(c);
+                    valid.insert(c);
                 }
             }
         }
@@ -256,38 +281,37 @@ impl<'a> TaxonomyValidator<'a> {
         // Pass 2: explicit incompatibilities (O(|accepted|^2 × avg incompatible size)).
         // Bounded: |accepted| ≤ LABEL_SET_CAPACITY = 32.
         for (i, &a) in accepted.iter().enumerate() {
-            let node_a = match self.find(a) {
-                Some(n) => n,
-                None => continue, // already rejected above
+            // O(1) cache hit — no binary search, no linear scan.
+            let Some(node_a) = accepted_nodes[i] else {
+                continue; // unreachable: accepted ⟹ node was cached in pass 1
             };
             for &b in accepted.iter().skip(i + 1) {
-                if node_a.incompatible_with.iter().any(|&x| x == b) {
-                    scratch
-                        .rejections
-                        .push(ValidationError::Incompatible(a, b));
+                if node_a.incompatible_with.contains(&b) {
+                    scratch.rejections.push(ValidationError::Incompatible(a, b));
                     // Remove both from valid — incompatibility is symmetric.
-                    valid = remove_from_set(valid, a);
-                    valid = remove_from_set(valid, b);
+                    // In-place `remove` (single shift) instead of rebuilding the
+                    // whole set per rejection.
+                    valid.remove(a);
+                    valid.remove(b);
                 }
             }
         }
 
         // Pass 3: parent/child coherence — every Label/Leaf with a parent
         // must have its parent implicitly active. ARG §OW-5 requires this.
-        for &c in accepted.iter() {
-            let node = match self.find(c) {
-                Some(n) => n,
-                None => continue,
+        for (idx, &c) in accepted.iter().enumerate() {
+            let Some(node) = accepted_nodes[idx] else {
+                continue;
             };
-            if let Some(parent_id) = node.parent_id {
-                if !valid.contains(parent_id) {
-                    scratch
-                        .rejections
-                        .push(ValidationError::MissingParent(parent_id));
-                    // Drop the orphan child (do NOT auto-add the parent — ARG
-                    // ascending expansion is a separate step (expand_ascending)).
-                    valid = remove_from_set(valid, c);
-                }
+            if let Some(parent_id) = node.parent_id
+                && !valid.contains(parent_id)
+            {
+                scratch
+                    .rejections
+                    .push(ValidationError::MissingParent(parent_id));
+                // Drop the orphan child (do NOT auto-add the parent — ARG
+                // ascending expansion is a separate step (expand_ascending)).
+                valid.remove(c);
             }
         }
 
@@ -337,21 +361,6 @@ impl<'a> TaxonomyValidator<'a> {
     pub fn is_empty(&self) -> bool {
         self.nodes.is_empty()
     }
-}
-
-/// Helper: rebuild a `LabelSet` minus a specific id (used during rejection).
-fn remove_from_set(mut set: LabelSet, id: LabelId) -> LabelSet {
-    if !set.contains(id) {
-        return set;
-    }
-    let mut new_set = LabelSet::new();
-    for &l in set.as_slice() {
-        if l != id {
-            new_set.insert(l);
-        }
-    }
-    core::mem::swap(&mut set, &mut new_set);
-    set
 }
 
 // Re-export TaxonomyKind Ord instance for stable serialization (future-proof).
@@ -422,7 +431,10 @@ mod tests {
 
     #[test]
     fn duplicate_ids_panic() {
-        let dup = vec![node(1, TaxonomyKind::Cluster, None), node(1, TaxonomyKind::Label, None)];
+        let dup = vec![
+            node(1, TaxonomyKind::Cluster, None),
+            node(1, TaxonomyKind::Label, None),
+        ];
         let result = std::panic::catch_unwind(|| {
             TaxonomyValidator::new(dup);
         });
@@ -437,7 +449,11 @@ mod tests {
         candidates.insert(lbl(99)); // not in taxonomy
         let r = v.validate_label_set(&candidates, &mut scratch);
         assert!(r.valid.is_empty());
-        assert!(r.rejections.iter().any(|e| matches!(e, ValidationError::NotFound)));
+        assert!(
+            r.rejections
+                .iter()
+                .any(|e| matches!(e, ValidationError::NotFound))
+        );
     }
 
     #[test]
@@ -469,9 +485,11 @@ mod tests {
         candidates.insert(lbl(3));
         let r = v.validate_label_set(&candidates, &mut scratch);
         assert!(!r.valid.contains(lbl(3)));
-        assert!(r.rejections
-            .iter()
-            .any(|e| matches!(e, ValidationError::MissingParent(p) if *p == lbl(2))));
+        assert!(
+            r.rejections
+                .iter()
+                .any(|e| matches!(e, ValidationError::MissingParent(p) if *p == lbl(2)))
+        );
     }
 
     #[test]
@@ -530,5 +548,34 @@ mod tests {
         assert!(set.insert(lbl(7)));
         assert!(!set.insert(lbl(7))); // duplicate rejected
         assert_eq!(set.len(), 1);
+    }
+
+    #[test]
+    fn label_set_remove_in_place() {
+        // Middle removal shifts the tail down, preserving order.
+        let mut set = LabelSet::new();
+        for i in [1u32, 2, 3, 4, 5] {
+            assert!(set.insert(lbl(i)));
+        }
+        assert!(set.remove(lbl(3)));
+        assert_eq!(set.as_slice(), &[lbl(1), lbl(2), lbl(4), lbl(5)]);
+
+        // Head removal.
+        assert!(set.remove(lbl(1)));
+        assert_eq!(set.as_slice(), &[lbl(2), lbl(4), lbl(5)]);
+
+        // Tail removal (no shift needed).
+        assert!(set.remove(lbl(5)));
+        assert_eq!(set.as_slice(), &[lbl(2), lbl(4)]);
+
+        // Absent label is a no-op returning false.
+        assert!(!set.remove(lbl(999)));
+        assert_eq!(set.as_slice(), &[lbl(2), lbl(4)]);
+
+        // Removing the last element empties the set.
+        assert!(set.remove(lbl(2)));
+        assert!(set.remove(lbl(4)));
+        assert!(set.is_empty());
+        assert!(!set.remove(lbl(2))); // empty → false
     }
 }

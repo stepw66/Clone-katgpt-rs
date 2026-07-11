@@ -17,7 +17,14 @@
 use crate::sigmoid::sigmoid;
 use crate::trait_def::LayerDirectionSource;
 use crate::types::PersonalityConfig;
-use katgpt_types::simd::simd_fused_scale_acc;
+use katgpt_types::simd::{simd_dot_f32, simd_fused_scale_acc};
+
+/// Unit vector used by [`PersonalityWeightedComposition::drift`] to compute
+/// `Σ_j d_recent[j]` as a dot-product (one NEON/AVX2 reduction instead of a
+/// scalar add loop). Sized for the maximum D supported by the type aliases in
+/// [`crate`] (production case is D=32; 64 gives headroom).
+const ONES_MAX_D: usize = 64;
+const ONES: [f32; ONES_MAX_D] = [1.0f32; ONES_MAX_D];
 
 /// The personality-weighted composition kernel.
 ///
@@ -142,10 +149,8 @@ impl<const N: usize, const D: usize> PersonalityWeightedComposition<N, D> {
         );
 
         // Zero the output. This is the only O(D) work outside the per-layer
-        // loop — LLVM elides it into a memset.
-        for x in out[..D].iter_mut() {
-            *x = 0.0;
-        }
+        // loop — `.fill(0.0)` lowers to memset unconditionally.
+        out[..D].fill(0.0);
 
         for (i, layer) in layers.iter().enumerate() {
             let d = layer.direction(scratch);
@@ -213,10 +218,22 @@ impl<const N: usize, const D: usize> PersonalityWeightedComposition<N, D> {
             let surprise = r_observed - self.r_expected[i];
 
             // Δw_i = alpha · surprise · Σ_j d_recent_i[j]
-            let mut delta = 0.0f32;
-            for &d in d_recent.iter().take(D) {
-                delta += d;
-            }
+            // Use the SIMD dot-product against a unit vector — at D=32 this is
+            // a single NEON/AVX2 reduction instead of 32 scalar adds. The host
+            // contract is `recent_direction()` returns either `&[]` (layer
+            // opts out of drift → delta = 0) or a length-`D` slice; we bound
+            // the dot to the actual slice length to stay safe against hosts
+            // that return a short EMA buffer during warmup.
+            let drift_len = d_recent.len().min(D);
+            let delta = if drift_len == 0 {
+                0.0
+            } else {
+                debug_assert!(
+                    D <= ONES_MAX_D,
+                    "D={D} exceeds ONES_MAX_D={ONES_MAX_D}; bump the constant"
+                );
+                simd_dot_f32(&d_recent[..drift_len], &ONES[..drift_len], drift_len)
+            };
             let inc = alpha * surprise * delta;
 
             self.w[i] = (self.w[i] + inc).clamp(-w_max, w_max);
@@ -308,6 +325,7 @@ pub(crate) mod tests {
             if self.has_recent { &self.recent } else { &[] }
         }
 
+        #[inline]
         fn belief_confidence(&self) -> f32 {
             self.confidence
         }

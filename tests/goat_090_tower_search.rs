@@ -11,7 +11,7 @@
 
 #[cfg(feature = "unit_distance")]
 mod tests {
-    use katgpt_rs::unit_distance::{
+    use katgpt_deprecated::unit_distance::{
         TowerArm, TowerBandit, TowerFamily, TowerSearch, TowerSearchConfig,
     };
 

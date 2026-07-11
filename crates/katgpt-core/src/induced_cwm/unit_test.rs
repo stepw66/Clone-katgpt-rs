@@ -139,13 +139,15 @@ where
 {
     trajectory
         .into_iter()
-        .map(|(pre, action, player_id, expected_post)| TransitionUnitTest {
-            pre,
-            action,
-            player_id,
-            expected_post,
-            expected_legal_actions: None,
-        })
+        .map(
+            |(pre, action, player_id, expected_post)| TransitionUnitTest {
+                pre,
+                action,
+                player_id,
+                expected_post,
+                expected_legal_actions: None,
+            },
+        )
         .collect()
 }
 
@@ -158,7 +160,7 @@ fn set_eq<T: PartialEq>(actual: &[T], expected: &[T]) -> bool {
     if actual.len() != expected.len() {
         return false;
     }
-    actual
-        .iter()
-        .all(|a| actual.iter().filter(|x| x == &a).count() == expected.iter().filter(|x| x == &a).count())
+    actual.iter().all(|a| {
+        actual.iter().filter(|x| x == &a).count() == expected.iter().filter(|x| x == &a).count()
+    })
 }

@@ -84,17 +84,36 @@ impl MultiLayerKVCache {
     }
 
     /// Get the tracked fill position (highest position written + 1).
+    #[inline]
     pub fn fill_pos(&self) -> usize {
         self.fill_pos
     }
 
+    /// Set the fill_pos tracker directly, WITHOUT touching the K/V buffers.
+    ///
+    /// Use this when a caller has already reshaped the buffer contents in-place
+    /// (e.g. sliding-window eviction's `copy_within` shift) and only needs to
+    /// advance/shrink the logical fill marker. Distinct from `reset()`, which
+    /// also zeroes the K/V data — calling `reset()` after an in-place shift
+    /// would wipe the just-copied entries (Issue: sleep eviction
+    /// sliding_window_retains_recent failure, 2026-06-29).
+    #[inline]
+    pub fn set_fill_pos(&mut self, pos: usize) {
+        self.fill_pos = pos;
+    }
+
     /// Snapshot KV cache state up to position `pos`.
     /// Copies only filled slots [0..pos) per layer — cheap at our model scale.
+    ///
+    /// **Allocating:** makes `1 + 2*n_layer` heap allocations per call. For the
+    /// per-speculation-step hot path, prefer [`snapshot_into`](Self::snapshot_into)
+    /// with a hoisted scratch buffer (zero alloc in steady state). This variant
+    /// remains for cold paths and convenience wrappers that don't have a
+    /// reusable buffer.
     pub fn snapshot(&self, pos: usize, config: &Config) -> KVSnapshot {
         let kd = types::kv_dim(config);
         let end = pos * kd;
         // Pre-allocate outer Vec to avoid collect() reallocation jitter.
-        // Called per-speculation-step (step.rs L149/L354/L487/L649/L1083).
         let mut layers = Vec::with_capacity(self.layers.len());
         for layer in &self.layers {
             layers.push(KVLayerSnapshot {
@@ -103,6 +122,41 @@ impl MultiLayerKVCache {
             });
         }
         KVSnapshot { pos, layers }
+    }
+
+    /// Zero-alloc variant of [`snapshot`](Self::snapshot) that refills a reusable
+    /// [`KVSnapshot`] in place. The snapshot's per-layer `key`/`value` buffers
+    /// are `resize`d to the new length (reusing their existing allocation when
+    /// possible) and overwritten — no new `Vec` is allocated in steady state.
+    ///
+    /// # Allocation
+    ///
+    /// On the first call (or when `out` was previously shorter), the inner
+    /// Vecs grow. On every subsequent call with the same or smaller `pos`,
+    /// the existing allocations are reused — zero new heap allocations. This
+    /// is the variant to use on the per-speculation-step hot path.
+    ///
+    /// # Layer-count changes
+    ///
+    /// If `out.layers.len() != self.layers.len()`, the outer Vec is resized.
+    /// In steady state (same model), this branch is never taken.
+    pub fn snapshot_into(&self, pos: usize, config: &Config, out: &mut KVSnapshot) {
+        let kd = types::kv_dim(config);
+        let end = pos * kd;
+        out.pos = pos;
+        if out.layers.len() != self.layers.len() {
+            out.layers
+                .resize_with(self.layers.len(), || KVLayerSnapshot {
+                    key: Vec::new(),
+                    value: Vec::new(),
+                });
+        }
+        for (src, dst) in self.layers.iter().zip(out.layers.iter_mut()) {
+            dst.key.resize(end, 0.0);
+            dst.value.resize(end, 0.0);
+            dst.key[..end].copy_from_slice(&src.key[..end]);
+            dst.value[..end].copy_from_slice(&src.value[..end]);
+        }
     }
 
     /// Restore KV cache from a snapshot.
@@ -126,12 +180,18 @@ impl MultiLayerKVCache {
 
 /// Cheap snapshot of KV cache state up to position `pos`.
 /// Only copies filled slots [0..pos) per layer, not the entire block_size buffer.
+///
+/// `Default` is derived so callers can construct an empty snapshot for use as
+/// a reusable scratch buffer with [`MultiLayerKVCache::snapshot_into`] — the
+/// zero-alloc variant on the per-speculation-step hot path.
+#[derive(Default)]
 pub struct KVSnapshot {
     pub pos: usize,
     pub layers: Vec<KVLayerSnapshot>,
 }
 
 /// Per-layer snapshot of KV cache data.
+#[derive(Default)]
 pub struct KVLayerSnapshot {
     pub key: Vec<f32>,   // [pos * kv_dim]
     pub value: Vec<f32>, // [pos * kv_dim]
@@ -282,17 +342,43 @@ impl PagedKVCache {
         for lt in &self.layer_page_tables {
             deficits.push(pages_needed.saturating_sub(lt[seq_idx].len()));
         }
+        let total_new: usize = deficits.iter().copied().sum();
 
-        // Allocate all pages upfront
-        let mut new_pages = ArrayVec::<Vec<usize>, 128>::new();
-        for &deficit in &deficits {
-            let pages: Vec<usize> = (0..deficit).map(|_| self.alloc_page()).collect();
-            new_pages.push(pages);
-        }
-
-        // Assign new pages to each layer's page table
-        for (layer_tables, pages) in self.layer_page_tables.iter_mut().zip(new_pages) {
-            layer_tables[seq_idx].extend(pages);
+        // Distribute newly-allocated page indices back into the layer tables.
+        //
+        // Fast path (the common case — autoregressive decode advances `pos` by
+        // 1, so each layer's deficit is 0 or 1, total_new ≤ n_layers ≤ 128):
+        // allocate into a flat stack `ArrayVec<usize, 128>` and `extend_from_slice`
+        // per layer. Zero heap allocation regardless of deficit distribution.
+        //
+        // Slow path (prefill / large position jump where total_new > 128): fall
+        // back to one heap `Vec<usize>` per layer-with-deficit. Matches the
+        // previous behavior; the cost is dominated by the page-data allocation
+        // itself, not the index Vec.
+        if total_new <= 128 {
+            let mut flat_new_pages = ArrayVec::<usize, 128>::new();
+            for _ in 0..total_new {
+                flat_new_pages.push(self.alloc_page());
+            }
+            let mut cursor = 0usize;
+            for (layer_tables, &deficit) in self.layer_page_tables.iter_mut().zip(&deficits) {
+                if deficit > 0 {
+                    layer_tables[seq_idx]
+                        .extend_from_slice(&flat_new_pages[cursor..cursor + deficit]);
+                    cursor += deficit;
+                }
+            }
+            debug_assert_eq!(cursor, total_new, "distributed all allocated pages");
+        } else {
+            // Slow path: per-layer heap Vecs (original behavior).
+            let mut new_pages = ArrayVec::<Vec<usize>, 128>::new();
+            for &deficit in &deficits {
+                let pages: Vec<usize> = (0..deficit).map(|_| self.alloc_page()).collect();
+                new_pages.push(pages);
+            }
+            for (layer_tables, pages) in self.layer_page_tables.iter_mut().zip(new_pages) {
+                layer_tables[seq_idx].extend(pages);
+            }
         }
     }
 
@@ -364,13 +450,18 @@ impl PagedKVCache {
         // Issue 053: use ref counts for O(1) exclusive-page detection instead of
         // building a HashSet by scanning all sequences across all layers (O(N×P×L)).
         // Decrement ref count for each removed page; if count reaches 0, it's exclusive.
+        //
+        // Pop from the end (no intermediate Vec) — the previous form allocated
+        // a `Vec<usize>` per layer per rollback just to iterate it once.
         for layer_tables in &mut self.layer_page_tables {
             if seq_idx >= layer_tables.len() {
                 continue;
             }
             let table = &mut layer_tables[seq_idx];
-            let removed: Vec<usize> = table.drain(keep_count..).collect();
-            for pidx in removed {
+            while table.len() > keep_count {
+                // SAFETY: we just checked `table.len() > keep_count`, so the
+                // table is non-empty; `pop` returns the last element.
+                let pidx = table.pop().expect("checked non-empty above");
                 self.page_ref_counts[pidx] -= 1;
                 if self.page_ref_counts[pidx] == 0 {
                     self.free_pages.push(pidx);

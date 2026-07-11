@@ -200,18 +200,18 @@ impl ZipfianCacheHierarchy {
         // drop the guard immediately.
         {
             let guard = self.plasma.pin();
-            if let Some((slot, _gen_val)) = guard.get(&hash) {
-                if slot.len() == d {
-                    out.copy_from_slice(slot);
-                    self.stats.hits_plasma.fetch_add(1, Ordering::Relaxed);
-                    return CacheResult {
-                        tier: Some(CacheTier::Plasma),
-                        hit: true,
-                    };
-                }
-                // Size mismatch — fall through to warm/cold. (Shouldn't
-                // happen in practice; documented for robustness.)
+            if let Some((slot, _gen_val)) = guard.get(&hash)
+                && slot.len() == d
+            {
+                out.copy_from_slice(slot);
+                self.stats.hits_plasma.fetch_add(1, Ordering::Relaxed);
+                return CacheResult {
+                    tier: Some(CacheTier::Plasma),
+                    hit: true,
+                };
             }
+            // Size mismatch — fall through to warm/cold. (Shouldn't
+            // happen in practice; documented for robustness.)
         }
 
         // ── Warm tier ──────────────────────────────────────────────────
@@ -234,21 +234,19 @@ impl ZipfianCacheHierarchy {
         }
 
         // ── Cold tier ──────────────────────────────────────────────────
-        if let Some(cold) = &self.cold_fetcher {
-            if cold.fetch(hash, out) {
-                self.stats.hits_cold.fetch_add(1, Ordering::Relaxed);
-                self.promote_to_plasma(hash, out);
-                return CacheResult {
-                    tier: Some(CacheTier::Cold),
-                    hit: true,
-                };
-            }
+        if let Some(cold) = &self.cold_fetcher
+            && cold.fetch(hash, out)
+        {
+            self.stats.hits_cold.fetch_add(1, Ordering::Relaxed);
+            self.promote_to_plasma(hash, out);
+            return CacheResult {
+                tier: Some(CacheTier::Cold),
+                hit: true,
+            };
         }
 
         // ── Full miss ──────────────────────────────────────────────────
-        for x in out.iter_mut() {
-            *x = 0.0;
-        }
+        out.fill(0.0);
         self.stats.misses.fetch_add(1, Ordering::Relaxed);
         CacheResult {
             tier: None,
@@ -329,6 +327,7 @@ impl ZipfianCacheHierarchy {
     }
 
     /// Current plasma capacity (for diagnostics).
+    #[inline]
     pub fn plasma_capacity(&self) -> usize {
         self.plasma_capacity
     }
@@ -362,8 +361,8 @@ mod tests {
         fn fetch(&self, hash: EngramHash, out: &mut [f32]) -> bool {
             if hash.0 >= self.base && (hash.0 - self.base) < self.n as u64 {
                 let i = (hash.0 - self.base) as usize;
-                for j in 0..self.d {
-                    out[j] = (i as f32) * 100.0 + j as f32;
+                for (j, oj) in out[..self.d].iter_mut().enumerate() {
+                    *oj = (i as f32) * 100.0 + j as f32;
                 }
                 true
             } else {

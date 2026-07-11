@@ -27,7 +27,9 @@
 
 use katgpt_rs::hla::MultiLayerAhlaCache;
 use katgpt_rs::pruners::self_advantage::AdvantageMarginGate;
-use katgpt_rs::transformer::{ForwardContext, MultiLayerKVCache, TransformerWeights, forward_looped};
+use katgpt_rs::transformer::{
+    ForwardContext, MultiLayerKVCache, TransformerWeights, forward_looped,
+};
 use katgpt_rs::types::{Config, HybridPattern, LoopMode, ResidualGate, Rng, SdpaOutputGate};
 
 /// Build a micro config with `loop_count = 4` and Uniform hybrid pattern,
@@ -97,10 +99,16 @@ fn no_gate_path_is_byte_identical_to_baseline() {
         );
         // Sanity: logits are finite (mirrors goat_108 Proof 9).
         for (i, &l) in a.iter().enumerate() {
-            assert!(l.is_finite(), "[T1] non-finite logit at pos {pos}, idx {i}: {l}");
+            assert!(
+                l.is_finite(),
+                "[T1] non-finite logit at pos {pos}, idx {i}: {l}"
+            );
         }
     }
-    println!("[T1] ✅ no-gate path byte-identical across {} decode steps", config.block_size);
+    println!(
+        "[T1] ✅ no-gate path byte-identical across {} decode steps",
+        config.block_size
+    );
 }
 
 // ── Test 3 (run before Test 2 for narrative flow): permissive gate never
@@ -124,7 +132,14 @@ fn gated_path_output_matches_no_gate_when_gate_never_fires() {
     for pos in 0..config.block_size {
         let baseline = run_once(&config, &weights, &residual_gate, &sdpa_gate, pos, None);
         let mut gate = AdvantageMarginGate::new(-1000.0);
-        let gated = run_once(&config, &weights, &residual_gate, &sdpa_gate, pos, Some(&mut gate));
+        let gated = run_once(
+            &config,
+            &weights,
+            &residual_gate,
+            &sdpa_gate,
+            pos,
+            Some(&mut gate),
+        );
         assert_eq!(
             baseline, gated,
             "[T3] permissive-gate path diverges from no-gate at pos {pos} — scratch lm_head perturbs final logits"
@@ -166,8 +181,14 @@ fn gated_path_can_halt_early() {
     for pos in 0..config4.block_size {
         // Strict gate on loop_count=4: should break after tau=1.
         let mut gate = AdvantageMarginGate::new(1000.0);
-        let halted =
-            run_once(&config4, &weights4, &residual_gate4, &sdpa_gate4, pos, Some(&mut gate));
+        let halted = run_once(
+            &config4,
+            &weights4,
+            &residual_gate4,
+            &sdpa_gate4,
+            pos,
+            Some(&mut gate),
+        );
         // Ungated loop_count=2: runs tau=0 then tau=1, then stops naturally.
         let two_iter = run_once(&config2, &weights2, &residual_gate2, &sdpa_gate2, pos, None);
         assert_eq!(
@@ -219,8 +240,7 @@ fn default_threshold_gate_is_alive() {
     let mut halted_at_least_once = false;
     for pos in 0..config4.block_size {
         let mut gate = AdvantageMarginGate::default(); // threshold = 0.01
-        let default_out =
-            run_once(&config4, &weights4, &rg4, &sg4, pos, Some(&mut gate));
+        let default_out = run_once(&config4, &weights4, &rg4, &sg4, pos, Some(&mut gate));
         let three = run_once(&config3, &weights3, &rg3, &sg3, pos, None);
         let two = run_once(&config2, &weights2, &rg2, &sg2, pos, None);
         if default_out == three || default_out == two {
@@ -233,5 +253,7 @@ fn default_threshold_gate_is_alive() {
          expected it to fire on convergent weight-shared recursion",
         config4.block_size
     );
-    println!("[T4] ✅ default-threshold (0.01) gate is alive — halted early on at least one position");
+    println!(
+        "[T4] ✅ default-threshold (0.01) gate is alive — halted early on at least one position"
+    );
 }

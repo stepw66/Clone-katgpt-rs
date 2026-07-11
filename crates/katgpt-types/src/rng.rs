@@ -86,7 +86,10 @@ mod tests_rng {
                 first, 0.0,
                 "seed {seed}: first uniform() must not be 0.0 (Issue 296)"
             );
-            assert!(first > 0.0 && first < 1.0, "seed {seed}: uniform() out of range: {first}");
+            assert!(
+                first > 0.0 && first < 1.0,
+                "seed {seed}: uniform() out of range: {first}"
+            );
         }
     }
 

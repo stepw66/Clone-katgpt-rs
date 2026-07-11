@@ -45,7 +45,13 @@ impl RaceState {
     const GOAL: u32 = 25;
 
     fn new() -> Self {
-        Self { counter: 0, turn: 0, tick: 0, is_terminal: false, winner: 255 }
+        Self {
+            counter: 0,
+            turn: 0,
+            tick: 0,
+            is_terminal: false,
+            winner: 255,
+        }
     }
 }
 
@@ -97,11 +103,7 @@ impl GameState for RaceState {
         if !self.is_terminal {
             return (self.counter as f32) / (Self::GOAL as f32 * 2.0);
         }
-        if self.winner == player_id {
-            1.0
-        } else {
-            0.0
-        }
+        if self.winner == player_id { 1.0 } else { 0.0 }
     }
 
     fn tick(&self) -> u32 {
@@ -188,7 +190,10 @@ fn main() {
     ];
     let candidate_names: Vec<&'static str> = candidates.iter().map(|c| c.name()).collect();
 
-    println!("Mock induced CWM: race-to-{} (turn-alternating, shared counter)", RaceState::GOAL);
+    println!(
+        "Mock induced CWM: race-to-{} (turn-alternating, shared counter)",
+        RaceState::GOAL
+    );
     println!("Baseline       : always Stall");
     println!("Candidates     : {:?}", candidate_names);
     println!("MCTS budget    : 24 iterations/move");

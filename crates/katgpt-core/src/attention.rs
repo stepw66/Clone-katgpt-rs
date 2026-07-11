@@ -54,6 +54,49 @@ pub fn tiled_attention_forward(
     tiled_attention_forward_impl(q, k, v, output, seq_len, head_dim, scale, None, None);
 }
 
+/// SSMax-augmented tiled attention forward (Plan 411 T2.4).
+///
+/// Identical to [`tiled_attention_forward`] but applies the SSMax
+/// length-aware log-N attention temperature by folding `s_L · log(N)` into
+/// the softmax scale. This is mathematically equivalent to rescaling each
+/// pre-softmax logit by `s_L · log(N)`:
+///
+/// `softmax(scale · q·k) = softmax((scale · s_L · log N) · q·k)`
+///
+/// because softmax is scale-equivariant in its input. For the online-softmax
+/// (flash-attention) kernel that doesn't materialize the full score matrix,
+/// this fold is the zero-overhead way to apply SSMax — one multiply on the
+/// scale parameter, no extra pass over the scores.
+///
+/// # Arguments
+/// Same as [`tiled_attention_forward`], plus:
+/// * `ssmax` - SSMax mode (the per-layer source of `s_L`).
+///
+/// # When `seq_len ≤ 1`
+///
+/// `log(N) = 0`, so the scale is unchanged — SSMax is a no-op. This preserves
+/// the small-N no-regression guarantee (G5).
+#[cfg(all(feature = "tiled_attention", feature = "ssmax_temperature"))]
+#[allow(clippy::too_many_arguments)]
+pub fn tiled_attention_forward_ssmax(
+    q: &[f32],
+    k: &[f32],
+    v: &[f32],
+    output: &mut [f32],
+    seq_len: usize,
+    head_dim: usize,
+    scale: f32,
+    ssmax: &crate::ssmax::SsmaxMode,
+) {
+    let log_n = if seq_len > 1 {
+        (seq_len as f32).ln()
+    } else {
+        0.0
+    };
+    let ssmax_scale = scale * ssmax.multiplier(log_n);
+    tiled_attention_forward_impl(q, k, v, output, seq_len, head_dim, ssmax_scale, None, None);
+}
+
 /// Implementation that accepts an optional pre-allocated scores scratch buffer.
 ///
 /// When `scores_buf` is `Some`, it is used as scratch space for the fallback
@@ -75,6 +118,9 @@ pub fn tiled_attention_forward_with_scores(
     tiled_attention_forward_impl(q, k, v, output, seq_len, head_dim, scale, scores_buf, None);
 }
 
+/// Inner implementation: accepts optional pre-allocated `scores_buf` and `o_tile`
+/// scratch buffers to avoid per-call heap allocation. `tiled_attention_forward`
+/// and `tiled_attention_forward_with_scores` both delegate here.
 #[cfg(feature = "tiled_attention")]
 #[allow(clippy::too_many_arguments)]
 fn tiled_attention_forward_impl(
@@ -454,8 +500,7 @@ mod tests {
         tiled_attention_forward(&q, &k, &v, &mut output, 1, head_dim, scale);
 
         // Single token: attention score = 1.0, softmax = 1.0, output = V
-        for d in 0..head_dim {
-            let out_d = output[d];
+        for (d, &out_d) in output[..head_dim].iter().enumerate() {
             let diff = (out_d - 0.5).abs();
             assert!(diff < 1e-5, "output[{d}] = {out_d}, expected 0.5");
         }
@@ -515,6 +560,84 @@ mod tests {
         // Verify no NaN/Inf in output
         for (i, &val) in output.iter().enumerate() {
             assert!(val.is_finite(), "output[{i}] = {val}, expected finite");
+        }
+    }
+}
+
+// ── SSMax SDPA wrapper tests (Plan 411 T2.4) ──────────────────────
+
+#[cfg(all(test, feature = "tiled_attention", feature = "ssmax_temperature"))]
+mod ssmax_tests {
+    use super::*;
+    use crate::ssmax::SsmaxMode;
+
+    /// `tiled_attention_forward_ssmax` with `SsmaxMode::Fixed { s_l: 1.0 }` must
+    /// produce the same output as calling `tiled_attention_forward` with
+    /// `scale * log(N)`. This verifies the scale-folding equivalence —
+    /// the wrapper adds zero overhead beyond the single `ln(N)` computation.
+    #[test]
+    fn ssmax_wrapper_matches_scale_folding() {
+        let seq_len = 16;
+        let head_dim = 8;
+        let scale = 1.0 / (head_dim as f32).sqrt();
+        let q: Vec<f32> = (0..seq_len * head_dim)
+            .map(|i| ((i as f32) * 0.07).sin())
+            .collect();
+        let k: Vec<f32> = (0..seq_len * head_dim)
+            .map(|i| ((i as f32) * 0.05).cos())
+            .collect();
+        let v: Vec<f32> = (0..seq_len * head_dim)
+            .map(|i| ((i as f32) * 0.03).sin())
+            .collect();
+
+        let mode = SsmaxMode::Fixed { s_l: 1.0 };
+        let log_n = (seq_len as f32).ln();
+        let folded_scale = scale * mode.multiplier(log_n);
+
+        let mut out_wrapper = vec![0.0f32; seq_len * head_dim];
+        let mut out_folded = vec![0.0f32; seq_len * head_dim];
+        tiled_attention_forward_ssmax(
+            &q,
+            &k,
+            &v,
+            &mut out_wrapper,
+            seq_len,
+            head_dim,
+            scale,
+            &mode,
+        );
+        tiled_attention_forward(&q, &k, &v, &mut out_folded, seq_len, head_dim, folded_scale);
+
+        for i in 0..(seq_len * head_dim) {
+            assert_eq!(
+                out_wrapper[i], out_folded[i],
+                "SSMax wrapper must match scale-folded at [{}]",
+                i
+            );
+        }
+    }
+
+    /// SSMax at n=1 is a no-op: log(1)=0, multiplier=0. But the wrapper guards
+    /// `seq_len <= 1` by setting `log_n = 0`, giving `mult = 0` and `scale * 0 = 0`.
+    /// At n=1, softmax of a single zero score is [1.0], so output = V regardless.
+    /// Verify the wrapper doesn't panic and produces V.
+    #[test]
+    fn ssmax_wrapper_n1_is_v() {
+        let head_dim = 4;
+        let q = [1.0f32, 0.0, 0.0, 0.0];
+        let k = [1.0f32, 0.0, 0.0, 0.0];
+        let v = [0.5f32, 0.5, 0.5, 0.5];
+        let mut output = [0.0f32; 4];
+        let mode = SsmaxMode::Fixed { s_l: 1.0 };
+        tiled_attention_forward_ssmax(&q, &k, &v, &mut output, 1, head_dim, 0.25, &mode);
+        // Single-token attention: output = V regardless of scale (softmax of 1 elem = 1.0).
+        for (i, &out_i) in output.iter().enumerate() {
+            assert!(
+                (out_i - 0.5).abs() < 1e-5,
+                "n=1 output[{}] = {}, expected 0.5",
+                i,
+                out_i
+            );
         }
     }
 }

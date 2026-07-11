@@ -1,0 +1,46 @@
+[package]
+name = "katgpt-band"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+description = "Band-Conditioned KV Segment Selector cluster — band conditioning, BCKVSS, ColliderConsistency ConstraintPruner, Adaptive CoT stopper (Plan 265, arXiv:2605.12733). Extracted from katgpt-rs root per Proposal 003 Phase 11 (2026-07-04)."
+repository = "https://github.com/katopz/katgpt-rs"
+keywords = ["band-conditioning", "causal-inference", "pruner", "segment-selector", "modelless"]
+categories = ["algorithms", "science"]
+publish = false  # only katgpt-core ships to crates.io
+
+[dependencies]
+# katgpt-core: provides `sigmoid` (hoisted in Phase 0.1), plus the
+# `ConstraintPruner` and `PreservationScorer` traits implemented by
+# `collider_pruner::ColliderConstraint`. Non-optional — every module in this
+# crate uses `sigmoid`; collider_pruner implements the two traits.
+katgpt-core = { path = "../katgpt-core" }
+# fastrand: deterministic RNG for `bckvss::SyntheticScm` (AR(1) state per task
+# per dim — paper §5 reproducible SCM generator). Always-on — production path.
+fastrand = "2"
+
+[features]
+default = ["band_conditioner", "collider_consistency"]
+
+# Band conditioning set + CI test primitives (Plan 265 Phase 0).
+# The cluster's foundation — sink module that bckvss + collider_pruner build on.
+# DEFAULT-ON (T5.3, 2026-07-02): G0a/G0b pass.
+band_conditioner = []
+
+# Fusion A: Band-Conditioned KV Segment Selector (Plan 265 Phase 1).
+# Opt-in — was opt-in in root pending GOAT G1–G3.
+bckvss = ["band_conditioner"]
+
+# Fusion C: Collider-Consistency ConstraintPruner for DDTree (Plan 265 Phase 3).
+# DEFAULT-ON (T5.3, 2026-07-02): G7-G9 pass. Forwards katgpt-core/local_branch_routing
+# so the PreservationScorer impl for ColliderConstraint (Plan 377 Phase 2 follow-up)
+# compiles under `--no-default-features --features collider_consistency`.
+collider_consistency = ["band_conditioner", "katgpt-core/local_branch_routing"]
+
+# Phase 4: Theory-backed adaptive CoT stopping criterion (Plan 265 Phase 4).
+# Opt-in — was opt-in in root pending GOAT G10. Despite the historical lib.rs
+# comment claiming dependence on `band_conditioner`, the module has zero
+# `crate::` imports (audit verified 2026-07-04). The feature-dep chain is kept
+# for parity with the historical root feature (`adaptive_cot_identifiability =
+# ["bckvss"]`); bckvss itself depends on band_conditioner.
+adaptive_cot_identifiability = ["bckvss"]

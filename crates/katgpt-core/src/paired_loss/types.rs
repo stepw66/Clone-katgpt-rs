@@ -250,7 +250,9 @@ impl FilterScratch {
     /// Construct an empty scratch buffer (no pre-allocation).
     #[inline]
     pub const fn new() -> Self {
-        Self { mask_buf: Vec::new() }
+        Self {
+            mask_buf: Vec::new(),
+        }
     }
 
     /// Construct with a pre-allocated capacity. Avoids the first-call grow.

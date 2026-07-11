@@ -39,13 +39,16 @@
 //! All PPoT code is behind the `ppot` feature flag. When disabled, zero overhead
 //! is incurred on the speculative decoding path.
 
-pub mod entropy;
-pub mod knowledge;
-pub mod rank;
-pub mod resample;
-pub mod types;
+// types/knowledge/entropy/rank extracted to katgpt-speculative crate (Issue 003).
+// Re-exported as modules so `resample` (which stays here) can reach them via
+// `super::entropy::*`, `super::types::*`, etc. — exactly the paths it uses today.
+pub use katgpt_speculative::ppot::{entropy, knowledge, rank, types};
 
-// ── Re-exports: Plan 026 Core ──────────────────────────────────
+// `resample` stays in root: 12 root-only refs (crate::pruners, crate::types::Rng,
+// katgpt_core::speculative::sampling, feature-gated crate::pruners::review_metrics).
+pub mod resample;
+
+// ── Re-exports: Plan 026 Core ──────────────────────────────
 
 pub use entropy::{
     identify_high_entropy_positions, identify_high_entropy_positions_into,
@@ -56,9 +59,9 @@ pub use resample::{
     ppot_resample, ppot_resample_different_value, ppot_resample_with_support, ppot_rescue,
 };
 
-pub use types::{PpotConfig, TokenRule};
+pub use types::{PpotConfig, QmcConfig, QmcMethod, TokenRule};
 
-// ── Re-exports: Plan 027 Adaptive ──────────────────────────────
+// ── Re-exports: Plan 027 Adaptive ────────────────────────────
 
 pub use entropy::{identify_positions_adaptive, identify_positions_adaptive_into};
 

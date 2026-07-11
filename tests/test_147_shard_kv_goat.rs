@@ -14,13 +14,13 @@
 #![cfg(feature = "shard_kv")]
 
 #[cfg(all(feature = "planar_quant", feature = "octopus"))]
-use katgpt_rs::hybrid_oct_pq::{HybridOctPqConfig, HybridOctPqKVCache};
-use katgpt_rs::shard_kv::{ShardCalibration, ShardConfig, ShardKVCache};
+use katgpt_quant::hybrid_oct_pq::{HybridOctPqConfig, HybridOctPqKVCache};
+use katgpt_kv::shard_kv::{ShardCalibration, ShardConfig, ShardKVCache};
 use katgpt_rs::spectralquant::participation_ratio;
 use katgpt_rs::spectralquant::{
     SpectralQuantCalibration, SpectralQuantKVCache, SpectralQuantKVCacheConfig,
 };
-use katgpt_rs::turboquant::{TurboQuantKVCache, TurboQuantKVCacheConfig};
+use katgpt_quant::turboquant::{TurboQuantKVCache, TurboQuantKVCacheConfig};
 
 // ── Helpers ───────────────────────────────────────────────────
 
@@ -178,6 +178,10 @@ fn make_sq_cache(head_dim: usize, max_seq_len: usize, avg_bits: f32) -> Spectral
         head_dim,
     };
 
+    // NOTE: cal.clone() in arg 2 is load-bearing — arg 3 (&[cal]) moves `cal`,
+    // so we cannot borrow cal via from_ref for arg 2. clippy's
+    // cloned_ref_to_slice_refs suggestion breaks the borrow checker here.
+    #[allow(clippy::cloned_ref_to_slice_refs)]
     SpectralQuantKVCache::from_calibration(&config, &[cal.clone()], &[cal])
 }
 
@@ -288,7 +292,7 @@ fn compute_covariance_eigenvalues(data: &[Vec<f32>], dim: usize) -> Vec<f32> {
         // Deflate: subtract rank-1 component
         for i in 0..dim {
             for j in 0..dim {
-                remaining_cov[i * dim + j] -= eigenvalue as f64 * v[i] * v[j];
+                remaining_cov[i * dim + j] -= eigenvalue * v[i] * v[j];
             }
         }
     }
@@ -805,10 +809,8 @@ fn test_proof6_cross_method_benchmark() {
     println!("  Parameters: head_dim={head_dim}, n_keys={n_keys}");
     println!();
 
-    let mut results: Vec<MethodResult> = Vec::new();
-
-    // ShardKV: avg_bits_k=4, avg_bits_v=2 → avg 3 bits
-    results.push(bench_shard_kv(head_dim, max_seq_len, n_keys, 4.0, 2.0));
+    let mut results: Vec<MethodResult> =
+        vec![bench_shard_kv(head_dim, max_seq_len, n_keys, 4.0, 2.0)];
 
     // SpectralQuant at 3-bit
     results.push(bench_spectral_quant(head_dim, max_seq_len, n_keys, 3.0));
@@ -893,7 +895,6 @@ fn test_proof7_asymmetric_vs_symmetric() {
             "  VERDICT: PASS — asymmetric allocation wins by {:.4} combined fidelity",
             asym_fidelity - sym_fidelity
         );
-        assert!(true);
     } else {
         // Let the data speak honestly
         println!(

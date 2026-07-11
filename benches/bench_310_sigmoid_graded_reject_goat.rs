@@ -172,8 +172,10 @@ fn gate_g1_backward_compat() -> bool {
     if mismatches != 0 {
         eprintln!("  ❌ G1-T1 FAIL: {mismatches} backward-compat mismatches");
     } else {
-        println!("  ✅ G1-T1 PASS: default reject_confidence() == is_valid() over {} samples",
-            8 * TOKEN_SWEEP + TOKEN_SWEEP);
+        println!(
+            "  ✅ G1-T1 PASS: default reject_confidence() == is_valid() over {} samples",
+            8 * TOKEN_SWEEP + TOKEN_SWEEP
+        );
     }
     mismatches == 0
 }
@@ -268,7 +270,10 @@ fn gate_g3_batch_throughput() -> (f64, f64) {
     for _ in 0..BATCH_ITERS {
         binary.batch_reject_confidence(0, &candidates, &parent, &mut results_f32);
         // Sink: bit-xor of the f32 confidence bits — forces the writes to be live.
-        sink ^= results_f32.iter().map(|f| f.to_bits() as u64).fold(0u64, |a, b| a.wrapping_add(b));
+        sink ^= results_f32
+            .iter()
+            .map(|f| f.to_bits() as u64)
+            .fold(0u64, |a, b| a.wrapping_add(b));
     }
     let elapsed_reject = start.elapsed();
     let _ = black_box(sink);
@@ -298,15 +303,7 @@ fn gate_g4_soft_reject_pipeline() -> f64 {
 
     let ns_pipeline = median_ns(LATENCY_ITERS, |i| {
         let tok = i % TOKEN_SWEEP;
-        soft_reject_with_relax(
-            &graded,
-            &mut relaxer,
-            &cfg,
-            0,
-            tok,
-            &parent,
-            &mut scratch,
-        ) as u64
+        soft_reject_with_relax(&graded, &mut relaxer, &cfg, 0, tok, &parent, &mut scratch) as u64
     });
 
     // Compare against the raw graded reject_confidence to isolate the
@@ -356,9 +353,15 @@ fn gate_g5_determinism() -> bool {
     // SoftRejectVerdict derives PartialEq + Eq, so direct comparison works.
     let cfg = SoftRejectConfig::default();
     let confidences = [0.0f32, 0.2, 0.4, 0.5, 0.6, 0.79, 0.8, 0.9, 1.0];
-    let baseline: Vec<_> = confidences.iter().map(|&c| soft_reject_decide(c, &cfg)).collect();
+    let baseline: Vec<_> = confidences
+        .iter()
+        .map(|&c| soft_reject_decide(c, &cfg))
+        .collect();
     for _ in 0..DETERMINISM_REPS {
-        let verdicts: Vec<_> = confidences.iter().map(|&c| soft_reject_decide(c, &cfg)).collect();
+        let verdicts: Vec<_> = confidences
+            .iter()
+            .map(|&c| soft_reject_decide(c, &cfg))
+            .collect();
         if verdicts != baseline {
             eprintln!("  ❌ G5-T1 FAIL: non-deterministic soft_reject_decide");
             return false;
@@ -428,10 +431,22 @@ fn main() {
     println!("│ GOAT VERDICT — Plan 310 T3.2 (T1 perf gate)                │");
     println!("├─────────────────────────────────────────────────────────────┤");
     println!("│ G1-T1 backward-compat           : {}", pass_str(g1));
-    println!("│ G2-T1 default Δ < {DEFAULT_DELTA_BUDGET_NS:.0}ns           : {}", pass_str(g2_default_pass));
-    println!("│ G2-T1 graded  Δ < {GRADED_DELTA_BUDGET_NS:.0}ns            : {}", pass_str(g2_graded_pass));
-    println!("│ G3-T1 batch ≥ {BATCH_MPS_FLOOR:.0}M/s                  : {}", pass_str(g3_pass));
-    println!("│ G4-T1 pipeline Δ < {PIPELINE_DELTA_BUDGET_NS:.0}ns        : {}", pass_str(g4_pass));
+    println!(
+        "│ G2-T1 default Δ < {DEFAULT_DELTA_BUDGET_NS:.0}ns           : {}",
+        pass_str(g2_default_pass)
+    );
+    println!(
+        "│ G2-T1 graded  Δ < {GRADED_DELTA_BUDGET_NS:.0}ns            : {}",
+        pass_str(g2_graded_pass)
+    );
+    println!(
+        "│ G3-T1 batch ≥ {BATCH_MPS_FLOOR:.0}M/s                  : {}",
+        pass_str(g3_pass)
+    );
+    println!(
+        "│ G4-T1 pipeline Δ < {PIPELINE_DELTA_BUDGET_NS:.0}ns        : {}",
+        pass_str(g4_pass)
+    );
     println!("│ G5-T1 determinism               : {}", pass_str(g5));
     println!("├─────────────────────────────────────────────────────────────┤");
     if all_pass {
@@ -449,9 +464,5 @@ fn main() {
 }
 
 fn pass_str(ok: bool) -> &'static str {
-    if ok {
-        "PASS ✅"
-    } else {
-        "FAIL ❌"
-    }
+    if ok { "PASS ✅" } else { "FAIL ❌" }
 }

@@ -9,8 +9,8 @@
 
 use katgpt_core::traits::ConstraintPruner;
 use katgpt_rs::pruners::soft_reject::{
-    NoRelaxation, RelaxationStrategy, SoftRejectConfig, SoftRejectVerdict,
-    soft_reject_decide, soft_reject_with_relax,
+    NoRelaxation, RelaxationStrategy, SoftRejectConfig, SoftRejectVerdict, soft_reject_decide,
+    soft_reject_with_relax,
 };
 
 /// Mock graded pruner: rejects tokens whose "evidence strength" (token_idx)
@@ -73,8 +73,14 @@ fn main() {
     let cfg = SoftRejectConfig::default(); // τ_low=0.4, τ_high=0.8
     let candidates: Vec<usize> = (0..12).collect();
 
-    println!("── Decision table (τ_low={}, τ_high={}) ──", cfg.tau_low, cfg.tau_high);
-    println!("{:<8} {:<12} {:<14} {:<10}", "token", "conf", "verdict", "is_valid");
+    println!(
+        "── Decision table (τ_low={}, τ_high={}) ──",
+        cfg.tau_low, cfg.tau_high
+    );
+    println!(
+        "{:<8} {:<12} {:<14} {:<10}",
+        "token", "conf", "verdict", "is_valid"
+    );
     println!("{}", "-".repeat(44));
     for &tok in &candidates {
         let conf = pruner.reject_confidence(0, tok, &[]);
@@ -116,15 +122,28 @@ fn main() {
         }
 
         let conf = pruner.reject_confidence(0, tok, &[]);
-        if matches!(soft_reject_decide(conf, &cfg), SoftRejectVerdict::SoftReject) {
+        if matches!(
+            soft_reject_decide(conf, &cfg),
+            SoftRejectVerdict::SoftReject
+        ) {
             soft_reject_band_count += 1;
         }
     }
 
     let strict_rate = strict_rejects as f32 / candidates.len() as f32;
     let tolerant_rate = tolerant_rejects as f32 / candidates.len() as f32;
-    println!("  Strict (is_valid):           {}/{} rejected ({:.1}%)", strict_rejects, candidates.len(), strict_rate * 100.0);
-    println!("  Tolerant (soft_reject+relax): {}/{} rejected ({:.1}%)", tolerant_rejects, candidates.len(), tolerant_rate * 100.0);
+    println!(
+        "  Strict (is_valid):           {}/{} rejected ({:.1}%)",
+        strict_rejects,
+        candidates.len(),
+        strict_rate * 100.0
+    );
+    println!(
+        "  Tolerant (soft_reject+relax): {}/{} rejected ({:.1}%)",
+        tolerant_rejects,
+        candidates.len(),
+        tolerant_rate * 100.0
+    );
     println!("  SoftReject band candidates:  {}", soft_reject_band_count);
     println!(
         "  False-reject reduction:      {:.1}pp (strict − tolerant)",
@@ -154,8 +173,14 @@ fn main() {
             mismatches += 1;
         }
     }
-    println!("  Mismatches between is_valid and soft_reject_with_relax: {}", mismatches);
-    assert_eq!(mismatches, 0, "binary pruner must reproduce is_valid exactly");
+    println!(
+        "  Mismatches between is_valid and soft_reject_with_relax: {}",
+        mismatches
+    );
+    assert_eq!(
+        mismatches, 0,
+        "binary pruner must reproduce is_valid exactly"
+    );
     println!("  ✓ Default binary impl unchanged (zero-behavior-change guarantee).");
     println!();
 

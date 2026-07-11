@@ -12,7 +12,7 @@
 //! Run: cargo run --example core_05_maxsim --features maxsim --release
 //! With all proofs: cargo run --example core_05_maxsim --features "maxsim,turboquant,spectral_quant" --release
 
-use katgpt_rs::simd::{maxsim_score, maxsim_score_packed, simd_dot_f32};
+use katgpt_core::simd::{maxsim_score, maxsim_score_packed, simd_dot_f32};
 use katgpt_rs::speculative::block_score_maxsim;
 
 fn main() {
@@ -372,8 +372,8 @@ fn main() {
 /// streaming pattern works on compressed caches.
 #[cfg(feature = "turboquant")]
 fn section5_turboquant_proof() {
-    use katgpt_rs::turboquant::TurboQuantKVCache;
-    use katgpt_rs::turboquant::forward::maxsim_score_turboquant;
+    use katgpt_quant::turboquant::TurboQuantKVCache;
+    use katgpt_quant::turboquant::forward::maxsim_score_turboquant;
     use katgpt_rs::types::Config;
 
     println!("── 5. TurboQuant MaxSim Scoring ────────────────────────────────\n");
@@ -550,8 +550,8 @@ fn section6_spectralquant_proof() {
 fn section7_tq_vs_sq_benchmark() {
     use katgpt_rs::spectralquant::forward::maxsim_score_spectralquant;
     use katgpt_rs::spectralquant::{SpectralQuantKVCache, SpectralQuantKVCacheConfig};
-    use katgpt_rs::turboquant::TurboQuantKVCache;
-    use katgpt_rs::turboquant::forward::{cosine_similarity, maxsim_score_turboquant};
+    use katgpt_quant::turboquant::TurboQuantKVCache;
+    use katgpt_quant::turboquant::forward::{cosine_similarity, maxsim_score_turboquant};
     use katgpt_rs::types::{Config, Rng};
 
     println!("── 7. 4-Way Matrix: TQ/SQ × Cosine/MaxSim (3-bit, calibrated) ─────────\n");

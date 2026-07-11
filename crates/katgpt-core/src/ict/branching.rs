@@ -100,11 +100,11 @@ pub fn branching_point_mask(uniqueness_scores: &[f32], k_percent: f32, mask: &mu
     // index wins). Walk left-to-right, demoting the lowest-priority ties
     // past k.
     let mut count = 0;
-    for i in 0..n {
-        if mask[i] {
+    for slot in mask[..n].iter_mut() {
+        if *slot {
             count += 1;
             if count > k {
-                mask[i] = false;
+                *slot = false;
             }
         }
     }

@@ -18,7 +18,7 @@
 
 #![cfg(feature = "cce_moderator")]
 
-use katgpt_rs::cce::{
+use katgpt_core::cce::{
     CceLp, Deviation, DeviationClass, ExternalRegret, OccupationMeasure, PayoffTensor,
     PerPlayerGame,
 };

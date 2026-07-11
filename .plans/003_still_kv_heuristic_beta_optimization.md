@@ -2,7 +2,7 @@
 
 **Date:** 2026-06-11
 **Status:** Done
-**Issue:** `.issues/003_still_kv_heuristic_beta_optimization.md`
+**Issue:** 003 (still-KV heuristic β optimization) — issue closed + removed (done).
 
 ## Tasks
 - [x] T1: Add `with_beta_strategy()` builder to `IterativeChunkCompactor`

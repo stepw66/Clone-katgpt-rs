@@ -20,34 +20,10 @@
 #![cfg(feature = "committed_field_blend")]
 
 use katgpt_core::committed_field_blend::{ArchetypeFieldSource, TriArchetypeBlend};
-use std::alloc::{GlobalAlloc, Layout, System};
-use std::sync::atomic::{AtomicUsize, Ordering};
 
-// ─── CountingAllocator (G4) ─────────────────────────────────────────────────
-
-struct CountingAllocator;
-
-static ALLOC_COUNT: AtomicUsize = AtomicUsize::new(0);
-
-unsafe impl GlobalAlloc for CountingAllocator {
-    unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
-        ALLOC_COUNT.fetch_add(1, Ordering::Relaxed);
-        unsafe { System.alloc(layout) }
-    }
-    unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
-        unsafe { System.dealloc(ptr, layout) }
-    }
-}
-
-#[global_allocator]
-static A: CountingAllocator = CountingAllocator;
-
-fn alloc_delta<R>(f: impl FnOnce() -> R) -> (R, usize) {
-    let before = ALLOC_COUNT.load(Ordering::Relaxed);
-    let r = f();
-    let after = ALLOC_COUNT.load(Ordering::Relaxed);
-    (r, after - before)
-}
+#[path = "../tests/common/mod.rs"]
+mod common;
+counting_allocator!();
 
 // ─── Test fields (frozen, zero-alloc evolve) ────────────────────────────────
 
@@ -92,10 +68,14 @@ fn g4_apply_blended_zero_alloc() -> (bool, usize) {
 
     // Three orthogonal-ish direction vectors (stack-fixed).
     let mut dirs = [[0.0f32; 32]; 3];
-    for j in 0..32 {
-        dirs[0][j] = if j < 11 { 1.0 } else { 0.0 };
-        dirs[1][j] = if (11..22).contains(&j) { 1.0 } else { 0.0 };
-        dirs[2][j] = if j >= 22 { 1.0 } else { 0.0 };
+    for (j, d) in dirs[0].iter_mut().enumerate() {
+        *d = if j < 11 { 1.0 } else { 0.0 };
+    }
+    for (j, d) in dirs[1].iter_mut().enumerate() {
+        *d = if (11..22).contains(&j) { 1.0 } else { 0.0 };
+    }
+    for (j, d) in dirs[2].iter_mut().enumerate() {
+        *d = if j >= 22 { 1.0 } else { 0.0 };
     }
     let summary: [f32; 32] = core::array::from_fn(|i| (i as f32) * 0.1);
 
@@ -117,8 +97,8 @@ fn g4_apply_blended_zero_alloc() -> (bool, usize) {
         for i in 0..1000 {
             // Vary z slightly each iteration so the compiler can't hoist the
             // call out of the loop, but do so without allocating.
-            for j in 0..32 {
-                z[j] = ((i + j) as f32) * 0.001;
+            for (j, z_j) in z.iter_mut().enumerate() {
+                *z_j = ((i + j) as f32) * 0.001;
             }
             let dz = blend.apply_blended(&fields, &z, &mut scratch, &mut dz_out);
             sink = sink.wrapping_add(dz[0].to_bits() as u64);
@@ -136,10 +116,14 @@ fn g4_commit_zero_alloc_after_warmup() -> (bool, usize) {
     let fields: [&dyn ArchetypeFieldSource<32>; 3] = [&f0, &f1, &f2];
 
     let mut dirs = [[0.0f32; 32]; 3];
-    for j in 0..32 {
-        dirs[0][j] = if j < 11 { 1.0 } else { 0.0 };
-        dirs[1][j] = if (11..22).contains(&j) { 1.0 } else { 0.0 };
-        dirs[2][j] = if j >= 22 { 1.0 } else { 0.0 };
+    for (j, d) in dirs[0].iter_mut().enumerate() {
+        *d = if j < 11 { 1.0 } else { 0.0 };
+    }
+    for (j, d) in dirs[1].iter_mut().enumerate() {
+        *d = if (11..22).contains(&j) { 1.0 } else { 0.0 };
+    }
+    for (j, d) in dirs[2].iter_mut().enumerate() {
+        *d = if j >= 22 { 1.0 } else { 0.0 };
     }
     let summary: [f32; 32] = core::array::from_fn(|i| (i as f32) * 0.1);
 

@@ -72,11 +72,13 @@ fn bench_sigmoid_vs_softmax_latency() {
             gate_scale: 1.0,
             zero_init: false,
             activation: ParallaxActivation::Softmax,
+            ..Default::default()
         };
         let sig_config = ParallaxConfig {
             gate_scale: 1.0,
             zero_init: false,
             activation: ParallaxActivation::Sigmoid,
+            ..Default::default()
         };
 
         // ── Bench SDPA baseline ──
@@ -176,6 +178,7 @@ fn bench_sigmoid_finite_all_seq_lens() {
             gate_scale: 1.0,
             zero_init: false,
             activation: ParallaxActivation::Sigmoid,
+            ..Default::default()
         };
 
         let mut output = vec![0.0f32; head_size];
@@ -228,6 +231,7 @@ fn bench_correction_magnitude_comparison() {
             gate_scale: 1.0,
             zero_init: false,
             activation: ParallaxActivation::Softmax,
+            ..Default::default()
         };
         let mut sm_out = vec![0.0f32; head_size];
         tiled_attention_parallax_forward(
@@ -249,6 +253,7 @@ fn bench_correction_magnitude_comparison() {
             gate_scale: 1.0,
             zero_init: false,
             activation: ParallaxActivation::Sigmoid,
+            ..Default::default()
         };
         let mut sig_out = vec![0.0f32; head_size];
         tiled_attention_parallax_forward(
@@ -419,6 +424,7 @@ fn bench_sigmoid_zero_r_recovers_base() {
         gate_scale: 0.0,
         zero_init: false,
         activation: ParallaxActivation::Sigmoid,
+        ..Default::default()
     };
 
     let mut parallax_out = vec![0.0f32; head_size];
@@ -484,11 +490,13 @@ fn bench_covariance_diversity() {
             gate_scale: 1.0,
             zero_init: false,
             activation: ParallaxActivation::Softmax,
+            ..Default::default()
         };
         let sig_config = ParallaxConfig {
             gate_scale: 1.0,
             zero_init: false,
             activation: ParallaxActivation::Sigmoid,
+            ..Default::default()
         };
 
         // Compute base SDPA

@@ -39,10 +39,10 @@ fn main() {
     //    corpus match. We use 18-byte quest lines that appear verbatim in the corpus.
     let ctx: &[u8] = b"";
     let candidates: &[&[u8]] = &[
-        b"guard needs sword\n",   // 18 bytes — appears 4× in corpus
-        b"sage seeks potion\n",   // 18 bytes — appears 4× in corpus
-        b"the dragon wakes\n\0\0",// 18 bytes — NOT in corpus (padding for length parity)
-        b"zzzzzzzzzzzzzzzzzz\n",  // 18 bytes — all-unseen alphabet
+        b"guard needs sword\n",    // 18 bytes — appears 4× in corpus
+        b"sage seeks potion\n",    // 18 bytes — appears 4× in corpus
+        b"the dragon wakes\n\0\0", // 18 bytes — NOT in corpus (padding for length parity)
+        b"zzzzzzzzzzzzzzzzzz\n",   // 18 bytes — all-unseen alphabet
     ];
     let scores = drafter.score_batch(ctx, candidates);
 
@@ -52,10 +52,14 @@ fn main() {
     let span = (best - worst).max(1);
     for (cand, score) in candidates.iter().zip(scores.iter()) {
         // Label relative to the score range — top-half = "seen-like", bottom-half = "unseen-like".
-        let label = if (*score - worst) * 2 >= span { "seen-like (compresses well)" } else { "unseen-like (adds entropy)" };
+        let label = if (*score - worst) * 2 >= span {
+            "seen-like (compresses well)"
+        } else {
+            "unseen-like (adds entropy)"
+        };
         // Strip trailing '\n' / '\0' for display cleanliness.
         let display = String::from_utf8_lossy(cand)
-            .trim_end_matches(|c: char| c == '\n' || c == '\0')
+            .trim_end_matches(['\n', '\0'])
             .to_string();
         println!("  {:>20}  →  {:>4}  ({})", display, score, label);
     }
@@ -63,7 +67,7 @@ fn main() {
     // 3. Argmax pick — the candidate the compressor "remembers" best.
     let (best_idx, best_score) = scores.iter().enumerate().max_by_key(|&(_, &s)| s).unwrap();
     let best_display = String::from_utf8_lossy(candidates[best_idx])
-        .trim_end_matches(|c: char| c == '\n' || c == '\0')
+        .trim_end_matches(['\n', '\0'])
         .to_string();
     println!("\nArgmax: '{}' (score {})", best_display, best_score);
 

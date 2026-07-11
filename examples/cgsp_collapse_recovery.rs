@@ -16,22 +16,27 @@
 
 #![cfg(feature = "cgsp")]
 
-use katgpt_rs::cgsp::{
+use katgpt_core::cgsp::{
+    BreakevenDifficultyFilter, CgspConfig, CgspLoop, ColinearityBatchGate, ComplexityWeights,
+    CycleResult, Direction, EntropyCollapse, HlaProjectionGuide, NoOpBatchGate,
+    NoOpDifficultyFilter, PoolConjecturer, Priority, ScratchBuffers, Target, entropy_nats, sigmoid,
     traits::{CollapseSignal, HintDeltaBandit, Solver},
-    BreakevenDifficultyFilter, CgspConfig, CgspLoop, ColinearityBatchGate,
-    ComplexityWeights, CycleResult, Direction, EntropyCollapse, HlaProjectionGuide,
-    NoOpBatchGate, NoOpDifficultyFilter, PoolConjecturer, Priority, ScratchBuffers, Target,
-    entropy_nats, sigmoid,
 };
 
 // ════════════════════════════════════════════════════════════════════════════
 // Minimal caller-provided Solver + Bandit (same as cgsp_minimal.rs)
 // ════════════════════════════════════════════════════════════════════════════
 
-struct VecBandit { prios: Vec<f32> }
+struct VecBandit {
+    prios: Vec<f32>,
+}
 
 impl VecBandit {
-    fn uniform(n: usize) -> Self { Self { prios: vec![1.0 / n as f32; n] } }
+    fn uniform(n: usize) -> Self {
+        Self {
+            prios: vec![1.0 / n as f32; n],
+        }
+    }
 }
 
 impl HintDeltaBandit for VecBandit {
@@ -43,11 +48,17 @@ impl HintDeltaBandit for VecBandit {
     fn priority(&self, arm: usize) -> Priority {
         self.prios.get(arm).copied().unwrap_or(0.0)
     }
-    fn priorities(&self) -> &[Priority] { &self.prios }
-    fn priorities_mut(&mut self) -> &mut [Priority] { &mut self.prios }
+    fn priorities(&self) -> &[Priority] {
+        &self.prios
+    }
+    fn priorities_mut(&mut self) -> &mut [Priority] {
+        &mut self.prios
+    }
 }
 
-struct DotSolver { sharpness: f32 }
+struct DotSolver {
+    sharpness: f32,
+}
 
 impl Solver for DotSolver {
     fn attempt(
@@ -67,7 +78,9 @@ impl Solver for DotSolver {
 struct NeverCollapse;
 
 impl CollapseSignal for NeverCollapse {
-    fn check_collapse(&mut self, _p: &[Priority], _r: &CycleResult) -> bool { false }
+    fn check_collapse(&mut self, _p: &[Priority], _r: &CycleResult) -> bool {
+        false
+    }
     fn inject_exploration(&mut self, _p: &mut [Priority], _m: f32) {}
 }
 
@@ -115,15 +128,17 @@ fn print_priorities(label: &str, prios: &[f32]) {
 }
 
 /// Force the priority table into a one-hot state on `collapsed_arm`.
-fn force_collapse<C, G, S, B, Col, Df, Qg>(lp: &mut CgspLoop<C, G, S, B, Col, Df, Qg>, collapsed_arm: usize)
-where
-    C: katgpt_rs::cgsp::traits::CuriosityConjecturer,
-    G: katgpt_rs::cgsp::traits::QualityGuide,
+fn force_collapse<C, G, S, B, Col, Df, Qg>(
+    lp: &mut CgspLoop<C, G, S, B, Col, Df, Qg>,
+    collapsed_arm: usize,
+) where
+    C: katgpt_core::cgsp::traits::CuriosityConjecturer,
+    G: katgpt_core::cgsp::traits::QualityGuide,
     S: Solver,
     B: HintDeltaBandit,
     Col: CollapseSignal,
-    Df: katgpt_rs::cgsp::traits::DifficultyFilter,
-    Qg: katgpt_rs::cgsp::traits::BatchQualityGate,
+    Df: katgpt_core::cgsp::traits::DifficultyFilter,
+    Qg: katgpt_core::cgsp::traits::BatchQualityGate,
 {
     for (i, p) in lp.bandit_mut().priorities_mut().iter_mut().enumerate() {
         *p = if i == collapsed_arm { 1.0 } else { 0.0 };
@@ -140,13 +155,13 @@ fn count_cycles_to_recover<C, G, S, B, Col, Df, Qg>(
     cap: usize,
 ) -> (usize, bool)
 where
-    C: katgpt_rs::cgsp::traits::CuriosityConjecturer,
-    G: katgpt_rs::cgsp::traits::QualityGuide,
+    C: katgpt_core::cgsp::traits::CuriosityConjecturer,
+    G: katgpt_core::cgsp::traits::QualityGuide,
     S: Solver,
     B: HintDeltaBandit,
     Col: CollapseSignal,
-    Df: katgpt_rs::cgsp::traits::DifficultyFilter,
-    Qg: katgpt_rs::cgsp::traits::BatchQualityGate,
+    Df: katgpt_core::cgsp::traits::DifficultyFilter,
+    Qg: katgpt_core::cgsp::traits::BatchQualityGate,
 {
     for c in 0..cap {
         let _ = lp.cycle(target, scratch);
@@ -183,10 +198,16 @@ fn main() {
         let guide = HlaProjectionGuide::new(2.0, 1.0, ComplexityWeights::default());
         let solver = DotSolver { sharpness: 1.0 };
         let bandit = VecBandit::uniform(8);
-        CgspLoop::new(conj, guide, solver, bandit, CgspConfig {
-            tau_low: TAU_LOW,
-            ..CgspConfig::default()
-        })
+        CgspLoop::new(
+            conj,
+            guide,
+            solver,
+            bandit,
+            CgspConfig {
+                tau_low: TAU_LOW,
+                ..CgspConfig::default()
+            },
+        )
         .with_collapse(EntropyCollapse::new(TAU_LOW))
         .with_difficulty_filter(BreakevenDifficultyFilter::default())
         .with_batch_gate(ColinearityBatchGate::default())
@@ -201,7 +222,11 @@ fn main() {
     print_priorities("collapsed", lp_cgsp.bandit().priorities());
 
     let (cycles_with, recovered_with) = count_cycles_to_recover(
-        &mut lp_cgsp, &target, &mut scratch_cgsp, TAU_LOW, RECOVERY_CAP,
+        &mut lp_cgsp,
+        &target,
+        &mut scratch_cgsp,
+        TAU_LOW,
+        RECOVERY_CAP,
     );
 
     separator("After recovery attempt (CGSP with collapse-aware)");
@@ -219,10 +244,16 @@ fn main() {
         let guide = HlaProjectionGuide::new(2.0, 1.0, ComplexityWeights::default());
         let solver = DotSolver { sharpness: 1.0 };
         let bandit = VecBandit::uniform(8);
-        CgspLoop::new(conj, guide, solver, bandit, CgspConfig {
-            tau_low: TAU_LOW,
-            ..CgspConfig::default()
-        })
+        CgspLoop::new(
+            conj,
+            guide,
+            solver,
+            bandit,
+            CgspConfig {
+                tau_low: TAU_LOW,
+                ..CgspConfig::default()
+            },
+        )
         .with_collapse(NeverCollapse)
         .with_difficulty_filter(NoOpDifficultyFilter)
         .with_batch_gate(NoOpBatchGate)
@@ -236,7 +267,11 @@ fn main() {
     println!("  Collapsed entropy H = {h_collapsed_b:.6} nats");
 
     let (cycles_without, recovered_without) = count_cycles_to_recover(
-        &mut lp_base, &target, &mut scratch_base, TAU_LOW, RECOVERY_CAP,
+        &mut lp_base,
+        &target,
+        &mut scratch_base,
+        TAU_LOW,
+        RECOVERY_CAP,
     );
 
     let h_after_b = entropy_nats(lp_base.bandit().priorities());
@@ -256,7 +291,9 @@ fn main() {
     println!("  │ Config              │ Cycles to recover                          │");
     println!("  ├──────────────────────────────────────────────────────────────────┤");
     println!("  │ CGSP (collapse-aware)│ {cycles_with:>4}                                       │");
-    println!("  │ Baseline (never)     │ {cycles_without:>4}                                       │");
+    println!(
+        "  │ Baseline (never)     │ {cycles_without:>4}                                       │"
+    );
     println!("  └──────────────────────────────────────────────────────────────────┘");
     println!();
     println!("  Speedup: {speedup:.1}× (CGSP with collapse-aware vs baseline)");
@@ -267,7 +304,10 @@ fn main() {
         cycles_with <= cycles_without,
         "CGSP ({cycles_with}) should recover at least as fast as baseline ({cycles_without})"
     );
-    assert!(recovered_with, "CGSP should recover within {RECOVERY_CAP} cycles");
+    assert!(
+        recovered_with,
+        "CGSP should recover within {RECOVERY_CAP} cycles"
+    );
 
     println!();
     println!("  ✓ CGSP with EntropyCollapse recovers in {cycles_with} cycle(s)");

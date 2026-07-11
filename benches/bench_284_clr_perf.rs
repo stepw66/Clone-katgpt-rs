@@ -36,7 +36,7 @@ use std::hint::black_box;
 use std::time::Instant;
 
 use fastrand::Rng;
-use katgpt_rs::clr::{
+use katgpt_claim::clr::{
     Claim, ClrConfig, ClrScratch, DirectionVectorSource, FnClaimExtractor,
     SigmoidProjectionVerifier, Trajectory, clr_vote_minimal,
 };
@@ -207,7 +207,10 @@ fn main() {
     }
 
     println!();
-    println!("Note: per-call allocations from the extractor (~{} allocs/call for", BENCH_M + 1);
+    println!(
+        "Note: per-call allocations from the extractor (~{} allocs/call for",
+        BENCH_M + 1
+    );
     println!("      K trajectories × clone-based FnClaimExtractor) are included in");
     println!("      this measurement. A pre-extracted hot-path variant would be");
     println!("      faster. The vote arithmetic itself is zero-alloc (see G4).");

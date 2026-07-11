@@ -10,7 +10,7 @@
 //! cargo run --example attn_match_online --features attn_match --release
 //! ```
 
-use katgpt_rs::attn_match::{online::OnlineCompactor, types::AmConfig};
+use katgpt_attn_match::{online::OnlineCompactor, types::AmConfig};
 
 fn synth_token(offset: usize, d: usize, seed: u32) -> (Vec<f32>, Vec<f32>) {
     let mut k = vec![0.0f32; d];
@@ -82,7 +82,11 @@ fn main() {
     }
     let mut pos = phys_budget + recent_window;
 
-    println!("\nInitial cache: {} tokens, {} bytes", pos, bytes_for(pos, d));
+    println!(
+        "\nInitial cache: {} tokens, {} bytes",
+        pos,
+        bytes_for(pos, d)
+    );
 
     let mut compaction_count = 0usize;
     let mut compaction_log: Vec<(usize, usize, usize, usize)> = Vec::new();
@@ -114,7 +118,11 @@ fn main() {
 
                 println!(
                     "{:>10} {:>12} {:>12} {:>14} {:>14}",
-                    step + 1, pos, logical_len, phys_bytes_before, cmp_bytes
+                    step + 1,
+                    pos,
+                    logical_len,
+                    phys_bytes_before,
+                    cmp_bytes
                 );
 
                 // Apply compaction: replace cache with [compact_prefix | recent].
@@ -133,7 +141,10 @@ fn main() {
     // ── Summary ────────────────────────────────────────────────────────────
     print_separator();
     println!("Summary");
-    println!("  Tokens generated (post initial): {}", total_generate - (phys_budget + recent_window));
+    println!(
+        "  Tokens generated (post initial): {}",
+        total_generate - (phys_budget + recent_window)
+    );
     println!("  Compactions triggered: {}", compaction_count);
     println!();
 
@@ -146,7 +157,11 @@ fn main() {
         for (i, (phys_before, logical_after, pb, cb)) in compaction_log.iter().enumerate() {
             println!(
                 "  {:>8} {:>14} {:>14} {:>14} {:>14}",
-                i + 1, phys_before, logical_after, pb, cb
+                i + 1,
+                phys_before,
+                logical_after,
+                pb,
+                cb
             );
         }
 

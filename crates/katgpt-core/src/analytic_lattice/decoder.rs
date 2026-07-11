@@ -93,6 +93,38 @@ pub fn direction_vector_decode_into<const N: usize>(
     }
 }
 
+/// Slice-entry decode: project `state` onto `direction`, return scalar score.
+///
+/// This is the runtime-dimension variant of [`direction_vector_decode`] for
+/// callers that hold raw `&[f32]` slices (e.g. the HLA 5-scalar bridge in
+/// riir-games, which operates on `&[f32]` + `&[[f32; D]]` rather than
+/// const-generic `LatticeVector<N>`). The math is identical:
+///
+/// `out = sigmoid((dot(state, direction) / state.len()) * temperature)`
+///
+/// # Contract
+///
+/// - `state.len()` MUST equal `direction.len()`.
+/// - The caller is responsible for ensuring the slices are the same length;
+///   a debug_assert guards this but no runtime check is performed (the hot
+///   path uses `simd_dot_f32` which reads exactly `state.len()` elements).
+///
+/// # Determinism
+///
+/// Bit-identical to [`direction_vector_decode`] for the same inputs when
+/// `state.len() == N` — both delegate to `simd_dot_f32` + `fast_sigmoid`.
+#[inline]
+pub fn direction_vector_decode_slice(state: &[f32], direction: &[f32], temperature: f32) -> f32 {
+    debug_assert_eq!(
+        state.len(),
+        direction.len(),
+        "direction_vector_decode_slice: state.len() != direction.len()"
+    );
+    let n = state.len();
+    let z = simd_dot_f32(state, direction, n) / n as f32;
+    fast_sigmoid(z * temperature)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -111,7 +143,10 @@ mod tests {
         let state = LatticeVector::<2>::new([1.0, 0.0]);
         let dir = LatticeVector::<2>::new([0.0, 1.0]);
         let score = direction_vector_decode(&state, &dir, 1.0);
-        assert!((score - 0.5).abs() < 1e-6, "orthogonal decode {score} != 0.5");
+        assert!(
+            (score - 0.5).abs() < 1e-6,
+            "orthogonal decode {score} != 0.5"
+        );
     }
 
     #[test]
@@ -153,7 +188,11 @@ mod tests {
         direction_vector_decode_into(&state, &dirs, 2.0, &mut out);
 
         assert!(out[0] > 0.5, "aligned should be > 0.5, got {}", out[0]);
-        assert!((out[1] - 0.5).abs() < 1e-6, "orthogonal should be 0.5, got {}", out[1]);
+        assert!(
+            (out[1] - 0.5).abs() < 1e-6,
+            "orthogonal should be 0.5, got {}",
+            out[1]
+        );
         assert!(out[2] < 0.5, "anti-aligned should be < 0.5, got {}", out[2]);
     }
 
@@ -179,6 +218,22 @@ mod tests {
                 scalar
             );
         }
+    }
+
+    #[test]
+    fn decode_slice_matches_const_generic() {
+        // The slice-entry variant MUST produce bit-identical results to the
+        // const-generic version for the same inputs — both delegate to
+        // simd_dot_f32 + fast_sigmoid.
+        let state = LatticeVector::<8>::new([0.1, -0.2, 0.3, -0.4, 0.5, -0.6, 0.7, -0.8]);
+        let dir = LatticeVector::<8>::new([0.9, 0.8, -0.7, 0.6, -0.5, 0.4, -0.3, 0.2]);
+        let const_gen = direction_vector_decode(&state, &dir, 1.5);
+        let slice = direction_vector_decode_slice(state.as_slice(), dir.as_slice(), 1.5);
+        assert_eq!(
+            const_gen.to_bits(),
+            slice.to_bits(),
+            "slice variant {slice} != const-generic {const_gen} (must be bit-identical)"
+        );
     }
 
     #[test]
@@ -220,13 +275,7 @@ mod tests {
         // Ranking must match exactly (sigmoid is monotone, so ranking is
         // determined by the dot product alone).
         for (i, (s, r)) in simd_scores.iter().zip(ref_scores.iter()).enumerate() {
-            assert!(
-                (s - r).abs() < 1e-6,
-                "rank {}: simd {} vs ref {}",
-                i,
-                s,
-                r
-            );
+            assert!((s - r).abs() < 1e-6, "rank {}: simd {} vs ref {}", i, s, r);
         }
     }
 }

@@ -236,31 +236,31 @@ fn generate_corpus(n: usize, seed: u64) -> Vec<DecisionSample> {
     for _ in 0..n {
         let weights_stale = rng.next_bool(0.5);
 
-        let (compression_ratio_mean, constraint_trend, reward_delta, stall_count) =
-            if weights_stale {
-                // Stale: high compression, rising constraints, low reward delta.
-                let comp = rng.next_normal(3.0, 1.0).max(1.0);
-                let trend = rng.next_normal(0.5, 0.3);
-                let delta = rng.next_normal(0.02, 0.05).max(0.0);
-                // 30% early-detection case: low stall_count (stall hasn't fired yet).
-                let stall = if rng.next_bool(0.30) {
-                    (rng.next_u64() % 4) as u32 // [0, 3]
-                } else {
-                    rng.next_poisson(8.0).min(20)
-                };
-                (comp, trend, delta, stall)
+        let (compression_ratio_mean, constraint_trend, reward_delta, stall_count) = if weights_stale
+        {
+            // Stale: high compression, rising constraints, low reward delta.
+            let comp = rng.next_normal(3.0, 1.0).max(1.0);
+            let trend = rng.next_normal(0.5, 0.3);
+            let delta = rng.next_normal(0.02, 0.05).max(0.0);
+            // 30% early-detection case: low stall_count (stall hasn't fired yet).
+            let stall = if rng.next_bool(0.30) {
+                (rng.next_u64() % 4) as u32 // [0, 3]
             } else {
-                // Not stale: low compression (15% false-positive spike), stable trend.
-                let comp = if rng.next_bool(0.15) {
-                    rng.next_normal(3.0, 0.8).max(1.0) // false-positive spike
-                } else {
-                    rng.next_normal(1.2, 0.5).max(1.0)
-                };
-                let trend = rng.next_normal(-0.1, 0.3);
-                let delta = rng.next_normal(0.15, 0.08).max(0.0);
-                let stall = rng.next_poisson(1.0).min(20);
-                (comp, trend, delta, stall)
+                rng.next_poisson(8.0).min(20)
             };
+            (comp, trend, delta, stall)
+        } else {
+            // Not stale: low compression (15% false-positive spike), stable trend.
+            let comp = if rng.next_bool(0.15) {
+                rng.next_normal(3.0, 0.8).max(1.0) // false-positive spike
+            } else {
+                rng.next_normal(1.2, 0.5).max(1.0)
+            };
+            let trend = rng.next_normal(-0.1, 0.3);
+            let delta = rng.next_normal(0.15, 0.08).max(0.0);
+            let stall = rng.next_poisson(1.0).min(20);
+            (comp, trend, delta, stall)
+        };
 
         let hla_arousal = if weights_stale {
             rng.next_normal(0.7, 0.15).clamp(0.0, 1.0)
@@ -272,7 +272,7 @@ fn generate_corpus(n: usize, seed: u64) -> Vec<DecisionSample> {
             reward_delta,
             stall_count,
             trace: ActiveStateSignal {
-                compression_ratio_mean: compression_ratio_mean,
+                compression_ratio_mean,
                 constraint_trend,
                 hla_arousal,
             },
@@ -303,8 +303,8 @@ fn policy_baseline(sample: &DecisionSample) -> Lever {
 /// picks `WeightUpdate` when the signal exceeds the threshold OR stall triggers.
 /// This catches weight-staleness proactively, before stall detection fires.
 fn policy_trace_informed(sample: &DecisionSample) -> Lever {
-    let trace_signal = sample.trace.compression_ratio_mean
-        * (1.0 + sample.trace.constraint_trend.max(0.0));
+    let trace_signal =
+        sample.trace.compression_ratio_mean * (1.0 + sample.trace.constraint_trend.max(0.0));
     if trace_signal >= TRACE_SIGNAL_THRESHOLD || sample.stall_count >= STALL_THRESHOLD {
         Lever::WeightUpdate
     } else {
@@ -315,8 +315,8 @@ fn policy_trace_informed(sample: &DecisionSample) -> Lever {
 /// Trace-informed policy with a configurable compression threshold.
 /// Used by G4 (backward-compat): threshold = ∞ → trace ignored → == baseline.
 fn policy_trace_informed_tunable(sample: &DecisionSample, threshold: f32) -> Lever {
-    let trace_signal = sample.trace.compression_ratio_mean
-        * (1.0 + sample.trace.constraint_trend.max(0.0));
+    let trace_signal =
+        sample.trace.compression_ratio_mean * (1.0 + sample.trace.constraint_trend.max(0.0));
     if trace_signal >= threshold || sample.stall_count >= STALL_THRESHOLD {
         Lever::WeightUpdate
     } else {
@@ -449,9 +449,7 @@ fn gate_g3_size_overhead() -> bool {
         (0.20, "dense   (1 event /  5 records)", false),
     ];
 
-    println!(
-        "  ActiveStateEvent = {event_bytes} bytes (tick8 + count4 + hla20 + ratio4 + hash32)"
-    );
+    println!("  ActiveStateEvent = {event_bytes} bytes (tick8 + count4 + hla20 + ratio4 + hash32)");
     println!("  TrialRecord      = {record_bytes} bytes (postcard, conservative)");
     println!();
 
@@ -501,8 +499,7 @@ fn gate_g4_backward_compat() -> bool {
     let mut mismatches = 0;
     for sample in &corpus {
         let baseline_decision = policy_baseline(sample);
-        let trace_disabled_decision =
-            policy_trace_informed_tunable(sample, f32::INFINITY);
+        let trace_disabled_decision = policy_trace_informed_tunable(sample, f32::INFINITY);
         if baseline_decision != trace_disabled_decision {
             mismatches += 1;
         }
@@ -524,21 +521,18 @@ fn gate_g5_determinism() -> bool {
     let mut last: Option<(PolicyStats, PolicyStats)> = None;
     for _ in 0..DETERMINISM_REPS {
         let (baseline, trace, _) = sweep();
-        if let Some((prev_b, prev_t)) = last {
-            if baseline.total_regret != prev_b.total_regret
+        if let Some((prev_b, prev_t)) = last
+            && (baseline.total_regret != prev_b.total_regret
                 || baseline.correct != prev_b.correct
                 || trace.total_regret != prev_t.total_regret
-                || trace.correct != prev_t.correct
-            {
-                println!("  ❌ G5-T2 FAIL: non-deterministic across reps");
-                return false;
-            }
+                || trace.correct != prev_t.correct)
+        {
+            println!("  ❌ G5-T2 FAIL: non-deterministic across reps");
+            return false;
         }
         last = Some((baseline, trace));
     }
-    println!(
-        "  ✅ G5-T2 PASS: bit-identical stats across {DETERMINISM_REPS} reps",
-    );
+    println!("  ✅ G5-T2 PASS: bit-identical stats across {DETERMINISM_REPS} reps",);
     true
 }
 

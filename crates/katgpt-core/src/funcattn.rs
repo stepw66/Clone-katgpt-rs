@@ -254,6 +254,7 @@ impl FuncAttnScratch {
 
 /// Errors returned by [`funcattn_forward`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
 pub enum FuncAttnError {
     /// Regularized matrix `(1-α)·K̃ᵀK̃ + α·I_d` was not positive definite
     /// even after adding `cholesky_jitter`. Should never trigger for
@@ -386,9 +387,9 @@ fn cholesky_inplace(a: &mut [f32], dim: usize) -> bool {
             }
             a[i * dim + j] = s * inv_diag;
         }
-        for i in (j + 1)..dim {
-            a[j * dim + i] = 0.0;
-        }
+        // Zero the upper triangle: `slice::fill` auto-vectorizes to a wide
+        // memset, beating the per-element scalar store for dim ≥ 16.
+        a[j * dim + (j + 1)..j * dim + dim].fill(0.0);
     }
     true
 }
@@ -668,10 +669,10 @@ pub fn make_dct_log_basis(k: usize, d: usize) -> Vec<f32> {
         let f_raw = (2.0f32).powf(frac * log_d_half).round() as i64;
         let mut f = f_raw.clamp(1, max_f as i64);
         // Ensure strictly-greater than the previous frequency.
-        if let Some(&prev) = freqs.last() {
-            if f <= prev {
-                f = prev + 1;
-            }
+        if let Some(&prev) = freqs.last()
+            && f <= prev
+        {
+            f = prev + 1;
         }
         // If we ran past max_f, clamp (last few frequencies may saturate at
         // max_f — for k > d/2 this is unavoidable).
@@ -738,8 +739,8 @@ pub fn make_haar_packet_basis(k: usize, d: usize) -> Vec<f32> {
     // Row 0: scaling function (DC component) = [1/sqrt(d); d]. This is the
     // "1 coarse" node from the plan — the lowest-frequency component.
     let dc_scale = (d as f32).sqrt();
-    for j in 0..d {
-        w[j] = 1.0 / dc_scale;
+    for w_slot in w.iter_mut().take(d) {
+        *w_slot = 1.0 / dc_scale;
     }
 
     // Rows 1..k: Haar wavelets at multiple scales, coarse-to-fine then by
@@ -1989,7 +1990,10 @@ mod tests {
                     count += 1;
                 }
             }
-            assert!(count >= 1, "Haar row {i} should have ≥1 sign change (got {count})");
+            assert!(
+                count >= 1,
+                "Haar row {i} should have ≥1 sign change (got {count})"
+            );
             sign_counts.push(count);
         }
         println!("Haar-packet sign-change profile (k={k}, d={d}): {sign_counts:?}");
@@ -2031,8 +2035,18 @@ mod tests {
         ] {
             let mut scratch = FuncAttnScratch::new(n, d, k);
             let mut out = vec![0.0f32; n * d];
-            funcattn_forward(&x, &x, &w_basis, &w_q, &w_k, &w_v, &cfg, &mut scratch, &mut out)
-                .unwrap_or_else(|e| panic!("{label}: forward failed: {e:?}"));
+            funcattn_forward(
+                &x,
+                &x,
+                &w_basis,
+                &w_q,
+                &w_k,
+                &w_v,
+                &cfg,
+                &mut scratch,
+                &mut out,
+            )
+            .unwrap_or_else(|e| panic!("{label}: forward failed: {e:?}"));
             for v in &out {
                 assert!(v.is_finite(), "{label}: non-finite forward output");
             }

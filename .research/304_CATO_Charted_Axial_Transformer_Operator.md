@@ -135,7 +135,7 @@ The obvious game-AI reframing: per-NPC chart = SVD-extracted principal direction
 **This reframing is already built**, in strictly stronger forms:
 
 - **Cross-Resolution Spectral Transport (R291, P310, DEFAULT-ON)** — asymmetric basis transport across plasma/hot/warm/cold tiers. CATO's symmetric single-resolution chart is the d_src=d_dst special case.
-- **FUNCATTN (R257, P286, opt-in)** — closed-form Tikhonov solve; strictly stronger than CATO's softmax axial attention.
+- **FUNCATTN (R257, P286, DEFAULT-ON since 2026-07-07)** — closed-form Tikhonov solve; strictly stronger than CATO's softmax axial attention.
 - **SafeManifoldGraph (R294, P312, DEFAULT-ON)** — KNN graph navigation in latent space with `pullback_volume` cost field. CATO-PC's KNN local aggregation is a strict subset.
 - **subspace_phase_gate (R279, P301)** — runtime participation ratio + numerical rank + Jacobian SVD. CATO's PR=1.126 chart-collapse diagnostic uses the exact metric this primitive computes.
 - **DEC operators (R219, P251, DEFAULT-ON)** — `hodge_laplacian` ships the derivative-aware loss structure.

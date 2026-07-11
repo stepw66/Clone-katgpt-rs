@@ -1,0 +1,72 @@
+[package]
+name = "katgpt-sense"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+description = "KG Latent Octree Sense substrate — octree construction, reconstruction, BAKE precision-gated update, LOD routing, serialization. Spun out of katgpt-core::sense (Issue 007 Phase E Tier 2 #7). Depends only on katgpt-types (the leaf)."
+repository = "https://github.com/katopz/katgpt-rs"
+keywords = ["inference", "octree", "sense", "lod", "modelless"]
+categories = ["data-structures", "science", "algorithms"]
+publish = false  # only katgpt-core ships to crates.io
+
+[dependencies]
+katgpt-types = { path = "../katgpt-types" }
+blake3 = "1"
+fastrand = "2"
+# papaya is needed by schema_centroid + bake_precision (BakePrecisionStore,
+# SchemaCentroidCache). Optional — pulled in by those features.
+papaya = { version = "0.2", optional = true }
+
+[features]
+# katgpt-sense compiles its core substrate (bake, octree, reconstruction,
+# serialize) unconditionally. The features below mirror the katgpt-core gates
+# so the re-export shim can forward them.
+default = []
+
+# Parent sense-composition flag (Plan 221). In katgpt-core this gated the
+# whole `sense` module + implied plasma_path/domain_latent. In katgpt-sense
+# the core substrate is unconditional, so this is a tracking flag only —
+# it gates the cached_weights SIMD-matvec path in reconstruction.rs (which
+# depends on TernaryDir from katgpt-types, always available) and the
+# paired sense_composition+temporal_deriv test in reconstruction.rs.
+sense_composition = []
+
+# Temporal Derivative Kernel surprise channel in reconstruction (Plan 277).
+# The kernel itself is unconditional in katgpt-types; this flag gates the
+# surprise fields/methods in ReconstructionConfig/ReconstructionState so
+# the struct layout matches katgpt-core's feature-gated layout bit-for-bit.
+temporal_deriv = []
+
+# Spectral NPC Perception Compression (Plan 240) — LOD routing for sense
+# modules. Gates the `lod` submodule + its SenseLodLevel/SenseLodMask/
+# SenseLodRouter surface. Forwards the slod / spectral_hierarchy dependency
+# transitively via katgpt-core (no katgpt-types dep needed — ScaleBoundary
+# is already in katgpt-types unconditionally).
+sense_lod = []
+
+# Schema-Centroid Informed KG Embedding Initialization (Plan 237) — gates
+# the `schema_centroid` submodule. Pulls in papaya for the cache.
+schema_centroid = ["dep:papaya"]
+
+# Multi-sector spatial projection (Plan 262) — gates the `sector` submodule.
+sector_projection = []
+
+# Depth-Invariance audit integration for reconstruction (Plan 331) — gates
+# the `reconstruction_depth_invariance` submodule. Forwards to katgpt-types
+# so DepthInvarianceConfig/Diagnostic/Scratch/classify_chain resolve.
+depth_invariance = ["katgpt-types/depth_invariance"]
+
+# Merkle octree build path in octree.rs (Plan 221-M) — gates the
+# `build_with_merkle` / `build_merkle_only` methods. Merkle primitives live
+# in katgpt-types unconditionally, so this is a local cfg only.
+merkle_octree = []
+
+# BAKE Precision-Gated Bayesian Embedding Update (Plan 236) — gates the
+# BakePrecisionStore / BakeSession / PrecisionEntry surface in `bake`.
+# Pulls in papaya for the precision store.
+bake_precision = ["dep:papaya"]
+
+# Self-advantage recursion gate (Plan 283 T5.1) — gates the
+# advantage-margin early-stop in reconstruction.rs (dead-compute detector).
+# Empty tracking flag: the code is self-contained (no extra deps).
+self_advantage_gate = []

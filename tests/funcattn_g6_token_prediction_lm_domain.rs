@@ -94,7 +94,7 @@
 #![cfg(feature = "funcattn")]
 
 use katgpt_core::attention::tiled_attention_forward_with_scores;
-use katgpt_core::funcattn::{funcattn_forward, FuncAttnBasis, FuncAttnConfig, FuncAttnScratch};
+use katgpt_core::funcattn::{FuncAttnBasis, FuncAttnConfig, FuncAttnScratch, funcattn_forward};
 use katgpt_core::simd;
 
 // ── Model dimensions ─────────────────────────────────────────────────
@@ -142,7 +142,7 @@ const ALPHA: f32 = 0.5;
 const TEMPERATURE: f32 = 0.1;
 /// Fixed reproducible seed (literal kept short on purpose so it's easy to
 /// grep for). Same seed across debug/release so the G6 verdict is stable.
-const SEED_U64: u64 = 0xC0FFEE_42AA_u64;
+const SEED_U64: u64 = 0x00C0_FFEE_42AA_u64;
 
 // ── Deterministic xorshift64* PRNG (mirrors G2/G3 tests) ─────────────────
 
@@ -153,7 +153,11 @@ struct Rng {
 impl Rng {
     fn new(seed: u64) -> Self {
         Self {
-            s: if seed == 0 { 0x9E37_79B9_7F4A_7C15 } else { seed },
+            s: if seed == 0 {
+                0x9E37_79B9_7F4A_7C15
+            } else {
+                seed
+            },
         }
     }
     fn next_u64(&mut self) -> u64 {
@@ -236,8 +240,20 @@ fn generate_pattern_dataset(
     let mut out = Vec::with_capacity(n_sequences);
     for _ in 0..n_sequences {
         let a = (rng.next_u64() as usize) % effective_vocab.max(1);
-        let b = (rng.next_u64() as usize) % effective_vocab.max(1);
-        let seq: Vec<usize> = (0..seq_len).map(|i| if i % 2 == 0 { a } else { b }).collect();
+        let mut b = (rng.next_u64() as usize) % effective_vocab.max(1);
+        // Reject a == b (constant sequences). Issue 049: a constant sequence
+        // [c,c,...,c] teaches the model nothing about the alternating pattern
+        // and corrupts FUNCATTN's learned basis with a degenerate direction that
+        // FD-SGD cannot recover from (5 of 32 train seqs were degenerate at V=8,
+        // matching the 12.5% expected rate — this drove the spurious 0.969
+        // plateau). Bump b to the next token; preserves the rest of the PRNG
+        // stream so predictor init weights are unaffected.
+        if effective_vocab > 1 && b == a {
+            b = (b + 1) % effective_vocab;
+        }
+        let seq: Vec<usize> = (0..seq_len)
+            .map(|i| if i % 2 == 0 { a } else { b })
+            .collect();
         out.push(seq);
     }
     out
@@ -247,12 +263,7 @@ fn generate_pattern_dataset(
 
 /// Embed tokens + add positional encoding.
 /// `x[n, d] = w_emb[token[n]*D + d] + w_pos[n*D + d]`.
-fn embed_add_pos(
-    tokens: &[usize],
-    w_emb: &[f32],
-    w_pos: &[f32],
-    out: &mut [f32],
-) {
+fn embed_add_pos(tokens: &[usize], w_emb: &[f32], w_pos: &[f32], out: &mut [f32]) {
     for n in 0..N {
         let tok = tokens[n];
         let emb_row = &w_emb[tok * D..(tok + 1) * D];
@@ -301,8 +312,8 @@ fn softmax_rows_v(logits: &[f32], probs: &mut [f32]) {
             sum += e;
         }
         let inv = 1.0 / sum.max(1e-20);
-        for v in 0..V {
-            out_row[v] *= inv;
+        for o in out_row {
+            *o *= inv;
         }
     }
 }
@@ -368,10 +379,10 @@ struct FuncattnPredictor {
     w_head: Vec<f32>,  // (V, D)
     // Scratch
     scratch: FuncAttnScratch,
-    x_buf: Vec<f32>,    // (N, D)
-    o_buf: Vec<f32>,    // (N, D)
-    logits: Vec<f32>,   // (N, V)
-    probs: Vec<f32>,    // (N, V)
+    x_buf: Vec<f32>,  // (N, D)
+    o_buf: Vec<f32>,  // (N, D)
+    logits: Vec<f32>, // (N, V)
+    probs: Vec<f32>,  // (N, V)
 }
 
 impl FuncattnPredictor {
@@ -472,9 +483,9 @@ impl FuncattnPredictor {
         let row = &self.probs[masked_pos * V..(masked_pos + 1) * V];
         let mut best = 0usize;
         let mut best_p = row[0];
-        for v in 1..V {
-            if row[v] > best_p {
-                best_p = row[v];
+        for (v, &p) in row.iter().enumerate().skip(1) {
+            if p > best_p {
+                best_p = p;
                 best = v;
             }
         }
@@ -559,21 +570,21 @@ impl FuncattnPredictor {
 // ── SDPA predictor ───────────────────────────────────────────────────────
 
 struct SdpaPredictor {
-    w_emb: Vec<f32>,   // (V, D)
-    w_pos: Vec<f32>,   // (N, D)
-    w_q: Vec<f32>,     // (D, D)
-    w_k: Vec<f32>,     // (D, D)
-    w_v: Vec<f32>,     // (D, D)
-    w_head: Vec<f32>,  // (V, D)
+    w_emb: Vec<f32>,  // (V, D)
+    w_pos: Vec<f32>,  // (N, D)
+    w_q: Vec<f32>,    // (D, D)
+    w_k: Vec<f32>,    // (D, D)
+    w_v: Vec<f32>,    // (D, D)
+    w_head: Vec<f32>, // (V, D)
     // Scratch
-    x_buf: Vec<f32>,    // (N, D)
-    q_buf: Vec<f32>,    // (N, D)
-    k_buf: Vec<f32>,    // (N, D)
-    v_buf: Vec<f32>,    // (N, D)
-    o_buf: Vec<f32>,    // (N, D)
+    x_buf: Vec<f32>,      // (N, D)
+    q_buf: Vec<f32>,      // (N, D)
+    k_buf: Vec<f32>,      // (N, D)
+    v_buf: Vec<f32>,      // (N, D)
+    o_buf: Vec<f32>,      // (N, D)
     scores_buf: Vec<f32>, // (N, N)
-    logits: Vec<f32>,   // (N, V)
-    probs: Vec<f32>,    // (N, V)
+    logits: Vec<f32>,     // (N, V)
+    probs: Vec<f32>,      // (N, V)
 }
 
 impl SdpaPredictor {
@@ -656,9 +667,9 @@ impl SdpaPredictor {
         let row = &self.probs[masked_pos * V..(masked_pos + 1) * V];
         let mut best = 0usize;
         let mut best_p = row[0];
-        for v in 1..V {
-            if row[v] > best_p {
-                best_p = row[v];
+        for (v, &p) in row.iter().enumerate().skip(1) {
+            if p > best_p {
+                best_p = p;
                 best = v;
             }
         }
@@ -861,7 +872,11 @@ fn g6_token_prediction_lm_domain() {
     eprintln!("  Plan 286 T4.4 promotion gate (hard, not asserted in this test):");
     eprintln!(
         "    FUNCATTN acc ≥ SDPA acc   → {} (fa {:.4} vs sd {:.4}, Δ {:+.4})",
-        if fa_acc >= sd_acc { "PASS — eligible for default-on promotion" } else { "FAIL — stays opt-in" },
+        if fa_acc >= sd_acc {
+            "PASS — eligible for default-on promotion"
+        } else {
+            "FAIL — stays opt-in"
+        },
         fa_acc,
         sd_acc,
         acc_delta,
@@ -879,11 +894,23 @@ fn g6_token_prediction_lm_domain() {
         "  training loss: funcattn {:.4}→{:.4} ({:.1}%), sdpa {:.4}→{:.4} ({:.1}%){}",
         fa_init_loss,
         fa_last_loss,
-        if fa_finite { (1.0 - fa_last_loss / fa_init_loss.max(1e-20)) * 100.0 } else { f32::NAN },
+        if fa_finite {
+            (1.0 - fa_last_loss / fa_init_loss.max(1e-20)) * 100.0
+        } else {
+            f32::NAN
+        },
         sd_init_loss,
         sd_last_loss,
-        if sd_finite { (1.0 - sd_last_loss / sd_init_loss.max(1e-20)) * 100.0 } else { f32::NAN },
-        if fa_finite && sd_finite { "" } else { "  [at least one DNF]" },
+        if sd_finite {
+            (1.0 - sd_last_loss / sd_init_loss.max(1e-20)) * 100.0
+        } else {
+            f32::NAN
+        },
+        if fa_finite && sd_finite {
+            ""
+        } else {
+            "  [at least one DNF]"
+        },
     );
 
     assert!(

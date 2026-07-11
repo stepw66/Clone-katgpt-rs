@@ -37,9 +37,10 @@ fn rules_count(rules: &[ValidatorRule]) -> usize {
 
 #[cfg(feature = "bomber-agent")]
 fn improvement_pct(agent: f32, baseline: f32) -> String {
-    match baseline {
-        b if b == 0.0 => format!("+{:.1}", agent),
-        b => format!("{:+.1}%", (agent - b) / b.abs() * 100.0),
+    if baseline == 0.0 {
+        format!("+{:.1}", agent)
+    } else {
+        format!("{:+.1}%", (agent - baseline) / baseline.abs() * 100.0)
     }
 }
 
@@ -108,8 +109,8 @@ fn bench_validator_agent() {
     );
 
     println!(
-        "\nAgent improvement over baseline: {} score ({})",
-        format!("{:+.1}", agent_eval.avg_score - baseline_eval.avg_score),
+        "\nAgent improvement over baseline: {:+.1} score ({})",
+        agent_eval.avg_score - baseline_eval.avg_score,
         improvement_pct(agent_eval.avg_score, baseline_eval.avg_score),
     );
 

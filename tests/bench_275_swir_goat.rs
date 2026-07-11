@@ -68,12 +68,11 @@
 #![cfg(feature = "swir_switch_thinking")]
 #![cfg(test)]
 
-use katgpt_rs::swir::{
-    entropy_from_logits, in_vocab_convex_hull, mix_thinking_signal, shannon_entropy,
-    soft_embedding, SwiRConfig, SwiRController, SwiRStrategyAdapter, StepAction,
-    ThinkMode,
+use katgpt_transformer::swir::{
+    StepAction, SwiRConfig, SwiRController, SwiRStrategyAdapter, ThinkMode, entropy_from_logits,
+    in_vocab_convex_hull, mix_thinking_signal, shannon_entropy, soft_embedding,
 };
-use katgpt_rs::thinking_cot::{ControlTokenIds, StepContext, StepDirective, ThinkingStrategy};
+use katgpt_transformer::thinking_cot::{ControlTokenIds, StepContext, StepDirective, ThinkingStrategy};
 use std::time::Instant;
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -191,8 +190,12 @@ fn g3_step_perf_under_200ns_release() {
     // Warm up (first step initialises reference_entropy — slightly slower).
     let mut entropy = 5.0f32;
     for i in 0..64 {
-        entropy = if i % 16 < 8 { entropy - 0.3 } else { entropy + 0.3 };
-        entropy = entropy.max(0.1).min(10.0);
+        entropy = if i % 16 < 8 {
+            entropy - 0.3
+        } else {
+            entropy + 0.3
+        };
+        entropy = entropy.clamp(0.1, 10.0);
         let _ = ctrl.step(entropy, i);
     }
 
@@ -200,8 +203,12 @@ fn g3_step_perf_under_200ns_release() {
     const N: u32 = 100_000;
     let t0 = Instant::now();
     for i in 0..N {
-        entropy = if (i % 16) < 8 { entropy - 0.3 } else { entropy + 0.3 };
-        entropy = entropy.max(0.1).min(10.0);
+        entropy = if (i % 16) < 8 {
+            entropy - 0.3
+        } else {
+            entropy + 0.3
+        };
+        entropy = entropy.clamp(0.1, 10.0);
         let action = ctrl.step(entropy, i);
         // Prevent the compiler from optimising step() away.
         if action == StepAction::Terminate {
@@ -335,7 +342,7 @@ fn g6_kurtosis_escape_hatch_end_to_end() {
     // (5 tests). This gate re-runs the path end-to-end through the adapter to
     // verify the host wiring (StepContext → on_step → StepDirective) doesn't
     // drop the escape signal.
-    let emb = synth_embedding_matrix(VOCAB, EMB_DIM, 0x6dead_beef);
+    let emb = synth_embedding_matrix(VOCAB, EMB_DIM, 0x0006_DEAD_BEEF);
     let mut adapter = SwiRStrategyAdapter::with_config(
         VOCAB,
         EMB_DIM,
@@ -404,7 +411,7 @@ fn g7_step_zero_allocation_debug() {
     // Run in debug so the library's TrackingAllocator is installed.
     #[cfg(debug_assertions)]
     {
-        katgpt_rs::alloc::reset_alloc_stats();
+        katgpt_core::alloc::reset_alloc_stats();
         let mut ctrl = SwiRController::new(SwiRConfig {
             w_e_to_l: 4,
             w_l_to_e: 0,
@@ -420,15 +427,19 @@ fn g7_step_zero_allocation_debug() {
         // but be conservative in case the constructor's lazy init triggers).
         let _ = ctrl.step(5.0, 0);
 
-        katgpt_rs::alloc::reset_alloc_stats();
+        katgpt_core::alloc::reset_alloc_stats();
         let mut entropy = 5.0f32;
         for i in 1..1024u32 {
-            entropy = if (i % 16) < 8 { entropy - 0.3 } else { entropy + 0.3 };
-            entropy = entropy.max(0.1).min(10.0);
+            entropy = if (i % 16) < 8 {
+                entropy - 0.3
+            } else {
+                entropy + 0.3
+            };
+            entropy = entropy.clamp(0.1, 10.0);
             let _ = ctrl.step(entropy, i);
             let _ = ctrl.should_mix_signal();
         }
-        let (count, bytes) = katgpt_rs::alloc::get_alloc_stats();
+        let (count, bytes) = katgpt_core::alloc::get_alloc_stats();
         println!(
             "G7 step() allocations: {count} allocs, {bytes} bytes over 1023 steps \
              (budget: {G7_STEP_ALLOC_SLACK} allocs)"
@@ -456,7 +467,7 @@ fn g7_adapter_on_step_allocations_debug() {
     // We document the per-step cost so downstream hosts know what to expect.
     #[cfg(debug_assertions)]
     {
-        let emb = synth_embedding_matrix(VOCAB, EMB_DIM, 0x7a10c_5ee);
+        let emb = synth_embedding_matrix(VOCAB, EMB_DIM, 0x7A10_C5EE);
         let mut adapter = SwiRStrategyAdapter::new(VOCAB, EMB_DIM);
         let ids = ControlTokenIds::default();
         let probs = vec![1.0f32 / VOCAB as f32; VOCAB]; // uniform → high entropy → Latent
@@ -473,7 +484,7 @@ fn g7_adapter_on_step_allocations_debug() {
         };
         let _ = adapter.on_step(&mut ctx);
 
-        katgpt_rs::alloc::reset_alloc_stats();
+        katgpt_core::alloc::reset_alloc_stats();
         let n_steps = 64u32;
         let mut soft_steps = 0u32;
         let mut inject_steps = 0u32;
@@ -492,7 +503,7 @@ fn g7_adapter_on_step_allocations_debug() {
                 _ => {}
             }
         }
-        let (count, bytes) = katgpt_rs::alloc::get_alloc_stats();
+        let (count, bytes) = katgpt_core::alloc::get_alloc_stats();
         let per_step = count as f64 / (n_steps - 1) as f64;
         println!(
             "G7 adapter on_step: {count} allocs / {bytes} bytes over {} steps ({per_step:.2} \
@@ -574,10 +585,10 @@ fn g1c_controller_correctness_on_converging_schedule() {
             switches += 1;
         }
         match action {
-            StepAction::InjectControlToken(katgpt_rs::swir::ControlToken::CloseThink) => {
+            StepAction::InjectControlToken(katgpt_transformer::swir::ControlToken::CloseThink) => {
                 close_think_injections += 1;
             }
-            StepAction::InjectControlToken(katgpt_rs::swir::ControlToken::ForceAnswerPrefix) => {
+            StepAction::InjectControlToken(katgpt_transformer::swir::ControlToken::ForceAnswerPrefix) => {
                 force_answer_injections += 1;
             }
             StepAction::Terminate => {
@@ -664,7 +675,13 @@ fn g2p_efficiency_proxy_swir_terminates_earlier_than_fixed_budget() {
     let mut swir_steps = 0u32;
     for i in 0..FIXED_BUDGET {
         // Step 0: HIGH (sets ref=HIGH, Latent). Steps after: alternate LOW/HIGH.
-        let entropy = if i == 0 { HIGH } else if i % 2 == 1 { LOW } else { HIGH };
+        let entropy = if i == 0 {
+            HIGH
+        } else if i % 2 == 1 {
+            LOW
+        } else {
+            HIGH
+        };
         let action = ctrl.step(entropy, i);
         swir_steps += 1;
         if action == StepAction::Terminate {
@@ -808,7 +825,13 @@ fn drive_alternating(ctrl: &mut SwiRController, max_steps: u32) -> AblationRun {
     let mut switches = 0u32;
     let mut terminated_at: Option<u32> = None;
     for i in 0..max_steps {
-        let entropy = if i == 0 { HIGH } else if i % 2 == 1 { LOW } else { HIGH };
+        let entropy = if i == 0 {
+            HIGH
+        } else if i % 2 == 1 {
+            LOW
+        } else {
+            HIGH
+        };
         let prev_mode = ctrl.mode();
         let action = ctrl.step(entropy, i);
         let new_mode = ctrl.mode();
@@ -841,7 +864,10 @@ fn g9a_w_e_to_l_sweep_larger_dwall_fewer_switches() {
     let max_steps = 512u32;
     let mut prev_switches = u32::MAX;
     println!("G9a — W_E→L sweep (c_max=∞, {max_steps} steps):");
-    println!("  {:>10} {:>10} {:>12} {:>12}", "W_E→L", "switches", "latent_st", "explicit_st");
+    println!(
+        "  {:>10} {:>10} {:>12} {:>12}",
+        "W_E→L", "switches", "latent_st", "explicit_st"
+    );
     for &w_e_to_l in w_e_to_l_values {
         let mut ctrl = SwiRController::new(SwiRConfig {
             w_e_to_l,
@@ -915,7 +941,10 @@ fn g9b_c_max_sweep_termination_step_scales_monotonically() {
     let max_steps = 4096u32;
     let mut prev_term: u32 = 0;
     println!("G9b — C_max sweep (w_e_to_l=1, answer_budget=16):");
-    println!("  {:>6} {:>14} {:>10}", "C_max", "terminated_at", "switches");
+    println!(
+        "  {:>6} {:>14} {:>10}",
+        "C_max", "terminated_at", "switches"
+    );
     for &c_max in c_max_values {
         let mut ctrl = SwiRController::new(SwiRConfig {
             w_e_to_l: 1,
@@ -966,7 +995,10 @@ fn g9c_alpha_0_sweep_switch_decisions_are_alpha_independent() {
     let max_steps = 256u32;
     let mut baseline: Option<AblationRun> = None;
     println!("G9c — α_0 sweep (switch decisions must be α-independent):");
-    println!("  {:>6} {:>10} {:>14} {:>10}", "α_0", "switches", "terminated_at", "latent_st");
+    println!(
+        "  {:>6} {:>10} {:>14} {:>10}",
+        "α_0", "switches", "terminated_at", "latent_st"
+    );
     for &alpha_0 in alpha_values {
         let mut ctrl = SwiRController::new(SwiRConfig {
             w_e_to_l: 1,
@@ -982,7 +1014,10 @@ fn g9c_alpha_0_sweep_switch_decisions_are_alpha_independent() {
         let run = drive_alternating(&mut ctrl, max_steps);
         println!(
             "  {:>6} {:>10} {:>14} {:>10}",
-            alpha_0, run.switches, format!("{:?}", run.terminated_at), run.latent_steps
+            alpha_0,
+            run.switches,
+            format!("{:?}", run.terminated_at),
+            run.latent_steps
         );
         match &baseline {
             None => baseline = Some(run),
@@ -1003,8 +1038,7 @@ fn g9c_alpha_0_sweep_switch_decisions_are_alpha_independent() {
                     run.latent_steps, b.latent_steps,
                     "G9c FAIL: α_0={alpha_0} latent_steps={} vs baseline {} — \
                      mode distribution must be α-independent",
-                    run.latent_steps,
-                    b.latent_steps
+                    run.latent_steps, b.latent_steps
                 );
             }
         }
@@ -1051,7 +1085,13 @@ fn g9d_signal_mixing_on_off_decisions_identical() {
     let mut mix_steps = 0u32;
     let mut total_switches = 0u32;
     for i in 0..max_steps {
-        let entropy = if i == 0 { 5.0 } else if i % 2 == 1 { 1.0 } else { 5.0 };
+        let entropy = if i == 0 {
+            5.0
+        } else if i % 2 == 1 {
+            1.0
+        } else {
+            5.0
+        };
         let prev_mode = ctrl.mode();
         let action = ctrl.step(entropy, i);
         let new_mode = ctrl.mode();
@@ -1105,7 +1145,7 @@ fn g9d_signal_mixing_on_off_decisions_identical() {
 
 #[test]
 fn g1h_accuracy_gate_harness_structure() {
-    use katgpt_rs::swir::bench::*;
+    use katgpt_transformer::swir::bench::*;
 
     let src = SyntheticProblemSource::new(10, 42);
     let mut backend_a = SyntheticDecodeBackend::new(42);
@@ -1149,7 +1189,7 @@ fn g1h_accuracy_gate_harness_structure() {
     assert!(cmp.swir.accuracy() >= 0.0 && cmp.swir.accuracy() <= 1.0);
     // Delta is computable.
     let delta = cmp.accuracy_delta_pp();
-    assert!(delta >= -100.0 && delta <= 100.0);
+    assert!((-100.0..=100.0).contains(&delta));
 }
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -1162,7 +1202,7 @@ fn g1h_accuracy_gate_harness_structure() {
 
 #[test]
 fn g2h_efficiency_gate_harness_structure() {
-    use katgpt_rs::swir::bench::*;
+    use katgpt_transformer::swir::bench::*;
 
     let src = SyntheticProblemSource::new(5, 42);
     let mut backend_a = SyntheticDecodeBackend::new(42);

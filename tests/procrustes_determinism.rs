@@ -14,9 +14,7 @@
 
 #![cfg(feature = "orthogonal_procrustes")]
 
-use katgpt_rs::procrustes::{
-    orthogonal_procrustes, ProcrustesConfig, ProcrustesScratch,
-};
+use katgpt_spectral::procrustes::{ProcrustesConfig, ProcrustesScratch, orthogonal_procrustes};
 
 /// Deterministic xorshift32 PRNG.
 fn seeded_anchors(seed: u32, n: usize, d: usize) -> Vec<f32> {
@@ -56,14 +54,26 @@ fn g3_bit_identical_output_across_repeated_calls() {
         let rep1 = orthogonal_procrustes(&a, &b, n, d, &mut r1, &mut s1, &cfg).unwrap();
         let rep2 = orthogonal_procrustes(&a, &b, n, d, &mut r2, &mut s2, &cfg).unwrap();
 
-        assert_eq!(r1, r2, "G3 FAIL: n={}, d={}: rotation matrix differs between calls", n, d);
+        assert_eq!(
+            r1, r2,
+            "G3 FAIL: n={}, d={}: rotation matrix differs between calls",
+            n, d
+        );
         // Reports should also be bit-identical.
         assert_eq!(rep1.n, rep2.n);
         assert_eq!(rep1.d, rep2.d);
-        assert!(rep1.residual.to_bits() == rep2.residual.to_bits(),
-                "G3 FAIL: residual bits differ: {} vs {}", rep1.residual, rep2.residual);
-        assert!(rep1.m_norm.to_bits() == rep2.m_norm.to_bits(),
-                "G3 FAIL: m_norm bits differ: {} vs {}", rep1.m_norm, rep2.m_norm);
+        assert!(
+            rep1.residual.to_bits() == rep2.residual.to_bits(),
+            "G3 FAIL: residual bits differ: {} vs {}",
+            rep1.residual,
+            rep2.residual
+        );
+        assert!(
+            rep1.m_norm.to_bits() == rep2.m_norm.to_bits(),
+            "G3 FAIL: m_norm bits differ: {} vs {}",
+            rep1.m_norm,
+            rep2.m_norm
+        );
     }
 }
 
@@ -84,7 +94,10 @@ fn g3_deterministic_with_zero_seed_guards() {
     assert!(result.is_err(), "expected DegenerateAnchors error");
     // Determinism: same input always errors. No NaN leakage.
     for v in &r {
-        assert!(v.is_finite() || *v == 0.0, "buffer should not contain NaN/Inf after error");
+        assert!(
+            v.is_finite() || *v == 0.0,
+            "buffer should not contain NaN/Inf after error"
+        );
     }
 }
 
@@ -105,15 +118,41 @@ fn g3_scratch_reuse_does_not_break_determinism() {
     let a_warmup = seeded_anchors(99, n, d);
     let b_warmup = seeded_anchors(88, n, d);
     let mut r_warmup = vec![0.0_f32; d * d];
-    let _ = orthogonal_procrustes(&a_warmup, &b_warmup, n, d, &mut r_warmup, &mut scratch_reused, &ProcrustesConfig::default());
+    let _ = orthogonal_procrustes(
+        &a_warmup,
+        &b_warmup,
+        n,
+        d,
+        &mut r_warmup,
+        &mut scratch_reused,
+        &ProcrustesConfig::default(),
+    );
 
     // Second call: this is what we compare.
-    let _ = orthogonal_procrustes(&a, &b, n, d, &mut r_reused, &mut scratch_reused, &ProcrustesConfig::default());
+    let _ = orthogonal_procrustes(
+        &a,
+        &b,
+        n,
+        d,
+        &mut r_reused,
+        &mut scratch_reused,
+        &ProcrustesConfig::default(),
+    );
 
     // Fresh scratch + same input.
     let mut scratch_fresh = ProcrustesScratch::new(n, d);
-    let _ = orthogonal_procrustes(&a, &b, n, d, &mut r_fresh, &mut scratch_fresh, &ProcrustesConfig::default());
+    let _ = orthogonal_procrustes(
+        &a,
+        &b,
+        n,
+        d,
+        &mut r_fresh,
+        &mut scratch_fresh,
+        &ProcrustesConfig::default(),
+    );
 
-    assert_eq!(r_reused, r_fresh,
-               "G3 FAIL: scratch reuse changed the result — internal state leaked");
+    assert_eq!(
+        r_reused, r_fresh,
+        "G3 FAIL: scratch reuse changed the result — internal state leaked"
+    );
 }

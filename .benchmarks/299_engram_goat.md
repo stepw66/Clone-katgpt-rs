@@ -193,12 +193,12 @@ G7 is the CI guard `cargo test --workspace --all-features` clean. The scoped eng
 - **Plan:** [299_Engram_Hash_Addressed_Pattern_Memory.md](../.plans/299_Engram_Hash_Addressed_Pattern_Memory.md)
 - **Research:** [278_Engram_Conditional_Memory_Latent_Lookup_Fusion.md](../.research/278_Engram_Conditional_Memory_Latent_Lookup_Fusion.md)
 - **Private guide (riir-ai):** `riir-ai/.research/147_Engram_Conditional_Memory_NPC_Guide.md`
-- **Chain commitment half (TODO):** `riir-chain/.research/001_Engram_LatCal_Commitment_Bridge.md` (file when the LatCal bridge starts)
+- **Chain commitment half:** `riir-chain/.research/007_Engram_LatCal_Commitment_Bridge.md` (filed 2026-07-04)
 - **Source paper:** [arxiv 2601.07372](https://arxiv.org/pdf/2601.07372) — Cheng et al. 2026 (DeepSeek-AI / Peking U.)
 - **Implementation:** `crates/katgpt-core/src/engram/{mod,hash,table,kernel,conv,tokenizer,hotswap,cache,commitment,forward,tests}.rs`
 - **GOAT gate:** `tests/bench_299_engram_goat.rs`
 - **Demo:** `examples/engram_demo.rs`
-- **Docs:** [`.docs/27_engram_conditional_memory.md`](../.docs/27_engram_conditional_memory.md)
+- **Docs:** [`.docs/03_memory/engram.md`](../.docs/03_memory/engram.md)
 
 ## TL;DR of the TL;DR
 

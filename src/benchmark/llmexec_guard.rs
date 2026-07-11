@@ -3,7 +3,7 @@
 //! Measures the cost of `verify_tier()` calls vs a no-guard baseline.
 //! LLMExecGuard should be zero-cost or negative-cost (by skipping verification).
 
-use crate::llmexec_guard::{LlmExecGuardConfig, verify_tier};
+use katgpt_core::llmexec_guard::{LlmExecGuardConfig, verify_tier};
 use std::hint::black_box;
 use std::time::Instant;
 

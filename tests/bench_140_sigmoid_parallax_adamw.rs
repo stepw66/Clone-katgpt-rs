@@ -41,6 +41,7 @@ fn vec_norm(v: &[f32]) -> f32 {
 
 /// Compute Σ_KV for frozen Q,K,V with given activation.
 /// Extracted from tiled_attention_parallax_forward Phase 1-2.
+#[allow(clippy::too_many_arguments)] // test helper: fixed Σ_KV I/O shape
 fn compute_sigma_kv(
     q: &[f32],
     k: &[f32],
@@ -61,6 +62,8 @@ fn compute_sigma_kv(
 
     for i in 0..n {
         let q_off = i * d;
+        // j needed for stride k_off = j*d
+        #[allow(clippy::needless_range_loop)]
         for j in 0..n {
             let k_off = j * d;
             scores_buf[j] =
@@ -75,6 +78,8 @@ fn compute_sigma_kv(
 
     // Phase 2: Σ_KV = Σ_j c_j · v_j ⊗ k_j^T
     let mut pv_buf = vec![0.0f32; d];
+    // j needed for stride v_off/k_off = j*d
+    #[allow(clippy::needless_range_loop)]
     for j in 0..n {
         let c_j = col_sums[j];
         if c_j == 0.0 {
@@ -145,6 +150,7 @@ impl AdamWState {
 // ── Forward + Loss + Gradient ─────────────────────────────────
 
 /// Forward pass: compute o_PLX and return (output, correction, sigma_kv).
+#[allow(clippy::too_many_arguments)] // test helper: fixed parallax forward I/O shape
 fn forward(
     q: &[f32],
     k: &[f32],
@@ -162,6 +168,7 @@ fn forward(
         gate_scale,
         zero_init: false,
         activation,
+        ..Default::default()
     };
     let mut output = vec![0.0f32; n * d];
     tiled_attention_parallax_forward(
@@ -297,6 +304,7 @@ fn experiment_adamw_sigmoid_vs_softmax() {
         gate_scale: 0.0, // base attention, no correction
         zero_init: true,
         activation: ParallaxActivation::Softmax,
+        ..Default::default()
     };
     let mut target = vec![0.0f32; n * d];
     tiled_attention_parallax_forward(
@@ -588,6 +596,7 @@ fn experiment_adamw_learnable_gate() {
         gate_scale: 0.0,
         zero_init: true,
         activation: ParallaxActivation::Softmax,
+        ..Default::default()
     };
     let mut target = vec![0.0f32; n * d];
     tiled_attention_parallax_forward(
@@ -627,6 +636,7 @@ fn experiment_adamw_learnable_gate() {
             gate_scale: gate_sm,
             zero_init: false,
             activation: ParallaxActivation::Softmax,
+            ..Default::default()
         };
         let mut out_sm = vec![0.0f32; n * d];
         tiled_attention_parallax_forward(
@@ -648,6 +658,7 @@ fn experiment_adamw_learnable_gate() {
             gate_scale: gate_sig,
             zero_init: false,
             activation: ParallaxActivation::Sigmoid,
+            ..Default::default()
         };
         let mut out_sig = vec![0.0f32; n * d];
         tiled_attention_parallax_forward(
@@ -806,6 +817,7 @@ fn experiment_adamw_learnable_gate() {
 ///
 /// scores[j] = q_i · k_j * scale + sink_bias[j]
 /// where sink_bias[j] = sink_strength * exp(-j / decay_rate)
+#[allow(clippy::too_many_arguments)] // test helper: fixed Σ_KV I/O shape
 fn compute_sigma_kv_sink(
     q: &[f32],
     k: &[f32],
@@ -839,6 +851,8 @@ fn compute_sigma_kv_sink(
     }
 
     let mut pv_buf = vec![0.0f32; d];
+    // j needed for stride v_off/k_off = j*d
+    #[allow(clippy::needless_range_loop)]
     for j in 0..n {
         let c_j = col_sums[j];
         if c_j == 0.0 {
@@ -853,6 +867,7 @@ fn compute_sigma_kv_sink(
 
 /// Forward pass with sink bias injected into scores.
 /// Returns (output, raw_correction, sigma_kv).
+#[allow(clippy::too_many_arguments)] // test helper: fixed parallax forward I/O shape
 fn forward_sink(
     q: &[f32],
     k: &[f32],
@@ -902,6 +917,8 @@ fn forward_sink(
                 + sink_bias[j];
         }
         normalize_weights(&mut scores_buf[..n], activation);
+        // j needed for stride v_off = j*d
+        #[allow(clippy::needless_range_loop)]
         for j in 0..n {
             let p = scores_buf[j];
             let v_off = j * d;
@@ -1012,6 +1029,7 @@ fn experiment_sink_injection() {
         gate_scale: 0.0,
         zero_init: true,
         activation: ParallaxActivation::Softmax,
+        ..Default::default()
     };
     let mut target = vec![0.0f32; n * d];
     tiled_attention_parallax_forward(
@@ -1491,6 +1509,7 @@ fn experiment_structured_cor_boosting() {
             gate_scale: 0.0, // no correction
             zero_init: true,
             activation: ParallaxActivation::Softmax,
+            ..Default::default()
         };
         let mut base_output = vec![0.0f32; n * d];
         tiled_attention_parallax_forward(
@@ -1836,6 +1855,7 @@ fn experiment_reverse_cor() {
                 gate_scale: 0.0,
                 zero_init: true,
                 activation: ParallaxActivation::Softmax,
+                ..Default::default()
             };
             let mut base_output = vec![0.0f32; n * d];
             tiled_attention_parallax_forward(

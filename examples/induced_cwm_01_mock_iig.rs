@@ -22,8 +22,7 @@ use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 
 use katgpt_core::induced_cwm::{
-    BeliefInferenceFn, InducedCwmKernel, InformationSet, NodeStats,
-    ismcts_search_with_inference,
+    BeliefInferenceFn, InducedCwmKernel, InformationSet, NodeStats, ismcts_search_with_inference,
 };
 use katgpt_core::traits::GameState;
 
@@ -76,7 +75,12 @@ impl GameState for MockGridState {
         if self.is_terminal {
             return Vec::new();
         }
-        vec![MockGridAction::Left, MockGridAction::Right, MockGridAction::Wait, MockGridAction::Exit]
+        vec![
+            MockGridAction::Left,
+            MockGridAction::Right,
+            MockGridAction::Wait,
+            MockGridAction::Exit,
+        ]
     }
 
     fn advance(&self, action: &Self::Action, _player_id: u8) -> Self {
@@ -94,7 +98,11 @@ impl GameState for MockGridState {
             }
             MockGridAction::Wait => Self::step(self, self.player_pos),
             MockGridAction::Exit => {
-                let reward = if self.player_pos == self.open_exit { 1.0 } else { 0.0 };
+                let reward = if self.player_pos == self.open_exit {
+                    1.0
+                } else {
+                    0.0
+                };
                 MockGridState {
                     player_pos: self.player_pos,
                     open_exit: self.open_exit,
@@ -206,7 +214,11 @@ fn run_ismcts_and_collect_stats(
     player_id: u8,
     budget: usize,
     rng_seed: u64,
-) -> (MockGridAction, InformationSet, std::collections::HashMap<u64, MockGridAction>) {
+) -> (
+    MockGridAction,
+    InformationSet,
+    std::collections::HashMap<u64, MockGridAction>,
+) {
     use fastrand::Rng;
 
     let mut rng = Rng::with_seed(rng_seed);
@@ -219,7 +231,9 @@ fn run_ismcts_and_collect_stats(
     for iteration in 0..budget {
         let belief_seed = rng_seed.wrapping_add(iteration as u64);
         let samples = belief.sample(&[], &[], player_id, 1, belief_seed);
-        let Some(sample) = samples.into_iter().next() else { continue };
+        let Some(sample) = samples.into_iter().next() else {
+            continue;
+        };
 
         sample.available_actions_into(player_id, &mut action_scratch);
         if action_scratch.is_empty() {
@@ -228,7 +242,7 @@ fn run_ismcts_and_collect_stats(
 
         for action in action_scratch.iter() {
             let key = action_hash(action);
-            hash_to_action.entry(key).or_insert_with(|| action.clone());
+            hash_to_action.entry(key).or_insert_with(|| *action);
 
             let child = sample.advance(action, player_id);
             let reward = if child.is_terminal() {
@@ -245,7 +259,7 @@ fn run_ismcts_and_collect_stats(
                         break;
                     }
                     let pick = rng.usize(0..rollout_scratch.len());
-                    let a = rollout_scratch[pick].clone();
+                    let a = rollout_scratch[pick];
                     cur = cur.advance(&a, player_id);
                 }
                 cur.reward(player_id)
@@ -275,7 +289,10 @@ fn run_ismcts_and_collect_stats(
         })
         .map(|(k, _)| *k)
         .expect("no edges recorded");
-    let best_action = hash_to_action.get(&best_hash).cloned().expect("missing action");
+    let best_action = hash_to_action
+        .get(&best_hash)
+        .cloned()
+        .expect("missing action");
 
     (best_action, root_set, hash_to_action)
 }
@@ -295,7 +312,10 @@ fn main() {
 
     println!("Mock induced CWM:");
     println!("  player_pos     = {}", belief.observed_player_pos);
-    println!("  open_exit ∈    = {:?}  (hidden, sampled by belief)", belief.support);
+    println!(
+        "  open_exit ∈    = {:?}  (hidden, sampled by belief)",
+        belief.support
+    );
     println!("  actions        = [Left, Right, Wait, Exit]");
     println!("  canonical tag  = \"mock_grid_iig_v1\"");
     println!();
@@ -304,7 +324,10 @@ fn main() {
     //    1–3 sample range the spec calls for).
     println!("Belief samples (n=3, seed=42):");
     for (i, s) in belief.sample(&[], &[], 0, 3, 42).iter().enumerate() {
-        println!("  [{}] player_pos={} open_exit={} (HIDDEN)", i, s.player_pos, s.open_exit);
+        println!(
+            "  [{}] player_pos={} open_exit={} (HIDDEN)",
+            i, s.player_pos, s.open_exit
+        );
     }
     println!();
 
@@ -313,7 +336,12 @@ fn main() {
     let seed = 42u64;
     let player_id = 0u8;
     let chosen = ismcts_search_with_inference::<MockGridState, MockGridBelief>(
-        &[], &[], player_id, &belief, budget, seed,
+        &[],
+        &[],
+        player_id,
+        &belief,
+        budget,
+        seed,
     );
 
     // Also run the internal aggregation loop (via the helper) so we can
@@ -332,7 +360,10 @@ fn main() {
 
     // 4. Print the root information-set statistics.
     println!("Root information-set statistics:");
-    println!("  {:<10} {:>8} {:>12} {:>10}", "action", "visits", "total_value", "mean");
+    println!(
+        "  {:<10} {:>8} {:>12} {:>10}",
+        "action", "visits", "total_value", "mean"
+    );
     println!("  {}", "-".repeat(44));
 
     // Print in a stable action order so output is reproducible.
@@ -357,10 +388,18 @@ fn main() {
     println!();
 
     // Sanity assertions.
-    assert!(root_set.total_visits > 0, "search must have visited at least one edge");
-    assert!(entries.iter().any(|(a, _)| *a == chosen), "chosen must be in stats");
+    assert!(
+        root_set.total_visits > 0,
+        "search must have visited at least one edge"
+    );
+    assert!(
+        entries.iter().any(|(a, _)| *a == chosen),
+        "chosen must be in stats"
+    );
     // Exit and Wait should generally have lower mean than directional moves
     // when the player doesn't know where the exit is — but we don't assert
     // that strictly; the smoke is just to confirm the pipeline runs.
-    println!("All sanity assertions OK. See .plans/296_induced_cwm_kernel_primitive.md for the plan.");
+    println!(
+        "All sanity assertions OK. See .plans/296_induced_cwm_kernel_primitive.md for the plan."
+    );
 }

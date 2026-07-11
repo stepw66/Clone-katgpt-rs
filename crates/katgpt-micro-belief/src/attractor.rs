@@ -92,11 +92,15 @@ impl AttractorKernel {
     pub fn from_seed(seed: u64, dim: usize) -> Self {
         let mut rng = fastrand::Rng::with_seed(seed);
         let scale = 1.0 / (dim as f32).sqrt();
-        let ws: Vec<_> = (0..dim * dim).map(|_| rng.f32() * 2.0 - 1.0).collect();
-        // Multiply by scale at init time so the hot path has one fewer mul.
-        let ws: Vec<f32> = ws.into_iter().map(|v| v * scale).collect();
-        let wx: Vec<_> = (0..dim * dim).map(|_| rng.f32() * 2.0 - 1.0).collect();
-        let wx: Vec<f32> = wx.into_iter().map(|v| v * scale).collect();
+        // Fold scale into the map closure: single allocation, single pass.
+        // (Previously this was two collects per matrix — the intermediate
+        // Vec was discarded immediately.)
+        let ws: Vec<f32> = (0..dim * dim)
+            .map(|_| (rng.f32() * 2.0 - 1.0) * scale)
+            .collect();
+        let wx: Vec<f32> = (0..dim * dim)
+            .map(|_| (rng.f32() * 2.0 - 1.0) * scale)
+            .collect();
         // Bias starts at zero — neutral fixed point at the origin.
         let b = vec![0.0; dim];
         Self {
@@ -219,8 +223,8 @@ impl AttractorKernel {
         }
         #[cfg(not(feature = "simd_sigmoid"))]
         {
-            for j in 0..dim {
-                next[j] = (2.0 * fast_sigmoid(next[j]) - 1.0).clamp(-clamp, clamp);
+            for v in next[..dim].iter_mut() {
+                *v = (2.0 * fast_sigmoid(*v) - 1.0).clamp(-clamp, clamp);
             }
         }
 
@@ -283,7 +287,11 @@ impl AttractorKernel {
         cfg: &katgpt_types::depth_invariance::DepthInvarianceConfig,
     ) -> katgpt_types::depth_invariance::DepthInvarianceDiagnostic {
         let dim = self.dim;
-        assert_eq!(initial_state.len(), dim, "initial_state must have length dim");
+        assert_eq!(
+            initial_state.len(),
+            dim,
+            "initial_state must have length dim"
+        );
         for (i, inp) in inputs.iter().enumerate() {
             assert_eq!(inp.len(), dim, "inputs[{i}] must have length dim");
         }
@@ -428,8 +436,8 @@ impl MicroRecurrentBeliefState for AttractorKernel {
         }
         #[cfg(not(feature = "simd_sigmoid"))]
         {
-            for j in 0..dim {
-                next[j] = (2.0 * fast_sigmoid(next[j]) - 1.0).clamp(-clamp, clamp);
+            for v in next[..dim].iter_mut() {
+                *v = (2.0 * fast_sigmoid(*v) - 1.0).clamp(-clamp, clamp);
             }
         }
 

@@ -191,7 +191,7 @@ const GEAR_TABLE: [u64; 256] = compute_gear_table();
 /// the chunker struct at ~40 bytes (vs ~2080 bytes), improving cache density
 /// when chunkers are stored in collections, and is bit-identical at the
 /// table-access site (both lower to a fixed-address `.rodata` load).
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct FastCdcChunker {
     /// Minimum chunk size — no cut points before this offset.
     pub min_size: usize,
@@ -267,14 +267,19 @@ impl FastCdcChunker {
         let mut fp: u64 = 0;
         let mut i = start;
 
+        // Safety: all loop bounds below are clamped to `max_end`, which is
+        // `≤ bytes.len()` by construction. `bytes[i]` for `i ∈ [start, max_end)`
+        // is therefore always in-bounds, and `GEAR_TABLE` is indexed by `u8`
+        // (0..256). The `get_unchecked` calls elide the per-byte bounds check
+        // in this hot byte-scanning loop.
         // Phase 0: prime fp, no cuts allowed.
         while i < skip_end {
-            fp = (fp << 1) ^ GEAR_TABLE[bytes[i] as usize];
+            fp = (fp << 1) ^ GEAR_TABLE[*unsafe { bytes.get_unchecked(i) } as usize];
             i += 1;
         }
         // Phase 1: normal mask (stricter → expected chunk ≈ 2^normal_level).
         while i < mid_end {
-            fp = (fp << 1) ^ GEAR_TABLE[bytes[i] as usize];
+            fp = (fp << 1) ^ GEAR_TABLE[*unsafe { bytes.get_unchecked(i) } as usize];
             if (fp & self.normal_mask) == 0 {
                 return i + 1;
             }
@@ -282,7 +287,7 @@ impl FastCdcChunker {
         }
         // Phase 2: looser mask (force a cut before MAX).
         while i < max_end {
-            fp = (fp << 1) ^ GEAR_TABLE[bytes[i] as usize];
+            fp = (fp << 1) ^ GEAR_TABLE[*unsafe { bytes.get_unchecked(i) } as usize];
             if (fp & self.max_mask) == 0 {
                 return i + 1;
             }
@@ -342,7 +347,7 @@ impl ChunkingStrategy for FastCdcChunker {
 /// Defaults match the FastCDC paper (Xia et al. 2016, §5.2) for ~8 KiB average
 /// chunks.
 #[repr(C)]
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct ChunkerConfig {
     /// Minimum chunk size — no cut points before this offset.
     pub min_size: usize,
@@ -374,7 +379,7 @@ impl ChunkerConfig {
     /// Construct a [`FastCdcChunker`] from this config.
     #[must_use]
     pub fn fast_cdc_chunker(&self) -> FastCdcChunker {
-        FastCdcChunker::with_config(self.clone())
+        FastCdcChunker::with_config(*self)
     }
 }
 

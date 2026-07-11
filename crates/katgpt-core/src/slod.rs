@@ -20,7 +20,7 @@ use crate::simd::simd_dot_f32;
 // ── Configuration ─────────────────────────────────────────────────
 
 /// SLoD configuration with sensible defaults for hyperbolic KG embeddings.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct SlodConfig {
     /// k for kNN graph construction.
     /// Default: computed as `max(10, min(sqrt(N), 50))`.
@@ -71,16 +71,10 @@ impl SlodConfig {
 
 // ── Scale Boundary ────────────────────────────────────────────────
 
-/// A detected scale boundary from the spectral analysis.
-#[derive(Debug, Clone)]
-pub struct ScaleBoundary {
-    /// Diffusion scale σ at which this boundary was detected.
-    pub sigma: f32,
-    /// Composite boundary score S(σ).
-    pub score: f32,
-    /// Effective rank K* (number of significant eigenmodes) at this scale.
-    pub k_star: usize,
-}
+// `ScaleBoundary` was co-extracted to `katgpt_types::slod` (Plan 338 Phase 1)
+// so katgpt-sense can depend on the leaf crate only. Re-exported here to
+// preserve `katgpt_core::slod::ScaleBoundary` bit-for-bit.
+pub use katgpt_types::ScaleBoundary;
 
 // ── SLoD Operator ─────────────────────────────────────────────────
 
@@ -507,7 +501,7 @@ impl SlodOperator {
             eigenvalues,
             eigenvectors,
             boundaries,
-            config: config.clone(),
+            config: *config,
         }
     }
 }

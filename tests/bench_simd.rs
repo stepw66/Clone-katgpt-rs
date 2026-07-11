@@ -12,11 +12,11 @@
 
 #![cfg(feature = "hla_attention")]
 
+use katgpt_core::simd::{self, SimdLevel};
 use katgpt_rs::hla::{
     AhlaQHeadState, HlaQHeadState, MultiLayerAhlaCache, MultiLayerHlaCache, ahla_step,
     forward_ahla, forward_hla, hla_state_update,
 };
-use katgpt_rs::simd::{self, SimdLevel};
 use katgpt_rs::transformer::{ForwardContext, TransformerWeights, forward};
 use katgpt_rs::types::{Config, Rng};
 use std::time::Instant;
@@ -57,10 +57,7 @@ fn bench_simd_level() {
     println!("  os:    {}", std::env::consts::OS);
     assert!(matches!(
         level,
-        SimdLevel::Neon
-            | SimdLevel::Avx2
-            | SimdLevel::WasmSimd128
-            | SimdLevel::Scalar
+        SimdLevel::Neon | SimdLevel::Avx2 | SimdLevel::WasmSimd128 | SimdLevel::Scalar
     ));
 }
 
@@ -295,30 +292,12 @@ fn bench_simd_hla_kernels() {
             let mut tmp_k_cqv = vec![0.0f32; hd];
 
             for _ in 0..warmup {
-                hla_state_update(
-                    &mut sk,
-                    &mut q_head,
-                    &q,
-                    &k,
-                    &v,
-                    hd,
-                    1.0,
-                    &mut tmp_k_cqv,
-                );
+                hla_state_update(&mut sk, &mut q_head, &q, &k, &v, hd, 1.0, &mut tmp_k_cqv);
             }
 
             let start = Instant::now();
             for _ in 0..iters {
-                hla_state_update(
-                    &mut sk,
-                    &mut q_head,
-                    &q,
-                    &k,
-                    &v,
-                    hd,
-                    1.0,
-                    &mut tmp_k_cqv,
-                );
+                hla_state_update(&mut sk, &mut q_head, &q, &k, &v, hd, 1.0, &mut tmp_k_cqv);
             }
             let elapsed = start.elapsed();
             let tps = iters as f64 / elapsed.as_secs_f64();

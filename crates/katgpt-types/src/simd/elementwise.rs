@@ -702,9 +702,7 @@ unsafe fn neon_sum_f32(x: &[f32]) -> f32 {
 #[cfg(target_arch = "aarch64")]
 #[inline]
 unsafe fn neon_masked_sum_count_f32(x: &[f32], mask: &[u8]) -> (f32, u32) {
-    use core::arch::aarch64::{
-        vaddq_f32, vaddvq_f32, vdupq_n_f32, vld1q_f32, vmulq_f32,
-    };
+    use core::arch::aarch64::{vaddq_f32, vaddvq_f32, vdupq_n_f32, vld1q_f32, vmulq_f32};
     unsafe {
         let zero = vdupq_n_f32(0.0);
         let mut acc_sum0 = zero;
@@ -738,7 +736,10 @@ unsafe fn neon_masked_sum_count_f32(x: &[f32], mask: &[u8]) -> (f32, u32) {
             i += 16;
         }
 
-        let mut sum = vaddvq_f32(vaddq_f32(vaddq_f32(acc_sum0, acc_sum1), vaddq_f32(acc_sum2, acc_sum3)));
+        let mut sum = vaddvq_f32(vaddq_f32(
+            vaddq_f32(acc_sum0, acc_sum1),
+            vaddq_f32(acc_sum2, acc_sum3),
+        ));
 
         // Remaining full 4-lanes.
         let remaining = (len - i) / 4;
@@ -1053,8 +1054,8 @@ unsafe fn avx2_sum_f32(x: &[f32]) -> f32 {
 #[inline]
 unsafe fn avx2_masked_sum_count_f32(x: &[f32], mask: &[u8]) -> (f32, u32) {
     use core::arch::x86_64::{
-        _mm256_add_ps, _mm256_cvtepi32_ps, _mm256_cvtepu8_epi32, _mm256_loadu_ps,
-        _mm256_mul_ps, _mm256_setzero_ps, _mm_loadu_si128,
+        _mm_loadu_si128, _mm256_add_ps, _mm256_cvtepi32_ps, _mm256_cvtepu8_epi32, _mm256_loadu_ps,
+        _mm256_mul_ps, _mm256_setzero_ps,
     };
     unsafe {
         let zero = _mm256_setzero_ps();
@@ -1423,7 +1424,9 @@ unsafe fn wasm32_simd128_sum_f32(x: &[f32]) -> f32 {
 #[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
 #[inline]
 unsafe fn wasm32_simd128_masked_sum_count_f32(x: &[f32], mask: &[u8]) -> (f32, u32) {
-    use core::arch::wasm32::{f32x4, f32x4_add, f32x4_extract_lane, f32x4_mul, f32x4_splat, v128_load};
+    use core::arch::wasm32::{
+        f32x4, f32x4_add, f32x4_extract_lane, f32x4_mul, f32x4_splat, v128_load,
+    };
     unsafe {
         let zero = f32x4_splat(0.0);
         let mut acc0 = zero;

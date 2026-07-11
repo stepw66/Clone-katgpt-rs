@@ -113,17 +113,22 @@ pub enum TuckerError {
 }
 
 impl core::fmt::Display for TuckerError {
+    #[cold]
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
-            TuckerError::InvalidModeCount { got, max } => write!(
-                f,
-                "tucker: invalid mode count {got}, must be in 1..={max}"
-            ),
+            TuckerError::InvalidModeCount { got, max } => {
+                write!(f, "tucker: invalid mode count {got}, must be in 1..={max}")
+            }
             TuckerError::ShapeExceedsSvdLimit { mode, min_dim, max } => write!(
                 f,
                 "tucker: shape at mode {mode} requires SVD of min-dim {min_dim} > {max} (SVD limit)"
             ),
-            TuckerError::RankTooLarge { mode, rank, bound, shape_n } => write!(
+            TuckerError::RankTooLarge {
+                mode,
+                rank,
+                bound,
+                shape_n,
+            } => write!(
                 f,
                 "tucker: rank {rank} for mode {mode} exceeds bound {bound} (shape {shape_n})"
             ),
@@ -134,9 +139,16 @@ impl core::fmt::Display for TuckerError {
                 write!(f, "tucker: input length {got} != product(shape) {expected}")
             }
             TuckerError::OutputSizeMismatch { got, expected } => {
-                write!(f, "tucker: output length {got} != product(shape) {expected}")
+                write!(
+                    f,
+                    "tucker: output length {got} != product(shape) {expected}"
+                )
             }
-            TuckerError::ShapeFactorMismatch { mode, got, expected } => write!(
+            TuckerError::ShapeFactorMismatch {
+                mode,
+                got,
+                expected,
+            } => write!(
                 f,
                 "tucker: out_shape[{mode}]={got} does not match factor rows {expected}"
             ),
@@ -310,8 +322,7 @@ impl TuckerScratch {
         //   max_m_rows = max_n max(I_n, prod_others)
         let mut max_n_cols = 1usize;
         let mut max_m_rows = 1usize;
-        for n in 0..nmodes {
-            let i_n = shape[n];
+        for &i_n in shape.iter().take(nmodes) {
             let m = total / i_n;
             let (nc, mr) = if i_n >= m { (m, i_n) } else { (i_n, m) };
             max_n_cols = max_n_cols.max(nc);
@@ -367,8 +378,8 @@ impl TuckerResultScratch {
     pub fn with_capacity(cfg: &TuckerConfig) -> Self {
         let mut factor_offsets = [0usize; MAX_MODES];
         let mut acc = 0usize;
-        for n in 0..cfg.n_modes() {
-            factor_offsets[n] = acc;
+        for (n, offset) in factor_offsets.iter_mut().enumerate().take(cfg.n_modes()) {
+            *offset = acc;
             acc += cfg.shape[n] * cfg.ranks[n];
         }
         Self {
@@ -378,7 +389,7 @@ impl TuckerResultScratch {
             factor_rows: cfg.shape,
             factor_cols: cfg.ranks,
             core_shape: cfg.ranks,
-            n_modes: cfg.n_modes as u8,
+            n_modes: cfg.n_modes,
         }
     }
 
@@ -536,20 +547,6 @@ impl TuckerResult {
 
 // ─── Internal helpers ───────────────────────────────────────────────────────
 
-/// Write `shape`'s row-major (C-order) strides into `out[..shape.len()]`.
-/// The last mode has stride 1; stride[k] = stride[k+1] * shape[k+1].
-#[inline]
-fn row_major_strides_into(shape: &[usize], out: &mut [usize]) {
-    let n = shape.len();
-    if n == 0 {
-        return;
-    }
-    out[n - 1] = 1;
-    for k in (0..n - 1).rev() {
-        out[k] = out[k + 1] * shape[k + 1];
-    }
-}
-
 /// Per-mode column strides for the mode-n unfolding (Kolda's convention).
 /// Modes other than `mode` are ordered increasingly (excluding `mode`); the
 /// earliest non-`mode` mode has stride 1, the next has stride `shape[that_mode]`, etc.
@@ -567,74 +564,130 @@ fn col_strides_for_unfold_into(shape: &[usize], mode: usize, out: &mut [usize]) 
     }
 }
 
+/// Incremental mixed-radix odometer used by [`unfold_into`] / [`fold_into`].
+///
+/// Tracks `row = multi[mode]` and `col = Σ_{k≠mode} multi[k] * col_strides[k]`
+/// as the multi-index advances in row-major (most-significant first) order.
+/// Each step is O(1) amortized: the expected carry-chain length per increment
+/// is `1 + 1/shape[n-1] + 1/(shape[n-1]·shape[n-2]) + …` ≈ 1 + ε.
+///
+/// This replaces the prior per-element `n`-division multi-index decode
+/// (O(n) integer div/mod per element — ~25 cycles each on most x86 cores)
+/// with a branch-predicted carry loop, eliminating ~`n × total × 25` cycles
+/// of division work per unfold/fold call.
+#[inline]
+fn unfold_deltas(
+    shape: &[usize],
+    mode: usize,
+    col_strides: &[usize; MAX_MODES],
+) -> ([usize; MAX_MODES], [usize; MAX_MODES]) {
+    let n = shape.len();
+    let mut row_delta = [0usize; MAX_MODES];
+    let mut col_delta = [0usize; MAX_MODES];
+    for k in 0..n {
+        if k == mode {
+            // `row` tracks multi[mode]; one step in mode-n bumps row by 1
+            // (the output addresses it as `row * m`, so the effective jump is m).
+            row_delta[k] = 1;
+        } else {
+            col_delta[k] = col_strides[k];
+        }
+    }
+    (row_delta, col_delta)
+}
+
+/// Advance the odometer one step in row-major order, maintaining `row` and
+/// `col` incrementally. Carries from the least-significant mode upward.
+#[inline]
+fn advance_multi(
+    multi: &mut [usize; MAX_MODES],
+    shape: &[usize],
+    row: &mut usize,
+    col: &mut usize,
+    row_delta: &[usize; MAX_MODES],
+    col_delta: &[usize; MAX_MODES],
+) {
+    let mut k = shape.len();
+    loop {
+        k -= 1;
+        multi[k] += 1;
+        *row += row_delta[k];
+        *col += col_delta[k];
+        if multi[k] < shape[k] {
+            return;
+        }
+        // Overflow: reset this digit and subtract its full contribution.
+        multi[k] = 0;
+        *row -= shape[k] * row_delta[k];
+        *col -= shape[k] * col_delta[k];
+        if k == 0 {
+            return;
+        }
+    }
+}
+
 /// Unfold `x` (row-major tensor of `shape`) along `mode` into `out` as a
 /// row-major `(I_n, M)` matrix, where `I_n = shape[mode]` and `M = len / I_n`.
 ///
 /// `out.len()` must be `≥ x.len()`. `x.len()` must equal `prod(shape)`.
 fn unfold_into(x: &[f32], shape: &[usize], mode: usize, out: &mut [f32]) {
-    let n = shape.len();
-    debug_assert!(n <= MAX_MODES, "MAX_MODES = {MAX_MODES}, got {n}");
+    debug_assert!(
+        shape.len() <= MAX_MODES,
+        "MAX_MODES = {MAX_MODES}, got {}",
+        shape.len()
+    );
     let i_n = shape[mode];
     let total = x.len();
     debug_assert_eq!(total, shape.iter().product::<usize>());
     debug_assert!(out.len() >= total);
+    if total == 0 {
+        return;
+    }
 
-    let mut rm_strides = [0usize; MAX_MODES];
-    row_major_strides_into(shape, &mut rm_strides);
     let mut col_strides = [0usize; MAX_MODES];
     col_strides_for_unfold_into(shape, mode, &mut col_strides);
+    let (row_delta, col_delta) = unfold_deltas(shape, mode, &col_strides);
 
     let m = total / i_n;
     let mut multi = [0usize; MAX_MODES];
-    for flat in 0..total {
-        // Decode flat (row-major) → multi-index.
-        let mut rem = flat;
-        for k in 0..n {
-            multi[k] = rem / rm_strides[k];
-            rem %= rm_strides[k];
-        }
-        let row = multi[mode];
-        // Column index = Σ_{k≠mode} multi[k] * col_strides[k].
-        let mut col = 0usize;
-        for k in 0..n {
-            if k != mode {
-                col += multi[k] * col_strides[k];
-            }
-        }
-        out[row * m + col] = x[flat];
+    let mut row = 0usize;
+    let mut col = 0usize;
+
+    out[0] = x[0];
+    for &x_val in x.iter().skip(1) {
+        advance_multi(
+            &mut multi, shape, &mut row, &mut col, &row_delta, &col_delta,
+        );
+        out[row * m + col] = x_val;
     }
 }
 
 /// Inverse of [`unfold_into`]: fold `mat` (row-major `(shape[mode], M)`) back
 /// into `out` (row-major tensor of `shape`). `out.len()` must equal `prod(shape)`.
 fn fold_into(mat: &[f32], shape: &[usize], mode: usize, out: &mut [f32]) {
-    let n = shape.len();
     let i_n = shape[mode];
     let total = out.len();
     debug_assert_eq!(total, shape.iter().product::<usize>());
     debug_assert_eq!(mat.len(), total);
+    if total == 0 {
+        return;
+    }
 
-    let mut rm_strides = [0usize; MAX_MODES];
-    row_major_strides_into(shape, &mut rm_strides);
     let mut col_strides = [0usize; MAX_MODES];
     col_strides_for_unfold_into(shape, mode, &mut col_strides);
+    let (row_delta, col_delta) = unfold_deltas(shape, mode, &col_strides);
 
     let m = total / i_n;
     let mut multi = [0usize; MAX_MODES];
-    for flat in 0..total {
-        let mut rem = flat;
-        for k in 0..n {
-            multi[k] = rem / rm_strides[k];
-            rem %= rm_strides[k];
-        }
-        let row = multi[mode];
-        let mut col = 0usize;
-        for k in 0..n {
-            if k != mode {
-                col += multi[k] * col_strides[k];
-            }
-        }
-        out[flat] = mat[row * m + col];
+    let mut row = 0usize;
+    let mut col = 0usize;
+
+    out[0] = mat[0];
+    for out_slot in out.iter_mut().skip(1) {
+        advance_multi(
+            &mut multi, shape, &mut row, &mut col, &row_delta, &col_delta,
+        );
+        *out_slot = mat[row * m + col];
     }
 }
 
@@ -787,9 +840,7 @@ pub fn tucker_decompose_into(
         // Loop order (i outer, j middle, k inner) treats each i as a rank-1 update
         // Y += a_col_j ⊗ unfold_row_i. Inner (j, k) block is SIMD-friendly.
         let y_slice = &mut scratch.y_buf[..r_n * m];
-        for v in y_slice.iter_mut() {
-            *v = 0.0;
-        }
+        y_slice.fill(0.0);
         for i in 0..i_n {
             let b_row = &scratch.unfold_buf[i * m..(i + 1) * m];
             for j in 0..r_n {
@@ -845,11 +896,11 @@ pub fn tucker_reconstruct_into(
             expected: nmodes,
         });
     }
-    for n in 0..nmodes {
-        if out_shape[n] != result.factor_rows[n] {
+    for (n, &out_s) in out_shape.iter().enumerate().take(nmodes) {
+        if out_s != result.factor_rows[n] {
             return Err(TuckerError::ShapeFactorMismatch {
                 mode: n,
-                got: out_shape[n],
+                got: out_s,
                 expected: result.factor_rows[n],
             });
         }
@@ -888,16 +939,14 @@ pub fn tucker_reconstruct_into(
         // Loop order (j outer, i middle, k inner): for each j, an outer-product
         // rank-1 update of Y[:, :] by a_col_j ⊗ unfold_row_j.
         let y_slice = &mut scratch.y_buf[..i_n * m];
-        for v in y_slice.iter_mut() {
-            *v = 0.0;
-        }
+        y_slice.fill(0.0);
         for j in 0..r_n {
             // Column j of A^(n) is contiguous at [offset_n + j*I_n .. offset_n + (j+1)*I_n].
             let a_col =
                 &result.factors[factor_offsets[n] + j * i_n..factor_offsets[n] + (j + 1) * i_n];
             let b_row = &scratch.unfold_buf[j * m..(j + 1) * m];
-            for i in 0..i_n {
-                let a_ij = a_col[i];
+            for (i, &a_ij) in a_col.iter().enumerate().take(i_n) {
+                // stride math: y_row index = i * m..(i + 1) * m
                 let y_row = &mut scratch.y_buf[i * m..(i + 1) * m];
                 for k in 0..m {
                     y_row[k] += a_ij * b_row[k];
@@ -1139,11 +1188,11 @@ mod tests {
         let b = [0.7f32, -0.3, 0.0, 0.0];
         let c = [0.4f32, 0.9, 0.0, 0.0];
         let mut x = vec![0.0f32; total];
-        for i0 in 0..4 {
-            for i1 in 0..4 {
-                for i2 in 0..4 {
+        for (i0, &av) in a.iter().enumerate() {
+            for (i1, &bv) in b.iter().enumerate() {
+                for (i2, &cv) in c.iter().enumerate() {
                     let flat = (i0 * 4 + i1) * 4 + i2;
-                    x[flat] = a[i0] * b[i1] * c[i2];
+                    x[flat] = av * bv * cv;
                 }
             }
         }
@@ -1575,7 +1624,7 @@ mod tests {
     #[test]
     fn from_owned_rejects_inconsistent_core_length() {
         let owned = TuckerResult {
-            core: vec![0.0; 8],   // claims 8 elements
+            core: vec![0.0; 8], // claims 8 elements
             factors: vec![vec![0.0; 4]],
             core_shape: vec![2, 2, 2], // product = 8 ✓ — make it inconsistent
             factor_shapes: vec![(2, 2)],
@@ -1584,7 +1633,7 @@ mod tests {
         // 1 factor for a 3-mode core_shape → InvalidModeCount. Build a truly
         // core-inconsistent one:
         let owned_bad = TuckerResult {
-            core: vec![0.0; 7],       // 7 ≠ 2*2*2 = 8
+            core: vec![0.0; 7], // 7 ≠ 2*2*2 = 8
             factors: vec![vec![0.0; 4], vec![0.0; 4], vec![0.0; 4]],
             core_shape: vec![2, 2, 2],
             factor_shapes: vec![(2, 2), (2, 2), (2, 2)],

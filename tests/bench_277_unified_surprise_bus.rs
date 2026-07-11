@@ -35,13 +35,13 @@
     feature = "cgsp"
 ))]
 
-use katgpt_core::sense::{ReconstructionConfig, ReconstructionState};
-use katgpt_core::traits::CollapseDetector;
 use katgpt_core::ThinkingBudget;
 use katgpt_core::cgsp::{
-    CgspConfig, DerivativeCuriosity, Direction, EntropyCollapse, HintDeltaBandit,
-    Priority, ScratchBuffers, Target, entropy_nats,
+    CgspConfig, DerivativeCuriosity, Direction, EntropyCollapse, HintDeltaBandit, Priority,
+    ScratchBuffers, Target, entropy_nats,
 };
+use katgpt_core::sense::{ReconstructionConfig, ReconstructionState};
+use katgpt_core::traits::CollapseDetector;
 use katgpt_rs::pruners::{DeltaMemoryConfig, DeltaMemoryState, S2FCollapseDetector};
 
 // ── α-grid ────────────────────────────────────────────────────────────────
@@ -82,13 +82,15 @@ const F1_EVENTS: [(usize, [f32; 8]); 3] = [
 const F1_WINDOW: usize = 20;
 
 fn f1_metric(af: f32, as_: f32) -> f32 {
-    let mut config = ReconstructionConfig::default();
-    config.temporal_deriv_alpha_fast = af;
-    config.temporal_deriv_alpha_slow = as_;
+    let config = ReconstructionConfig {
+        temporal_deriv_alpha_fast: af,
+        temporal_deriv_alpha_slow: as_,
+        ..ReconstructionConfig::default()
+    };
     let mut state = ReconstructionState::with_config([0.0; 8], config);
 
     let mut surprise = [0.0f32; F1_TRACE_LEN];
-    for t in 0..F1_TRACE_LEN {
+    for (t, surprise_t) in surprise.iter_mut().enumerate() {
         // Inject scripted event delta at the event tick.
         for &(tick, delta) in &F1_EVENTS {
             if t == tick {
@@ -97,7 +99,7 @@ fn f1_metric(af: f32, as_: f32) -> f32 {
         }
         // No-op evolve (zero evidence) — kernel still observes the HLA.
         state.evolve_hla();
-        surprise[t] = state.surprise_norm();
+        *surprise_t = state.surprise_norm();
     }
 
     // Peak threshold = 0.5 × max surprise (per the sweep spec).
@@ -154,6 +156,9 @@ fn f1_metric(af: f32, as_: f32) -> f32 {
 
 const F2_RANK: usize = 8;
 
+/// Key/value pair for the F2 synthetic stream.
+type F2Pair = ([f32; F2_RANK], [f32; F2_RANK]);
+
 #[inline]
 fn l2_normalize(v: &mut [f32; F2_RANK]) {
     let norm: f32 = v.iter().map(|x| x * x).sum::<f32>().sqrt().max(1e-8);
@@ -163,11 +168,11 @@ fn l2_normalize(v: &mut [f32; F2_RANK]) {
     }
 }
 
-fn f2_build_stream() -> (Vec<([f32; F2_RANK], [f32; F2_RANK])>, usize) {
+fn f2_build_stream() -> (Vec<F2Pair>, usize) {
     // Boring centroid: first 4 dims active.
     let mut centroid_bg = [0.0f32; F2_RANK];
-    for i in 0..4 {
-        centroid_bg[i] = 1.0;
+    for c in centroid_bg.iter_mut().take(4) {
+        *c = 1.0;
     }
     l2_normalize(&mut centroid_bg);
 
@@ -185,7 +190,7 @@ fn f2_build_stream() -> (Vec<([f32; F2_RANK], [f32; F2_RANK])>, usize) {
     const BORING_BLOCK: usize = 200;
     const NOVEL_BLOCK: usize = 50;
 
-    let mut stream: Vec<([f32; F2_RANK], [f32; F2_RANK])> = Vec::new();
+    let mut stream: Vec<F2Pair> = Vec::new();
     for pair in 0..5 {
         for _ in 0..BORING_BLOCK {
             stream.push((centroid_bg, bg_val));
@@ -202,7 +207,7 @@ fn f2_build_stream() -> (Vec<([f32; F2_RANK], [f32; F2_RANK])>, usize) {
     (stream, total)
 }
 
-fn f2_metric(af: f32, as_: f32, stream: &[([f32; F2_RANK], [f32; F2_RANK])]) -> f32 {
+fn f2_metric(af: f32, as_: f32, stream: &[F2Pair]) -> f32 {
     let mut gated = DeltaMemoryState::new(DeltaMemoryConfig::default());
     gated.enable_surprise_gate_with_alphas(af, as_);
     gated.set_theta_surprise(0.10);
@@ -417,10 +422,7 @@ fn within_higher(paper: f32, values: &[f32]) -> (f32, f32, bool) {
 /// For "lower is better" metrics: is the paper-default within `frac` of the
 /// best valid metric? Returns (paper_metric, best_metric, within).
 fn within_lower(paper: f32, values: &[f32]) -> (f32, f32, bool) {
-    let best = values
-        .iter()
-        .cloned()
-        .fold(f32::INFINITY, f32::min);
+    let best = values.iter().cloned().fold(f32::INFINITY, f32::min);
     let within = paper <= best * (1.0 + WITHIN_FRAC);
     (paper, best, within)
 }
@@ -433,8 +435,12 @@ fn within_lower(paper: f32, values: &[f32]) -> (f32, f32, bool) {
 fn unified_surprise_bus_sweep() {
     println!("\n══════════════════════════════════════════════════════════════════");
     println!("  Plan 277 Issue 026 — Unified Surprise Bus Super-GOAT Sweep");
-    println!("  Paper-default α-pair: ({}, {})  |  Pareto tolerance: ±{:.0}%",
-             PAPER_AF, PAPER_AS, WITHIN_FRAC * 100.0);
+    println!(
+        "  Paper-default α-pair: ({}, {})  |  Pareto tolerance: ±{:.0}%",
+        PAPER_AF,
+        PAPER_AS,
+        WITHIN_FRAC * 100.0
+    );
     println!("══════════════════════════════════════════════════════════════════");
 
     // ── F1: HLA companion ──────────────────────────────────────────────────
@@ -446,15 +452,26 @@ fn unified_surprise_bus_sweep() {
             }
         }
     }
-    let f1_flat: Vec<f32> = f1_grid.iter().flatten().filter(|v| !v.is_nan()).copied().collect();
+    let f1_flat: Vec<f32> = f1_grid
+        .iter()
+        .flatten()
+        .filter(|v| !v.is_nan())
+        .copied()
+        .collect();
     let f1_paper = f1_metric(PAPER_AF, PAPER_AS);
     let (f1_p, f1_best, f1_within) = within_higher(f1_paper, &f1_flat);
 
     println!("\n── F1: HLA Surprise Companion (N=8) ──");
-    print_grid_f32("recall·(1−FPR)", "score", |af, as_| f1_metric(af, as_));
-    println!("  paper ({},{}) = {:.4}  |  best = {:.4}  |  within ±{:.0}%: {}",
-             PAPER_AF, PAPER_AS, f1_p, f1_best, WITHIN_FRAC * 100.0,
-             if f1_within { "YES ✓" } else { "NO ✗" });
+    print_grid_f32("recall·(1−FPR)", "score", f1_metric);
+    println!(
+        "  paper ({},{}) = {:.4}  |  best = {:.4}  |  within ±{:.0}%: {}",
+        PAPER_AF,
+        PAPER_AS,
+        f1_p,
+        f1_best,
+        WITHIN_FRAC * 100.0,
+        if f1_within { "YES ✓" } else { "NO ✗" }
+    );
 
     // ── F2: δ-Mem gate ─────────────────────────────────────────────────────
     let (stream, n_writes) = f2_build_stream();
@@ -467,14 +484,27 @@ fn unified_surprise_bus_sweep() {
             }
         }
     }
-    let f2_flat: Vec<f32> = f2_grid.iter().flatten().filter(|v| !v.is_nan()).copied().collect();
+    let f2_flat: Vec<f32> = f2_grid
+        .iter()
+        .flatten()
+        .filter(|v| !v.is_nan())
+        .copied()
+        .collect();
     let f2_paper = f2_metric(PAPER_AF, PAPER_AS, &stream);
     let (f2_p, f2_best, f2_within) = within_higher(f2_paper, &f2_flat);
 
-    print_grid_f32("suppression %", "frac", |af, as_| f2_metric(af, as_, &stream));
-    println!("  paper ({},{}) = {:.4}  |  best = {:.4}  |  within ±{:.0}%: {}",
-             PAPER_AF, PAPER_AS, f2_p, f2_best, WITHIN_FRAC * 100.0,
-             if f2_within { "YES ✓" } else { "NO ✗" });
+    print_grid_f32("suppression %", "frac", |af, as_| {
+        f2_metric(af, as_, &stream)
+    });
+    println!(
+        "  paper ({},{}) = {:.4}  |  best = {:.4}  |  within ±{:.0}%: {}",
+        PAPER_AF,
+        PAPER_AS,
+        f2_p,
+        f2_best,
+        WITHIN_FRAC * 100.0,
+        if f2_within { "YES ✓" } else { "NO ✗" }
+    );
 
     // ── F3: Collapse detector ──────────────────────────────────────────────
     let traces = f3_build_traces();
@@ -487,14 +517,27 @@ fn unified_surprise_bus_sweep() {
             }
         }
     }
-    let f3_flat: Vec<f32> = f3_grid.iter().flatten().filter(|v| !v.is_nan()).copied().collect();
+    let f3_flat: Vec<f32> = f3_grid
+        .iter()
+        .flatten()
+        .filter(|v| !v.is_nan())
+        .copied()
+        .collect();
     let f3_paper = f3_metric(PAPER_AF, PAPER_AS, &traces);
     let (f3_p, f3_best, f3_within) = within_higher(f3_paper, &f3_flat);
 
-    print_grid_f32("FN reduction", "frac", |af, as_| f3_metric(af, as_, &traces));
-    println!("  paper ({},{}) = {:.4}  |  best = {:.4}  |  within ±{:.0}%: {}",
-             PAPER_AF, PAPER_AS, f3_p, f3_best, WITHIN_FRAC * 100.0,
-             if f3_within { "YES ✓" } else { "NO ✗" });
+    print_grid_f32("FN reduction", "frac", |af, as_| {
+        f3_metric(af, as_, &traces)
+    });
+    println!(
+        "  paper ({},{}) = {:.4}  |  best = {:.4}  |  within ±{:.0}%: {}",
+        PAPER_AF,
+        PAPER_AS,
+        f3_p,
+        f3_best,
+        WITHIN_FRAC * 100.0,
+        if f3_within { "YES ✓" } else { "NO ✗" }
+    );
 
     // ── F4: Derivative curiosity ───────────────────────────────────────────
     println!("\n── F4: Derivative Curiosity (N=64) ──  recovery from one-hot collapse");
@@ -512,10 +555,16 @@ fn unified_surprise_bus_sweep() {
     let f4_paper = f4_metric(PAPER_AF, PAPER_AS);
     let (_f4_p, f4_best, f4_within) = within_lower(f4_paper as f32, &f4_valid);
 
-    print_grid_usize("recovery cycles", "cycles", |af, as_| f4_metric(af, as_));
-    println!("  paper ({},{}) = {}  |  best = {}  |  within ±{:.0}%: {}",
-             PAPER_AF, PAPER_AS, f4_paper, f4_best as usize, WITHIN_FRAC * 100.0,
-             if f4_within { "YES ✓" } else { "NO ✗"});
+    print_grid_usize("recovery cycles", "cycles", f4_metric);
+    println!(
+        "  paper ({},{}) = {}  |  best = {}  |  within ±{:.0}%: {}",
+        PAPER_AF,
+        PAPER_AS,
+        f4_paper,
+        f4_best as usize,
+        WITHIN_FRAC * 100.0,
+        if f4_within { "YES ✓" } else { "NO ✗" }
+    );
 
     // ── Pareto verdict ─────────────────────────────────────────────────────
     let n_pass = [f1_within, f2_within, f3_within, f4_within]
@@ -525,19 +574,39 @@ fn unified_surprise_bus_sweep() {
     let super_goat = n_pass == 4;
 
     println!("\n══════════════════════════════════════════════════════════════════");
-    println!("  PARETO ANALYSIS — is (0.3, 0.03) within ±{:.0}% of best for ALL 4?",
-             WITHIN_FRAC * 100.0);
-    println!("  F1 HLA companion   : {}", if f1_within { "YES ✓" } else { "NO ✗" });
-    println!("  F2 δ-Mem gate      : {}", if f2_within { "YES ✓" } else { "NO ✗" });
-    println!("  F3 Collapse detect : {}", if f3_within { "YES ✓" } else { "NO ✗" });
-    println!("  F4 Deriv curiosity : {}", if f4_within { "YES ✓" } else { "NO ✗"});
+    println!(
+        "  PARETO ANALYSIS — is (0.3, 0.03) within ±{:.0}% of best for ALL 4?",
+        WITHIN_FRAC * 100.0
+    );
+    println!(
+        "  F1 HLA companion   : {}",
+        if f1_within { "YES ✓" } else { "NO ✗" }
+    );
+    println!(
+        "  F2 δ-Mem gate      : {}",
+        if f2_within { "YES ✓" } else { "NO ✗" }
+    );
+    println!(
+        "  F3 Collapse detect : {}",
+        if f3_within { "YES ✓" } else { "NO ✗" }
+    );
+    println!(
+        "  F4 Deriv curiosity : {}",
+        if f4_within { "YES ✓" } else { "NO ✗" }
+    );
     println!("  ─────────────────────────────────────────────────────────");
-    println!("  {}/4 consumers have the paper-default in their Pareto region.", n_pass);
+    println!(
+        "  {}/4 consumers have the paper-default in their Pareto region.",
+        n_pass
+    );
     if super_goat {
         println!("  VERDICT: SUPER-GOAT ✓ — unified α-pair (0.3, 0.03) is universal.");
     } else {
         println!("  VERDICT: GOAT only — unified α-pair is NOT universal for all 4.");
-        println!("           Per-consumer tuning recommended for the {} outlier(s).", 4 - n_pass);
+        println!(
+            "           Per-consumer tuning recommended for the {} outlier(s).",
+            4 - n_pass
+        );
     }
     println!("══════════════════════════════════════════════════════════════════\n");
 }

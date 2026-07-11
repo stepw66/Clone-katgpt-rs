@@ -29,7 +29,7 @@
 
 use std::path::Path;
 
-use katgpt_rs::pruners::bomber::wasm_pruner::{BatchResult, BomberWasmPruner};
+use katgpt_rs::pruners::bomber::wasm_pruner::BomberWasmPruner;
 use katgpt_rs::pruners::bomber::{ArenaGrid, BomberAction, Cell, GridPos, is_safe_action};
 
 // ── Constants ──────────────────────────────────────────────────

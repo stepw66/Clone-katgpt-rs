@@ -3,7 +3,7 @@
 //! G1–G7: weight merge helpers, cache layout, and defaults.
 
 use katgpt_core::types::{AttentionProjection, CacheLayout};
-use katgpt_rs::kv_share::{cache_layout, merge_kv_bias, merge_kv_weights};
+use katgpt_kv::kv_share::{cache_layout, merge_kv_bias, merge_kv_weights};
 
 #[test]
 fn g1_merge_kv_weights_produces_correct_average() {

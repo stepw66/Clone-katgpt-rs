@@ -19,9 +19,9 @@
 //! 2. For each of `budget` iterations:
 //!    a. Sample one hidden state `s̃` from the belief fn.
 //!    b. For each root action `a`, do a SHORT random rollout
-//!       (depth ≤ `ROLLOUT_DEPTH_CAP`) from `s̃.advance(&a, player_id)`,
-//!       accumulating `(visits += 1, total_value += reward)` into the root
-//!       table keyed by `action_hash(&a)`.
+//!    (depth ≤ `ROLLOUT_DEPTH_CAP`) from `s̃.advance(&a, player_id)`,
+//!    accumulating `(visits += 1, total_value += reward)` into the root
+//!    table keyed by `action_hash(&a)`.
 //! 3. Return the root action with the highest visit count; tie-break by mean
 //!    value (`total_value / visits`).
 //!
@@ -136,7 +136,8 @@ impl NodeStats {
             0 => f32::INFINITY,
             n => {
                 let exploit = self.total_value / n as f32;
-                let explore = UCB1_C * (parent_visits.max(1) as f32).ln().sqrt() / (n as f32).sqrt();
+                let explore =
+                    UCB1_C * (parent_visits.max(1) as f32).ln().sqrt() / (n as f32).sqrt();
                 exploit + explore
             }
         }

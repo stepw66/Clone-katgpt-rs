@@ -30,7 +30,7 @@
 
 #![cfg(feature = "sink_aware_attn")]
 
-use katgpt_rs::data_probe::sink_classify::{
+use katgpt_core::data_probe::sink_classify::{
     CachedSinkClassification, SinkAwarePolicy, SinkClassifierConfig, StableRankScratch,
     apply_dual_policy_gate, apply_dual_policy_gate_cached_flat, apply_dual_policy_gate_flat,
 };
@@ -134,8 +134,7 @@ fn run_regime(regime: &str, n_values: &[usize], cfg: SinkClassifierConfig) {
     println!("── regime: {regime} ──────────────────────────────────────────────");
     println!(
         "{:>5} {:>10} {:>10} {:>10} {:>8} {:>10} {:>8}",
-        "n", "uniform", "dual", "dual_flat", "oh%",
-        "cached", "oh%"
+        "n", "uniform", "dual", "dual_flat", "oh%", "cached", "oh%"
     );
     println!("{}", "-".repeat(75));
 
@@ -151,8 +150,13 @@ fn run_regime(regime: &str, n_values: &[usize], cfg: SinkClassifierConfig) {
         // ── Uniform baseline (Vec<Vec> copy) ────────────────────────
         let us_uniform = bench_us(3, 30, || {
             let kind = apply_dual_policy_gate(
-                &cd.attn_rows, &cd.values_rows, &cd.o_rows,
-                &policy_uniform, 0.0, &mut scratch, &mut out_rows,
+                &cd.attn_rows,
+                &cd.values_rows,
+                &cd.o_rows,
+                &policy_uniform,
+                0.0,
+                &mut scratch,
+                &mut out_rows,
             );
             std::hint::black_box(kind);
         });
@@ -160,8 +164,13 @@ fn run_regime(regime: &str, n_values: &[usize], cfg: SinkClassifierConfig) {
         // ── Per-call DualPolicy, Vec<Vec<f32>> ──────────────────────
         let us_dual = bench_us(3, 30, || {
             let kind = apply_dual_policy_gate(
-                &cd.attn_rows, &cd.values_rows, &cd.o_rows,
-                &policy_dual, 0.0, &mut scratch, &mut out_rows,
+                &cd.attn_rows,
+                &cd.values_rows,
+                &cd.o_rows,
+                &policy_dual,
+                0.0,
+                &mut scratch,
+                &mut out_rows,
             );
             std::hint::black_box(kind);
         });
@@ -169,8 +178,15 @@ fn run_regime(regime: &str, n_values: &[usize], cfg: SinkClassifierConfig) {
         // ── Per-call DualPolicy, flat &[f32] (Plan 288) ─────────────
         let us_dual_flat = bench_us(3, 30, || {
             let kind = apply_dual_policy_gate_flat(
-                &cd.attn_flat, &cd.values_flat, &cd.o_flat, n, cd.d,
-                &policy_dual, 0.0, &mut scratch, &mut out_flat,
+                &cd.attn_flat,
+                &cd.values_flat,
+                &cd.o_flat,
+                n,
+                cd.d,
+                &policy_dual,
+                0.0,
+                &mut scratch,
+                &mut out_flat,
             );
             std::hint::black_box(kind);
         });
@@ -183,21 +199,40 @@ fn run_regime(regime: &str, n_values: &[usize], cfg: SinkClassifierConfig) {
         // forward.
         let mut cached = CachedSinkClassification::with_config(cfg, 16);
         apply_dual_policy_gate_cached_flat(
-            &cd.attn_flat, &cd.values_flat, &cd.o_flat, n, cd.d,
-            0.0, &mut scratch, &mut cached, &mut out_flat,
+            &cd.attn_flat,
+            &cd.values_flat,
+            &cd.o_flat,
+            n,
+            cd.d,
+            0.0,
+            &mut scratch,
+            &mut cached,
+            &mut out_flat,
         );
         let us_cached_flat = bench_us(3, 30, || {
             let kind = apply_dual_policy_gate_cached_flat(
-                &cd.attn_flat, &cd.values_flat, &cd.o_flat, n, cd.d,
-                0.0, &mut scratch, &mut cached, &mut out_flat,
+                &cd.attn_flat,
+                &cd.values_flat,
+                &cd.o_flat,
+                n,
+                cd.d,
+                0.0,
+                &mut scratch,
+                &mut cached,
+                &mut out_flat,
             );
             std::hint::black_box(kind);
         });
 
         println!(
             "{:>5} {:>10.3} {:>10.3} {:>10.3} {:>7.1}% {:>10.3} {:>7.1}%",
-            n, us_uniform, us_dual, us_dual_flat, pct(us_dual_flat, us_uniform),
-            us_cached_flat, pct(us_cached_flat, us_uniform),
+            n,
+            us_uniform,
+            us_dual,
+            us_dual_flat,
+            pct(us_dual_flat, us_uniform),
+            us_cached_flat,
+            pct(us_cached_flat, us_uniform),
         );
     }
     println!();

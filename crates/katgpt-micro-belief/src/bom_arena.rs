@@ -53,14 +53,32 @@
 //! - Research: [`katgpt-rs/.research/248_DeltaTok_DeltaWorld_BoM_Single_Pass_Diverse_Sampling.md`]
 //! - Source paper: [arXiv:2604.04913](https://arxiv.org/abs/2604.04913)
 
-use crate::{
-    AttractorKernel, BoMSampler, LeakyIntegrator, NoiseQueryConfig,
-};
+use crate::{AttractorKernel, BoMSampler, LeakyIntegrator, NoiseQueryConfig};
 // `MicroRecurrentBeliefState` is needed by the `#[cfg(test)]` module via
 // `use super::*` (the `.step()` / `.dim()` methods are trait methods). Listed
 // separately with `#[cfg(test)]` so the non-test build stays warning-clean.
 #[cfg(test)]
 use crate::MicroRecurrentBeliefState;
+
+/// Fill `out` with deterministic Gaussian(0, σ²) noise derived from `seed`.
+///
+/// Box–Muller transform per element: `u1`, `u2` uniform → `r·cos(θ)` normal.
+/// Deterministic given `(seed, sigma)` — the same seed always produces the
+/// same query bytes, so [`NoiseQueryConfig::commit`] / snapshot commitments
+/// remain stable. Shared by [`BoMMinimaxPlanner`] and [`BoMMeanPlanner`] to
+/// keep the two planners' noise derivation bit-identical (DRY: previously
+/// the body was duplicated across both impls).
+#[inline]
+fn fill_gaussian_queries(out: &mut [f32], seed: u64, sigma: f32) {
+    let mut rng = fastrand::Rng::with_seed(seed);
+    for q in out.iter_mut() {
+        let u1 = rng.f32().max(1e-9);
+        let u2 = rng.f32();
+        let r = (-2.0 * u1.ln()).sqrt();
+        let theta = 2.0 * core::f32::consts::PI * u2;
+        *q = sigma * r * theta.cos();
+    }
+}
 
 // ────────────────────────────────────────────────────────────────────────────
 // Traits — the abstraction boundary between engine and fuel
@@ -218,7 +236,9 @@ pub struct DeterministicPlanner {
 impl DeterministicPlanner {
     /// Construct with the default label.
     pub fn new() -> Self {
-        Self { label: "deterministic" }
+        Self {
+            label: "deterministic",
+        }
     }
 
     /// Construct with a custom label (for ablation runs).
@@ -294,16 +314,7 @@ impl<K: BoMSampler> BoMMinimaxPlanner<K> {
     /// (sync-safety / replay).
     #[inline]
     fn resample_queries(&mut self, seed: u64) {
-        let mut rng = fastrand::Rng::with_seed(seed);
-        let sigma = self.cfg.sigma;
-        // Box–Muller for each query element. Deterministic given (seed, sigma).
-        for q in self.queries.iter_mut() {
-            let u1 = rng.f32().max(1e-9);
-            let u2 = rng.f32();
-            let r = (-2.0 * u1.ln()).sqrt();
-            let theta = 2.0 * core::f32::consts::PI * u2;
-            *q = sigma * r * theta.cos();
-        }
+        fill_gaussian_queries(&mut self.queries, seed, self.cfg.sigma);
     }
 }
 
@@ -411,15 +422,7 @@ impl<K: BoMSampler> BoMMeanPlanner<K> {
 
     #[inline]
     fn resample_queries(&mut self, seed: u64) {
-        let mut rng = fastrand::Rng::with_seed(seed);
-        let sigma = self.cfg.sigma;
-        for q in self.queries.iter_mut() {
-            let u1 = rng.f32().max(1e-9);
-            let u2 = rng.f32();
-            let r = (-2.0 * u1.ln()).sqrt();
-            let theta = 2.0 * core::f32::consts::PI * u2;
-            *q = sigma * r * theta.cos();
-        }
+        fill_gaussian_queries(&mut self.queries, seed, self.cfg.sigma);
     }
 }
 
@@ -561,7 +564,11 @@ impl SyntheticThreatArena {
     pub fn new(dim: usize, max_ticks: usize) -> Self {
         assert!(dim >= 2, "SyntheticThreatArena requires dim >= 2");
         // Guard against max_ticks == 0 to avoid div-by-zero in the cached reciprocal.
-        let inv_max_ticks = if max_ticks == 0 { 0.0 } else { 1.0 / max_ticks as f32 };
+        let inv_max_ticks = if max_ticks == 0 {
+            0.0
+        } else {
+            1.0 / max_ticks as f32
+        };
         Self {
             obs: vec![0.0; dim],
             tick_idx: 0,
@@ -612,6 +619,7 @@ impl ArenaEnvironment for SyntheticThreatArena {
         &self.obs
     }
 
+    #[inline]
     fn apply_action(&mut self, action: ArenaAction) {
         self.last_action = action;
     }
@@ -620,10 +628,8 @@ impl ArenaEnvironment for SyntheticThreatArena {
         // Score the prior action: if the true threat this tick had positive
         // dot with the action's evade, the NPC evaded; otherwise it was hit.
         let evade = self.last_action.evade_vec();
-        let evasion_dot = evade[0] * self.current_threat[0]
-            + evade[1] * self.current_threat[1];
-        if evasion_dot <= 0.0 && (self.current_threat[0] != 0.0 || self.current_threat[1] != 0.0)
-        {
+        let evasion_dot = evade[0] * self.current_threat[0] + evade[1] * self.current_threat[1];
+        if evasion_dot <= 0.0 && (self.current_threat[0] != 0.0 || self.current_threat[1] != 0.0) {
             self.hits_taken += 1;
         } else if evasion_dot > 0.0 {
             // Successfully evaded a real threat. Use cached reciprocal to
@@ -837,8 +843,7 @@ where
     );
 
     let delta_pp = (candidate_outcome.mean_score - baseline_outcome.mean_score) * 100.0;
-    let win_rate_delta_pp =
-        (candidate_outcome.win_rate - baseline_outcome.win_rate) * 100.0;
+    let win_rate_delta_pp = (candidate_outcome.win_rate - baseline_outcome.win_rate) * 100.0;
     let latency_ratio = if baseline_outcome.total_us == 0 {
         1.0
     } else {
@@ -910,10 +915,10 @@ where
         }
         let score = env.episode_score();
         scores.push(score);
+        // Strict win: score > 0.5. Draws (== 0.5) and losses (< 0.5) do not
+        // increment `wins` — kept as a plain `if` (no dead `else` branch).
         if score > 0.5 {
             wins += 1;
-        } else if score == 0.5 {
-            wins += 0; // explicit: draws don't count as wins
         }
     }
 
@@ -953,10 +958,7 @@ pub fn bom_minimax_attractor(
 }
 
 /// Build a BoM minimax planner over [`LeakyIntegrator`] with sensible defaults.
-pub fn bom_minimax_leaky(
-    dim: usize,
-    cfg: NoiseQueryConfig,
-) -> BoMMinimaxPlanner<LeakyIntegrator> {
+pub fn bom_minimax_leaky(dim: usize, cfg: NoiseQueryConfig) -> BoMMinimaxPlanner<LeakyIntegrator> {
     let kernel = LeakyIntegrator::hla_default(dim);
     BoMMinimaxPlanner::new(kernel, cfg)
 }
@@ -1246,10 +1248,8 @@ mod tests {
     #[test]
     fn noise_query_config_seed_strategy_affects_arena_outcome() {
         // Just verifies the config types wire through the planner API.
-        let cfg_per_npc =
-            NoiseQueryConfig::default().with_seed_strategy(SeedStrategy::PerNpc);
-        let cfg_per_class =
-            NoiseQueryConfig::default().with_seed_strategy(SeedStrategy::PerClass);
+        let cfg_per_npc = NoiseQueryConfig::default().with_seed_strategy(SeedStrategy::PerNpc);
+        let cfg_per_class = NoiseQueryConfig::default().with_seed_strategy(SeedStrategy::PerClass);
         assert_ne!(cfg_per_npc.commit(), cfg_per_class.commit());
     }
 

@@ -7,8 +7,8 @@
 //! root-only composition types that depend on `katgpt-transformer` or other
 //! root-only modules:
 //!
-//! - [`SpeculativeContext`] — needs `ForwardContext` + `MultiLayerKVCache`
-//!   (from `katgpt-transformer`)
+//! - `SpeculativeContext` — re-exported from `katgpt_forward` (Plan 393, moved
+//!   there because it composes `ForwardContext`)
 //! - [`DDTreeBranchCache`] — needs `PagedKVCache` + `forward_paged`
 //!   (from `katgpt-transformer`)
 //! - `TesConfig` — needs `BanditStrategy` (from `crate::pruners::bandit`)
@@ -17,13 +17,8 @@
 //!
 //! Everything else re-exports from `katgpt_core::speculative::types`.
 
-use crate::transformer::{
-    ForwardContext, MultiLayerKVCache, PagedKVCache, TransformerWeights, forward_paged,
-};
+use crate::transformer::{ForwardContext, PagedKVCache, TransformerWeights, forward_paged};
 use crate::types::Config;
-
-#[cfg(feature = "tes_loop")]
-use crate::pruners::bandit::BanditStrategy;
 
 // ── Re-exported from katgpt-core (Plan 107 Phase 0 + Plan 008 Step 5) ──
 // The substrate traits (ConstraintPruner, ScreeningPruner, DominoPruner,
@@ -31,17 +26,40 @@ use crate::pruners::bandit::BanditStrategy;
 // `katgpt_core::traits` since Plan 107 Phase 0. The substrate data types,
 // configs, and algorithms joined them in Plan 008 Step 5
 // (`katgpt_core::speculative::types`).
+//
+// (BanditStrategy / TesConfig moved to katgpt_pruners; no import needed here.)
 
 pub use katgpt_core::traits::{
     BinaryScreeningPruner, CompletionHorizon, ConstraintPruner, DominoPruner, NoPruner,
     NoScreeningPruner, ScreeningPruner,
 };
 
+// Always-available speculative substrate types (no feature gate in katgpt-core).
 pub use katgpt_core::speculative::types::{
-    BlockScores, BudgetAdaptation, DecodeStrategy, DraftEvent, DraftResult, EarlyStopGate,
-    FlashPrefillConfig, PrefillMode, RejectionReason, RoutingOverlapSnapshot, SdeConfig,
-    ScoreReduction, SpecCostSnapshot, StabilitySnapshot, TreeNode,
+    BlockScores, BudgetAdaptation, DecodeStrategy, DraftEvent, DraftResult, FlashPrefillConfig,
+    PrefillMode, RejectionReason, ScoreReduction, SdeConfig, TreeNode,
 };
+
+// Feature-gated re-exports — MUST mirror katgpt-core's gates.
+//
+// `EarlyStopGate` / `SpecCostSnapshot` / `StabilitySnapshot` are gated in
+// katgpt-core behind `elf_sde` / `spec_cost_model` / `stability_metrics`
+// respectively. `RoutingOverlapSnapshot` is gated behind `domain_latent`
+// (which katgpt-core turns on transitively via `octree_ctc → sense_composition`,
+// so it's almost always available — but we still gate the re-export on root's
+// `domain_latent` so root's API surface matches root's feature flags).
+//
+// See Issue 016: the prior unconditional re-export broke
+// `cargo check --no-default-features` because the gated names don't exist in
+// katgpt-core when their features are off.
+#[cfg(feature = "elf_sde")]
+pub use katgpt_core::speculative::types::EarlyStopGate;
+#[cfg(feature = "domain_latent")]
+pub use katgpt_core::speculative::types::RoutingOverlapSnapshot;
+#[cfg(feature = "spec_cost_model")]
+pub use katgpt_core::speculative::types::SpecCostSnapshot;
+#[cfg(feature = "stability_metrics")]
+pub use katgpt_core::speculative::types::StabilitySnapshot;
 
 // NB: `katgpt_core::speculative::types` also exports feature-gated substrate
 // types (`MarginalFusionConfig`, `KvRoutingConfig`, `PositionWeightedBudget`,
@@ -52,10 +70,10 @@ pub use katgpt_core::speculative::types::{
 // duplicate-path ambiguity. Consumers that need them can `use katgpt_core::speculative::types::*`.
 // The blanket `pub use katgpt_core::speculative::types::*` is intentionally omitted.
 
-#[cfg(feature = "dflare_fusion")]
-pub use katgpt_core::speculative::types::MarginalFusionConfig;
 #[cfg(feature = "dflare_kv_routing")]
 pub use katgpt_core::speculative::types::KvRoutingConfig;
+#[cfg(feature = "dflare_fusion")]
+pub use katgpt_core::speculative::types::MarginalFusionConfig;
 #[cfg(feature = "dflare_progressive_budget")]
 pub use katgpt_core::speculative::types::PositionWeightedBudget;
 #[cfg(feature = "lattice_deduction")]
@@ -65,155 +83,13 @@ pub use katgpt_core::speculative::types::{
 #[cfg(feature = "tes_loop")]
 pub use katgpt_core::speculative::types::{TesNode, TrajectoryCredit};
 
-// ── Pre-allocated Speculative Context (composition — needs katgpt-transformer) ──
-
-/// Pre-allocated buffers for zero-alloc speculative decoding.
-///
-/// Create once with `SpeculativeContext::new(config)`, reuse across calls.
-/// Call `reset()` between decode steps to clear transient state.
-///
-/// All hot-path operations borrow from this struct instead of allocating:
-/// - `dflash_predict_with` reuses `ctx`, `cache`, `marginals_flat`, `probs_buf`
-/// - `build_dd_tree` reuses `TreeBuilder` heap/tree buffers
-/// - `sample_residual_distribution_into` reuses `residual_buf`
-/// - Leviathan rejection sampling reuses `p_distributions_flat`
-pub struct SpeculativeContext {
-    /// Pre-allocated forward pass buffers (embedding, attention, MLP, logits).
-    pub ctx: ForwardContext,
-    /// Pre-allocated KV cache for draft model.
-    pub cache: MultiLayerKVCache,
-    /// Flat marginals buffer: `[draft_lookahead * vocab_size]`.
-    /// Each step's marginal occupies `[step * vocab_size..(step+1) * vocab_size]`.
-    pub marginals_flat: Vec<f32>,
-    /// Temp probs buffer: `[vocab_size]` for logits→softmax in-place.
-    pub probs_buf: Vec<f32>,
-    /// Pre-allocated sampled tokens: `[draft_lookahead]`.
-    pub sampled_tokens: Vec<usize>,
-    /// Pre-allocated accepted tokens: `[draft_lookahead + 1]`.
-    pub accepted_buf: Vec<usize>,
-    /// Pre-allocated path buffer: `[draft_lookahead + 1]`.
-    pub path_buf: Vec<usize>,
-    /// Residual distribution scratch: `[vocab_size]` for `sample_residual_distribution_into`.
-    pub residual_buf: Vec<f32>,
-    /// Flat p-distributions buffer for Leviathan: `[(draft_lookahead + 1) * vocab_size]`.
-    pub p_distributions_flat: Vec<f32>,
-    /// Number of steps populated in last operation (for slicing).
-    pub steps_populated: usize,
-    /// SDE noise injection config for DDTree expansion (ELF Plan 079).
-    pub sde_config: SdeConfig,
-}
-
-impl SpeculativeContext {
-    /// Allocate all buffers from config dimensions.
-    pub fn new(config: &Config) -> Self {
-        let vocab_size = config.vocab_size;
-        let draft_lookahead = config.draft_lookahead;
-
-        Self {
-            ctx: ForwardContext::new(config),
-            cache: MultiLayerKVCache::new(config),
-            marginals_flat: vec![0.0f32; draft_lookahead * vocab_size],
-            probs_buf: vec![0.0f32; vocab_size],
-            sampled_tokens: vec![0usize; draft_lookahead],
-            accepted_buf: vec![0usize; draft_lookahead + 1],
-            path_buf: vec![0usize; draft_lookahead + 1],
-            residual_buf: vec![0.0f32; vocab_size],
-            p_distributions_flat: vec![0.0f32; (draft_lookahead + 1) * vocab_size],
-            steps_populated: 0,
-            sde_config: SdeConfig::default(),
-        }
-    }
-
-    /// Reset transient state between decode steps.
-    /// Clears lengths to zero; buffers retain capacity for reuse.
-    pub fn reset(&mut self) {
-        self.cache.reset();
-        self.steps_populated = 0;
-    }
-
-    /// Get marginal slice for a specific step.
-    /// Returns empty slice if step is out of range.
-    pub fn marginal_slice(&self, step: usize, vocab_size: usize) -> &[f32] {
-        let start = step * vocab_size;
-        let end = start + vocab_size;
-        if end <= self.marginals_flat.len() && step < self.steps_populated {
-            &self.marginals_flat[start..end]
-        } else {
-            &[]
-        }
-    }
-
-    /// Get mutable marginal slice for a specific step.
-    pub fn marginal_slice_mut(&mut self, step: usize, vocab_size: usize) -> &mut [f32] {
-        let start = step * vocab_size;
-        let end = start + vocab_size;
-        if end <= self.marginals_flat.len() {
-            &mut self.marginals_flat[start..end]
-        } else {
-            &mut []
-        }
-    }
-
-    /// Get populated marginals as slice-of-slices (borrowed view).
-    /// Returns a Vec of borrowed slices for compatibility with existing APIs.
-    /// Prefer [`marginals_into`] for hot paths (zero-alloc).
-    pub fn marginals_view(&self, vocab_size: usize) -> Vec<&[f32]> {
-        (0..self.steps_populated)
-            .map(|step| self.marginal_slice(step, vocab_size))
-            .collect()
-    }
-
-    /// Zero-alloc marginals view: writes borrowed slices into caller-provided buffer.
-    ///
-    /// Returns the populated portion of `buf` as `&[&[f32]]`.
-    /// `buf` must be at least `steps_populated` long (bounded by `draft_lookahead`, typically ≤64).
-    ///
-    /// # Example
-    ///
-    /// ```ignore
-    /// let mut buf: [&[f32]; 64] = [&[]; 64];
-    /// let view = sctx.marginals_into(&mut buf, vocab_size);
-    /// tree_builder.build(view, config, &NoPruner, false);
-    /// ```
-    pub fn marginals_into<'s, 'a>(
-        &'s self,
-        buf: &'a mut [&'s [f32]],
-        vocab_size: usize,
-    ) -> &'a [&'s [f32]] {
-        let count = self.steps_populated.min(buf.len());
-        for (i, slot) in buf.iter_mut().enumerate().take(count) {
-            *slot = self.marginal_slice(i, vocab_size);
-        }
-        &buf[..count]
-    }
-
-    /// Get populated sampled tokens.
-    pub fn sampled_tokens(&self) -> &[usize] {
-        &self.sampled_tokens[..self.steps_populated]
-    }
-
-    /// Get p-distribution slice for Leviathan step.
-    pub fn p_dist_slice(&self, step: usize, vocab_size: usize) -> &[f32] {
-        let start = step * vocab_size;
-        let end = start + vocab_size;
-        if end <= self.p_distributions_flat.len() {
-            &self.p_distributions_flat[start..end]
-        } else {
-            &[]
-        }
-    }
-
-    /// Get mutable p-distribution slice for Leviathan step.
-    pub fn p_dist_slice_mut(&mut self, step: usize, vocab_size: usize) -> &mut [f32] {
-        let start = step * vocab_size;
-        let end = start + vocab_size;
-        if end <= self.p_distributions_flat.len() {
-            &mut self.p_distributions_flat[start..end]
-        } else {
-            &mut []
-        }
-    }
-}
+// ── Pre-allocated Speculative Context (moved to katgpt-forward, Plan 393) ──
+// `SpeculativeContext` lives in `katgpt_forward::speculative_context` because it
+// composes `ForwardContext` (also in katgpt-forward). It cannot live in
+// katgpt-speculative (the leaf below katgpt-forward) without creating a cycle.
+// Re-exported here so all `crate::speculative::types::SpeculativeContext` and
+// `crate::speculative::SpeculativeContext` import paths continue to resolve.
+pub use katgpt_forward::SpeculativeContext;
 
 // ── DDTree Branch Cache (composition — needs katgpt-transformer) ──
 
@@ -324,48 +200,12 @@ impl Default for SelfSpecConfig {
 
 // ── SimpleTES Config (composition — needs root-only BanditStrategy) ──
 // NB: `TesNode` + `TrajectoryCredit` (the pure-data / pure-algorithm half of
-// SimpleTES) moved to `katgpt_core::speculative::types`. `TesConfig` stays
-// here because it has a field typed as `BanditStrategy` from
-// `crate::pruners::bandit` (root-only).
-
-/// SimpleTES evaluation-driven scaling config (Plan 086).
-///
-/// Budget = C × L × K total evaluations per solve.
+// SimpleTES) live in `katgpt_core::speculative::types`. `TesConfig` moved to
+// `katgpt_pruners::tes_loop` (Plan 005) because its `bandit_strategy` field is
+// typed as `BanditStrategy` from `katgpt_pruners::bandit`. Re-exported here so
+// existing `crate::speculative::types::TesConfig` import paths still resolve.
 #[cfg(feature = "tes_loop")]
-#[derive(Clone, Debug)]
-pub struct TesConfig {
-    /// C: parallel trajectories.
-    pub global_width: usize,
-    /// L: iterations per trajectory.
-    pub refinement_depth: usize,
-    /// K: candidates per step.
-    pub local_sample_size: usize,
-    /// Bandit strategy for proposal selection (Φ).
-    pub bandit_strategy: BanditStrategy,
-}
-
-#[cfg(feature = "tes_loop")]
-impl Default for TesConfig {
-    fn default() -> Self {
-        Self {
-            global_width: 32,
-            refinement_depth: 100,
-            local_sample_size: 16,
-            bandit_strategy: BanditStrategy::Rpucg {
-                gamma: 0.8,
-                lambda: 1.0,
-            },
-        }
-    }
-}
-
-#[cfg(feature = "tes_loop")]
-impl TesConfig {
-    /// Total evaluation budget: C × L × K.
-    pub fn budget(&self) -> usize {
-        self.global_width * self.refinement_depth * self.local_sample_size
-    }
-}
+pub use katgpt_pruners::tes_loop::TesConfig;
 
 #[cfg(test)]
 mod tests {

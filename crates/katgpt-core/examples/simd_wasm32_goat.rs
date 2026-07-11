@@ -34,11 +34,11 @@
 //!   not kernel cost.
 
 use katgpt_core::simd::{
-    fast_sigmoid, simd_add_inplace, simd_add_into, simd_add_scalar_inplace, simd_argmax_f32,
-    simd_dot_f32, simd_exp_inplace, simd_exp_sum_inplace, simd_fused_decay_write,
-    simd_fused_sub_scale_inplace, simd_max_f32, simd_reciprocal_inplace, simd_scale_inplace,
-    simd_scale_mul_inplace, simd_sigmoid_inplace, simd_sigmoid_tanh_clamp_inplace, simd_sum_f32,
-    SimdLevel, simd_level,
+    SimdLevel, fast_sigmoid, simd_add_inplace, simd_add_into, simd_add_scalar_inplace,
+    simd_argmax_f32, simd_dot_f32, simd_exp_inplace, simd_exp_sum_inplace, simd_fused_decay_write,
+    simd_fused_sub_scale_inplace, simd_level, simd_max_f32, simd_reciprocal_inplace,
+    simd_scale_inplace, simd_scale_mul_inplace, simd_sigmoid_inplace,
+    simd_sigmoid_tanh_clamp_inplace, simd_sum_f32,
 };
 use katgpt_core::simd::{simd_outer_product_acc, simd_sparse_dot_f32};
 
@@ -91,7 +91,11 @@ struct Rng {
 impl Rng {
     fn new(seed: u64) -> Self {
         Self {
-            state: if seed == 0 { 0xDEAD_BEEF_CAFE_BABE } else { seed },
+            state: if seed == 0 {
+                0xDEAD_BEEF_CAFE_BABE
+            } else {
+                seed
+            },
         }
     }
     fn next_u64(&mut self) -> u64 {
@@ -178,11 +182,17 @@ fn level_name() -> &'static str {
 
 fn main() {
     let mut rng = Rng::new(0xC0FFEE);
-    let mut r = Results { pass: 0, fail: 0, fails: Vec::new() };
+    let mut r = Results {
+        pass: 0,
+        fail: 0,
+        fails: Vec::new(),
+    };
 
     // Deterministic input sizes covering: 0, sub-wide, exact-wide, multi-wide,
     // and non-aligned tails (exercises the scalar tails of every kernel).
-    const SIZES: &[usize] = &[0, 1, 3, 4, 5, 7, 8, 13, 16, 31, 32, 33, 63, 64, 65, 127, 128, 1024];
+    const SIZES: &[usize] = &[
+        0, 1, 3, 4, 5, 7, 8, 13, 16, 31, 32, 33, 63, 64, 65, 127, 128, 1024,
+    ];
 
     println!("=== Issue 007 SIMD GOAT — backend: {} ===", level_name());
 
@@ -197,7 +207,11 @@ fn main() {
         // FMA contraction: NEON/AVX2 use true FMA, WASM uses mul→add. Allow
         // ~1e-5 rel on n=1024 (accumulated rounding). Scalar reference here
         // is plain mul+sum.
-        let ok = Tol::Ulp { abs: 1e-5, rel: 1e-5 }.check(got, want);
+        let ok = Tol::Ulp {
+            abs: 1e-5,
+            rel: 1e-5,
+        }
+        .check(got, want);
         r.check(&format!("dot[n={n}]"), ok, &format!("{got} != {want}"));
     }
 
@@ -209,7 +223,11 @@ fn main() {
         let want = ref_sum(&x);
         // sum uses add reduction — bit-exact for the 4-wide unroll on most
         // inputs but ordering can differ; allow tiny tolerance.
-        let ok = Tol::Ulp { abs: 1e-6, rel: 1e-6 }.check(got, want);
+        let ok = Tol::Ulp {
+            abs: 1e-6,
+            rel: 1e-6,
+        }
+        .check(got, want);
         r.check(&format!("sum[n={n}]"), ok, &format!("{got} != {want}"));
     }
 
@@ -222,7 +240,11 @@ fn main() {
         rng.fill(&mut x, -5.0, 5.0);
         let got = simd_max_f32(&x);
         let want = ref_max(&x);
-        r.check(&format!("max[n={n}]"), Tol::Exact.check(got, want), &format!("{got} != {want}"));
+        r.check(
+            &format!("max[n={n}]"),
+            Tol::Exact.check(got, want),
+            &format!("{got} != {want}"),
+        );
     }
 
     // ── argmax ─────────────────────────────────────────────────────────
@@ -239,7 +261,11 @@ fn main() {
         let (gi, gv) = simd_argmax_f32(&x);
         let (wi, wv) = ref_argmax(&x);
         let ok = gi == wi && Tol::Exact.check(gv, wv);
-        r.check(&format!("argmax[n={n}]"), ok, &format!("({gi},{gv}) != ({wi},{wv})"));
+        r.check(
+            &format!("argmax[n={n}]"),
+            ok,
+            &format!("({gi},{gv}) != ({wi},{wv})"),
+        );
     }
 
     // ── scale_inplace ──────────────────────────────────────────────────
@@ -253,7 +279,11 @@ fn main() {
         for x in b.iter_mut() {
             *x *= s;
         }
-        r.check(&format!("scale[n={n}]"), Tol::Exact.check_slice(&a, &b), "mismatch");
+        r.check(
+            &format!("scale[n={n}]"),
+            Tol::Exact.check_slice(&a, &b),
+            "mismatch",
+        );
     }
 
     // ── add_scalar_inplace ─────────────────────────────────────────────
@@ -267,7 +297,11 @@ fn main() {
         for x in b.iter_mut() {
             *x += v;
         }
-        r.check(&format!("add_scalar[n={n}]"), Tol::Exact.check_slice(&a, &b), "mismatch");
+        r.check(
+            &format!("add_scalar[n={n}]"),
+            Tol::Exact.check_slice(&a, &b),
+            "mismatch",
+        );
     }
 
     // ── fused_sub_scale_inplace: x = (x - sub) * scale ─────────────────
@@ -282,7 +316,11 @@ fn main() {
         for x in b.iter_mut() {
             *x = (*x - sub) * sc;
         }
-        r.check(&format!("fused_sub_scale[n={n}]"), Tol::Exact.check_slice(&a, &b), "mismatch");
+        r.check(
+            &format!("fused_sub_scale[n={n}]"),
+            Tol::Exact.check_slice(&a, &b),
+            "mismatch",
+        );
     }
 
     // ── add_inplace: dst += src ────────────────────────────────────────
@@ -297,7 +335,11 @@ fn main() {
         for (d, &s) in dst_r.iter_mut().zip(src.iter()) {
             *d += s;
         }
-        r.check(&format!("add_inplace[n={n}]"), Tol::Exact.check_slice(&dst, &dst_r), "mismatch");
+        r.check(
+            &format!("add_inplace[n={n}]"),
+            Tol::Exact.check_slice(&dst, &dst_r),
+            "mismatch",
+        );
     }
 
     // ── add_into: dst = a + b ──────────────────────────────────────────
@@ -312,7 +354,11 @@ fn main() {
         for ((d, &x), &y) in dst_r.iter_mut().zip(a.iter()).zip(b.iter()) {
             *d = x + y;
         }
-        r.check(&format!("add_into[n={n}]"), Tol::Exact.check_slice(&dst, &dst_r), "mismatch");
+        r.check(
+            &format!("add_into[n={n}]"),
+            Tol::Exact.check_slice(&dst, &dst_r),
+            "mismatch",
+        );
     }
 
     // ── fused_decay_write: dst = dst*decay + src*write (FMA-sensitive) ─
@@ -333,7 +379,11 @@ fn main() {
         // path uses mul→add; allow small tolerance.
         r.check(
             &format!("fused_decay_write[n={n}]"),
-            Tol::Ulp { abs: 1e-6, rel: 1e-6 }.check_slice(&dst, &dst_r),
+            Tol::Ulp {
+                abs: 1e-6,
+                rel: 1e-6,
+            }
+            .check_slice(&dst, &dst_r),
             "mismatch",
         );
     }
@@ -355,7 +405,11 @@ fn main() {
         }
         r.check(
             &format!("scale_mul[n={n}]"),
-            Tol::Ulp { abs: 1e-6, rel: 1e-6 }.check_slice(&x, &x_r),
+            Tol::Ulp {
+                abs: 1e-6,
+                rel: 1e-6,
+            }
+            .check_slice(&x, &x_r),
             "mismatch",
         );
     }
@@ -372,7 +426,11 @@ fn main() {
         }
         r.check(
             &format!("reciprocal[n={n}]"),
-            Tol::Ulp { abs: 1e-6, rel: 1e-6 }.check_slice(&x, &x_r),
+            Tol::Ulp {
+                abs: 1e-6,
+                rel: 1e-6,
+            }
+            .check_slice(&x, &x_r),
             "mismatch",
         );
     }
@@ -390,7 +448,11 @@ fn main() {
         // Cephes is ~1 ULP of f32::exp; allow 2 ULP equivalent.
         r.check(
             &format!("exp[n={n}]"),
-            Tol::Ulp { abs: 1e-4, rel: 1e-4 }.check_slice(&x, &x_r),
+            Tol::Ulp {
+                abs: 1e-4,
+                rel: 1e-4,
+            }
+            .check_slice(&x, &x_r),
             "mismatch",
         );
     }
@@ -405,7 +467,11 @@ fn main() {
         let want: f32 = x_r.iter().map(|v| ref_exp(*v)).sum();
         r.check(
             &format!("exp_sum[n={n}]"),
-            Tol::Ulp { abs: 1e-4, rel: 1e-4 }.check(got, want),
+            Tol::Ulp {
+                abs: 1e-4,
+                rel: 1e-4,
+            }
+            .check(got, want),
             &format!("{got} != {want}"),
         );
     }
@@ -422,7 +488,11 @@ fn main() {
         }
         r.check(
             &format!("sigmoid[n={n}]"),
-            Tol::Ulp { abs: 1e-5, rel: 1e-5 }.check_slice(&x, &x_r),
+            Tol::Ulp {
+                abs: 1e-5,
+                rel: 1e-5,
+            }
+            .check_slice(&x, &x_r),
             "mismatch",
         );
     }
@@ -450,7 +520,11 @@ fn main() {
             // producing a discontinuous jump up to the Cephes error. 1e-4 abs
             // comfortably covers this for a transcendental gate function (not a
             // bit-exact correctness kernel).
-            Tol::Ulp { abs: 1e-4, rel: 1e-4 }.check_slice(&out, &out_r),
+            Tol::Ulp {
+                abs: 1e-4,
+                rel: 1e-4,
+            }
+            .check_slice(&out, &out_r),
             "mismatch",
         );
     }
@@ -472,7 +546,11 @@ fn main() {
         }
         r.check(
             "outer_product_acc[8x8]",
-            Tol::Ulp { abs: 1e-6, rel: 1e-6 }.check_slice(&acc, &acc_r),
+            Tol::Ulp {
+                abs: 1e-6,
+                rel: 1e-6,
+            }
+            .check_slice(&acc, &acc_r),
             "mismatch",
         );
     }
@@ -494,13 +572,21 @@ fn main() {
         let want = ref_sparse_dot(&x, &idx, &v, row_off);
         r.check(
             "sparse_dot[8 active]",
-            Tol::Ulp { abs: 1e-6, rel: 1e-6 }.check(got, want),
+            Tol::Ulp {
+                abs: 1e-6,
+                rel: 1e-6,
+            }
+            .check(got, want),
             &format!("{got} != {want}"),
         );
     }
 
     // ── Verdict ────────────────────────────────────────────────────────
-    println!("\nG1 correctness: {}/{} checks passed", r.pass, r.pass + r.fail);
+    println!(
+        "\nG1 correctness: {}/{} checks passed",
+        r.pass,
+        r.pass + r.fail
+    );
     if !r.fails.is_empty() {
         println!("FAILURES:");
         for f in &r.fails {
@@ -514,9 +600,17 @@ fn main() {
     let mut b = vec![0.0f32; n];
     rng.fill(&mut a, -2.0, 2.0);
     rng.fill(&mut b, -2.0, 2.0);
-    let iters = if cfg!(target_arch = "wasm32") { 2000 } else { 200_000 };
+    let iters = if cfg!(target_arch = "wasm32") {
+        2000
+    } else {
+        200_000
+    };
     let simd_ns = bench(iters, || {
-        std::hint::black_box(simd_dot_f32(std::hint::black_box(&a), std::hint::black_box(&b), n));
+        std::hint::black_box(simd_dot_f32(
+            std::hint::black_box(&a),
+            std::hint::black_box(&b),
+            n,
+        ));
     });
     let scalar_ns = bench(iters, || {
         std::hint::black_box(ref_dot(std::hint::black_box(&a), std::hint::black_box(&b)));
@@ -527,11 +621,19 @@ fn main() {
     );
     println!(
         "G2 verdict: {} (smoke target ≥1.0x; strict ≥2x lives in criterion benches)",
-        if speedup >= 1.0 { "PASS" } else { "INCONCLUSIVE" }
+        if speedup >= 1.0 {
+            "PASS"
+        } else {
+            "INCONCLUSIVE"
+        }
     );
 
     let g1_ok = r.fail == 0;
-    println!("\n=== GOAT: G1={}  backend={} ===", if g1_ok { "PASS" } else { "FAIL" }, level_name());
+    println!(
+        "\n=== GOAT: G1={}  backend={} ===",
+        if g1_ok { "PASS" } else { "FAIL" },
+        level_name()
+    );
     if !g1_ok {
         std::process::exit(1);
     }

@@ -26,9 +26,7 @@
 
 use std::env;
 
-use katgpt_rs::pruners::go::autoresearch::{
-    AutoResearchConfig, BaselinePlayer, run_autoresearch,
-};
+use katgpt_rs::pruners::go::autoresearch::{AutoResearchConfig, BaselinePlayer, run_autoresearch};
 
 // ── Constants ──────────────────────────────────────────────────
 

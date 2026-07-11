@@ -62,7 +62,8 @@ The feature is purely additive — no other feature depends on it, and
 `ict_branching` will be promoted to default-on when **all** of:
 
 1. riir-ai Plan 324 reports G8 PASS (runtime fusion validated on real NPCs).
-2. The `k_percent` sweep recommended by [Issue 033](../.issues/033_ict_g2_inflection_37_percent_npc_domain.md)
+2. The `k_percent` sweep recommended by Issue 033
+   (originally tracked in `033_ict_g2_inflection_37_percent_npc_domain.md`, closed + removed; this benchmark is the canonical record)
    is confirmed on real game data (paper's 10% may not survive the NPC
    domain transfer — Issue 033 measured 37.5% on synthetic data).
 3. The Bebop H₁→H₂ upgrade (G10) has been re-calibrated on production
@@ -76,5 +77,5 @@ primitive can enable it with one feature flag.
 
 - Plan 294 §Phase 8 T8.4
 - [G3 benchmark doc](294_ict_g3.md) — the make-or-break PASS
-- [Issue 033](../.issues/033_ict_g2_inflection_37_percent_npc_domain.md) — k_percent sweep follow-up
+- Issue 033 (`033_ict_g2_inflection_37_percent_npc_domain`) — k_percent sweep follow-up (closed + removed; benchmark `.benchmarks/294_ict_g2.md` is the canonical record)
 - riir-ai Plan 324 — runtime fusion (G7–G9, G8 specifically)

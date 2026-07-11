@@ -28,11 +28,11 @@
 #![cfg(feature = "clr")]
 
 use fastrand::Rng;
-use katgpt_rs::clr::{
-    brevity_tiebreak, clr_vote, Claim, ClaimVerifier, ClrConfig, ClrScratch, Cluster,
-    DirectionVectorSource, FnClaimExtractor, SigmoidProjectionVerifier, Trajectory,
+use katgpt_core::simd::simd_dot_f32;
+use katgpt_claim::clr::{
+    Claim, ClaimVerifier, ClrConfig, ClrScratch, Cluster, DirectionVectorSource, FnClaimExtractor,
+    SigmoidProjectionVerifier, Trajectory, brevity_tiebreak, clr_vote,
 };
-use katgpt_rs::simd::simd_dot_f32;
 
 // ──────────────────────────────────────────────────────────────────────────
 // Shared helpers (also reused conceptually by the G4 binary)
@@ -267,7 +267,14 @@ fn clr_pick_cluster(
     let extractor = FnClaimExtractor::new(G1_M, |t: &Trajectory<u8>| t.claims.clone());
     let verifier = SigmoidProjectionVerifier::new(directions, G1_DIM);
     let outcome_eq = |a: &u8, b: &u8| a == b;
-    let result = clr_vote(trajectories, &extractor, &verifier, config, &outcome_eq, scratch);
+    let result = clr_vote(
+        trajectories,
+        &extractor,
+        &verifier,
+        config,
+        &outcome_eq,
+        scratch,
+    );
     result.winner.outcome
 }
 
@@ -323,8 +330,10 @@ fn g1_clr_beats_best_of_n_majority() {
 
     eprintln!("──────── G1: CLR vs Best-of-N Majority ────────");
     eprintln!("Seeds          : {G1_NUM_SEEDS}");
-    eprintln!("Suite          : {} clusters × {} trajectories, K={}, M={}, dim={}",
-        G1_NUM_CLUSTERS, G1_TRAJECTORIES_PER_CLUSTER, G1_K_TOTAL, G1_M, G1_DIM);
+    eprintln!(
+        "Suite          : {} clusters × {} trajectories, K={}, M={}, dim={}",
+        G1_NUM_CLUSTERS, G1_TRAJECTORIES_PER_CLUSTER, G1_K_TOTAL, G1_M, G1_DIM
+    );
     eprintln!("Correct cluster: {G1_CORRECT_CLUSTER} (highest baseline magnitude)");
     eprintln!("CLR pick dist  : {clr_picks:?}");
     eprintln!("Majority dist  : {majority_picks:?}");
@@ -419,10 +428,7 @@ fn g2_calibration_ece() {
     }
     eprintln!("ECE: {ece:.5} (target ≤ 0.10)");
 
-    assert!(
-        ece <= 0.10,
-        "G2 FAILED: ECE {ece:.5} > 0.10 target"
-    );
+    assert!(ece <= 0.10, "G2 FAILED: ECE {ece:.5} > 0.10 target");
     eprintln!("G2 PASS ✅");
 }
 
@@ -469,7 +475,10 @@ fn g5_feature_isolation() {
 
     eprintln!("──────── G5: Feature Isolation ────────");
     eprintln!("clr feature: enabled (this binary compiled)");
-    eprintln!("ClrConfig default: {{ k={}, m={}, tau_v={} }}", config.k, config.m, config.tau_v);
+    eprintln!(
+        "ClrConfig default: {{ k={}, m={}, tau_v={} }}",
+        config.k, config.m, config.tau_v
+    );
     eprintln!("G5 runtime smoke PASS ✅");
     eprintln!();
     eprintln!("Full G5 proof is a CI concern:");

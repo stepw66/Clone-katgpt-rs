@@ -1,0 +1,40 @@
+[package]
+name = "katgpt-validator"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+description = "Two-tier syntax pruner for inference-time code validation — PartialParser (bracket balancer DFA) + SynPruner (syn parse). Extracted from katgpt-rs root per Proposal 003 Phase 11 (2026-07-04)."
+repository = "https://github.com/katopz/katgpt-rs"
+keywords = ["validator", "syntax-pruner", "partial-parser", "syn", "modelless"]
+categories = ["algorithms", "development-tools"]
+publish = false  # only katgpt-core ships to crates.io
+
+[dependencies]
+# katgpt-core: provides `traits::ConstraintPruner` (the trait SynPruner implements).
+# Always-on — the trait impl is unconditional.
+katgpt-core = { path = "../katgpt-core" }
+# katgpt-tokenizer: provides `BpeTokenizer` (struct field) + `BpeTokenizerImpl::decode`
+# (prod decode path). Always-on — the validator's `SynPruner::is_valid` decodes the
+# token sequence back to source code before parsing.
+katgpt-tokenizer = { path = "../katgpt-tokenizer" }
+# syn: third-party Rust parser, used for the Tier-1 accurate parse
+# (`syn::parse_str::<syn::Stmt>`). Always-on — the whole point of the validator.
+syn = { version = "2", features = ["full", "parsing"] }
+# proc-macro2: transitive requirement of `syn` for span/token tracking.
+proc-macro2 = "1"
+
+[features]
+default = []
+
+# The validator substrate — PartialParser + SynPruner + types. The crate is the
+# validator; this feature exists only for back-compat with the historical root
+# feature name. Root's `validator = []` forwards here.
+validator = []
+
+# Optional `ConstraintPruner::propagate` impl on `SynPruner` (line 84 of
+# syn_pruner.rs). Root's `hoare_pruner` feature forwards here so the method
+# compiles when both `validator` and `hoare_pruner` are on. NOTE: this is a
+# separate concept from root's predicate-propagation `hoare_pruner` (which
+# gates llmexec_guard + katgpt-pruners/hoare_pruner) — they share the feature
+# name but not the code path. The shared name is preserved for back-compat.
+hoare_pruner = []

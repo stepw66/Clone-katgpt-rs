@@ -67,7 +67,12 @@ mod tests_sense;
 #[cfg(test)]
 use dot::{scalar_dot_f32, scalar_outer_product_acc};
 #[cfg(test)]
-use elementwise::{scalar_add_inplace, scalar_add_into, scalar_add_scalar_inplace, scalar_fused_decay_write, scalar_max_f32, scalar_scale_inplace, scalar_sum_f32};
+use elementwise::{
+    scalar_add_inplace, scalar_add_into, scalar_add_scalar_inplace, scalar_fused_decay_write,
+    scalar_max_f32, scalar_scale_inplace, scalar_sum_f32,
+};
+#[cfg(test)]
+use research::scalar_l_inf_distance_f32;
 #[cfg(test)]
 use research::scalar_sum_sq_quartic;
 #[cfg(test)]
@@ -76,17 +81,31 @@ use sparse::scalar_sparse_dot_f32;
 // Re-export the entire public surface so `crate::simd::*` paths are unchanged
 // after the file → folder split. Existing call sites (e.g. `simd::simd_dot_f32`,
 // `simd::SimdLevel`) continue to resolve without modification.
-pub use activations::{fast_sigmoid, simd_exp_inplace, simd_exp_sum_inplace, simd_reciprocal_inplace, simd_sigmoid_inplace, simd_sigmoid_tanh_clamp_inplace};
+pub use activations::{
+    fast_sigmoid, simd_exp_inplace, simd_exp_sum_inplace, simd_reciprocal_inplace,
+    simd_sigmoid_inplace, simd_sigmoid_tanh_clamp_inplace,
+};
 pub use argmax::simd_argmax_f32;
-pub use dot::{simd_dot_f16_f32, simd_dot_f32, simd_fma_row, simd_matmul_f16_f32_rows, simd_matmul_f16_f32_rows_parallel, simd_matmul_relu_rows, simd_matmul_rows, simd_matmul_rows_parallel, simd_matvec, simd_outer_product_acc, simd_outer_product_acc_scaled};
-pub use elementwise::{simd_add_inplace, simd_add_into, simd_add_scalar_inplace, simd_fused_decay_write, simd_fused_sub_scale_inplace, simd_masked_sum_count_f32, simd_max_f32, simd_scale_inplace, simd_scale_mul_inplace, simd_sum_f32};
+pub use dot::{
+    simd_dot_f16_f32, simd_dot_f32, simd_fma_row, simd_matmul_f16_f32_rows,
+    simd_matmul_f16_f32_rows_parallel, simd_matmul_relu_rows, simd_matmul_rows,
+    simd_matmul_rows_parallel, simd_matvec, simd_outer_product_acc, simd_outer_product_acc_scaled,
+};
+pub use elementwise::{
+    simd_add_inplace, simd_add_into, simd_add_scalar_inplace, simd_fused_decay_write,
+    simd_fused_sub_scale_inplace, simd_masked_sum_count_f32, simd_max_f32, simd_scale_inplace,
+    simd_scale_mul_inplace, simd_sum_f32,
+};
 // Feature-gated re-exports — mirror the `#[cfg(feature = "...")]` gates on
 // the underlying items so `cargo check --no-default-features` stays green.
 #[cfg(feature = "maxsim")]
 pub use maxsim::{maxsim_score, maxsim_score_packed};
+pub use research::{
+    coincidence_score, entropy_f32, simd_dist_sq, simd_fused_scale_acc, simd_fused_sub_acc,
+    simd_gram_f32, simd_l_inf_distance_f32, simd_sum_abs_f32, simd_sum_sq, simd_sum_sq_quartic,
+};
 #[cfg(feature = "sigmoid_margin")]
 pub use research::{compute_retrieval_margin, dim_sufficiency_bound, sigmoid_margin_loss};
-pub use research::{coincidence_score, entropy_f32, simd_dist_sq, simd_fused_scale_acc, simd_fused_sub_acc, simd_gram_f32, simd_sum_abs_f32, simd_sum_sq, simd_sum_sq_quartic};
 pub use sparse::{simd_sparse_dot_f32, simd_sparse_matmul_rows};
 pub use ternary::simd_ternary_dot_f32;
 #[cfg(feature = "plasma_path")]

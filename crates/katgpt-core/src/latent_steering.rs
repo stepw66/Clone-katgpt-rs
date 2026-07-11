@@ -70,6 +70,7 @@ pub const HLA_DIM: usize = 8;
 
 /// Errors returned by [`LatentSteeringVector::new`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
 pub enum LatentSteeringError {
     /// Direction vector is not unit-norm within the constructor tolerance.
     NotUnitNorm,
@@ -114,14 +115,22 @@ impl LatentSteeringVector {
             return Err(LatentSteeringError::NotUnitNorm);
         }
         let commitment = compute_commitment(&direction, alpha);
-        Ok(Self { direction, alpha, commitment })
+        Ok(Self {
+            direction,
+            alpha,
+            commitment,
+        })
     }
 
     /// Construct without validation. Caller guarantees unit-norm + alpha range.
     /// Used when the direction comes from a trusted frozen artifact.
     pub fn new_unchecked(direction: Vec<f32>, alpha: f32) -> Self {
         let commitment = compute_commitment(&direction, alpha);
-        Self { direction, alpha, commitment }
+        Self {
+            direction,
+            alpha,
+            commitment,
+        }
     }
 
     /// Re-check unit-norm (within `tol`) AND that the stored commitment matches
@@ -142,6 +151,118 @@ impl LatentSteeringVector {
     #[inline]
     pub fn as_slice(&self) -> &[f32] {
         &self.direction
+    }
+}
+
+// ── Freeze/thaw envelope ─────────────────────────────────────────
+
+/// Self-contained freeze/thaw envelope for a [`LatentSteeringVector`].
+///
+/// Persists semantic-domain (latent) steering state across freeze/thaw so
+/// steered NPC personality survives session restarts, shard consolidation,
+/// and process restarts. The envelope carries both the BLAKE3 commitment
+/// AND the serialized payload, so a single value can be persisted and later
+/// thawed without external data.
+///
+/// **Sync-boundary invariant (CRITICAL, per global AGENTS.md):** This
+/// envelope carries ONLY latent semantic-domain state (the NPC
+/// personality/affect direction + strength). It contains NO raw synced
+/// state (no `MapPos`, no HP, no wallet, no velocity). Enforced by
+/// construction: the wrapped `LatentSteeringVector` has no raw fields by
+/// definition — `direction` is a latent vector, `alpha` is a scalar
+/// strength, `commitment` is a content-addressed hash. No bridge function
+/// is needed because no raw state crosses the boundary.
+#[derive(Clone, Debug)]
+pub struct LatentSteeringEnvelope {
+    /// BLAKE3 commitment over `payload`.
+    commitment: [u8; 32],
+    /// Serialized payload: `dim` (u32 LE) || `direction` (f32 LE × dim) || `alpha` (f32 LE).
+    payload: Vec<u8>,
+}
+
+impl LatentSteeringEnvelope {
+    /// Freeze a [`LatentSteeringVector`] into a self-contained envelope.
+    ///
+    /// Serializes the direction + alpha into a byte buffer and computes a
+    /// BLAKE3 commitment over it. The original vector's own `commitment` field
+    /// is NOT re-serialized (it is derivable from direction + alpha); the
+    /// envelope commitment is an independent integrity layer over the
+    /// serialized form.
+    pub fn freeze(v: &LatentSteeringVector) -> Self {
+        let dim = v.dim() as u32;
+        let mut payload = Vec::with_capacity(4 + v.dim() * 4 + 4);
+        payload.extend_from_slice(&dim.to_le_bytes());
+        for &f in v.as_slice() {
+            payload.extend_from_slice(&f.to_le_bytes());
+        }
+        payload.extend_from_slice(&v.alpha.to_le_bytes());
+        let commitment = *blake3::hash(&payload).as_bytes();
+        Self { commitment, payload }
+    }
+
+    /// Verify that the envelope's commitment matches its payload.
+    ///
+    /// Returns `false` if the payload has been tampered with after freezing.
+    #[inline]
+    pub fn verify(&self) -> bool {
+        *blake3::hash(&self.payload).as_bytes() == self.commitment
+    }
+
+    /// Thaw the envelope back into a [`LatentSteeringVector`].
+    ///
+    /// Verifies the commitment first; returns `None` if verification fails
+    /// (tampered envelope) or if the payload is malformed (truncated,
+    /// wrong dimension, NaN values). On success, reconstructs the vector via
+    /// [`LatentSteeringVector::new_unchecked`] — the commitment layer has
+    /// already validated integrity, so re-validation would be redundant.
+    pub fn thaw(&self) -> Option<LatentSteeringVector> {
+        if !self.verify() {
+            return None;
+        }
+        Self::deserialize(&self.payload)
+    }
+
+    /// The BLAKE3 commitment over the serialized payload.
+    #[inline]
+    pub fn commitment(&self) -> [u8; 32] {
+        self.commitment
+    }
+
+    /// Serialized payload bytes (for external persistence / network transport).
+    #[inline]
+    pub fn payload(&self) -> &[u8] {
+        &self.payload
+    }
+
+    /// Deserialize a payload into a `LatentSteeringVector`.
+    ///
+    /// Returns `None` on any malformation: truncated buffer, dimension
+    /// mismatch, or NaN in the direction or alpha.
+    fn deserialize(payload: &[u8]) -> Option<LatentSteeringVector> {
+        if payload.len() < 4 {
+            return None;
+        }
+        let dim = u32::from_le_bytes(payload[..4].try_into().ok()?) as usize;
+        let expected_len = 4 + dim * 4 + 4;
+        if payload.len() != expected_len {
+            return None;
+        }
+        let mut direction = Vec::with_capacity(dim);
+        for i in 0..dim {
+            let offset = 4 + i * 4;
+            let f = f32::from_le_bytes(payload[offset..offset + 4].try_into().ok()?);
+            if f.is_nan() {
+                return None;
+            }
+            direction.push(f);
+        }
+        let alpha = f32::from_le_bytes(
+            payload[4 + dim * 4..4 + dim * 4 + 4].try_into().ok()?,
+        );
+        if alpha.is_nan() {
+            return None;
+        }
+        Some(LatentSteeringVector::new_unchecked(direction, alpha))
     }
 }
 
@@ -197,11 +318,7 @@ pub fn apply_latent_steering(state: &mut [f32], steering: &LatentSteeringVector)
 /// Effective strength is `alpha * w`. Use for localized fields where the
 /// caller has already computed the kernel weight via [`kernel_weight`].
 #[inline]
-pub fn apply_latent_steering_weighted(
-    state: &mut [f32],
-    steering: &LatentSteeringVector,
-    w: f32,
-) {
+pub fn apply_latent_steering_weighted(state: &mut [f32], steering: &LatentSteeringVector, w: f32) {
     if w <= 0.0 {
         return;
     }
@@ -261,7 +378,9 @@ fn saxpy_inplace_scalar(state: &mut [f32], alpha: f32, dir: &[f32]) {
 #[cfg(target_arch = "x86_64")]
 #[inline]
 unsafe fn saxpy_inplace_avx2(state: &mut [f32], alpha: f32, dir: &[f32]) {
-    use std::arch::x86_64::{_mm256_add_ps, _mm256_loadu_ps, _mm256_mul_ps, _mm256_set1_ps, _mm256_storeu_ps};
+    use std::arch::x86_64::{
+        _mm256_add_ps, _mm256_loadu_ps, _mm256_mul_ps, _mm256_set1_ps, _mm256_storeu_ps,
+    };
     let len = state.len();
     let chunks = len / 8;
     let v_alpha = unsafe { _mm256_set1_ps(alpha) };
@@ -296,7 +415,11 @@ pub fn kernel_weight(
 ) -> f32 {
     match support {
         FieldSupport::Global => 1.0,
-        FieldSupport::Radius { center, bandwidth, steepness } => {
+        FieldSupport::Radius {
+            center,
+            bandwidth,
+            steepness,
+        } => {
             let pos = match entity_pos {
                 Some(p) => p,
                 None => return 0.0,
@@ -380,7 +503,9 @@ mod tests {
         let mut rng = seed;
         let mut v: Vec<f32> = (0..d)
             .map(|_| {
-                rng = rng.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+                rng = rng
+                    .wrapping_mul(6364136223846793005)
+                    .wrapping_add(1442695040888963407);
                 ((rng >> 33) as f32) / (1u64 << 31) as f32 - 1.0
             })
             .collect();
@@ -396,7 +521,10 @@ mod tests {
         // T1.5: Global field shifts state by exactly alpha * direction.
         let dir = make_unit_direction(8, 42);
         let steering = LatentSteeringVector::new(dir.clone(), 0.5, 1e-4).unwrap();
-        let field = LatentField { steering, support: FieldSupport::Global };
+        let field = LatentField {
+            steering,
+            support: FieldSupport::Global,
+        };
 
         let mut state = vec![0.1f32; 8];
         apply_latent_steering(&mut state, &field.steering);
@@ -495,7 +623,10 @@ mod tests {
         let e2 = &states[16..24];
         let e3 = &states[24..32];
         assert!(e0.iter().all(|x| x.abs() < 1e-9), "e0 wrong zone, no shift");
-        assert!(e1.iter().any(|x| x.abs() > 1e-5), "e1 matching zone, must shift");
+        assert!(
+            e1.iter().any(|x| x.abs() > 1e-5),
+            "e1 matching zone, must shift"
+        );
         assert!(e2.iter().all(|x| x.abs() < 1e-9), "e2 wrong zone, no shift");
         assert!(e3.iter().all(|x| x.abs() < 1e-9), "e3 no zone, no shift");
     }
@@ -511,7 +642,9 @@ mod tests {
         #[cfg(target_arch = "x86_64")]
         {
             if !std::is_x86_feature_detected!("avx2") {
-                eprintln!("AVX2 not available on this host — skipping SIMD vs scalar equality check");
+                eprintln!(
+                    "AVX2 not available on this host — skipping SIMD vs scalar equality check"
+                );
                 return;
             }
             let dims = [8usize, 16];
@@ -521,7 +654,11 @@ mod tests {
                     for seed in [0xC40D_u64, 0xDEAD_BEEF, 0x1234_5678] {
                         let dir = make_unit_direction(d, seed);
                         let base: Vec<f32> = (0..d)
-                            .map(|i| ((seed.wrapping_mul((i as u64) + 1)) >> 33) as f32 / (1u64 << 31) as f32 - 1.0)
+                            .map(|i| {
+                                ((seed.wrapping_mul((i as u64) + 1)) >> 33) as f32
+                                    / (1u64 << 31) as f32
+                                    - 1.0
+                            })
                             .collect();
 
                         let mut simd_state = base.clone();
@@ -552,5 +689,102 @@ mod tests {
                 assert!((state[i] - expected).abs() < 1e-6);
             }
         }
+    }
+
+    // ── LatentSteeringEnvelope tests (Issue 426) ──────────────────
+
+    fn make_steering_vector(d: usize, alpha: f32, seed: u64) -> LatentSteeringVector {
+        let dir = make_unit_direction(d, seed);
+        LatentSteeringVector::new(dir, alpha, 1e-5).expect("unit-norm direction")
+    }
+
+    #[test]
+    fn envelope_round_trip_bit_identical() {
+        let v = make_steering_vector(8, 0.25, 42);
+        let envelope = LatentSteeringEnvelope::freeze(&v);
+        let thawed = envelope.thaw().expect("thaw should succeed on valid envelope");
+        // Bit-identical: direction, alpha, and reconstructed commitment must match.
+        assert_eq!(thawed.as_slice(), v.as_slice());
+        assert!(thawed.alpha.to_bits() == v.alpha.to_bits());
+        assert_eq!(thawed.commitment, v.commitment);
+    }
+
+    #[test]
+    fn envelope_round_trip_d64() {
+        // D=64 (the max practical dimension for HLA / shard embeddings).
+        let v = make_steering_vector(64, 0.1, 99);
+        let envelope = LatentSteeringEnvelope::freeze(&v);
+        let thawed = envelope.thaw().expect("thaw should succeed");
+        assert_eq!(thawed.as_slice(), v.as_slice());
+        assert!(thawed.alpha.to_bits() == v.alpha.to_bits());
+        assert_eq!(thawed.commitment, v.commitment);
+    }
+
+    #[test]
+    fn envelope_tampered_payload_rejected() {
+        let v = make_steering_vector(8, 0.25, 42);
+        let mut envelope = LatentSteeringEnvelope::freeze(&v);
+        // Flip a bit in the payload (inside the direction bytes).
+        envelope.payload[4] ^= 0xFF;
+        assert!(!envelope.verify());
+        assert!(envelope.thaw().is_none());
+    }
+
+    #[test]
+    fn envelope_tampered_commitment_rejected() {
+        let v = make_steering_vector(8, 0.25, 42);
+        let mut envelope = LatentSteeringEnvelope::freeze(&v);
+        envelope.commitment[0] ^= 0xFF;
+        assert!(!envelope.verify());
+        assert!(envelope.thaw().is_none());
+    }
+
+    #[test]
+    fn envelope_truncated_payload_rejected() {
+        let v = make_steering_vector(8, 0.25, 42);
+        let mut envelope = LatentSteeringEnvelope::freeze(&v);
+        // Truncate the payload (remove the alpha bytes).
+        envelope.payload.truncate(envelope.payload.len() - 4);
+        // The commitment no longer matches the truncated payload.
+        assert!(!envelope.verify());
+        assert!(envelope.thaw().is_none());
+    }
+
+    #[test]
+    fn envelope_deterministic() {
+        // Same vector → same commitment + same payload.
+        let v = make_steering_vector(8, 0.3, 7);
+        let e1 = LatentSteeringEnvelope::freeze(&v);
+        let e2 = LatentSteeringEnvelope::freeze(&v);
+        assert_eq!(e1.commitment(), e2.commitment());
+        assert_eq!(e1.payload(), e2.payload());
+    }
+
+    #[test]
+    fn envelope_different_vectors_different_commitments() {
+        let v1 = make_steering_vector(8, 0.25, 42);
+        let v2 = make_steering_vector(8, 0.25, 43); // different seed → different direction
+        let e1 = LatentSteeringEnvelope::freeze(&v1);
+        let e2 = LatentSteeringEnvelope::freeze(&v2);
+        assert_ne!(e1.commitment(), e2.commitment());
+    }
+
+    /// Sync-boundary invariant: the envelope carries ONLY latent state.
+    /// This is a compile-time + runtime invariant check. The envelope type
+    /// wraps `LatentSteeringVector` which has fields: `direction: Vec<f32>`
+    /// (latent), `alpha: f32` (scalar strength), `commitment: [u8; 32]` (hash).
+    /// NONE of these are raw synced state (no MapPos, no HP, no wallet).
+    /// This test asserts the invariant by construction: the serialized payload
+    /// only contains dim + direction f32s + alpha f32 — no raw physical-domain
+    /// fields can enter.
+    #[test]
+    fn envelope_sync_boundary_latent_only() {
+        let v = make_steering_vector(8, 0.25, 42);
+        let envelope = LatentSteeringEnvelope::freeze(&v);
+        // Payload format: 4 (dim) + 8*4 (direction) + 4 (alpha) = 40 bytes.
+        // No room for MapPos {x,y} (8+ bytes), HP (4+ bytes), wallet (8+ bytes).
+        // If raw state were included, the payload would be significantly larger.
+        assert_eq!(envelope.payload().len(), 4 + 8 * 4 + 4);
+        assert_eq!(envelope.payload().len(), 40);
     }
 }

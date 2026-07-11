@@ -11,9 +11,9 @@
 
 use std::time::Instant;
 
-use katgpt_rs::percepta::compile::{compile_rust_program, rust_template};
-use katgpt_rs::percepta::runner::Runner;
-use katgpt_rs::percepta::weights::TransformerWeights;
+use katgpt_percepta::compile::{compile_rust_program, rust_template};
+use katgpt_percepta::runner::Runner;
+use katgpt_percepta::weights::TransformerWeights;
 
 fn mat_f64(m: &[Vec<f64>]) -> usize {
     m.iter().map(|r| r.len()).sum()
@@ -90,8 +90,11 @@ fn main() {
     println!("  d_model   : {}", build.config.d_model);
     println!("  n_layers  : {}", build.config.n_layers);
     println!("  vocab     : {}", build.vocab.len());
-    println!("  weights   : {f64s} f64  =  {:.2} MB (f64) / {:.2} MB (f32)",
-        bytes_f64 as f64 / 1e6, bytes_f32 as f64 / 1e6);
+    println!(
+        "  weights   : {f64s} f64  =  {:.2} MB (f64) / {:.2} MB (f32)",
+        bytes_f64 as f64 / 1e6,
+        bytes_f32 as f64 / 1e6
+    );
     println!("  build time: {build_ms:.0} ms");
     bar();
 
@@ -135,8 +138,11 @@ fn main() {
     let sudoku_tokens = 900_000.0;
     println!("EXTRAPOLATION → Sudoku (~900K tokens)");
     println!("  native est.     : {:.1} s", sudoku_tokens / tps);
-    println!("  browser est.    : {:.1}–{:.1} s  (assume 3–10× slower in wasm)",
-        sudoku_tokens / tps * 3.0, sudoku_tokens / tps * 10.0);
+    println!(
+        "  browser est.    : {:.1}–{:.1} s  (assume 3–10× slower in wasm)",
+        sudoku_tokens / tps * 3.0,
+        sudoku_tokens / tps * 10.0
+    );
     println!("  weights ship    : {:.2} MB (f32)", bytes_f32 as f64 / 1e6);
     bar();
     println!(

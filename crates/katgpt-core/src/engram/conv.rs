@@ -131,18 +131,18 @@ pub fn conv_causal_into(v_tilde: &[f32], out: &mut [f32], kernel: [f32; 4], dila
     );
 
     let dil = dilation.max(1) as isize;
-    for t in 0..n {
+    for (t, out_slot) in out.iter_mut().enumerate().take(n) {
         let mut acc = 0.0f32;
         // kernel[0] = oldest tap (t - 3δ); kernel[3] = current (t - 0δ).
         // Out-of-range taps contribute 0 (zero-padding at the left edge).
-        for j in 0..4 {
+        for (j, &k) in kernel.iter().enumerate() {
             let offset = (3 - j) as isize * dil;
             let tap_t = t as isize - offset;
             if tap_t >= 0 {
-                acc += kernel[j] * v_tilde[tap_t as usize];
+                acc += k * v_tilde[tap_t as usize];
             }
         }
-        out[t] = acc;
+        *out_slot = acc;
     }
 }
 
@@ -225,8 +225,8 @@ mod tests {
         assert!((out[0] - 0.25).abs() < 1e-6, "out[0] = {}", out[0]);
         assert!((out[1] - 0.5).abs() < 1e-6, "out[1] = {}", out[1]);
         assert!((out[2] - 0.75).abs() < 1e-6, "out[2] = {}", out[2]);
-        for i in 3..6 {
-            assert!((out[i] - 1.0).abs() < 1e-6, "out[{i}] = {}", out[i]);
+        for (i, oi) in out[3..6].iter().enumerate() {
+            assert!((*oi - 1.0).abs() < 1e-6, "out[{}] = {}", i + 3, oi);
         }
     }
 

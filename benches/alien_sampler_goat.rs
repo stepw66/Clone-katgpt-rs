@@ -39,7 +39,7 @@
 
 #![cfg(feature = "alien_sampler")]
 
-use katgpt_rs::alien_sampler::{
+use katgpt_deprecated::alien_sampler::{
     AlienConfig, AlienSampler, CoherenceScorer, MedianTopMAvailability, ScoredCandidate,
 };
 use rayon::prelude::*;
@@ -212,7 +212,9 @@ fn make_archetypes(seed: u64) -> Vec<Vec<f32>> {
 fn make_shared_coherence(archetypes: &[Vec<f32>]) -> SharedCoherence {
     // Use archetype 0 as the global direction — candidates near archetype 0
     // have the highest coherence.
-    SharedCoherence { direction: archetypes[0].clone() }
+    SharedCoherence {
+        direction: archetypes[0].clone(),
+    }
 }
 
 /// Build per-NPC initial states. All NPCs share the coherence function; the
@@ -248,13 +250,13 @@ fn regen_pool(npc: &mut NpcState, archetypes: &[Vec<f32>], rng: &mut Lcg) {
             usize::MAX
         };
         if source_idx == usize::MAX {
-            for k in 0..POOL_DIM {
-                pool[k] = rng.next_range(1.0);
+            for p in pool.iter_mut().take(POOL_DIM) {
+                *p = rng.next_range(1.0);
             }
         } else {
             let archetype = &archetypes[source_idx];
-            for k in 0..POOL_DIM {
-                pool[k] = archetype[k] + rng.next_range(0.2); // ±20% noise
+            for (p, a) in pool.iter_mut().zip(archetype.iter()).take(POOL_DIM) {
+                *p = *a + rng.next_range(0.2); // ±20% noise
             }
         }
         // Normalize.
@@ -311,7 +313,10 @@ struct ArmA {
 
 impl ArmA {
     fn new(coherence: SharedCoherence) -> Self {
-        Self { npcs: make_npcs(), coherence }
+        Self {
+            npcs: make_npcs(),
+            coherence,
+        }
     }
 
     /// Run one cycle. Returns the selected direction for each NPC.
@@ -370,7 +375,10 @@ struct ArmB {
 
 impl ArmB {
     fn new(coherence: SharedCoherence) -> Self {
-        Self { npcs: make_npcs(), coherence }
+        Self {
+            npcs: make_npcs(),
+            coherence,
+        }
     }
 
     fn step(&mut self, archetypes: &[Vec<f32>], rng: &mut Lcg) -> Vec<(usize, Vec<f32>)> {
@@ -439,7 +447,10 @@ impl ArmC {
             sampler: AlienSampler::new(
                 coherence,
                 MedianTopMAvailability::new(vec![], M),
-                AlienConfig { beta: config.beta, top_m: M },
+                AlienConfig {
+                    beta: config.beta,
+                    top_m: M,
+                },
             ),
             cycle_count: 0,
         }
@@ -448,11 +459,14 @@ impl ArmC {
     fn step(&mut self, archetypes: &[Vec<f32>], rng: &mut Lcg) -> Vec<(usize, Vec<f32>)> {
         // Rebuild the cached scorer every REBUILD_EVERY cycles (or on first
         // call, or when the bank is empty).
-        if self.cycle_count % REBUILD_EVERY == 0 || self.cached_avail.is_none() {
+        if self.cycle_count.is_multiple_of(REBUILD_EVERY) || self.cached_avail.is_none() {
             self.cached_avail = Some(MedianTopMAvailability::new(self.zone_bank.clone(), M));
         }
         self.cycle_count = self.cycle_count.wrapping_add(1);
-        let avail = self.cached_avail.as_ref().expect("cached_avail built above");
+        let avail = self
+            .cached_avail
+            .as_ref()
+            .expect("cached_avail built above");
         let bank_len = avail.bank_len();
         let sampler = &self.sampler;
 
@@ -577,13 +591,16 @@ where
                 // are unit-norm → dot ∈ [-1, 1]. Map to [0, 1] via (dot+1)/2
                 // for a normalized quality score.
                 let mut dot = 0.0_f32;
-                for k in 0..dir.len() {
-                    dot += dir[k] * shared_coherence.direction[k];
+                for (d, s) in dir.iter().zip(shared_coherence.direction.iter()) {
+                    dot += d * s;
                 }
                 let quality = (dot + 1.0) * 0.5;
                 cohs.push(quality);
             }
-            records.push(CycleRecord { archetype_buckets: buckets, coherences: cohs });
+            records.push(CycleRecord {
+                archetype_buckets: buckets,
+                coherences: cohs,
+            });
         }
     }
     (records, total_time)
@@ -630,11 +647,7 @@ fn mean_coherence(records: &[CycleRecord]) -> f64 {
             n += 1;
         }
     }
-    if n == 0 {
-        0.0
-    } else {
-        sum / n as f64
-    }
+    if n == 0 { 0.0 } else { sum / n as f64 }
 }
 
 // ─── Main ───────────────────────────────────────────────────────────────────
@@ -755,13 +768,22 @@ fn main() {
     println!("    Arm A (coherence-only): {g1_a:.4}");
     println!("    Arm B (local redundancy): {g1_b:.4}");
     println!("    Arm C (AlienSampler):    {g1_c:.4}");
-    println!("    (uniform spread baseline: {:.4})", 1.0 / (N_ARCHETYPES as f64));
+    println!(
+        "    (uniform spread baseline: {:.4})",
+        1.0 / (N_ARCHETYPES as f64)
+    );
     println!("  G2 mean quality (dot+1)/2 against shared coherence direction):");
     println!("    Arm A (coherence-only): {g2_a:.4}");
     println!("    Arm C (AlienSampler):    {g2_c:.4}");
     println!("  G3 per-cycle wall time:");
-    println!("    Arm B (local redundancy): {:.2} µs", per_cycle_b.as_secs_f64() * 1e6);
-    println!("    Arm C (AlienSampler):    {:.2} µs", per_cycle_c.as_secs_f64() * 1e6);
+    println!(
+        "    Arm B (local redundancy): {:.2} µs",
+        per_cycle_b.as_secs_f64() * 1e6
+    );
+    println!(
+        "    Arm C (AlienSampler):    {:.2} µs",
+        per_cycle_c.as_secs_f64() * 1e6
+    );
     let c_over_b = per_cycle_c.as_secs_f64() / per_cycle_b.as_secs_f64();
     println!("    C/B ratio: {c_over_b:.2}×");
     println!();
@@ -769,7 +791,11 @@ fn main() {
     // ── Gate decisions ────────────────────────────────────────────────
     // G1: Arm C ≤ 50% of Arm B's concentration.
     let g1_pass = g1_c <= 0.5 * g1_b;
-    let g1_ratio = if g1_b > 0.0 { g1_c / g1_b } else { f64::INFINITY };
+    let g1_ratio = if g1_b > 0.0 {
+        g1_c / g1_b
+    } else {
+        f64::INFINITY
+    };
 
     // G2: Arm C ≥ 90% of Arm A's mean coherence.
     let g2_pass = g2_c >= 0.9 * g2_a;
@@ -805,13 +831,21 @@ fn main() {
 
     let all_pass = g1_pass && g2_pass && g3_pass && g4_pass;
     if all_pass {
-        println!("  → ALL GATES PASS. PROMOTE `alien_sampler` to default feature (Plan 311 Phase 5).");
+        println!(
+            "  → ALL GATES PASS. PROMOTE `alien_sampler` to default feature (Plan 311 Phase 5)."
+        );
     } else if !g1_pass {
-        println!("  → G1 FAIL. DEMOTE — dual-encoder not worth the complexity over scalar redundancy.");
-        println!("    Keep module as opt-in for paper reproduction. Note honestly in benchmark doc.");
+        println!(
+            "  → G1 FAIL. DEMOTE — dual-encoder not worth the complexity over scalar redundancy."
+        );
+        println!(
+            "    Keep module as opt-in for paper reproduction. Note honestly in benchmark doc."
+        );
     } else if !g2_pass {
         println!("  → G2 FAIL. Diversity at the cost of quality. Try β sweep before demoting.");
     } else if !g3_pass {
-        println!("  → G3 FAIL. Perf regression. Profile; Phase 4 SIMD may fix. Else demote to opt-in.");
+        println!(
+            "  → G3 FAIL. Perf regression. Profile; Phase 4 SIMD may fix. Else demote to opt-in."
+        );
     }
 }

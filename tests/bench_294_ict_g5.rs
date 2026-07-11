@@ -39,15 +39,17 @@ fn make_trajectories() -> Vec<Vec<f32>> {
     let mut out = Vec::with_capacity(K_TRAJECTORIES);
     let mut seed = 0xABCDEF01u64;
     for _ in 0..K_TRAJECTORIES {
-        seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+        seed = seed
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
         let dom = (seed >> 32) as usize % ACTION_DIM;
         let dom_mass = 0.5 + 0.2 * ((seed & 0xFFFF) as f32 / 65535.0);
         let mut p = vec![0.0_f32; ACTION_DIM];
         p[dom] = dom_mass;
         let rest = (1.0 - dom_mass) / (ACTION_DIM - 1) as f32;
-        for j in 0..ACTION_DIM {
+        for (j, slot) in p.iter_mut().enumerate() {
             if j != dom {
-                p[j] = rest;
+                *slot = rest;
             }
         }
         out.push(p);
@@ -58,7 +60,7 @@ fn make_trajectories() -> Vec<Vec<f32>> {
 #[cfg(debug_assertions)]
 #[test]
 fn g5_zero_alloc_hot_path() {
-    use katgpt_rs::alloc::{get_alloc_stats, reset_alloc_stats};
+    use katgpt_core::alloc::{get_alloc_stats, reset_alloc_stats};
 
     let trajectories = make_trajectories();
     let traj_refs: Vec<&[f32]> = trajectories.iter().map(|v| v.as_slice()).collect();

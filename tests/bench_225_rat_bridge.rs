@@ -7,7 +7,7 @@
 //! Run: `cargo test --features rat_plus_bridge --test bench_225_rat_bridge -- --nocapture`
 
 use katgpt_core::types::DilationConfig;
-use katgpt_rs::rat_bridge::{DilatedKvAccessor, RatBridgeState, rat_decode_step};
+use katgpt_attn::rat_bridge::{DilatedKvAccessor, RatBridgeState, rat_decode_step};
 
 // ── T6.2: Decode Latency Benchmarks ─────────────────────────────
 

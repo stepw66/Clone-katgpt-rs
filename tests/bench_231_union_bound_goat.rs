@@ -76,8 +76,16 @@ fn test_goat_g1_boole_correctness() {
     );
 
     let empty: Vec<f32> = vec![];
-    assert_eq!(mult.total_confidence(&empty), 1.0, "G1.3c: mult empty = 1.0");
-    assert_eq!(union.total_confidence(&empty), 1.0, "G1.3d: union empty = 1.0");
+    assert_eq!(
+        mult.total_confidence(&empty),
+        1.0,
+        "G1.3c: mult empty = 1.0"
+    );
+    assert_eq!(
+        union.total_confidence(&empty),
+        1.0,
+        "G1.3d: union empty = 1.0"
+    );
 
     eprintln!(
         "✅ G1: Boole's inequality verified — union ≤ mult for all test cases, trivial cases match"
@@ -112,7 +120,10 @@ fn test_goat_g2_degradation_shapes() {
         // G2.1: Verify exact formulas
         let expected_mult = base_score.powi(len as i32);
         let expected_union = (1.0 - (1.0 - base_score) * len as f32).max(0.0);
-        assert!((m - expected_mult).abs() < 1e-6, "G2.1a: mult formula mismatch");
+        assert!(
+            (m - expected_mult).abs() < 1e-6,
+            "G2.1a: mult formula mismatch"
+        );
         assert!(
             (u - expected_union).abs() < 1e-6,
             "G2.1b: union formula mismatch"
@@ -213,9 +224,7 @@ fn test_goat_g4_overhead() {
     let small_ns = start.elapsed().as_nanos() as f64 / iters as f64;
 
     // G4.2: Larger chain cost (1000 elements)
-    let large_scores: Vec<f32> = (0..1000)
-        .map(|i| 0.9 + (i as f32 % 10.0) * 0.005)
-        .collect();
+    let large_scores: Vec<f32> = (0..1000).map(|i| 0.9 + (i as f32 % 10.0) * 0.005).collect();
     let start = Instant::now();
     for _ in 0..iters {
         std::hint::black_box(scorer.total_confidence(&large_scores));
@@ -300,11 +309,18 @@ fn test_goat_g6_feature_isolation() {
     assert_eq!(scorers.len(), 3);
     for scorer in &scorers {
         let result = scorer.total_confidence(&[0.9, 0.8, 0.7]);
-        assert!(result > 0.0 && result <= 1.0, "{} returned {}", scorer.name(), result);
+        assert!(
+            result > 0.0 && result <= 1.0,
+            "{} returned {}",
+            scorer.name(),
+            result
+        );
     }
 
     // G6.3: Configurable hybrid threshold
-    let custom = HybridScorer { short_chain_threshold: 8 };
+    let custom = HybridScorer {
+        short_chain_threshold: 8,
+    };
     let scores = vec![0.9f32; 6];
     assert!(
         (custom.total_confidence(&scores) - mult.total_confidence(&scores)).abs() < 1e-6,

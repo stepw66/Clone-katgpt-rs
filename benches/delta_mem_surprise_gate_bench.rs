@@ -53,7 +53,7 @@ use katgpt_rs::pruners::delta_mem::state::DEFAULT_THETA_SURPRISE;
 const RANK: usize = 8;
 const N_TOTAL: usize = 1_000;
 const FRAC_EVENTS: f32 = 0.20; // 20% events, 80% background
-const SEED: u64 = 0xC0FFEE_BABE_1234;
+const SEED: u64 = 0x00C0_FFEE_BABE_1234;
 
 /// Deterministic LCG (no extra crate dependency; fastrand is available but
 /// this keeps the bench self-contained and reproducible).
@@ -61,7 +61,10 @@ struct Rng(u64);
 impl Rng {
     fn next_u32(&mut self) -> u32 {
         // Numerical Recipes LCG.
-        self.0 = self.0.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+        self.0 = self
+            .0
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
         (self.0 >> 32) as u32
     }
     fn next_f32(&mut self) -> f32 {
@@ -252,7 +255,11 @@ fn run_scenario(name: &str, stream: &[StreamSample], gated: bool, theta: f32) ->
 fn print_row(r: &ScenarioResult) {
     println!(
         "  {:<34} | writes={:>5} gated={:>5} | supp={:>6.2}% | recall_cos={:.4} | {:>7}μs",
-        r.name, r.writes_total, r.writes_gated, r.suppression_rate * 100.0, r.recall_cosine,
+        r.name,
+        r.writes_total,
+        r.writes_gated,
+        r.suppression_rate * 100.0,
+        r.recall_cosine,
         r.elapsed_us,
     );
 }
@@ -305,14 +312,17 @@ fn main() {
 
     // ── G3 verdict ──────────────────────────────────────────────────────
     let supp_pct = gated_default.suppression_rate * 100.0;
-    let recall_loss_pct =
-        (baseline.recall_cosine - gated_default.recall_cosine).max(0.0) / baseline.recall_cosine
-            * 100.0;
+    let recall_loss_pct = (baseline.recall_cosine - gated_default.recall_cosine).max(0.0)
+        / baseline.recall_cosine
+        * 100.0;
 
     let supp_pass = supp_pct >= 30.0;
     let recall_pass = recall_loss_pct <= 5.0;
 
-    println!("── G3 Verdict (gated θ={:.2} = default vs baseline) ────────────", DEFAULT_THETA_SURPRISE);
+    println!(
+        "── G3 Verdict (gated θ={:.2} = default vs baseline) ────────────",
+        DEFAULT_THETA_SURPRISE
+    );
     println!(
         "  write suppression: {:.2}%  (target ≥ 30%)  → {}",
         supp_pct,

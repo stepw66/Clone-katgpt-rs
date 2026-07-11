@@ -58,6 +58,7 @@
 
 /// Errors returned by [`fourier_continue_into`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
 pub enum FourierContinuationError {
     /// `x.len() < 2 * (poly_order + 1)` — too few samples for the two
     /// boundary windows not to overlap.

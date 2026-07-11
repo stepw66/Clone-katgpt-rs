@@ -190,8 +190,8 @@ pub fn partition_refine(graph: &TransitionGraph) -> BisimulationQuotient {
         // ── Step 1b: group states by signature, assign new class ids ────
         // Move signatures into `indexed_sigs` (mem::take avoids cloning).
         indexed_sigs.clear();
-        for i in 0..n {
-            let sig = mem::take(&mut signatures[i]);
+        for (i, sig_slot) in signatures.iter_mut().enumerate().take(n) {
+            let sig = mem::take(sig_slot);
             indexed_sigs.push((sig, i as u32));
         }
         // Sort by (signature, original_index) — stable for signature ties.
@@ -203,7 +203,7 @@ pub fn partition_refine(graph: &TransitionGraph) -> BisimulationQuotient {
         let mut prev_full: Option<&Vec<(u8, u32)>> = None;
         for (sig, original_idx) in &indexed_sigs {
             // Distinct-signature check via full vec comparison.
-            let is_new = prev_full.map_or(true, |p| p.as_slice() != sig.as_slice());
+            let is_new = prev_full.is_none_or(|p| p.as_slice() != sig.as_slice());
             if is_new {
                 next_class += 1;
             }

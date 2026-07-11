@@ -131,16 +131,19 @@ impl FeatureHasher {
     }
 
     /// Get the rank dimension.
+    #[inline]
     pub fn rank(&self) -> usize {
         self.rank
     }
 
     /// Get the input feature dimension.
+    #[inline]
     pub fn feature_dim(&self) -> usize {
         self.feature_dim
     }
 
     /// Get the seed used for initialization.
+    #[inline]
     pub fn seed(&self) -> u64 {
         self.seed
     }
@@ -158,7 +161,7 @@ impl Clone for FeatureHasher {
 }
 
 /// Extract features from DDTree context for memory hashing.
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct ContextFeatures {
     /// Domain hash (from PromptRouter domain string)
     pub domain: u64,
@@ -237,7 +240,7 @@ impl ContextFeatures {
 }
 
 /// Extract features from generation outcome for memory values.
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct OutcomeFeatures {
     /// Hint-δ value (from DeltaBanditPruner)
     pub delta: f32,

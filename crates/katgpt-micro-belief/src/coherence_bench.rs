@@ -99,20 +99,20 @@ pub fn build_input_sequence(dim: usize) -> Vec<Vec<f32>> {
                     x[i] = (rng.f32() * 2.0 - 1.0) * 0.05; // [-0.05, 0.05]
                 }
                 x[0] = 0.8; // strong positive evidence for dim 0
-            },
+            }
             // Phase 2: ambiguous. All dims = small noise, no dominant signal.
             s if s < PHASE_AMBIGUOUS_END => {
                 for i in 0..dim {
                     x[i] = (rng.f32() * 2.0 - 1.0) * 0.05;
                 }
-            },
+            }
             // Phase 3: dim 1 dominant. input[1] = 0.8, others = small noise.
             _ => {
                 for i in 0..dim {
                     x[i] = (rng.f32() * 2.0 - 1.0) * 0.05;
                 }
                 x[1] = 0.8; // strong positive evidence for dim 1
-            },
+            }
         }
         seq.push(x);
     }
@@ -195,15 +195,14 @@ fn run_kernel(
         let (argmax_idx, _argmax_val) = out
             .iter()
             .enumerate()
-            .max_by(|(_, a), (_, b)| {
-                a.partial_cmp(b).unwrap_or(core::cmp::Ordering::Equal)
-            })
+            .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(core::cmp::Ordering::Equal))
             .unwrap_or((0, &0.0f32));
 
         if let Some(prev) = prev_argmax
-            && prev != argmax_idx {
-                flip_flops += 1;
-            }
+            && prev != argmax_idx
+        {
+            flip_flops += 1;
+        }
         prev_argmax = Some(argmax_idx);
 
         if (PHASE_DIM0_END..PHASE_AMBIGUOUS_END).contains(&step) {
@@ -257,14 +256,24 @@ impl CoherenceReport {
         eprintln!();
         eprintln!("┌────────────────────────────────────────────────────────────────────────────┐");
         eprintln!("│ G2.1 long-horizon coherence benchmark — Plan 276 Phase 5 T5.0              │");
-        eprintln!("├──────────────────────┬───────────────┬───────────────┬──────────────────────┤");
-        eprintln!("│ Kernel               │ flip-flops    │ ambig-window  │ diverged?            │");
-        eprintln!("│                      │ (lower=better)│ argmax-var    │ (G1.2 invariant)     │");
-        eprintln!("├──────────────────────┼───────────────┼───────────────┼──────────────────────┤");
+        eprintln!(
+            "├──────────────────────┬───────────────┬───────────────┬──────────────────────┤"
+        );
+        eprintln!(
+            "│ Kernel               │ flip-flops    │ ambig-window  │ diverged?            │"
+        );
+        eprintln!(
+            "│                      │ (lower=better)│ argmax-var    │ (G1.2 invariant)     │"
+        );
+        eprintln!(
+            "├──────────────────────┼───────────────┼───────────────┼──────────────────────┤"
+        );
         self.print_row(&self.leaky);
         self.print_row(&self.attractor);
         self.print_row(&self.latent_thought);
-        eprintln!("└──────────────────────┴───────────────┴───────────────┴──────────────────────┘");
+        eprintln!(
+            "└──────────────────────┴───────────────┴───────────────┴──────────────────────┘"
+        );
 
         // Verdict line.
         let l = self.leaky.flip_flop_count;
@@ -273,13 +282,11 @@ impl CoherenceReport {
         let verdict = match (a.cmp(&l), b.cmp(&l)) {
             (core::cmp::Ordering::Less, _) | (_, core::cmp::Ordering::Less) => {
                 "GOAT PASS (T5.1): attractor family flips LESS than leaky — promote opt-in variant"
-            },
+            }
             (core::cmp::Ordering::Equal, core::cmp::Ordering::Equal) => {
                 "TIE (T5.2): attractor family does NOT beat leaky — demote to Gain"
-            },
-            _ => {
-                "G2.1 FAIL (T5.2): attractor family flips MORE than leaky — demote to Gain"
-            },
+            }
+            _ => "G2.1 FAIL (T5.2): attractor family flips MORE than leaky — demote to Gain",
         };
         eprintln!("│ leaky={l}  attractor={a}  latent_thought={b}");
         eprintln!("│ VERDICT: {verdict}");
@@ -382,9 +389,7 @@ fn g2_1_coherence_attractor_beats_or_matches_leaky() {
             "G2.1 VERDICT: attractor family wins (less flip-flopping) — promote opt-in variant per T5.1"
         );
     } else if attractor_ff == leaky_ff && latent_ff == leaky_ff {
-        eprintln!(
-            "G2.1 VERDICT: tie — no improvement, demote attractor to Gain per T5.2"
-        );
+        eprintln!("G2.1 VERDICT: tie — no improvement, demote attractor to Gain per T5.2");
     } else {
         eprintln!(
             "G2.1 VERDICT: attractor family flips MORE than leaky — demote to Gain per T5.2 \

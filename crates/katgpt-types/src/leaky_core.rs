@@ -129,7 +129,10 @@ mod tests {
             state_ref[i] = (state_ref[i] + clamped).clamp(-1.0, 1.0);
         }
 
-        assert_eq!(state_actual, state_ref, "primitive must match reference math");
+        assert_eq!(
+            state_actual, state_ref,
+            "primitive must match reference math"
+        );
     }
 
     /// Evolve_hla's sum-over-6 quirk: passing `total = Σ[0..6]` while looping
@@ -149,6 +152,9 @@ mod tests {
         let mut s_eight = [0.0f32; 8];
         leaky_step(&mut s_six, &input, total_six, lr, max_delta);
         leaky_step(&mut s_eight, &input, total_eight, lr, max_delta);
-        assert_ne!(s_six, s_eight, "different totals must yield different states");
+        assert_ne!(
+            s_six, s_eight,
+            "different totals must yield different states"
+        );
     }
 }

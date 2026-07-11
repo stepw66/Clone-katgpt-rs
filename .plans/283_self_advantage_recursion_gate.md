@@ -4,7 +4,7 @@
 **Research:** [katgpt-rs/.research/250_Latent_Recursion_Policy_Improvement_Advantage_Margin.md](../.research/250_Latent_Recursion_Policy_Improvement_Advantage_Margin.md)
 **Source paper:** [arxiv:2511.16886](https://arxiv.org/abs/2511.16886) — "Latent Reasoning in TRMs is Secretly a Policy Improvement Operator" (Asadulaev et al., ICML 2026)
 **Target:** `katgpt-rs/src/pruners/self_advantage.rs` (new module) + Cargo features `self_advantage_gate`, `product_policy_sharpen`
-**Status:** Phase 0–4 + T5.1 + T5.2 COMPLETE. `self_advantage_gate` **promoted to default-on** (GOAT 4/4 PASS with G3 scoped to intended operating range vocab ≤ 128). See [`.benchmarks/056_self_advantage_gate.md`](../.benchmarks/056_self_advantage_gate.md) for the revised GOAT verdict and [`.benchmarks/283_self_advantage_gate_goat.md`](../.benchmarks/283_self_advantage_gate_goat.md) for the prior stricter run (3/4, G3 at vocab=1024). HLA integration T5.1 GOAT 3/3 PASS → [`.benchmarks/057_self_advantage_hla_gate.md`](../.benchmarks/057_self_advantage_hla_gate.md). Deep integrations T2.2/T2.3 + freeze/thaw T5.3 remain **deferred** in [Issue 028](../.issues/028_self_advantage_gate_integration_followups.md) with explicit re-trigger conditions.
+**Status:** Phase 0–4 + T5.1 + T5.2 COMPLETE. `self_advantage_gate` **promoted to default-on** (GOAT 4/4 PASS with G3 scoped to intended operating range vocab ≤ 128). See [`.benchmarks/056_self_advantage_gate.md`](../.benchmarks/056_self_advantage_gate.md) for the revised GOAT verdict and [`.benchmarks/283_self_advantage_gate_goat.md`](../.benchmarks/283_self_advantage_gate_goat.md) for the prior stricter run (3/4, G3 at vocab=1024). HLA integration T5.1 GOAT 3/3 PASS → [`.benchmarks/057_self_advantage_hla_gate.md`](../.benchmarks/057_self_advantage_hla_gate.md). Deep integrations T2.2/T2.3 + freeze/thaw T5.3 remain **deferred** in Issue 028 (closed + removed, integrations deferred, tracked in this plan) with explicit re-trigger conditions.
 
 ---
 
@@ -121,7 +121,7 @@ Ship three modelless primitives derived from the policy-improvement theoretical 
 
 ---
 
-## Phase 5 — Cross-Pollination (tracked in [Issue 028](../.issues/028_self_advantage_gate_integration_followups.md))
+## Phase 5 — Cross-Pollination (tracked in Issue 028, closed + removed)
 
 - [x] **T5.1** (GOAT-tier optimization, tracked in Issue 028) Apply self-advantage gate to HLA `evolve_hla` reconstruction loop — add as 4th early-stop criterion (complementary to existing `max_steps` + `entropy_threshold` + `adaptive_budget`). **COMPLETE 2026-06-17:** all 5 sub-tasks done. GOAT 3/3 PASS (G1=2.50× steps saved, G2=100% argmax match, G3=0ns overhead — see [Bench 057](../.benchmarks/057_self_advantage_hla_gate.md)). `advantage_margin_threshold` promoted default NaN→0.01. Design: inline minimal gate in katgpt-core (~50 LOC math, canonical primitive stays in root crate).
 - [x] **T5.2** (CLOSED 2026-06-17, Issue 028) riir-ai NPC thought-cycle guide: **re-evaluated, NOT Super-GOAT**. Novelty gate Q1=NO (prior art: `self_advantage` primitive ships; `evolve_hla` per-NPC substrate ships; HLA loop already has 3 early-stop criteria; related crowd-NPC priors in CuriosityPulse, LatentThoughtKernel, Plan 277 surprise kernel), Q2=Partial (optimization on existing capability, not new class). No `riir-ai/.research/` guide created — Super-GOAT-guide-mandatory rule not triggered. Re-trigger requires runtime evidence of qualitatively new behavior (crowd-coordinated thinking budgets, or catching argmax-drift-with-sharp-entropy that existing gates miss).

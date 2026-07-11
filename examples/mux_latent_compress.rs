@@ -5,7 +5,7 @@
 //! and adaptive LOD with mixed content.
 
 #[cfg(feature = "mux_latent_context")]
-use katgpt_rs::mux_latent::{
+use katgpt_core::mux_latent::{
     CompressionRatio, CompressionSummary, LatentContextBuffer, LatentPrefillAdapter,
     MuxLatentConfig, MuxLatentEncoder, SpectralLOD, forward_prefill_with_compression,
 };

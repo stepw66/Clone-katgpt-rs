@@ -27,7 +27,9 @@
 
 #![cfg(feature = "latent_field_steering")]
 
-use katgpt_core::latent_steering::{LatentSteeringVector, apply_field_to_crowd, apply_latent_steering};
+use katgpt_core::latent_steering::{
+    LatentSteeringVector, apply_field_to_crowd, apply_latent_steering,
+};
 use std::hint::black_box;
 use std::time::Instant;
 
@@ -184,7 +186,11 @@ fn t3_simd_vs_scalar_throughput() {
     black_box(&states);
     crowd_ns.sort_by(|a, b| a.partial_cmp(b).unwrap());
     let p50_us = crowd_ns[N_ITERS / 2] / 1000.0;
-    let crowd_verdict = if p50_us < GATE_CROWD_US { "PASS" } else { "GATE FAIL" };
+    let crowd_verdict = if p50_us < GATE_CROWD_US {
+        "PASS"
+    } else {
+        "GATE FAIL"
+    };
     println!(
         "  G4 re-run (SIMD, {n_npcs}×{d}): p50={p50_us:.1}µs  (gate <{GATE_CROWD_US:.0}µs)  {crowd_verdict}"
     );
@@ -193,5 +199,7 @@ fn t3_simd_vs_scalar_throughput() {
         "G4 carry-over FAIL: p50={p50_us:.1}µs ≥ {GATE_CROWD_US:.0}µs"
     );
 
-    println!("=== T3.2 measurement complete (verdicts printed above; asserts only enforce G4 carry-over) ===");
+    println!(
+        "=== T3.2 measurement complete (verdicts printed above; asserts only enforce G4 carry-over) ==="
+    );
 }

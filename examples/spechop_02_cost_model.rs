@@ -10,7 +10,7 @@
 //!
 //! Run: `cargo run --example spechop_02_cost_model --features spechop`
 
-use katgpt_rs::spechop::{
+use katgpt_speculative::spechop::{
     InferenceStats, SpecHopConfig, bounded_rel_lat, compute_optimal_k, oracle_rel_lat,
     should_activate_spechop, spechop_configurator_reward, starvation_prob,
 };

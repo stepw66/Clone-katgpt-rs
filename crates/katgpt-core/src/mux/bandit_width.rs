@@ -4,7 +4,7 @@
 //! expansion width that has historically yielded the best reward.
 
 /// A single arm in the bandit, representing a candidate width.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 struct Arm {
     width: usize,
     pulls: u32,

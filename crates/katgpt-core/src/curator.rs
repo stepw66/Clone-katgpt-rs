@@ -38,7 +38,7 @@ pub struct CuratorVerdict {
 /// 1. KG consistency: dot-product similarity between direction vectors.
 /// 2. Spectral flatness: variance of leaf hashes exceeds entropy floor.
 /// 3. Latent conditioning: sigmoid projection of query onto direction is valid.
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct CuratorVerifier {
     /// Minimum acceptable KG consistency (dot-product similarity).
     pub kg_consistency_threshold: f32,
@@ -424,10 +424,10 @@ mod tests {
     /// Helper: build a tree with varied leaf data (non-zero spectral variance).
     fn varied_tree() -> MerkleOctree {
         let mut leaf_hashes = [[0u8; HASH_SIZE]; MERKLE_OCTREE_LEAVES];
-        for i in 0..MERKLE_OCTREE_LEAVES {
+        for (i, leaf_hash) in leaf_hashes.iter_mut().enumerate() {
             let mut buf = [0u8; 32];
             buf[0..8].copy_from_slice(&(i as u64).to_le_bytes());
-            leaf_hashes[i] = *blake3::hash(&buf).as_bytes();
+            *leaf_hash = *blake3::hash(&buf).as_bytes();
         }
         MerkleOctree::build_from_leaves(&leaf_hashes)
     }
@@ -674,7 +674,10 @@ mod tests {
         // High accuracy: amplified
         let w_high = verification_weight(0.9);
         let expected_high = 1.0 + (0.9 - 0.8) * 5.0;
-        assert!((w_high - expected_high).abs() < EPS, "high amplification: {w_high} vs {expected_high}");
+        assert!(
+            (w_high - expected_high).abs() < EPS,
+            "high amplification: {w_high} vs {expected_high}"
+        );
         assert!(w_high > 1.0, "high accuracy should amplify");
         assert!(w_high <= 2.0, "max amplification is 2.0");
 

@@ -145,10 +145,8 @@ fn run_phase(
         stats.total_moves += result.total_moves;
 
         // Update HL bandit after each game (Phase 1 learning only)
-        if update_hl {
-            if let Some(hl) = player_a.as_any_mut().downcast_mut::<GoHLPlayer>() {
-                hl.update_outcome(result.black_won);
-            }
+        if update_hl && let Some(hl) = player_a.as_any_mut().downcast_mut::<GoHLPlayer>() {
+            hl.update_outcome(result.black_won);
         }
     }
 

@@ -52,14 +52,16 @@ fn main() {
     for _ in 0..K_TRAJECTORIES {
         let mut p = vec![0.0_f32; ACTION_DIM];
         // LCG for reproducibility.
-        seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+        seed = seed
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
         let dom = (seed >> 32) as usize % ACTION_DIM;
         let dom_mass = 0.5 + 0.2 * ((seed & 0xFFFF) as f32 / 65535.0);
         p[dom] = dom_mass;
         let rest = (1.0 - dom_mass) / (ACTION_DIM - 1) as f32;
-        for j in 0..ACTION_DIM {
+        for (j, p_j) in p.iter_mut().enumerate() {
             if j != dom {
-                p[j] = rest;
+                *p_j = rest;
             }
         }
         trajectories.push(p);
@@ -79,7 +81,7 @@ fn main() {
     let mut sink = 0.0_f32;
     for _ in 0..WARMUP_ITERS {
         det.observe_and_detect_into(&traj_refs, &mut report);
-        sink = sink + report.uniqueness_scores[0];
+        sink += report.uniqueness_scores[0];
     }
     if black_box(sink.is_nan()) {
         eprintln!("warmup sink nan (impossible for finite inputs)");
@@ -92,7 +94,7 @@ fn main() {
         let t0 = Instant::now();
         det.observe_and_detect_into(black_box(&traj_refs), black_box(&mut report));
         let dt = t0.elapsed();
-        sink2 = sink2 + report.uniqueness_scores[0];
+        sink2 += report.uniqueness_scores[0];
         samples_us.push(dt.as_micros() as u64);
     }
     if black_box(sink2.is_nan()) {

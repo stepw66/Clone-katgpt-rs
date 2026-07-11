@@ -49,11 +49,11 @@
 
 #![cfg(all(feature = "manifold_power_iter_router", feature = "vocab_coreset"))]
 
-use katgpt_rs::manifold_power_iter_router::{
+use katgpt_spectral::manifold_power_iter_router::{
     compute_expert_gram_into, gate_sigmoid_topk, manifold_power_iter_router,
 };
+use katgpt_spectral::spectral_retract::PowerRetractScratch;
 use katgpt_rs::speculative::vocab_coreset::vocab_coreset;
-use katgpt_rs::spectral_retract::PowerRetractScratch;
 
 // ── Deterministic PRNG (xorshift64, matches the GOAT test convention) ─────
 
@@ -211,8 +211,7 @@ fn g1_mpi_changes_score_distribution() {
                 any_diff = true;
                 eprintln!(
                     "✓ context {k} expert {i}: R={:.6} → R'={:.6} (Δ={delta:.6})",
-                    sr[i],
-                    srp[i]
+                    sr[i], srp[i]
                 );
                 break;
             }
@@ -221,7 +220,10 @@ fn g1_mpi_changes_score_distribution() {
             break;
         }
     }
-    assert!(any_diff, "G1 FAIL: MPI produced identical scores — composition is trivial");
+    assert!(
+        any_diff,
+        "G1 FAIL: MPI produced identical scores — composition is trivial"
+    );
 }
 
 /// G2 + G3 — `vocab_coreset` contract is respected for both router variants,
@@ -233,7 +235,10 @@ fn g2_g3_coreset_contract_and_well_formed_outputs() {
 
     let ps = [0.5_f32, 0.7, 0.9, 1.0];
 
-    for (label, router) in [("R", fixture.router_r.as_slice()), ("R'", r_prime.as_slice())] {
+    for (label, router) in [
+        ("R", fixture.router_r.as_slice()),
+        ("R'", r_prime.as_slice()),
+    ] {
         // G3: well-formed scores for every context (no NaN, in [0,1]).
         let probe = run_composition(router, &fixture.contexts, 0.9);
         for (k, scores) in probe.scores_per_ctx.iter().enumerate() {
@@ -266,7 +271,7 @@ fn g2_g3_coreset_contract_and_well_formed_outputs() {
 
         assert_eq!(
             sizes.last(),
-            Some(&(N_EXPERTS as usize)),
+            Some(&N_EXPERTS),
             "G2c FAIL [{label}]: p=1.0 must select all experts, got {sizes:?}"
         );
 
@@ -286,7 +291,11 @@ fn g4_composition_deterministic_across_runs() {
     let run_once = || -> (Vec<Vec<f32>>, Vec<bool>, usize) {
         let r_prime = build_r_prime(&fixture);
         let res = run_composition(&r_prime, &fixture.contexts, 0.85);
-        (res.scores_per_ctx.clone(), res.coreset_mask.clone(), res.coreset_size)
+        (
+            res.scores_per_ctx.clone(),
+            res.coreset_mask.clone(),
+            res.coreset_size,
+        )
     };
 
     let (scores_a, mask_a, size_a) = run_once();
@@ -305,7 +314,10 @@ fn g5_sigmoid_discipline_not_softmax() {
     let fixture = build_fixture();
     let r_prime = build_r_prime(&fixture);
 
-    for (label, router) in [("R", fixture.router_r.as_slice()), ("R'", r_prime.as_slice())] {
+    for (label, router) in [
+        ("R", fixture.router_r.as_slice()),
+        ("R'", r_prime.as_slice()),
+    ] {
         let mut scores = vec![0.0f32; N_EXPERTS];
         score_context(&fixture.contexts[0], router, 1.0, &mut scores);
 

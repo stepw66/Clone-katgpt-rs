@@ -1,6 +1,6 @@
 # Plan 091: Go Self-Play Komi Imbalance Fix
 
-> Issue: [#060 Go Self-Play Komi Imbalance — 98.6% Black Wins](../.issues/060_go_selfplay_komi.md)
+> Issue #060 (Go Self-Play Komi Imbalance — 98.6% Black Wins) — issue closed + removed
 
 ## Tasks
 

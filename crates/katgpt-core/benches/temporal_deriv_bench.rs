@@ -43,8 +43,7 @@ fn bench_observe(c: &mut Criterion) {
                 });
             }
             16 => {
-                let mut k: TemporalDerivativeKernel<16> =
-                    TemporalDerivativeKernel::new(0.3, 0.03);
+                let mut k: TemporalDerivativeKernel<16> = TemporalDerivativeKernel::new(0.3, 0.03);
                 let signal = [0.5f32; 16];
                 group.bench_function("n=16", |b| {
                     b.iter(|| {
@@ -88,18 +87,19 @@ fn bench_batch_1000_npcs(c: &mut Criterion) {
 
     let mut group = c.benchmark_group("temporal_deriv/batch_1000_npcs");
     let n_npcs: usize = 1000;
-    let kernels: Mutex<Vec<TemporalDerivativeKernel<8>>> =
-        Mutex::new((0..n_npcs).map(|_| TemporalDerivativeKernel::new(0.3, 0.03)).collect());
+    let kernels: Mutex<Vec<TemporalDerivativeKernel<8>>> = Mutex::new(
+        (0..n_npcs)
+            .map(|_| TemporalDerivativeKernel::new(0.3, 0.03))
+            .collect(),
+    );
     let signal = [0.5f32; 8];
 
     group.bench_function("rayon_par_iter_n=8", |b| {
         b.iter(|| {
             let mut kernels = kernels.lock().unwrap();
-            kernels
-                .par_iter_mut()
-                .for_each(|k| {
-                    let _ = k.observe(black_box(&signal));
-                });
+            kernels.par_iter_mut().for_each(|k| {
+                let _ = k.observe(black_box(&signal));
+            });
         });
     });
 

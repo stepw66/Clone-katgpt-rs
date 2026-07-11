@@ -37,7 +37,10 @@
 
 pub mod admit;
 pub mod bridge;
+#[cfg(feature = "ptg_functor_edges")]
+pub mod functor_edge;
 pub mod metrics;
+pub mod mining;
 pub mod motif;
 pub mod trace;
 
@@ -48,10 +51,25 @@ pub use bridge::{
     DEFAULT_MOTIF_DIRS, MotifDirections, motif_embedding_to_tar_score, ptg_to_motif_embedding,
 };
 pub use metrics::{CdgScore, PriScores, compute_tar_score};
-pub use motif::{
-    FixedU32Set, MAX_MOTIF_EDGES, MAX_MOTIF_NODES, Motif, MotifMiner, RING_BUFFER_K,
-};
+pub use motif::{FixedU32Set, MAX_MOTIF_EDGES, MAX_MOTIF_NODES, Motif, MotifMiner, RING_BUFFER_K};
 pub use trace::{NodeId, PtgRecorder};
+
+// Sleep-cycle boundary mining instrument (Plan 290 T4.3). Hoisted from
+// `katgpt-rs/src/closure_mining.rs` in Proposal 003 Phase 7 (2026-07-04).
+// Runs `MotifMiner::mine_batch` + PRI aggregation + admission sweep at sleep-
+// cycle boundaries. The original proposal targeted katgpt-sleep, but that
+// created a cyclic package dep (katgpt-core → katgpt-sleep → katgpt-core,
+// because katgpt-core already depends on katgpt-sleep for the sleep_time
+// anticipator re-export). katgpt-core is the natural home: the instrument is
+// a thin wrapper around `closure::{MotifMiner, MotifAdmitter, compute_pri,
+// compute_cdg}` which already live here. Re-exported at the crate root as
+// `katgpt_core::mine_motifs_at_sleep_cycle` (Issue 125, 2026-07-10: the
+// `katgpt_rs::closure_mining` root re-export shim was removed; consumers
+// now import from katgpt-core directly).
+pub use mining::{SleepCycleClosureReport, fold_cdg_at_sleep_cycle, mine_motifs_at_sleep_cycle};
+
+#[cfg(feature = "ptg_functor_edges")]
+pub use functor_edge::{FunctorEdgeParams, FunctorPtg, apply_functor_edge_into, functor_edge_gate};
 
 // ── Cold-tier serde + commitment helpers ───────────────────────────────────
 // (T1.3 — kept in `mod.rs` next to the data model; the file is small enough
@@ -303,8 +321,8 @@ macro_rules! serde_via_u8 {
     };
 }
 
-pub(crate) use serde_via_u32;
 pub(crate) use serde_via_u8;
+pub(crate) use serde_via_u32;
 
 // ── Tests (T1.4 + T1.5) ────────────────────────────────────────────────────
 
@@ -332,7 +350,7 @@ mod tests {
             assert!(matches!(p, PrimitiveKind::Composite(_)));
             assert_eq!(p.to_u32(), v);
         }
-        assert!(PrimitiveKind::UserDefined(0).is_composite() == false);
+        assert!(!PrimitiveKind::UserDefined(0).is_composite());
         assert!(PrimitiveKind::Composite(7).is_composite());
     }
 
@@ -341,8 +359,16 @@ mod tests {
         let ptg = PrimitiveTransitionGraph {
             nodes: vec![dummy_node(0, 10), dummy_node(1, 20), dummy_node(2, 30)],
             edges: vec![
-                PtgEdge { op: OperatorKind::Sequence, from: 0, to: 1 },
-                PtgEdge { op: OperatorKind::Branch, from: 1, to: 2 },
+                PtgEdge {
+                    op: OperatorKind::Sequence,
+                    from: 0,
+                    to: 1,
+                },
+                PtgEdge {
+                    op: OperatorKind::Branch,
+                    from: 1,
+                    to: 2,
+                },
             ],
             root: 0,
             task_family_id: 42,

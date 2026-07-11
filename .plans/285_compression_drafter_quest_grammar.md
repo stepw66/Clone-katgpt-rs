@@ -19,7 +19,7 @@
 
 Target: G1 ≥ 3× (24 unique), G2 ≤ 2× (~600ns).
 
-**Honest verdict:** Compression-based generation loses to `TernaryDraftModel` template selection for Hot-tier quest grammar — fundamentally, not just implementationally. Beam search structurally needs ~1440 scorer calls/generation (~313µs); template selection needs 1 matvec + 1 hash (~290ns). Open primitive is correct and tested (15/15 + 6 + 4), just not the right tool for this tier. See `.issues/029_compression_beam_search_followups.md` for two unexplored paths (per-NPC corpus, Warm-tier repositioning) — neither pursued without concrete consumer.
+**Honest verdict:** Compression-based generation loses to `TernaryDraftModel` template selection for Hot-tier quest grammar — fundamentally, not just implementationally. Beam search structurally needs ~1440 scorer calls/generation (~313µs); template selection needs 1 matvec + 1 hash (~290ns). Open primitive is correct and tested (15/15 + 6 + 4), just not the right tool for this tier. See issue 029 (closed + removed) for two unexplored paths (per-NPC corpus, Warm-tier repositioning) — neither pursued without concrete consumer.
 
 ---
 

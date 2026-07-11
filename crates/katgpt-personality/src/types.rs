@@ -108,11 +108,11 @@ impl ArchetypeLabel {
     #[allow(clippy::should_implement_trait)] // infallible hash constructor, not FromStr (which requires Result)
     pub fn from_str(s: &str) -> Self {
         let hash = blake3::hash(s.as_bytes());
-        Self(
-            hash.as_bytes()[..16]
-                .try_into()
-                .expect("blake3 is 32 bytes"),
-        )
+        // blake3 always produces 32 bytes — copy the low 16 directly without
+        // going through try_into().expect() (no Result, no panic path).
+        let mut bytes = [0u8; 16];
+        bytes.copy_from_slice(&hash.as_bytes()[..16]);
+        Self(bytes)
     }
 
     /// The "unlabelled" archetype (all-zeros). Use when the host does not

@@ -19,12 +19,12 @@
 use std::boxed::Box;
 use std::time::{Duration, Instant};
 
-use katgpt_rs::dense_mesh::{
-    compute_router, EdgeBandit, EdgeBanditArm, IdentityEdge, LayerwiseTopology, MeshConfig,
-    MeshScratch, Topology,
+use katgpt_transformer::dense_mesh::traits::{DenseEdge, DenseNode};
+use katgpt_transformer::dense_mesh::types::{DenseHidden, LayerRole};
+use katgpt_transformer::dense_mesh::{
+    EdgeBandit, EdgeBanditArm, IdentityEdge, LayerwiseTopology, MeshConfig, MeshScratch, Topology,
+    compute_router,
 };
-use katgpt_rs::dense_mesh::traits::{DenseEdge, DenseNode};
-use katgpt_rs::dense_mesh::types::{DenseHidden, LayerRole};
 
 // ─── Helpers ───────────────────────────────────────────────────────────────
 
@@ -67,8 +67,9 @@ fn make_synthetic_topology(width: usize, depth: usize, hidden_dim: usize) -> Lay
     let mut edges_per_layer: Vec<Vec<Box<dyn DenseEdge>>> = Vec::with_capacity(depth - 1);
     for w in topology.widths.windows(2) {
         let count = w[0] * w[1];
-        let layer: Vec<Box<dyn DenseEdge>> =
-            (0..count).map(|_| Box::new(IdentityEdge::new()) as Box<dyn DenseEdge>).collect();
+        let layer: Vec<Box<dyn DenseEdge>> = (0..count)
+            .map(|_| Box::new(IdentityEdge::new()) as Box<dyn DenseEdge>)
+            .collect();
         edges_per_layer.push(layer);
     }
 
@@ -121,7 +122,9 @@ fn prof_dense_mesh_forward_scaling() {
     println!();
     println!("┌──────────────────────────────────────────────────────────────────────────┐");
     println!("│ T1: DenseMesh forward scaling — width vs mean/p99 latency                │");
-    println!("│   topology: [1, W, 1], seq_len={seq_len}, hidden_dim={hidden_dim}, iters={n_iters:<5}        │");
+    println!(
+        "│   topology: [1, W, 1], seq_len={seq_len}, hidden_dim={hidden_dim}, iters={n_iters:<5}        │"
+    );
     println!("├──────┬──────────────┬──────────────┬──────────────────┬───────────────────┤");
     println!("│ width│  mean (μs)   │  p99  (μs)   │  qps             │  vs width=1       │");
     println!("├──────┼──────────────┼──────────────┼──────────────────┼───────────────────┤");
@@ -151,7 +154,11 @@ fn prof_dense_mesh_forward_scaling() {
         let (mean, p99) = stats(&samples);
         let mean_us = mean.as_secs_f64() * 1e6;
         let p99_us = p99.as_secs_f64() * 1e6;
-        let qps = if mean_us > 0.0 { 1e6 / mean_us } else { f64::INFINITY };
+        let qps = if mean_us > 0.0 {
+            1e6 / mean_us
+        } else {
+            f64::INFINITY
+        };
 
         if i == 0 {
             baseline_mean_us = mean_us.max(1e-6);
@@ -203,7 +210,11 @@ fn prof_dense_mesh_forward_scaling() {
     println!(
         "Gate 3 (easy overhead): width=16/width=1 ratio = {:.2}x (threshold < {gate3_threshold}x) — {}",
         ratio,
-        if ratio < gate3_threshold { "✅ PASS" } else { "❌ FAIL" }
+        if ratio < gate3_threshold {
+            "✅ PASS"
+        } else {
+            "❌ FAIL"
+        }
     );
     assert!(
         ratio < gate3_threshold,
@@ -228,7 +239,9 @@ fn prof_dense_mesh_aggregation_overhead() {
     println!();
     println!("┌──────────────────────────────────────────────────────────────────────────┐");
     println!("│ T2: Aggregation overhead (sum of fan_in IdentityEdge outputs)            │");
-    println!("│   seq_len={seq_len}, hidden_dim={hidden_dim}, iters={n_iters}                                          │");
+    println!(
+        "│   seq_len={seq_len}, hidden_dim={hidden_dim}, iters={n_iters}                                          │"
+    );
     println!("├─────────┬──────────────┬───────────────────────────────────────────────────┤");
     println!("│ fan_in  │  mean (ns)   │  note                                             │");
     println!("├─────────┼──────────────┼───────────────────────────────────────────────────┤");
@@ -273,7 +286,11 @@ fn prof_dense_mesh_aggregation_overhead() {
 
         let (mean, _) = stats(&samples);
         let mean_ns = mean.as_secs_f64() * 1e9;
-        let per_edge_ns = if fan_in > 0 { mean_ns / fan_in as f64 } else { 0.0 };
+        let per_edge_ns = if fan_in > 0 {
+            mean_ns / fan_in as f64
+        } else {
+            0.0
+        };
         println!(
             "│ {:>7} │ {:>12.1} │  per-edge ≈ {per_edge_ns:>6.1} ns                          │",
             fan_in, mean_ns
@@ -292,9 +309,7 @@ fn prof_dense_mesh_edge_bandit_decision() {
     // EdgeBandit::sample() does Thompson sampling over N arms. Must be < 1μs
     // in release so the bandit doesn't dominate per-query overhead.
     let arms: Vec<EdgeBanditArm> = (0..8)
-        .map(|i| {
-            EdgeBanditArm::new(format!("arm_{i}"), vec![1, 2, 1], vec![0, 1])
-        })
+        .map(|i| EdgeBanditArm::new(format!("arm_{i}"), vec![1, 2, 1], vec![0, 1]))
         .collect();
     let mut bandit = EdgeBandit::new(arms, 42);
 
@@ -324,13 +339,23 @@ fn prof_dense_mesh_edge_bandit_decision() {
     println!();
     println!("┌──────────────────────────────────────────────────────────────────────────┐");
     println!("│ T3: EdgeBandit::sample() decision latency                                │");
-    println!("│   arms={}, calls={}, total={elapsed:?}  │", 8, n_iters, );
+    println!("│   arms={}, calls={}, total={elapsed:?}  │", 8, n_iters,);
     println!("│   ns/call   : {ns_per_call:>10.1} ns                                       │");
-    println!("│   threshold : {budget_ns:>10.1} ns ({})                            │",
-        if cfg!(debug_assertions) { "debug 50×" } else { "release" });
+    println!(
+        "│   threshold : {budget_ns:>10.1} ns ({})                            │",
+        if cfg!(debug_assertions) {
+            "debug 50×"
+        } else {
+            "release"
+        }
+    );
     println!(
         "│   PASS      : {}                                                         │",
-        if ns_per_call < budget_ns { "✅" } else { "❌" }
+        if ns_per_call < budget_ns {
+            "✅"
+        } else {
+            "❌"
+        }
     );
     println!("└──────────────────────────────────────────────────────────────────────────┘");
     assert!(
@@ -347,7 +372,10 @@ fn prof_dense_mesh_compute_router_o1() {
     let n_iters = 100_000;
     let warmup = 10_000;
 
-    let mut probe = ComputeProbe { width: 1, role: LayerRole::Input };
+    let mut probe = ComputeProbe {
+        width: 1,
+        role: LayerRole::Input,
+    };
     for _ in 0..warmup {
         probe = step_router(probe);
     }
@@ -356,7 +384,11 @@ fn prof_dense_mesh_compute_router_o1() {
     for i in 0..n_iters {
         // Vary inputs to defeat const-folding.
         probe.width = 1 + (i % 17);
-        probe.role = if i & 1 == 0 { LayerRole::Hidden } else { LayerRole::Output };
+        probe.role = if i & 1 == 0 {
+            LayerRole::Hidden
+        } else {
+            LayerRole::Output
+        };
         probe = step_router(probe);
     }
     let elapsed = start.elapsed();
@@ -367,13 +399,26 @@ fn prof_dense_mesh_compute_router_o1() {
     println!();
     println!("┌──────────────────────────────────────────────────────────────────────────┐");
     println!("│ T4: compute_router::pick_compute() dispatch latency                      │");
-    println!("│   calls={}, total={elapsed:?}                                          │", n_iters);
+    println!(
+        "│   calls={}, total={elapsed:?}                                          │",
+        n_iters
+    );
     println!("│   ns/call   : {ns_per_call:>10.2} ns                                       │");
-    println!("│   threshold : {budget_ns:>10.2} ns ({})                            │",
-        if cfg!(debug_assertions) { "debug 50×" } else { "release" });
+    println!(
+        "│   threshold : {budget_ns:>10.2} ns ({})                            │",
+        if cfg!(debug_assertions) {
+            "debug 50×"
+        } else {
+            "release"
+        }
+    );
     println!(
         "│   PASS      : {}                                                         │",
-        if ns_per_call < budget_ns { "✅" } else { "❌" }
+        if ns_per_call < budget_ns {
+            "✅"
+        } else {
+            "❌"
+        }
     );
     println!("└──────────────────────────────────────────────────────────────────────────┘");
     assert!(
@@ -427,25 +472,29 @@ fn prof_dense_mesh_zero_alloc_hot_path() {
     {
         // Allocation audit — global counters are shared across tests, so we
         // measure the *delta* across N forward calls.
-        katgpt_rs::alloc::reset_alloc_stats();
-        let (before_count, _) = katgpt_rs::alloc::get_alloc_stats();
+        katgpt_core::alloc::reset_alloc_stats();
+        let (before_count, _) = katgpt_core::alloc::get_alloc_stats();
         let _ = before_count; // reset gives 0
 
         for _ in 0..n_iters {
             let _ = topo.forward(&input, &mut scratch, &cfg);
         }
 
-        let (after_count, after_bytes) = katgpt_rs::alloc::get_alloc_stats();
+        let (after_count, after_bytes) = katgpt_core::alloc::get_alloc_stats();
 
         let per_call_allocs = after_count as f64 / n_iters as f64;
         let per_call_bytes = after_bytes as f64 / n_iters as f64;
         println!();
         println!("┌──────────────────────────────────────────────────────────────────────────┐");
         println!("│ T5: DenseMesh forward() allocation audit (debug-only)                    │");
-        println!("│   topology: [1,4,1], seq_len={seq_len}, hidden_dim={hidden_dim}, iters={n_iters}                 │");
+        println!(
+            "│   topology: [1,4,1], seq_len={seq_len}, hidden_dim={hidden_dim}, iters={n_iters}                 │"
+        );
         println!("│   total allocs : {after_count:>10}                                          │");
         println!("│   total bytes  : {after_bytes:>10}                                          │");
-        println!("│   per-call     : {per_call_allocs:>6.2} allocs  ({per_call_bytes:>8.1} bytes)               │");
+        println!(
+            "│   per-call     : {per_call_allocs:>6.2} allocs  ({per_call_bytes:>8.1} bytes)               │"
+        );
         println!("│   note         : per-layer clone of scratch.aggregate in topology.rs     │");
         println!("│                 is the dominant allocator — flagged for future fix.      │");
         println!("└──────────────────────────────────────────────────────────────────────────┘");

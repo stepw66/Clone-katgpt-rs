@@ -40,13 +40,13 @@
 //! `tests_types.rs` for cross-cutting tests.
 
 mod config;
-mod domain;
 /// Depth-Invariance Diagnostic & Magnitude-Regularized Residual (Plan 306).
 /// Pure math, depends only on simd. Co-located here (the leaf) so both
 /// katgpt-core (depth_invariance feature) and katgpt-micro-belief
 /// (audit_depth_invariance methods) can consume it without a cycle.
 #[cfg(feature = "depth_invariance")]
 pub mod depth_invariance;
+mod domain;
 #[cfg(feature = "depth_invariance")]
 pub use depth_invariance::{
     DepthInvarianceConfig, DepthInvarianceDiagnostic, DepthInvarianceKind, MagnitudeRegularization,
@@ -56,6 +56,10 @@ mod enums;
 mod gpart;
 mod hydra;
 mod inference;
+/// QuantizedKVCache trait — shared extension point for all KV backends.
+/// Promoted from `katgpt-rs/src/types.rs` (Issue 015 Phase 1) so backend
+/// crates can depend on the trait without pulling the whole root crate.
+pub mod kv_cache;
 /// Shared leaky-integrator / delta-rule step primitive (Plan 276 Phase 2 T2.1).
 /// Pure inline math, zero deps. Consumed by both katgpt-micro-belief
 /// (`LeakyIntegrator::step`) and katgpt-core's sense reconstruction
@@ -65,12 +69,15 @@ pub mod leaky_core;
 mod looping;
 mod lora;
 pub mod math;
+pub mod merkle;
 mod rng;
+mod sense;
 /// SIMD-accelerated linear algebra kernels (NEON / AVX2 / WASM-SIMD128 /
 /// scalar fallback). Co-located with `types` because `types::math` calls
 /// these kernels and `simd::ternary` uses `types::TernaryWeights`.
 pub mod simd;
-mod sense;
+pub mod slod;
+pub mod temporal;
 mod ternary;
 
 #[cfg(test)]
@@ -82,17 +89,17 @@ mod tests_types;
 pub use config::{Config, InferenceOverrides, kv_dim};
 #[cfg(feature = "domain_latent")]
 pub use domain::DomainLatent;
-pub use enums::{
-    AttentionMode, AttentionProjection, CacheLayout, ConvergenceSelector, DashAttnConfig,
-    DepthTier, HlaMode, HybridPattern, LoopMode, ModelArchitecture, ResidualGate,
-    RetrievalHeadRole, RtTurboConfig, SdpaOutputGate, WeightDtype,
-};
 #[cfg(feature = "deltanet_inference")]
 pub use enums::DeltaNetLayerType;
 #[cfg(feature = "collapse_aware_thinking")]
 pub use enums::ThinkingBudget;
 #[cfg(feature = "wall_attention")]
 pub use enums::WallConfig;
+pub use enums::{
+    AttentionMode, AttentionProjection, CacheLayout, CalibrationMode, ConvergenceSelector,
+    DashAttnConfig, DepthTier, HlaMode, HybridPattern, LoopMode, ModelArchitecture, ResidualGate,
+    RetrievalHeadRole, RtTurboConfig, SdpaOutputGate, WeightDtype,
+};
 #[cfg(feature = "sr2am_configurator")]
 pub use enums::{ConfiguratorContext, PlanningDecision};
 #[cfg(feature = "gpart_adapter")]
@@ -102,18 +109,27 @@ pub use hydra::{HydraBudgetConfig, HydraLayerProfile};
 pub use inference::InferenceResult;
 #[cfg(feature = "data_gate")]
 pub use inference::{DataGate, GateDecision, ProposerTask, TaskType};
+pub use kv_cache::QuantizedKVCache;
+pub use leaky_core::leaky_step;
 pub use looping::{CacheStrategy, IterationMode, SubStepStrategy, TrainingFreeLoopConfig};
 pub use lora::{LoraAdapter, LoraPair, lora_apply};
-pub use math::{
-    gegelu, gegelu_tanh, matmul, matmul_f16, matmul_f16_parallel, matmul_parallel, matmul_relu,
-    rmsnorm, rmsnorm_with_gamma, rmsnorm_with_gamma_eps, sample_token, sample_token_into, silu,
-    softmax, softmax_scaled, swiglu,
-};
-pub use leaky_core::leaky_step;
+#[allow(deprecated)]
+pub use math::sample_token;
 #[cfg(feature = "sparse_mlp")]
 pub use math::sparse_matmul;
+pub use math::{
+    gegelu, gegelu_tanh, matmul, matmul_f16, matmul_f16_parallel, matmul_parallel, matmul_relu,
+    rmsnorm, rmsnorm_with_gamma, rmsnorm_with_gamma_eps, sample_token_into, silu, softmax,
+    softmax_scaled, swiglu,
+};
+pub use merkle::{
+    HASH_SIZE, MERKLE_OCTREE_BRANCHING, MERKLE_OCTREE_DEPTH, MERKLE_OCTREE_INTERNAL,
+    MERKLE_OCTREE_LEAVES, MERKLE_OCTREE_NODES, MerkleOctree, MerkleProof,
+};
 pub use rng::Rng;
 pub use sense::{DilationConfig, SenseKind, SenseModule, ShardEmbedding, TernaryDir};
+pub use slod::ScaleBoundary;
+pub use temporal::{TemporalDerivativeKernel, sigmoid_surprise_gate};
 #[cfg(feature = "plasma_path")]
 pub use ternary::TernaryWeights;
 

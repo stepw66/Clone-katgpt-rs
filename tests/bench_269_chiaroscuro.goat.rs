@@ -15,7 +15,7 @@
 #[cfg(feature = "chiaroscuro")]
 #[cfg(test)]
 mod tests {
-    use katgpt_rs::chiaroscuro::{
+    use katgpt_attn::chiaroscuro::{
         collapse::CollapseDiscoveryHarness,
         entropy::{sigmoid, spectral_entropy_dct, spectral_entropy_dct_into},
         kv::{ChiaroscuroKvDispatcher, ChiaroscuroKvStrategy, DEFAULT_DCT_TRUNCATED_COEFFS},
@@ -82,7 +82,11 @@ mod tests {
         let op = DctMixOp::new(1.0, 32); // any n_coeffs ≥ 1 keeps DC
         let mut out = vec![0.0; d];
         op.forward_token(&x, &mut out);
-        let max_err: f32 = x.iter().zip(&out).map(|(a, b)| (a - b).abs()).fold(0.0, f32::max);
+        let max_err: f32 = x
+            .iter()
+            .zip(&out)
+            .map(|(a, b)| (a - b).abs())
+            .fold(0.0, f32::max);
         assert!(
             max_err < 1e-3,
             "G3 FAIL: smooth token reconstruction error {max_err} > 1e-3 (Theorem 1 violated)"
@@ -130,8 +134,14 @@ mod tests {
         let lo = cal.tau_lo_mut();
         let hi = cal.tau_hi_mut();
         // Should be within the input range.
-        assert!((0.84..=0.87).contains(&lo), "G5 FAIL: τ_lo = {lo} not in [0.84, 0.87]");
-        assert!((0.85..=0.88).contains(&hi), "G5 FAIL: τ_hi = {hi} not in [0.85, 0.88]");
+        assert!(
+            (0.84..=0.87).contains(&lo),
+            "G5 FAIL: τ_lo = {lo} not in [0.84, 0.87]"
+        );
+        assert!(
+            (0.85..=0.88).contains(&hi),
+            "G5 FAIL: τ_hi = {hi} not in [0.85, 0.88]"
+        );
         assert!(lo < hi, "G5 FAIL: τ_lo ({lo}) ≥ τ_hi ({hi})");
         eprintln!("G5 PASS: τ_lo = {lo:.4}, τ_hi = {hi:.4} (converged within 1024 tokens)");
     }
@@ -140,17 +150,29 @@ mod tests {
 
     #[test]
     fn g6_collapse_harness_identifies_survivor_subset() {
-        let ops: Vec<Box<dyn ChiaroscuroOp>> =
-            vec![Box::new(DctMixOp::default()), Box::new(FullAttnOp::default())];
+        let ops: Vec<Box<dyn ChiaroscuroOp>> = vec![
+            Box::new(DctMixOp::default()),
+            Box::new(FullAttnOp::default()),
+        ];
         let router = ChiaroscuroRouter::new(ops);
         let mut harness = CollapseDiscoveryHarness::new(router, 50, 0.10);
         // All smooth → all to DctMix.
         for _ in 0..100 {
             harness.observe(&[0.5_f32; 64]);
         }
-        let promotion = harness.check_collapse().expect("G6: should detect collapse");
-        assert_eq!(promotion.keep, vec![0], "G6 FAIL: survivor should be [DctMix]");
-        assert_eq!(promotion.demote, vec![1], "G6 FAIL: demote should be [FullAttn]");
+        let promotion = harness
+            .check_collapse()
+            .expect("G6: should detect collapse");
+        assert_eq!(
+            promotion.keep,
+            vec![0],
+            "G6 FAIL: survivor should be [DctMix]"
+        );
+        assert_eq!(
+            promotion.demote,
+            vec![1],
+            "G6 FAIL: demote should be [FullAttn]"
+        );
         eprintln!(
             "G6 PASS: collapse detected, survivors = {:?}, demoted = {:?}",
             promotion.keep, promotion.demote
@@ -164,7 +186,10 @@ mod tests {
         // σ(x) + σ(y) ≠ 1 in general (it would if we used softmax).
         let s1 = sigmoid(1.0);
         let s2 = sigmoid(2.0);
-        assert!((s1 + s2 - 1.0).abs() > 0.01, "G7 FAIL: outputs sum to 1 (softmax behavior)");
+        assert!(
+            (s1 + s2 - 1.0).abs() > 0.01,
+            "G7 FAIL: outputs sum to 1 (softmax behavior)"
+        );
         // σ(0) = 0.5 (not 1/n).
         assert!((sigmoid(0.0) - 0.5).abs() < 1e-6);
         // Bounds.
@@ -212,7 +237,7 @@ mod tests {
         // content words, giving high H-variance.
         for i in 0..8192 {
             let x: Vec<f32> = match i % 4 {
-                0 => vec![0.5_f32; 256],                                  // smooth
+                0 => vec![0.5_f32; 256],                                   // smooth
                 1 => (0..256).map(|j| ((j as f32) * 0.1).sin()).collect(), // mid
                 2 => (0..256).map(|_| rng.f32() * 2.0 - 1.0).collect(),    // complex
                 _ => {
@@ -258,7 +283,10 @@ mod tests {
         }
         // Sanity: result is stable.
         let h_alloc = spectral_entropy_dct(&x);
-        assert!((last_h - h_alloc).abs() < 1e-5, "G9: into and alloc variants disagree");
+        assert!(
+            (last_h - h_alloc).abs() < 1e-5,
+            "G9: into and alloc variants disagree"
+        );
         eprintln!("G9 PASS: zero-alloc entropy_into reusable across calls (H = {last_h:.4})");
     }
 }

@@ -207,8 +207,8 @@ mod tests {
 
         assert_eq!(artifact.slots.len(), K);
         // Each slot's direction matches the input.
-        for i in 0..K {
-            assert_eq!(artifact.slots[i].dir.blake3, dirs[i].blake3);
+        for (slot, dir) in artifact.slots.iter().zip(&dirs) {
+            assert_eq!(slot.dir.blake3, dir.blake3);
         }
         // IdentityFunctorOp: z_i = c + dir_i.
         assert!((artifact.slots[0].precomputed[0] - 1.5).abs() < 1e-6);
@@ -234,10 +234,7 @@ mod tests {
         let mut scratch = SleepTimeScratch::new();
         let a1 = anticipator.anticipate(&c, &dirs, &mut scratch);
         let a2 = anticipator.anticipate(&c, &dirs, &mut scratch);
-        assert_eq!(
-            a1.blake3, a2.blake3,
-            "same inputs → same BLAKE3 commitment"
-        );
+        assert_eq!(a1.blake3, a2.blake3, "same inputs → same BLAKE3 commitment");
         assert!(a1.verify_commitment(), "commitment verifies");
     }
 

@@ -47,20 +47,25 @@ pub mod types;
 pub mod dual_pool;
 
 // Convenience re-exports — flat namespace for callers.
+pub use conjecturer::PoolConjecturer;
 #[cfg(feature = "temporal_deriv")]
 pub use derivative_curiosity::DerivativeCuriosity;
-pub use conjecturer::PoolConjecturer;
 pub use filters::{BreakevenDifficultyFilter, ColinearityBatchGate};
-pub use guide::{structural_complexity, ComplexityWeights, HlaProjectionGuide};
+pub use guide::{ComplexityWeights, HlaProjectionGuide, structural_complexity};
 pub use loop_::{CgspConfig, CgspLoop, EntropyCollapse};
+// Issue 364 T4 — modelless k_npc selector wrapping GainCostLoopHalter.
+// Gated on gain_cost_halt (the halter kernel feature); lives in the cgsp
+// module because k_npc is conceptually CGSP's per-cycle planning budget.
+#[cfg(feature = "gain_cost_halt")]
+pub use loop_::{KnpcDecision, KnpcSelector};
 pub use traits::{
     BatchQualityGate, CollapseSignal, CuriosityConjecturer, DifficultyFilter, HintDeltaBandit,
     NoOpBatchGate, NoOpDifficultyFilter, QualityGuide, Solver,
 };
 pub use types::{
-    entropy_nats, sigmoid, Candidate, CuriosityPrioritySnapshot, CycleResult, CycleStats,
-    Direction, Priority, ScratchBuffers, SolveRate, Target, DEFAULT_HLA_DIM, DEFAULT_K,
-    DEFAULT_POOL_SIZE,
+    Candidate, CuriosityPrioritySnapshot, CycleResult, CycleStats, DEFAULT_HLA_DIM, DEFAULT_K,
+    DEFAULT_POOL_SIZE, Direction, Priority, ScratchBuffers, SolveRate, Target, entropy_nats,
+    sigmoid,
 };
 
 // Dual-pool re-exports (Plan 282, Research 249).
@@ -154,7 +159,10 @@ mod integration_tests {
         for cycle in 0..100 {
             let r = lp.cycle(&target, &mut scratch);
             // No NaN / infinity anywhere observable.
-            assert!(r.stats.priority_entropy.is_finite(), "cycle {cycle}: entropy NaN");
+            assert!(
+                r.stats.priority_entropy.is_finite(),
+                "cycle {cycle}: entropy NaN"
+            );
             assert!(
                 r.stats.mean_guide_score.is_finite(),
                 "cycle {cycle}: guide score NaN"
@@ -190,7 +198,7 @@ mod integration_tests {
         let prios = lp.bandit().priorities();
         let target_p = prios[0];
         let mut sorted: Vec<f32> = prios.to_vec();
-        sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+        sorted.sort_by(|a, b| a.total_cmp(b));
         let median = sorted[sorted.len() / 2];
         assert!(
             target_p >= median,
@@ -244,7 +252,10 @@ mod integration_tests {
             *p = if i == 3 { 1.0 } else { 0.0 };
         }
         let h_collapsed = entropy_nats(lp.bandit().priorities());
-        assert!(h_collapsed < 0.30, "collapsed entropy should be low: {h_collapsed}");
+        assert!(
+            h_collapsed < 0.30,
+            "collapsed entropy should be low: {h_collapsed}"
+        );
 
         // Run cycles — the collapse_aware path should inject exploration,
         // so within a few cycles entropy should rise above the collapsed

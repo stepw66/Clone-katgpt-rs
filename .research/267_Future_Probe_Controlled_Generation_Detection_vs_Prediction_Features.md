@@ -232,7 +232,7 @@ This is a future `riir-ai/.research/` guide **only if** the katgpt-rs plan ships
   - `katgpt-rs/.research/244_Self_Evolver_Faithfulness_Cognitive_Integrity.md` — FaithfulnessProbe (behavioral delta)
 - **Cousin plans/issues:**
   - `katgpt-rs/.plans/162_*` (Emotion Vector), `087_*` (CNA), `239_*` (Posterior-Guided), `277_*` (Temporal Deriv), `274_*` (CGSP), `278_*` (FaithfulnessProbe)
-  - `katgpt-rs/.issues/023_adaptive_gamma_from_entropy_forecast.md` — AcceptanceForecast (the linear-forecast precedent to land first)
+  - `katgpt-rs/.issues/023_adaptive_gamma_from_entropy_forecast.md` (Issue 023 was closed + removed; GOAT failed -9.25%, kept opt-in) — AcceptanceForecast (the linear-forecast precedent to land first)
 
 ---
 

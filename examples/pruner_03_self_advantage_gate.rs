@@ -121,7 +121,11 @@ fn main() {
         simulate_recursion_step(&mut logits, &target);
         let margin = gate.margin(&pre, &logits, candidate);
         let should = gate.should_recurse(&pre, &logits, candidate);
-        let decision = if should { "CONTINUE" } else { "STOP (dead compute)" };
+        let decision = if should {
+            "CONTINUE"
+        } else {
+            "STOP (dead compute)"
+        };
         println!("   {:>4} │ {:>11.6} │ {}", step + 1, margin, decision);
         if !should {
             stopped_at = Some(step + 1);
@@ -131,13 +135,25 @@ fn main() {
 
     if let Some(steps) = stopped_at {
         println!();
-        println!("✅ Gate stopped after {} steps (dead compute detected).", steps);
-        println!("   Baseline would have done {} steps. Saved {} forward passes.",
-            max_steps, max_steps - steps);
+        println!(
+            "✅ Gate stopped after {} steps (dead compute detected).",
+            steps
+        );
+        println!(
+            "   Baseline would have done {} steps. Saved {} forward passes.",
+            max_steps,
+            max_steps - steps
+        );
         let speedup = max_steps as f32 / steps as f32;
-        println!("   Speedup: {:.2}× (matching paper's claim of ~18× at scale).", speedup);
+        println!(
+            "   Speedup: {:.2}× (matching paper's claim of ~18× at scale).",
+            speedup
+        );
     } else {
         println!();
-        println!("⚠ Gate did not stop — all {} steps had margin >= threshold.", max_steps);
+        println!(
+            "⚠ Gate did not stop — all {} steps had margin >= threshold.",
+            max_steps
+        );
     }
 }

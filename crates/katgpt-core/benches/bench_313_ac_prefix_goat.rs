@@ -34,34 +34,10 @@
 
 use katgpt_core::ac_prefix::{AcPrefix, AcPrefixMask};
 use katgpt_core::{Config, matmul, matmul_relu, rmsnorm, softmax};
-use std::alloc::{GlobalAlloc, Layout, System};
-use std::sync::atomic::{AtomicUsize, Ordering};
 
-// ─── CountingAllocator (G4) ─────────────────────────────────────────────────
-
-struct CountingAllocator;
-
-static ALLOC_COUNT: AtomicUsize = AtomicUsize::new(0);
-
-unsafe impl GlobalAlloc for CountingAllocator {
-    unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
-        ALLOC_COUNT.fetch_add(1, Ordering::Relaxed);
-        unsafe { System.alloc(layout) }
-    }
-    unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
-        unsafe { System.dealloc(ptr, layout) }
-    }
-}
-
-#[global_allocator]
-static A: CountingAllocator = CountingAllocator;
-
-fn alloc_delta<R>(f: impl FnOnce() -> R) -> (R, usize) {
-    let before = ALLOC_COUNT.load(Ordering::Relaxed);
-    let r = f();
-    let after = ALLOC_COUNT.load(Ordering::Relaxed);
-    (r, after - before)
-}
+#[path = "../tests/common/mod.rs"]
+mod common;
+counting_allocator!();
 
 // ─── Micro-GPT (mirrors examples/ac_prefix_demo.rs) ─────────────────────────
 
@@ -123,7 +99,9 @@ impl SimpleRng {
 }
 
 fn rand_vec(n: usize, rng: &mut SimpleRng, scale: f32) -> Vec<f32> {
-    (0..n).map(|_| (rng.uniform() * 2.0 - 1.0) * scale).collect()
+    (0..n)
+        .map(|_| (rng.uniform() * 2.0 - 1.0) * scale)
+        .collect()
 }
 
 /// General masked forward: `attends_fn(i, j) -> bool` decides the mask.
@@ -159,15 +137,32 @@ fn forward_masked(
     let mut v_all = vec![0.0f32; seq * n_embd];
     for i in 0..seq {
         let h_in = &hidden[i * n_embd..(i + 1) * n_embd];
-        matmul(&mut q_all[i * n_embd..(i + 1) * n_embd], &model.w_q, h_in, n_embd, n_embd);
-        matmul(&mut k_all[i * n_embd..(i + 1) * n_embd], &model.w_k, h_in, n_embd, n_embd);
-        matmul(&mut v_all[i * n_embd..(i + 1) * n_embd], &model.w_v, h_in, n_embd, n_embd);
+        matmul(
+            &mut q_all[i * n_embd..(i + 1) * n_embd],
+            &model.w_q,
+            h_in,
+            n_embd,
+            n_embd,
+        );
+        matmul(
+            &mut k_all[i * n_embd..(i + 1) * n_embd],
+            &model.w_k,
+            h_in,
+            n_embd,
+            n_embd,
+        );
+        matmul(
+            &mut v_all[i * n_embd..(i + 1) * n_embd],
+            &model.w_v,
+            h_in,
+            n_embd,
+            n_embd,
+        );
     }
     let mut attn_out = vec![0.0f32; seq * n_embd];
     let scale = 1.0 / (head_dim as f32).sqrt();
-    let pos_phase = |pi: usize, pj: usize| -> f32 {
-        ((pi.max(pj) - pi.min(pj)) as f32 * 0.1).cos()
-    };
+    let pos_phase =
+        |pi: usize, pj: usize| -> f32 { ((pi.max(pj) - pi.min(pj)) as f32 * 0.1).cos() };
     for i in 0..seq {
         for h in 0..n_head {
             let off = h * head_dim;
@@ -213,7 +208,13 @@ fn forward_masked(
     }
     for i in 0..seq {
         let mut o = vec![0.0f32; n_embd];
-        matmul(&mut o, &model.w_o, &attn_out[i * n_embd..(i + 1) * n_embd], n_embd, n_embd);
+        matmul(
+            &mut o,
+            &model.w_o,
+            &attn_out[i * n_embd..(i + 1) * n_embd],
+            n_embd,
+            n_embd,
+        );
         for d in 0..n_embd {
             hidden[i * n_embd + d] += o[d];
         }
@@ -301,12 +302,9 @@ fn g1_correctness() -> (bool, f32, f32) {
     prefix.original_positions_into(&mut augmented_positions);
     prefix.loss_mask_into(&mut loss_mask);
     let mask = AcPrefixMask::materialize_from(&prefix);
-    let logprobs = forward_masked(
-        &model,
-        &augmented_tokens,
-        &augmented_positions,
-        &|i, j| mask.get(i, j, n),
-    );
+    let logprobs = forward_masked(&model, &augmented_tokens, &augmented_positions, &|i, j| {
+        mask.get(i, j, n)
+    });
     let mut manual_logprob = 0.0f32;
     for (lp, m) in logprobs.iter().zip(loss_mask.iter()) {
         manual_logprob += lp * m;
@@ -477,11 +475,17 @@ fn main() {
     println!("── G1: primitive buffer construction matches manual forward ──");
     println!("   conditional_logprob:  {g1_via:.6}");
     println!("   Manual buffer build:  {g1_manual:.6}");
-    println!("   |diff|:                {:.6}", (g1_via - g1_manual).abs());
+    println!(
+        "   |diff|:                {:.6}",
+        (g1_via - g1_manual).abs()
+    );
     println!("   Threshold:             1e-6 (bit-identical expectation)");
     println!("   Note:                  iterative-MLM logprob equivalence is a trained-model");
     println!("                          property (riir-train); tested separately there.");
-    println!("   Result:                {}", if g1_pass { "PASS ✓" } else { "FAIL ✗" });
+    println!(
+        "   Result:                {}",
+        if g1_pass { "PASS ✓" } else { "FAIL ✗" }
+    );
     println!();
 
     let (g2_pass, g2_ac_ms, g2_iter_ms, g2_speedup) = g2_speedup();
@@ -490,14 +494,20 @@ fn main() {
     println!("   Iterative-MLM median:  {g2_iter_ms:.4} ms");
     println!("   Speedup:               {g2_speedup:.3}×");
     println!("   Threshold:             ≥3× (ac_ms * 3 <= iter_ms)");
-    println!("   Result:                {}", if g2_pass { "PASS ✓" } else { "FAIL ✗" });
+    println!(
+        "   Result:                {}",
+        if g2_pass { "PASS ✓" } else { "FAIL ✗" }
+    );
     println!();
 
     let (g3_pass, g3_mismatch, g3_len) = g3_no_regression();
     println!("── G3: no-regression on empty prefix ──");
     println!("   Mismatched positions:  {g3_mismatch} / {g3_len}");
     println!("   Threshold:             0 mismatches (bit-identical)");
-    println!("   Result:                {}", if g3_pass { "PASS ✓" } else { "FAIL ✗" });
+    println!(
+        "   Result:                {}",
+        if g3_pass { "PASS ✓" } else { "FAIL ✗" }
+    );
     println!();
 
     let (g4_pass, g4_attends, g4_get) = g4_alloc_free();
@@ -505,7 +515,10 @@ fn main() {
     println!("   attends(i,j) allocs:   {g4_attends}");
     println!("   mask.get(i,j,n) allocs:{g4_get}");
     println!("   Threshold:             0 allocs on either hot path");
-    println!("   Result:                {}", if g4_pass { "PASS ✓" } else { "FAIL ✗" });
+    println!(
+        "   Result:                {}",
+        if g4_pass { "PASS ✓" } else { "FAIL ✗" }
+    );
     println!();
 
     let all_pass = g1_pass && g2_pass && g3_pass && g4_pass;
@@ -514,7 +527,9 @@ fn main() {
         if g2_pass {
             println!("   G1 ✓ G2 ✓ G3 ✓ G4 ✓ → PROMOTE: add `ac_prefix` to default features.");
         } else {
-            println!("   G1 ✓ G2 ✗ G3 ✓ G4 ✓ → DEMOTE: leave `ac_prefix` opt-in, document negative result.");
+            println!(
+                "   G1 ✓ G2 ✗ G3 ✓ G4 ✓ → DEMOTE: leave `ac_prefix` opt-in, document negative result."
+            );
             println!("   (G2 likely fails at micro-GPT scale; the single-pass win appears");
             println!("    only at larger contexts where per-forward overhead dominates.)");
         }

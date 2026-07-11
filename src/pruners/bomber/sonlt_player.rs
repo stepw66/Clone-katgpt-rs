@@ -5,7 +5,7 @@
 //! Transformer forward pass over the 169-cell board encoding to predict
 //! the next Bomberman action.
 //!
-//! Training format (matches `riir_gpu::game`):
+//! Training format (self-contained benchmark domain spec):
 //! - Input sequence: 169 board cell tokens (values 0-3) + 1 action token (4-9).
 //! - Training layout: `input = tokens[0..169]`, `target = tokens[1..170]`, so
 //!   the model at position 168 (last board cell) predicts the action token.
@@ -39,8 +39,8 @@ use crate::types::{
 
 use super::arena::ArenaGrid;
 use super::players::{
-    ACTION_COUNT, ALL_ACTIONS, KnownBomb, BomberPlayer, in_blast_zone, is_safe_action,
-    move_target, score_action, update_bombs, update_powerups,
+    ACTION_COUNT, ALL_ACTIONS, BomberPlayer, KnownBomb, in_blast_zone, is_safe_action, move_target,
+    score_action, update_bombs, update_powerups,
 };
 use super::{BomberAction, Cell, GameEvent, GridPos};
 
@@ -128,19 +128,17 @@ impl SonltPlayer {
                 let mlp = config.mlp_hidden;
                 // (adapter, expected_in, expected_out)
                 let checks: [(Option<&LoraAdapter>, usize, usize); 6] = [
-                    (Some(&v[0]), n, n),    // q
-                    (Some(&v[1]), n, kvd),  // k
-                    (Some(&v[2]), n, kvd),  // v
-                    (Some(&v[3]), n, n),    // o
-                    (Some(&v[4]), n, mlp),  // mlp1
-                    (Some(&v[5]), mlp, n),  // mlp2
+                    (Some(&v[0]), n, n),   // q
+                    (Some(&v[1]), n, kvd), // k
+                    (Some(&v[2]), n, kvd), // v
+                    (Some(&v[3]), n, n),   // o
+                    (Some(&v[4]), n, mlp), // mlp1
+                    (Some(&v[5]), mlp, n), // mlp2
                 ];
-                let dims_ok = checks
-                    .iter()
-                    .all(|(a, ein, eout)| {
-                        a.map(|ad| ad.in_dim == *ein && ad.out_dim == *eout)
-                            .unwrap_or(false)
-                    });
+                let dims_ok = checks.iter().all(|(a, ein, eout)| {
+                    a.map(|ad| ad.in_dim == *ein && ad.out_dim == *eout)
+                        .unwrap_or(false)
+                });
                 if dims_ok {
                     let mut it = v.into_iter();
                     let q = it.next().unwrap();
@@ -151,16 +149,12 @@ impl SonltPlayer {
                     let m2 = it.next().unwrap();
                     (Some(q), Some(k), Some(vv), Some(o), Some(m1), Some(m2))
                 } else {
-                    eprintln!(
-                        "SonltPlayer: adapter dims mismatch — falling back to heuristic"
-                    );
+                    eprintln!("SonltPlayer: adapter dims mismatch — falling back to heuristic");
                     (None, None, None, None, None, None)
                 }
             }
             None => {
-                eprintln!(
-                    "SonltPlayer: LoRA load failed or wrong adapter count — heuristic mode"
-                );
+                eprintln!("SonltPlayer: LoRA load failed or wrong adapter count — heuristic mode");
                 (None, None, None, None, None, None)
             }
         };
@@ -296,9 +290,7 @@ impl SonltPlayer {
         let best_idx = action_logits
             .iter()
             .enumerate()
-            .max_by(|(_, a), (_, b)| {
-                a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal)
-            })
+            .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
             .map(|(i, _)| i)
             .unwrap_or(0);
 

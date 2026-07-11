@@ -89,7 +89,7 @@ Wire SIMD primitives into all remaining scalar loops in `src/transformer.rs`, `s
 
 ## Related
 
-- `.issues/062_residual_attention_simd.md` — original issue
+- Issue 062 (residual attention SIMD) — issue closed + removed
 - `.agent/optimization.md` — hot-path patterns reference
 - Issue 057 — SIMD dot + zero-alloc (CLOSED, +25-32% forward)
 - Issue 058 — SIMD scale + extract paths (CLOSED)

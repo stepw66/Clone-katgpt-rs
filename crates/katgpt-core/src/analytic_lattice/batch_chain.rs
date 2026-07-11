@@ -87,8 +87,7 @@ pub fn batch_compose_chain(
         }
         // Build [prefix_composite, suffix...] as owned operators.
         // compose_chain gives: C[n-1] × ... × C[0] = suffix × prefix_composite.
-        let mut chain: Vec<TransportOperator> =
-            Vec::with_capacity(1 + suffix.len());
+        let mut chain: Vec<TransportOperator> = Vec::with_capacity(1 + suffix.len());
         chain.push(prefix_composite.clone());
         for op in suffix.iter() {
             chain.push(op.clone());
@@ -186,10 +185,7 @@ mod tests {
         let suffix_b = vec![player_b.clone()];
         let suffixes: Vec<&[TransportOperator]> = vec![&suffix_a, &suffix_b];
 
-        let mut out = vec![
-            TransportOperator::zeros(2),
-            TransportOperator::zeros(2),
-        ];
+        let mut out = vec![TransportOperator::zeros(2), TransportOperator::zeros(2)];
         let mut scratch = Vec::new();
         batch_compose_chain(&prefix, &suffixes, &mut out, &mut scratch).unwrap();
 
@@ -210,8 +206,14 @@ mod tests {
             .map(|(b, n)| (b - n).abs())
             .sum();
 
-        assert!(err_a < 1e-6, "G2 FAIL: player A Frobenius err {err_a} >= 1e-6");
-        assert!(err_b < 1e-6, "G2 FAIL: player B Frobenius err {err_b} >= 1e-6");
+        assert!(
+            err_a < 1e-6,
+            "G2 FAIL: player A Frobenius err {err_a} >= 1e-6"
+        );
+        assert!(
+            err_b < 1e-6,
+            "G2 FAIL: player B Frobenius err {err_b} >= 1e-6"
+        );
     }
 
     #[test]
@@ -230,7 +232,10 @@ mod tests {
 
         // With identity prefix, out should equal suffixes.
         for i in 0..n * k * k {
-            assert!((out[i] - suffixes[i]).abs() < 1e-6, "raw slice mismatch at {i}");
+            assert!(
+                (out[i] - suffixes[i]).abs() < 1e-6,
+                "raw slice mismatch at {i}"
+            );
         }
     }
 
@@ -265,10 +270,7 @@ mod tests {
         let prefix = vec![TransportOperator::identity(2)];
         let suffix_a = vec![TransportOperator::identity(2)];
         let suffixes: Vec<&[TransportOperator]> = vec![&suffix_a];
-        let mut out = vec![
-            TransportOperator::zeros(2),
-            TransportOperator::zeros(2),
-        ]; // wrong length (2 vs 1 suffix)
+        let mut out = vec![TransportOperator::zeros(2), TransportOperator::zeros(2)]; // wrong length (2 vs 1 suffix)
         let mut scratch = Vec::new();
         let err = batch_compose_chain(&prefix, &suffixes, &mut out, &mut scratch).unwrap_err();
         assert!(matches!(err, ChainError::DimensionMismatch { .. }));

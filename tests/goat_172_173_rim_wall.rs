@@ -330,8 +330,8 @@ fn proof_wall_prefix_sum_numerical_stability() {
     // We can only observe via rescale behavior, since prefix_sums is private.
     // Build a simple kv_group_lut: identity (n_head = n_kv_head = 1)
     let mut lut = [0u8; 128];
-    for i in 0..4 {
-        lut[i] = 0; // all Q heads map to KV head 0 (GQA with 1 KV head)
+    for slot in &mut lut[..4] {
+        *slot = 0; // all Q heads map to KV head 0 (GQA with 1 KV head)
     }
 
     // This should not panic even with large negative prefix sums
@@ -392,8 +392,8 @@ fn proof_wall_rescale_identity_at_zero_prefix() {
 
     // Identity kv_group_lut (n_head == n_kv_head)
     let mut lut = [0u8; 128];
-    for i in 0..4 {
-        lut[i] = i as u8;
+    for (i, slot) in lut[..4].iter_mut().enumerate() {
+        *slot = i as u8;
     }
 
     state.rescale_query(0, &mut q, &lut, 4);

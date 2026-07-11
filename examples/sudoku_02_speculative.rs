@@ -10,7 +10,7 @@
 //!
 //! Run: cargo run --example sudoku_02_speculative
 
-use katgpt_rs::percepta::Sudoku9x9;
+use katgpt_percepta::Sudoku9x9;
 use katgpt_rs::pruners::SudokuPruner;
 use katgpt_rs::speculative::{
     ConstraintPruner, TreeNode, build_dd_tree, build_dd_tree_pruned, extract_parent_tokens,

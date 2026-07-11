@@ -36,7 +36,7 @@
 
 #![cfg(feature = "funcattn")]
 
-use katgpt_core::funcattn::{funcattn_forward, FuncAttnBasis, FuncAttnConfig, FuncAttnScratch};
+use katgpt_core::funcattn::{FuncAttnBasis, FuncAttnConfig, FuncAttnScratch, funcattn_forward};
 
 // ── Model dimensions (tiny for tractable finite-diff) ────────────────────
 const D: usize = 8;
@@ -73,7 +73,11 @@ struct Rng {
 impl Rng {
     fn new(seed: u64) -> Self {
         Self {
-            s: if seed == 0 { 0x9E37_79B9_7F4A_7C15 } else { seed },
+            s: if seed == 0 {
+                0x9E37_79B9_7F4A_7C15
+            } else {
+                seed
+            },
         }
     }
     fn next_u64(&mut self) -> u64 {
@@ -182,6 +186,7 @@ fn relative_l2(out: &[f32], y: &[f32]) -> f32 {
 ///
 /// MSE has a cleaner gradient than relative-L2 (no singularity as out→y),
 /// so we train on MSE and report relative-L2 only for the final verdict.
+#[allow(clippy::too_many_arguments)] // test helper: fixed FUNCATTN I/O shape
 fn forward_mse(
     x_basis: &[f32],
     x_value: &[f32],
@@ -213,6 +218,7 @@ fn forward_mse(
 }
 
 /// Forward-only relative-L2 (for the final verdict, not for training).
+#[allow(clippy::too_many_arguments)] // test helper: fixed FUNCATTN I/O shape
 fn forward_rel_l2(
     x_basis: &[f32],
     x_value: &[f32],
@@ -246,6 +252,7 @@ fn forward_rel_l2(
 /// after its gradient is computed, so subsequent gradient evaluations in the
 /// same step use partially-updated weights. For LR=0.05 and FD_EPS=1e-3, the
 /// distortion is well below FD noise — equivalent to Jacobi for our purposes.
+#[allow(clippy::too_many_arguments)] // test helper: fixed FUNCATTN I/O shape
 fn fd_sgd_step(
     x_basis: &[f32],
     x_value: &[f32],
@@ -319,10 +326,13 @@ fn fd_sgd_step(
         w_v[i] = orig - LR * grad;
     }
 
-    forward_mse(x_basis, x_value, y, w_basis, w_q, w_k, w_v, basis, scratch, out)
+    forward_mse(
+        x_basis, x_value, y, w_basis, w_q, w_k, w_v, basis, scratch, out,
+    )
 }
 
 /// Train one variant for `STEPS` steps. Returns (final MSE, final rel-L2).
+#[allow(clippy::too_many_arguments)] // test helper: fixed FUNCATTN I/O shape
 fn train_variant(
     x_basis: &[f32],
     x_value: &[f32],
@@ -342,7 +352,16 @@ fn train_variant(
     let mut out = vec![0.0f32; N * D];
 
     let mut last_mse = forward_mse(
-        x_basis, x_value, y, &w_basis, &w_q, &w_k, &w_v, basis, &mut scratch, &mut out,
+        x_basis,
+        x_value,
+        y,
+        &w_basis,
+        &w_q,
+        &w_k,
+        &w_v,
+        basis,
+        &mut scratch,
+        &mut out,
     );
     let mut rng = Rng::new(seed);
 
@@ -363,7 +382,16 @@ fn train_variant(
         if step == 0 || (step + 1) % 25 == 0 || step + 1 == STEPS {
             // Also compute rel-L2 for comparability with the final verdict.
             let rl2 = forward_rel_l2(
-                x_basis, x_value, y, &w_basis, &w_q, &w_k, &w_v, basis, &mut scratch, &mut out,
+                x_basis,
+                x_value,
+                y,
+                &w_basis,
+                &w_q,
+                &w_k,
+                &w_v,
+                basis,
+                &mut scratch,
+                &mut out,
             );
             eprintln!(
                 "[{:>7}] step {:>4}/{:<4}  mse = {:.6}  rel-L2 = {:.6}",
@@ -379,7 +407,16 @@ fn train_variant(
         let _ = rng.next_u64();
     }
     let final_rl2 = forward_rel_l2(
-        x_basis, x_value, y, &w_basis, &w_q, &w_k, &w_v, basis, &mut scratch, &mut out,
+        x_basis,
+        x_value,
+        y,
+        &w_basis,
+        &w_q,
+        &w_k,
+        &w_v,
+        basis,
+        &mut scratch,
+        &mut out,
     );
     (last_mse, final_rl2)
 }
@@ -432,9 +469,16 @@ fn g3_sigmoid_matches_softmax() {
         let mut probe_scratch = FuncAttnScratch::new(N, D, K);
         let mut probe_out = vec![0.0f32; N * D];
         let probe_mse = forward_mse(
-            &x_basis, &x_value, &y,
-            &init_w_basis, &init_w_q, &init_w_k, &init_w_v,
-            FuncAttnBasis::Sigmoid, &mut probe_scratch, &mut probe_out,
+            &x_basis,
+            &x_value,
+            &y,
+            &init_w_basis,
+            &init_w_q,
+            &init_w_k,
+            &init_w_v,
+            FuncAttnBasis::Sigmoid,
+            &mut probe_scratch,
+            &mut probe_out,
         );
         let out_norm: f32 = probe_out.iter().map(|x| x * x).sum::<f32>().sqrt();
         let y_norm: f32 = y.iter().map(|x| x * x).sum::<f32>().sqrt();
@@ -478,8 +522,14 @@ fn g3_sigmoid_matches_softmax() {
     let ratio = sigmoid_loss / softmax_loss.max(1e-20);
     let mse_ratio = sigmoid_mse / softmax_mse.max(1e-20);
     eprintln!("\n=== G3 verdict ===");
-    eprintln!("  softmax  mse = {:.6}  rel-L2 = {:.6}", softmax_mse, softmax_loss);
-    eprintln!("  sigmoid  mse = {:.6}  rel-L2 = {:.6}", sigmoid_mse, sigmoid_loss);
+    eprintln!(
+        "  softmax  mse = {:.6}  rel-L2 = {:.6}",
+        softmax_mse, softmax_loss
+    );
+    eprintln!(
+        "  sigmoid  mse = {:.6}  rel-L2 = {:.6}",
+        sigmoid_mse, sigmoid_loss
+    );
     eprintln!("  sigmoid / softmax  (rel-L2) = {:.4}", ratio);
     eprintln!("  sigmoid / softmax  (mse)    = {:.4}", mse_ratio);
     eprintln!("  gate: sigmoid ≤ softmax × 1.05  (PASS within 5%)");

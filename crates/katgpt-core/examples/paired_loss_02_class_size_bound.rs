@@ -47,9 +47,7 @@
 
 use std::collections::HashMap;
 
-use katgpt_core::{
-    ClassSizeBound, PairedLossGap, TokenClass,
-};
+use katgpt_core::{ClassSizeBound, PairedLossGap, TokenClass};
 
 // ── The bound table ─────────────────────────────────────────────────────────
 
@@ -111,13 +109,11 @@ const BOUND_TABLE: &[BoundRow] = &[
 
 fn print_bound_table() {
     println!("── Proposition 1 bound across the class-size spectrum ──");
-    println!(
-        "  DKL(p⋆_τ ‖ p_ϕ,τ) ≤ log|V_τ|  — the worst-case reducible loss (nats)"
-    );
+    println!("  DKL(p⋆_τ ‖ p_ϕ,τ) ≤ log|V_τ|  — the worst-case reducible loss (nats)");
     println!();
     println!(
-        "  {:<22} {:>12} {:>12}  {:<18} {}",
-        "class", "|V_τ|", "log|V_τ|", "domain", "recommendation"
+        "  {:<22} {:>12} {:>12}  {:<18} recommendation",
+        "class", "|V_τ|", "log|V_τ|", "domain"
     );
     for row in BOUND_TABLE {
         let bound = ClassSizeBound::for_vocab_size(row.v_tau);
@@ -144,9 +140,21 @@ fn print_raw_vs_latent_decision() {
 
     // Physical domain examples (raw, synced).
     let physical: &[(&str, usize, &str)] = &[
-        ("MapPos { x, y }", 65_536, "raw, synced via SyncBlock, replayed bit-exact"),
-        ("HP / wallet balance", 1_000_000, "raw, synced — quorum needs exact scalar"),
-        ("ForceVector { fx, fy }", 65_536, "raw physics — feeds latent via bridge"),
+        (
+            "MapPos { x, y }",
+            65_536,
+            "raw, synced via SyncBlock, replayed bit-exact",
+        ),
+        (
+            "HP / wallet balance",
+            1_000_000,
+            "raw, synced — quorum needs exact scalar",
+        ),
+        (
+            "ForceVector { fx, fy }",
+            65_536,
+            "raw physics — feeds latent via bridge",
+        ),
         ("boolean gate", 2, "raw, 1 bit — latent is pure overhead"),
     ];
     println!("  Physical domain (raw + synced):");
@@ -164,10 +172,26 @@ fn print_raw_vs_latent_decision() {
 
     // Semantic domain examples (latent, local).
     let semantic: &[(&str, usize, &str)] = &[
-        ("HlaCacheProxy", 50_000, "latent, local — 5 affect scalars bridge to sync"),
-        ("NeuronShard weights", 50_257, "latent, Cold-tier committed as Pod (BLAKE3)"),
-        ("emotion projection", 50_000, "latent — dot-product + sigmoid, not synced"),
-        ("zone embedding", 50_000, "latent — drives zone attention, not synced"),
+        (
+            "HlaCacheProxy",
+            50_000,
+            "latent, local — 5 affect scalars bridge to sync",
+        ),
+        (
+            "NeuronShard weights",
+            50_257,
+            "latent, Cold-tier committed as Pod (BLAKE3)",
+        ),
+        (
+            "emotion projection",
+            50_000,
+            "latent — dot-product + sigmoid, not synced",
+        ),
+        (
+            "zone embedding",
+            50_000,
+            "latent — drives zone attention, not synced",
+        ),
     ];
     println!("  Semantic domain (latent + local):");
     for (name, v, note) in semantic {
@@ -226,8 +250,8 @@ fn print_worked_annotation() {
     let report = gap.annotate_with_class_bounds(&classes, &bounds);
 
     println!(
-        "  {:<12} {:>8} {:>12} {:>10} {:>14}  {}",
-        "class", "count", "mean Δ", "log|V_τ|", "ratio", "interpretation"
+        "  {:<12} {:>8} {:>12} {:>10} {:>14}  interpretation",
+        "class", "count", "mean Δ", "log|V_τ|", "ratio"
     );
     for row in &report.rows {
         let lv_str = if row.log_v_tau.is_nan() {

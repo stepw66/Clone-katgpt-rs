@@ -312,9 +312,11 @@ impl BudgetCompiler {
     /// needed. For the homogeneous tiers (`episodic`, `failures`,
     /// `cross_branch_positive`, `working_memory`) the byte cost comes from the
     /// parallel arrays or fixed estimates.
-    #[allow(unused_assignments)] // `remaining` is decremented by `admit!` on the
-                                 // final successful admission; the value is not
-                                 // read afterward because the loop is over.
+    #[allow(unused_assignments)]
+    // `remaining` is decremented by `admit!` on the
+    // final successful admission; the value is not
+    // read afterward because the loop is over.
+    #[allow(clippy::too_many_arguments)] // 17 lanes: branching compiler material/context API, bundling fragments generics
     pub fn compile<E, F, W, Q, S, O>(
         &self,
         materials: &RetrievedMaterials<E, F, W, Q, S>,
@@ -401,7 +403,8 @@ impl BudgetCompiler {
 
         // Tier 4: Cross-branch positive transfers.
         // Use the parallel-bytes array if it matches length; else compute.
-        let use_xb_parallel = materials.cross_branch_bytes.len() == materials.cross_branch_positive.len();
+        let use_xb_parallel =
+            materials.cross_branch_bytes.len() == materials.cross_branch_positive.len();
         for (i, item) in materials.cross_branch_positive.iter().enumerate() {
             let b = if use_xb_parallel {
                 materials.cross_branch_bytes[i]
@@ -418,7 +421,8 @@ impl BudgetCompiler {
         }
 
         // Tier 6: Working memory.
-        let use_wm_parallel = materials.working_memory_bytes.len() == materials.working_memory.len();
+        let use_wm_parallel =
+            materials.working_memory_bytes.len() == materials.working_memory.len();
         for (i, item) in materials.working_memory.iter().enumerate() {
             let b = if use_wm_parallel {
                 materials.working_memory_bytes[i]
@@ -521,6 +525,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::field_reassign_with_default)]
     fn compile_admits_scope_ctx_first() {
         let compiler = BudgetCompiler::new(1024);
         let mut out = CompiledContext::<String>::default();
@@ -556,6 +561,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::field_reassign_with_default)]
     fn compile_drops_query_before_scope_ctx_on_overflow() {
         // Budget large enough for either but not both. ScopeCtx wins.
         let compiler = BudgetCompiler::new(10);
@@ -591,6 +597,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::field_reassign_with_default)]
     fn compile_priority_cascade_drops_lowest_first() {
         // Set up materials in every tier. Tight budget forces cascade drops.
         let compiler = BudgetCompiler::new(350);
@@ -651,6 +658,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::field_reassign_with_default)]
     fn compile_atomic_admission_never_partially_admits() {
         // An item larger than the entire budget is dropped, not truncated.
         let compiler = BudgetCompiler::new(10);
@@ -724,6 +732,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::field_reassign_with_default)]
     fn compile_reuse_out_resets_state() {
         // Two successive compiles into the same `out` should not accumulate.
         let compiler = BudgetCompiler::new(1024);
@@ -767,6 +776,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::field_reassign_with_default)]
     fn compile_uses_parallel_byte_arrays_when_lengths_match() {
         // cross_branch_bytes parallel array overrides the closure.
         let compiler = BudgetCompiler::new(1024);
@@ -798,6 +808,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::field_reassign_with_default)]
     fn compile_falls_back_to_closure_when_parallel_lengths_mismatch() {
         let compiler = BudgetCompiler::new(1024);
         let mut out = CompiledContext::<&'static str>::default();
@@ -851,7 +862,8 @@ mod tests {
     #[test]
     fn compiled_context_reset_preserves_capacity_and_budget() {
         let mut ctx = CompiledContext::<&'static str>::with_capacity(8, 256);
-        ctx.items.push(CompiledItem::new(PriorityTier::Query, 10, "x"));
+        ctx.items
+            .push(CompiledItem::new(PriorityTier::Query, 10, "x"));
         ctx.bytes_used = 10;
         ctx.tier_counts[PriorityTier::Query as usize] = 1;
         ctx.reset();
@@ -973,6 +985,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::field_reassign_with_default)]
     fn scope_ctx_never_dropped_before_working_memory() {
         // Even with a tiny budget, scope_ctx wins over working memory because
         // it's admitted in an earlier tier.
@@ -1006,6 +1019,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::field_reassign_with_default)]
     fn compile_admits_all_when_under_budget() {
         let compiler = BudgetCompiler::new(10000);
         let mut out = CompiledContext::<String>::default();
@@ -1063,8 +1077,18 @@ mod tests {
             PriorityTier::WorkingMemory,
             PriorityTier::Query,
         ] {
-            assert_eq!(out.tier_count(tier), 1, "tier {:?} should have 1 item", tier);
-            assert_eq!(out.tier_dropped(tier), 0, "tier {:?} should have 0 dropped", tier);
+            assert_eq!(
+                out.tier_count(tier),
+                1,
+                "tier {:?} should have 1 item",
+                tier
+            );
+            assert_eq!(
+                out.tier_dropped(tier),
+                0,
+                "tier {:?} should have 0 dropped",
+                tier
+            );
         }
         assert_eq!(out.n_items(), 7);
         assert!(out.within_budget());

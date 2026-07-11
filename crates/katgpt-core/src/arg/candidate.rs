@@ -52,10 +52,7 @@ impl CandidateKind {
     /// Returns `true` for kinds that retire label ids (require redirect entries).
     #[inline]
     pub fn retires_label(self) -> bool {
-        matches!(
-            self,
-            CandidateKind::Merge | CandidateKind::RegistryDedup
-        )
+        matches!(self, CandidateKind::Merge | CandidateKind::RegistryDedup)
     }
 }
 

@@ -14,7 +14,7 @@
 
 #![cfg(feature = "octopus")]
 
-use katgpt_rs::octopus::{
+use katgpt_quant::octopus::{
     OctopusConfig, OctopusKVCache,
     forward::{cosine_similarity, ip_error, per_coord_mse},
 };
@@ -24,7 +24,7 @@ use katgpt_rs::types::Rng;
 use katgpt_rs::types::Config;
 
 #[cfg(feature = "turboquant")]
-use katgpt_rs::turboquant::TurboQuantKVCache;
+use katgpt_quant::turboquant::TurboQuantKVCache;
 
 #[cfg(feature = "spectral_quant")]
 use katgpt_rs::spectralquant::SpectralQuantKVCache;
@@ -79,7 +79,6 @@ fn mean_std(values: &[f64]) -> (f64, f64) {
 // ── T9: Synthetic Quality Sweep ──────────────────────────────
 
 #[test]
-
 #[ignore = "pure measurement benchmark (no assertions), slow in debug; run with --release --ignored"]
 fn goat_octopus_synthetic_mse_sweep() {
     let dims = [64usize, 128, 256];
@@ -178,7 +177,6 @@ fn goat_octopus_synthetic_mse_sweep() {
 // ── T9b: Joint vs Simple Rounding Ablation ───────────────────
 
 #[test]
-
 #[ignore = "pure measurement benchmark (no assertions), slow in debug; run with --release --ignored"]
 fn goat_octopus_joint_vs_simple_rounding() {
     let dim = 128;
@@ -255,7 +253,6 @@ fn goat_octopus_joint_vs_simple_rounding() {
 // ── T10: Compression Ratio Comparison ────────────────────────
 
 #[test]
-
 #[ignore = "pure measurement benchmark (no assertions), slow in debug; run with --release --ignored"]
 fn goat_octopus_compression_ratio() {
     let dims = [64usize, 128, 256];
@@ -517,7 +514,6 @@ fn goat_octopus_vs_turboquant_legacy() {
 // ── T11: Quality by Dimension ────────────────────────────────
 
 #[test]
-
 #[ignore = "pure measurement benchmark (no assertions), slow in debug; run with --release --ignored"]
 fn goat_octopus_quality_by_dimension() {
     let bits = 2; // Most aggressive — where OCTOPUS should shine
@@ -576,7 +572,6 @@ fn goat_octopus_quality_by_dimension() {
 // ── T9d: Bit Split Sensitivity ───────────────────────────────
 
 #[test]
-
 #[ignore = "pure measurement benchmark (no assertions), slow in debug; run with --release --ignored"]
 fn goat_octopus_bit_split_sweep() {
     let dim = 128;
@@ -647,7 +642,6 @@ fn goat_octopus_bit_split_sweep() {
 // ── T10c: Effective Storage Efficiency ────────────────────────
 
 #[test]
-
 #[ignore = "pure measurement benchmark (no assertions), slow in debug; run with --release --ignored"]
 fn goat_octopus_storage_efficiency() {
     println!("\n🧪 GOAT 022: OCTOPUS Storage Efficiency");
@@ -732,7 +726,7 @@ fn goat_octopus_vs_spectralquant_maxsim() {
 
     // Ground-truth MaxSim on uncompressed flat keys
     let flat_keys: Vec<f32> = keys.iter().flatten().copied().collect();
-    let gt_ms = katgpt_rs::simd::maxsim_score(&queries, &flat_keys, lq, n_keys, dim);
+    let gt_ms = katgpt_core::simd::maxsim_score(&queries, &flat_keys, lq, n_keys, dim);
 
     for &bits in &bits_list {
         let max_seq = n_keys + 16;
@@ -771,7 +765,7 @@ fn goat_octopus_vs_spectralquant_maxsim() {
         }
 
         // Compute MaxSim scores
-        let oct_ms = katgpt_rs::octopus::forward::maxsim_score_octopus(
+        let oct_ms = katgpt_quant::octopus::forward::maxsim_score_octopus(
             &queries,
             &mut oct_cache,
             0,

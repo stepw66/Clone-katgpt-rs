@@ -113,7 +113,7 @@ This is a **fusion idea, not a Super-GOAT claim** — it needs Q1–Q4 novelty-g
 
 **Q2 + Q3 fail → not Super-GOAT, not GOAT.** No new plan: there is no software-level speedup to gate behind a feature flag today. The fusion idea in §3 is speculative and untestable without benchmark infrastructure we don't have for tapered-precision quantization.
 
-**Action:** Track in `katgpt-rs/.issues/031_b_posit_cross_platform_deterministic_encoding.md`. The trigger for re-evaluation is concrete: (a) a hardware target we ship to adds posit/b-posit support, OR (b) SpectralQuant fovea-allocation fusion produces a measurable cosine gain in `tests/bench_spectralquant.rs`. Until then, this note is reference material.
+**Action:** Track in `katgpt-rs/.issues/031_b_posit_cross_platform_deterministic_encoding.md` (Issue 031 was closed + removed; no re-evaluation trigger fired). The trigger for re-evaluation is concrete: (a) a hardware target we ship to adds posit/b-posit support, OR (b) SpectralQuant fovea-allocation fusion produces a measurable cosine gain in `tests/bench_spectralquant.rs`. Until then, this note is reference material.
 
 **What we do NOT do:**
 - ❌ Implement software b-posit decode/encode now — no consumer.

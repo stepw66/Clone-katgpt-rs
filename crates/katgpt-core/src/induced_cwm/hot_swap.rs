@@ -17,8 +17,8 @@
 //!
 //! Per Plan 296 §T4.2, this is the SAME atomic-swap pattern used by:
 //!
-//! - [`riir_engine::episode_buffer::LoRAWeightVersion`] (ArcSwap-backed A/B
-//!   LoRA weight swap, riir-ai Plan 092).
+//! - the private runtime's ArcSwap-backed A/B LoRA weight swap
+//!   (riir-ai Plan 092).
 //! - [`crate::micro_belief::snapshot::MicroRecurrentKernelSnapshot`] (BLAKE3
 //!   snapshot with `u64 version`, the precedent Phase 1's `CwmCommitment`
 //!   follows).
@@ -73,7 +73,7 @@
 //!
 //! - Plan: [`crate::induced_cwm`] §Phase 4
 //! - Source paper: [arxiv 2510.04542](https://arxiv.org/pdf/2510.04542) §3.2
-//! - Precedent (riir-ai): `riir_engine::episode_buffer::LoRAWeightVersion`
+//! - Precedent (riir-ai): the runtime's ArcSwap-backed A/B LoRA weight swap (Plan 092)
 //! - Precedent (katgpt-core): [`crate::micro_belief::snapshot`]
 //! - Commitment artifact: [`crate::induced_cwm::CwmCommitment`]
 //! - Kernel trait: [`crate::induced_cwm::InducedCwmKernel`]
@@ -142,14 +142,18 @@ impl<K: InducedCwmKernel + Send + Sync> Clone for InducedCwmSlot<K> {
         // the same induced kernel. This is the "fan-out" pattern: a top-level
         // slot gets cloned into per-worker slots, all of which observe the
         // same hot-swaps.
-        Self { inner: Arc::clone(&self.inner) }
+        Self {
+            inner: Arc::clone(&self.inner),
+        }
     }
 }
 
 impl<K: InducedCwmKernel + Send + Sync> InducedCwmSlot<K> {
     /// Construct an empty slot (no kernel induced yet).
     pub fn new() -> Self {
-        Self { inner: Arc::new(RwLock::new(None)) }
+        Self {
+            inner: Arc::new(RwLock::new(None)),
+        }
     }
 
     /// Construct a slot pre-loaded with `kernel` at `version` / `tick`.
@@ -159,7 +163,9 @@ impl<K: InducedCwmKernel + Send + Sync> InducedCwmSlot<K> {
     /// avoids the temporary empty state.
     pub fn with_kernel(kernel: K, version: u64, created_at_tick: u64) -> Self {
         let commitment = CwmCommitment::from_kernel(&kernel, version, created_at_tick);
-        Self { inner: Arc::new(RwLock::new(Some((kernel, commitment)))) }
+        Self {
+            inner: Arc::new(RwLock::new(Some((kernel, commitment)))),
+        }
     }
 
     /// Hot-swap the kernel.
@@ -190,10 +196,9 @@ impl<K: InducedCwmKernel + Send + Sync> InducedCwmSlot<K> {
         // critical section is just `*guard = Some(...)` (a Vec push at
         // worst, depending on `K`'s move semantics). Microseconds.
         let mut guard = self.inner.write().expect("InducedCwmSlot lock poisoned");
-        // Clone the commitment into the slot — we return the original to
-        // the caller. CwmCommitment is small (32 + 8 + 8 = 48 bytes), so the
-        // clone is cheaper than restructuring the API to return a borrow.
-        *guard = Some((kernel, commitment.clone()));
+        // Copy the commitment into the slot — we return the original to
+        // the caller. CwmCommitment is Copy (32 + 8 + 8 = 48 bytes).
+        *guard = Some((kernel, commitment));
         commitment
     }
 
@@ -214,7 +219,7 @@ impl<K: InducedCwmKernel + Send + Sync> InducedCwmSlot<K> {
     /// the write lock). This is unrecoverable — the slot is corrupt.
     pub fn current(&self) -> Option<(K, CwmCommitment)> {
         let guard = self.inner.read().expect("InducedCwmSlot lock poisoned");
-        guard.as_ref().map(|(k, c)| (k.clone(), c.clone()))
+        guard.as_ref().map(|(k, c)| (k.clone(), *c))
     }
 
     /// Cheap accessor for the current kernel's BLAKE3 commitment hash.
@@ -234,7 +239,7 @@ impl<K: InducedCwmKernel + Send + Sync> InducedCwmSlot<K> {
     /// the kernel itself.
     pub fn current_commitment(&self) -> Option<CwmCommitment> {
         let guard = self.inner.read().expect("InducedCwmSlot lock poisoned");
-        guard.as_ref().map(|(_, c)| c.clone())
+        guard.as_ref().map(|(_, c)| *c)
     }
 
     /// Cheap accessor for the current kernel's version counter.
@@ -420,8 +425,7 @@ mod tests {
         // has no platform-specific layout quirks beyond the [u8; 32] BLAKE3
         // field, which serde_json serialises as a sequence of bytes).
         let json = serde_json::to_string(&original).expect("serde_json::to_string");
-        let restored: CwmCommitment =
-            serde_json::from_str(&json).expect("serde_json::from_str");
+        let restored: CwmCommitment = serde_json::from_str(&json).expect("serde_json::from_str");
 
         assert_eq!(original, restored, "roundtrip must preserve all fields");
         assert_eq!(restored.blake3, original.blake3);
@@ -440,7 +444,10 @@ mod tests {
         let bytes = postcard::to_allocvec(&original).expect("postcard::to_allocvec");
         let restored: CwmCommitment = postcard::from_bytes(&bytes).expect("postcard::from_bytes");
 
-        assert_eq!(original, restored, "postcard roundtrip must preserve all fields");
+        assert_eq!(
+            original, restored,
+            "postcard roundtrip must preserve all fields"
+        );
     }
 
     #[test]
@@ -503,7 +510,11 @@ mod tests {
         // shape allows concurrent reads without deadlock or panic.
         use std::thread;
 
-        let slot = Arc::new(InducedCwmSlot::with_kernel(MockKernel { step_size: 1 }, 0, 0));
+        let slot = Arc::new(InducedCwmSlot::with_kernel(
+            MockKernel { step_size: 1 },
+            0,
+            0,
+        ));
 
         // Spawn N reader threads, each reading `current()` in a tight loop.
         // Concurrently (well, sequentially here — true contention needs a
@@ -531,7 +542,13 @@ mod tests {
 
         // Writer induces several kernels.
         for i in 1..=10u64 {
-            slot.induce(MockKernel { step_size: i as u32 }, i, i * 10);
+            slot.induce(
+                MockKernel {
+                    step_size: i as u32,
+                },
+                i,
+                i * 10,
+            );
         }
 
         for h in handles {

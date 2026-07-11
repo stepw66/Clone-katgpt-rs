@@ -9,7 +9,7 @@
 //! 4. Compare retrieval vs local head routing patterns
 //! 5. Show sparsity ratios and efficiency stats
 
-use katgpt_rs::rt_turbo::*;
+use katgpt_speculative::rt_turbo::*;
 
 // ── Deterministic PRNG (no `rand` dependency) ──────────────────
 
@@ -122,6 +122,7 @@ fn run_decode_bench(seq_len: usize, rng: &mut SeedRng) -> DecodeBenchResult {
         sliding_window: 8192,
         sink_tokens: 4,
         block_size: 64,
+        ..katgpt_rs::types::RtTurboConfig::default()
     };
 
     // Build calibration: first 2 heads are retrieval (highest scores)

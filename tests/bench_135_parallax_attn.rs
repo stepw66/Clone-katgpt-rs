@@ -68,6 +68,7 @@ fn bench_parallax_cpu_decode_overhead() {
             gate_scale: 1.0,
             zero_init: false,
             activation: ParallaxActivation::Softmax,
+            ..Default::default()
         };
 
         // ── Warmup SDPA ──
@@ -150,6 +151,7 @@ fn bench_parallax_zero_init_recovers_softmax() {
         gate_scale: 1.0,
         zero_init: true,
         activation: ParallaxActivation::Softmax,
+        ..Default::default()
     };
 
     let mut sdpa_out = vec![0.0f32; head_size];
@@ -206,6 +208,7 @@ fn bench_parallax_gate_zero_recovers_softmax() {
         gate_scale: 0.0,
         zero_init: false,
         activation: ParallaxActivation::Softmax,
+        ..Default::default()
     };
 
     let mut sdpa_out = vec![0.0f32; head_size];
@@ -252,6 +255,7 @@ fn bench_parallax_finite_output() {
             gate_scale: 1.0,
             zero_init: false,
             activation: ParallaxActivation::Softmax,
+            ..Default::default()
         };
 
         let mut output = vec![0.0f32; head_size];
@@ -305,6 +309,7 @@ fn bench_parallax_correction_magnitude() {
         gate_scale: 1.0,
         zero_init: false,
         activation: ParallaxActivation::Softmax,
+        ..Default::default()
     };
     let mut plx_out = vec![0.0f32; head_size];
     tiled_attention_parallax_forward(

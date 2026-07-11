@@ -525,7 +525,7 @@ impl<S: GameState> RolloutPolicy<S> for RandomRolloutPolicy {
 /// - Comparing action space across game domains
 ///
 /// Per-player aggregate tracked during insert for O(1) reads.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Copy, Debug, Default)]
 struct PlayerAgg {
     // OPT: usize first avoids 4 bytes of padding between f32 and usize
     count: usize,
@@ -615,6 +615,7 @@ impl ActionSpaceLog {
 
     /// Peak (maximum) action space size recorded.
     /// O(1) via running peak tracked during record().
+    #[inline]
     pub fn peak_action_space(&self) -> usize {
         self.peak
     }
@@ -1015,7 +1016,8 @@ pub trait AutocurriculumSampler {
                     // Union matching: normalized cosine-like similarity.
                     // Threshold > 0.9 ensures only near-exact matches count.
                     // JAX uses binary match_sum > 0 on discretized observations.
-                    let dot: f32 = crate::simd::simd_dot_f32(obs, goal_obs, obs.len().min(goal_obs.len()));
+                    let dot: f32 =
+                        crate::simd::simd_dot_f32(obs, goal_obs, obs.len().min(goal_obs.len()));
                     let norm_goal = norm_goals[g];
                     let denom = norm_obs * norm_goal;
                     if denom > 0.0 && dot / denom > 0.9 {
@@ -1258,7 +1260,7 @@ impl QGradientOracle for NoGuidanceOracle {
 /// Captures episode statistics needed for graduated reward computation.
 /// Lightweight: stack-friendly, no heap allocations in the struct itself.
 #[cfg(feature = "partial_scoring")]
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Copy, Debug, Default)]
 pub struct GameTrace {
     /// Final reward from the game engine (binary: win=1.0, loss=0.0).
     pub final_reward: f64,
@@ -1297,7 +1299,7 @@ pub trait PartialScorer: Send + Sync {
 /// Each field can be perturbed by a [`ProblemMutator`] to create
 /// harder variants for open-ended problem evolution.
 #[cfg(feature = "problem_mutator")]
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct GameConfig {
     /// Maximum steps per episode.
     pub max_steps: u32,
@@ -1509,9 +1511,11 @@ mod tests_leo {
         fn all_goals_q(&self, _state: &[f32]) -> Vec<f32> {
             vec![0.5; self.goals * self.actions]
         }
+        #[inline]
         fn goal_count(&self) -> usize {
             self.goals
         }
+        #[inline]
         fn action_count(&self) -> usize {
             self.actions
         }
@@ -2003,14 +2007,20 @@ mod tests_reject_confidence {
             let valid = p.is_valid(0, tok, &[]);
             let conf = p.reject_confidence(0, tok, &[]);
             assert!(valid, "token {tok} should be valid");
-            assert_eq!(conf, 0.0, "valid token {tok} should have 0.0 reject confidence");
+            assert_eq!(
+                conf, 0.0,
+                "valid token {tok} should have 0.0 reject confidence"
+            );
         }
         // Invalid tokens map to 1.0 confidence
         for tok in 5..10 {
             let valid = p.is_valid(0, tok, &[]);
             let conf = p.reject_confidence(0, tok, &[]);
             assert!(!valid, "token {tok} should be invalid");
-            assert_eq!(conf, 1.0, "invalid token {tok} should have 1.0 reject confidence");
+            assert_eq!(
+                conf, 1.0,
+                "invalid token {tok} should have 1.0 reject confidence"
+            );
         }
     }
 
@@ -2130,14 +2140,19 @@ mod recursion_logits_tests {
     #[test]
     fn generator_exposes_pre_post_logits() {
         let mut g = TestRecursionGenerator::new();
-        let _ = g.sharpen_step();
+        g.sharpen_step();
 
         let pre = g.pre_recursion_logits();
         let post = g.post_recursion_logits();
         assert_eq!(pre.len(), 4);
         assert_eq!(post.len(), 4);
         // Post sharpened toward index 0 (target 3.0), pre did not have that boost.
-        assert!(post[0] > pre[0], "post[0]={} should exceed pre[0]={}", post[0], pre[0]);
+        assert!(
+            post[0] > pre[0],
+            "post[0]={} should exceed pre[0]={}",
+            post[0],
+            pre[0]
+        );
     }
 
     #[test]
@@ -2158,10 +2173,14 @@ mod recursion_logits_tests {
         }
 
         let mut g = TestRecursionGenerator::new();
-        let _ = g.sharpen_step();
+        g.sharpen_step();
         let margin = compute_margin_sign(&g, 0);
         // Index 0 is the candidate being sharpened toward, so margin should be positive.
-        assert!(margin > 0.0, "sharpened candidate must have positive margin, got {}", margin);
+        assert!(
+            margin > 0.0,
+            "sharpened candidate must have positive margin, got {}",
+            margin
+        );
     }
 
     #[test]
@@ -2170,8 +2189,12 @@ mod recursion_logits_tests {
         // The trait explicitly allows this.
         struct NoRecursionYet;
         impl RecursionLogits for NoRecursionYet {
-            fn pre_recursion_logits(&self) -> &[f32] { &[] }
-            fn post_recursion_logits(&self) -> &[f32] { &[] }
+            fn pre_recursion_logits(&self) -> &[f32] {
+                &[]
+            }
+            fn post_recursion_logits(&self) -> &[f32] {
+                &[]
+            }
         }
         let g = NoRecursionYet;
         assert_eq!(g.pre_recursion_logits().len(), 0);

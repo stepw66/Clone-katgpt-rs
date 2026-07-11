@@ -27,7 +27,7 @@
 
 #![cfg(feature = "salience_tri_gate")]
 
-use katgpt_rs::salience::{SalienceDecision, SalienceTriGate};
+use katgpt_core::salience::{SalienceDecision, SalienceTriGate};
 use std::time::{Duration, Instant};
 
 // ─── Config ─────────────────────────────────────────────────────────────────
@@ -82,14 +82,12 @@ fn make_gate<const D: usize>() -> SalienceTriGate<u32, D> {
     d_speak[0] = 1.0;
     d_delegate[1 % D] = 1.0;
     SalienceTriGate::new(
-        d_speak,
-        d_delegate,
-        0.3, // w_z
-        0.2, // w_c
-        2.0, // beta_speak
-        2.0, // beta_delegate
-        0.5, // tau_speak
-        0.5, // tau_delegate
+        d_speak, d_delegate, 0.3,  // w_z
+        0.2,  // w_c
+        2.0,  // beta_speak
+        2.0,  // beta_delegate
+        0.5,  // tau_speak
+        0.5,  // tau_delegate
         0.15, // floor_speak
         0.4,  // ceil_delegate
     )
@@ -216,15 +214,7 @@ fn g2_ablation_parity_smoke<const D: usize>() -> bool {
     d_delegate[1 % D] = 1.0;
 
     let full = SalienceTriGate::<u32, D>::new(
-        d_speak,
-        d_delegate,
-        0.3,
-        0.2,
-        2.0,
-        2.0,
-        0.5,
-        0.5,
-        0.15,
+        d_speak, d_delegate, 0.3, 0.2, 2.0, 2.0, 0.5, 0.5, 0.15,
         0.4, // finite ceil — delegate CAN fire
     );
     let ablated = SalienceTriGate::<u32, D>::new(
@@ -301,8 +291,14 @@ fn main() {
         let gate: SalienceTriGate<u32, 8> = make_gate();
         g1_pass = g1_determinism_smoke(&gate);
         g2_pass = g2_ablation_parity_smoke::<8>();
-        println!("G1 determinism (1000-call re-confirm): {}", pass_str(g1_pass));
-        println!("G2 ablation parity (10k-input re-confirm): {}", pass_str(g2_pass));
+        println!(
+            "G1 determinism (1000-call re-confirm): {}",
+            pass_str(g1_pass)
+        );
+        println!(
+            "G2 ablation parity (10k-input re-confirm): {}",
+            pass_str(g2_pass)
+        );
         println!();
     }
 
@@ -314,9 +310,7 @@ fn main() {
         let target = 50.0_f64;
         let pass = pass && ns < target;
         let verdict = if pass { "PASS" } else { "FAIL" };
-        println!(
-            "  D={d:>2}: {ns:>6.2} ns/call  (target < {target:.0} ns)  [{verdict}]"
-        );
+        println!("  D={d:>2}: {ns:>6.2} ns/call  (target < {target:.0} ns)  [{verdict}]");
         latency_results.push((d, ns, pass));
     }
     println!();
@@ -356,7 +350,10 @@ fn main() {
     println!("=== GOAT Gate Verdict ===");
     println!("  G1 determinism:       {}", pass_str(g1_pass));
     println!("  G2 ablation parity:   {}", pass_str(g2_pass));
-    println!("  decide() latency D=8 < 50ns:        {}", pass_str(latency_d8_pass));
+    println!(
+        "  decide() latency D=8 < 50ns:        {}",
+        pass_str(latency_d8_pass)
+    );
     println!(
         "  decide_batch() D=8 N=1000 >= 50M/s:  {}",
         pass_str(batch_d8_n1000_pass)
@@ -366,7 +363,9 @@ fn main() {
     if all_pass {
         println!("  → PROMOTE `salience_tri_gate` to default feature (Plan 303 Phase 5).");
     } else {
-        println!("  → KEEP OPT-IN. Latency/throughput targets not met — file issue for SIMD optimisation.");
+        println!(
+            "  → KEEP OPT-IN. Latency/throughput targets not met — file issue for SIMD optimisation."
+        );
     }
     println!();
     println!("  Raw latency: {:?}", latency_results);
@@ -374,11 +373,7 @@ fn main() {
 }
 
 fn pass_str(p: bool) -> &'static str {
-    if p {
-        "PASS"
-    } else {
-        "FAIL"
-    }
+    if p { "PASS" } else { "FAIL" }
 }
 
 // ─── Per-D dispatch (monomorphised inner timing) ────────────────────────────

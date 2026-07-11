@@ -9,7 +9,7 @@
 //! 4. Print classification results and stats
 //! 5. Serialize calibration to JSON for offline reuse
 
-use katgpt_rs::rt_turbo::*;
+use katgpt_speculative::rt_turbo::*;
 use katgpt_rs::types::RetrievalHeadRole;
 
 // ── Deterministic PRNG (no `rand` dependency) ──────────────────
@@ -264,4 +264,70 @@ fn main() {
         n_ret = calibration.n_retrieval(),
         n_heads = calibration.n_heads(),
     );
+
+    // ── Step 6: Causal-necessity mode (Plan 358) ────────────────────
+    // When `causal_head_importance` is enabled, demonstrate the alternative
+    // calibration mode that ranks heads by causal necessity (activation
+    // patching IE) rather than observational attention-mass. On a workload
+    // with correlated bystanders (heads that attend strongly but project to
+    // zero), causal mode excludes them while attention-mass does not.
+    #[cfg(feature = "causal_head_importance")]
+    {
+        use katgpt_core::causal_head_importance::direct_effect_importance;
+        use katgpt_speculative::rt_turbo::calibrate_from_causal_scores;
+        use katgpt_rs::types::CalibrationMode;
+
+        println!("\n========================================");
+        println!("Step 6: Causal-necessity calibration mode (Plan 358)");
+        println!("========================================");
+        println!("\nCalibrationMode::CausalNecessity ranks heads by causal IE");
+        println!("(activation patching) instead of attention-mass. On bystander-");
+        println!("heavy workloads it excludes heads that attend strongly but");
+        println!("project to zero in the readout direction.\n");
+
+        // Simulate causal IE scores: invert the attention-mass story so the
+        // lowest-attention heads are causally load-bearing (they project into
+        // the readout) and the highest-attention heads are correlated
+        // bystanders (IE = 0). This is the synthetic bystander pathology.
+        // m_clean = sum of load-bearing projections, m_corrupt = 0,
+        // m_patched(h) = m_clean - projection_h.
+        let m_clean = n_heads as f32 * 0.5; // half the heads are load-bearing
+        let m_corrupt = 0.0f32;
+        let causal_scores: Vec<f32> = (0..n_heads)
+            .map(|h| {
+                // First half are load-bearing (projection 0.5), second half
+                // are bystanders (projection 0). This inverts attention-mass.
+                let projection = if h < n_heads / 2 { 0.5 } else { 0.0 };
+                let m_patched = m_clean - projection;
+                direct_effect_importance(m_clean, m_corrupt, m_patched)
+            })
+            .collect();
+
+        let causal_config = katgpt_rs::types::RtTurboConfig {
+            calibration_mode: CalibrationMode::CausalNecessity,
+            ..Default::default()
+        };
+        let causal_cal = calibrate_from_causal_scores(&causal_scores, &causal_config);
+
+        println!("  Causal-necessity partition:");
+        println!(
+            "    Retrieval (causally load-bearing): {:?}",
+            causal_cal.retrieval_set
+        );
+        println!(
+            "    Local (bystanders + irrelevant):   {:?}",
+            causal_cal.local_set
+        );
+        println!("    Mode: {:?}", causal_config.calibration_mode);
+        println!("\n  Contrast with attention-mass (Step 2-3): attention-mass");
+        println!("  ranks by WHERE a head attends; causal ranks by WHETHER");
+        println!("  patching it collapses the capability. Use CausalNecessity");
+        println!("  for long-context-extreme regimes where bystanders matter.");
+    }
+    #[cfg(not(feature = "causal_head_importance"))]
+    {
+        println!(
+            "\n(Step 6: causal-necessity mode hidden — enable `causal_head_importance` feature)"
+        );
+    }
 }

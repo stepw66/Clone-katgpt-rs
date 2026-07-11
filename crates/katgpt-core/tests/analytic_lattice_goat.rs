@@ -36,9 +36,8 @@
 #![cfg(feature = "analytic_lattice")]
 
 use katgpt_core::analytic_lattice::{
-    AuditReport, LatticeVector, TransportOperator, batch_compose_chain,
-    batch_compose_chain_into, compose_chain, compose_chain_into,
-    direction_vector_decode, spectral_audit,
+    AuditReport, LatticeVector, TransportOperator, batch_compose_chain, batch_compose_chain_into,
+    compose_chain, compose_chain_into, direction_vector_decode, spectral_audit,
 };
 
 // NOTE: the G5 zero-alloc gate lives in a SEPARATE test binary
@@ -120,7 +119,11 @@ fn g1_compose_chain_into_is_bit_identical() {
     compose_chain_into(&[a, b], &mut scratch2, &mut out2).unwrap();
 
     for (x, y) in out1.as_slice().iter().zip(out2.as_slice().iter()) {
-        assert_eq!(x.to_bits(), y.to_bits(), "G1 FAIL: compose_chain_into not bit-identical");
+        assert_eq!(
+            x.to_bits(),
+            y.to_bits(),
+            "G1 FAIL: compose_chain_into not bit-identical"
+        );
     }
 }
 
@@ -130,7 +133,11 @@ fn g1_direction_vector_decode_is_bit_identical() {
     let dir = LatticeVector::<8>::new([0.8, 0.7, 0.6, 0.5, 0.4, 0.3, 0.2, 0.1]);
     let a = direction_vector_decode(&state, &dir, 1.5);
     let b = direction_vector_decode(&state, &dir, 1.5);
-    assert_eq!(a.to_bits(), b.to_bits(), "G1 FAIL: decode not bit-identical");
+    assert_eq!(
+        a.to_bits(),
+        b.to_bits(),
+        "G1 FAIL: decode not bit-identical"
+    );
 }
 
 // ── G2: Ranking preservation ──────────────────────────────────────────────
@@ -141,14 +148,14 @@ fn g2_decoder_ranking_matches_reference_cos_ge_095() {
     // brute-force reference within cos ≥ 0.95.
     use katgpt_core::simd::fast_sigmoid;
 
-    let direction = LatticeVector::<8>::new([
-        0.31, -0.42, 0.55, 0.19, -0.67, 0.83, -0.11, 0.47,
-    ]);
+    let direction = LatticeVector::<8>::new([0.31, -0.42, 0.55, 0.19, -0.67, 0.83, -0.11, 0.47]);
 
     // Deterministic pseudo-random states (LCG — no external rand dep).
     let mut seed: u64 = 0xDEAD_BEEF_CAFE_BABE;
     let mut rng = || {
-        seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+        seed = seed
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
         ((seed >> 33) as f32) / (1u64 << 31) as f32 * 2.0 - 1.0
     };
 
@@ -156,9 +163,8 @@ fn g2_decoder_ranking_matches_reference_cos_ge_095() {
     let mut ref_scores: Vec<f32> = Vec::with_capacity(100);
 
     for _ in 0..100 {
-        let state = LatticeVector::<8>::new([
-            rng(), rng(), rng(), rng(), rng(), rng(), rng(), rng(),
-        ]);
+        let state =
+            LatticeVector::<8>::new([rng(), rng(), rng(), rng(), rng(), rng(), rng(), rng()]);
         simd_scores.push(direction_vector_decode(&state, &direction, 1.0));
 
         // Reference: brute-force dot / N, then sigmoid.
@@ -173,16 +179,16 @@ fn g2_decoder_ranking_matches_reference_cos_ge_095() {
     }
 
     // Cosine similarity between the two score vectors.
-    let dot: f32 = simd_scores.iter().zip(ref_scores.iter()).map(|(a, b)| a * b).sum();
+    let dot: f32 = simd_scores
+        .iter()
+        .zip(ref_scores.iter())
+        .map(|(a, b)| a * b)
+        .sum();
     let norm_a: f32 = simd_scores.iter().map(|x| x * x).sum::<f32>().sqrt();
     let norm_b: f32 = ref_scores.iter().map(|x| x * x).sum::<f32>().sqrt();
     let cos = dot / (norm_a * norm_b);
 
-    assert!(
-        cos >= 0.95,
-        "G2 FAIL: decoder ranking cos {} < 0.95",
-        cos
-    );
+    assert!(cos >= 0.95, "G2 FAIL: decoder ranking cos {} < 0.95", cos);
 }
 
 #[test]
@@ -260,7 +266,7 @@ fn g2_batch_compose_into_matches_typed() {
     let suffixes_data: Vec<Vec<f32>> = (0..n)
         .map(|i| {
             (0..k * k)
-                .map(|j| (i as f32 * 0.1 + j as f32 * 0.01))
+                .map(|j| i as f32 * 0.1 + j as f32 * 0.01)
                 .collect()
         })
         .collect();
@@ -269,7 +275,7 @@ fn g2_batch_compose_into_matches_typed() {
         .map(|d| TransportOperator::from_row_major(k, d.clone()).unwrap())
         .collect();
     let suffix_slices: Vec<&[TransportOperator]> =
-        suffixes_typed.iter().map(|s| std::slice::from_ref(s)).collect();
+        suffixes_typed.iter().map(std::slice::from_ref).collect();
 
     let mut typed_out = vec![TransportOperator::zeros(k); n];
     let mut scratch = Vec::new();
@@ -290,7 +296,10 @@ fn g2_batch_compose_into_matches_typed() {
             assert!(
                 (t - r).abs() < 1e-6,
                 "G2 FAIL: typed[{}][{}] = {} vs raw = {}",
-                i, j, t, r
+                i,
+                j,
+                t,
+                r
             );
         }
     }

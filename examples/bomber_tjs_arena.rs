@@ -177,6 +177,7 @@ fn parse_args() -> CliArgs {
 // ── Stats ──────────────────────────────────────────────────────
 
 #[derive(Clone, Default)]
+#[allow(dead_code)] // demo stats: full surface retained for future scoreboards
 struct PlayerStats {
     survival_count: u32,
     kill_count: u32,
@@ -188,6 +189,7 @@ struct PlayerStats {
     elo: f64,
 }
 
+#[allow(dead_code)] // demo stats: full surface retained for future scoreboards
 impl PlayerStats {
     fn new() -> Self {
         Self {
@@ -402,8 +404,16 @@ fn run_arena(
 
     println!("── Arena {label} ── P4 {p4_emoji} {p4_name}-LoRA vs P3 🧠 Dense-LoRA ──");
     println!();
-    println!("  Dense LoRA:   {} {}", dense_path.display(), if dense_exists { "✓" } else { "⚠ missing" });
-    println!("  {p4_name} LoRA: {} {}", p4_path.display(), if p4_exists { "✓" } else { "⚠ missing" });
+    println!(
+        "  Dense LoRA:   {} {}",
+        dense_path.display(),
+        if dense_exists { "✓" } else { "⚠ missing" }
+    );
+    println!(
+        "  {p4_name} LoRA: {} {}",
+        p4_path.display(),
+        if p4_exists { "✓" } else { "⚠ missing" }
+    );
     println!("  Map:    {}", map_preset.unwrap_or("procedural"));
     println!("  Seed:   {seed}");
     println!("  ELO:    k={ELO_K}, base={ELO_BASE}, pairwise survival-based");
@@ -430,7 +440,9 @@ fn run_arena(
                 }
             }
         } else {
-            println!("  ⚠ {adapter_label} LoRA file not found — player will run in heuristic fallback mode");
+            println!(
+                "  ⚠ {adapter_label} LoRA file not found — player will run in heuristic fallback mode"
+            );
         }
     }
     println!();
@@ -440,8 +452,14 @@ fn run_arena(
     let mut players: Vec<Box<dyn BomberPlayer>> = vec![
         Box::new(RandomPlayer::new(0)),
         Box::new(GreedyPlayer::new(1)),
-        Box::new(SonltPlayer::new_with_lora(2, dense_path.to_str().unwrap_or(""))),
-        Box::new(SonltPlayer::new_with_lora(3, p4_path.to_str().unwrap_or(""))),
+        Box::new(SonltPlayer::new_with_lora(
+            2,
+            dense_path.to_str().unwrap_or(""),
+        )),
+        Box::new(SonltPlayer::new_with_lora(
+            3,
+            p4_path.to_str().unwrap_or(""),
+        )),
     ];
 
     println!("╔═══ Players (Arena {label}) ══════════════════════════════════════╗");
@@ -536,11 +554,17 @@ fn main() {
     if dual_arena {
         println!("╔═══ Plan 300 T1.11 + T1.10 — TJS / TJS+ManifoldE vs Dense-LoRA ════╗");
         println!("║  Dual-arena mode: Arena A (T1.11) → Arena B (T1.10)              ║");
-        println!("║  {}-round per arena, shared seeds/maps for fair P4 comparison    ║", cli.rounds);
+        println!(
+            "║  {}-round per arena, shared seeds/maps for fair P4 comparison    ║",
+            cli.rounds
+        );
         println!("╚══════════════════════════════════════════════════════════════════╝");
     } else {
         println!("╔═══ Plan 300 T1.11 — TJS-LoRA vs Dense-LoRA Bomber Arena ═════╗");
-        println!("║  {}-round head-to-head: TJS-LoRA vs Dense-LoRA              ║", cli.rounds);
+        println!(
+            "║  {}-round head-to-head: TJS-LoRA vs Dense-LoRA              ║",
+            cli.rounds
+        );
         println!("╚════════════════════════════════════════════════════════════════╝");
     }
     println!();
@@ -580,15 +604,29 @@ fn main() {
     println!();
 
     if tjs_ratio >= TJS_ELO_RATIO_TARGET {
-        println!("  ✅ T1.11 PASSED: TJS-LoRA achieves ≥ {:.0}% of Dense-LoRA ELO", TJS_ELO_RATIO_TARGET * 100.0);
+        println!(
+            "  ✅ T1.11 PASSED: TJS-LoRA achieves ≥ {:.0}% of Dense-LoRA ELO",
+            TJS_ELO_RATIO_TARGET * 100.0
+        );
         println!("     Paper finding (Zheng et al. 2026 §4.4) confirmed: the task-conditioned");
-        println!("     Jacobian support mask recovers ≥95% of dense-LoRA quality at lower density.");
+        println!(
+            "     Jacobian support mask recovers ≥95% of dense-LoRA quality at lower density."
+        );
     } else if tjs_ratio >= 0.90 {
-        println!("  ⚠ T1.11 PARTIAL: TJS-LoRA achieves {:.1}% of Dense ELO (target {:.0}%)", tjs_ratio * 100.0, TJS_ELO_RATIO_TARGET * 100.0);
-        println!("     Close to gate but below threshold. Consider longer training, higher λ_sparse,");
+        println!(
+            "  ⚠ T1.11 PARTIAL: TJS-LoRA achieves {:.1}% of Dense ELO (target {:.0}%)",
+            tjs_ratio * 100.0,
+            TJS_ELO_RATIO_TARGET * 100.0
+        );
+        println!(
+            "     Close to gate but below threshold. Consider longer training, higher λ_sparse,"
+        );
         println!("     or longer warmup before finalizing the support mask.");
     } else {
-        println!("  ❌ T1.11 NOT PASSED: TJS-LoRA achieves only {:.1}% of Dense ELO", tjs_ratio * 100.0);
+        println!(
+            "  ❌ T1.11 NOT PASSED: TJS-LoRA achieves only {:.1}% of Dense ELO",
+            tjs_ratio * 100.0
+        );
         println!("     The sparse mask is too aggressive. Inspect the TJS summary from training");
         println!("     (mask density, total support size) and tune hyperparameters.");
     }
@@ -636,21 +674,34 @@ fn main() {
 
         println!("  ELO ratio (Manifold / TJS):  {manifold_ratio:.4}");
         println!("  ELO delta  (Manifold - TJS): {manifold_delta:+.1}");
-        println!("  Target ratio:                ≥ {:.2}", MANIFOLD_ELO_RATIO_TARGET);
+        println!(
+            "  Target ratio:                ≥ {:.2}",
+            MANIFOLD_ELO_RATIO_TARGET
+        );
         println!();
 
         if manifold_ratio >= MANIFOLD_ELO_RATIO_TARGET {
-            println!("  ✅ T1.10 PASSED: TJS+ManifoldE achieves ≥ {:.0}% of TJS-alone ELO", MANIFOLD_ELO_RATIO_TARGET * 100.0);
+            println!(
+                "  ✅ T1.10 PASSED: TJS+ManifoldE achieves ≥ {:.0}% of TJS-alone ELO",
+                MANIFOLD_ELO_RATIO_TARGET * 100.0
+            );
             println!("     Plan 300 T1.10 confirmed: at equal rank, the ManifoldE composition");
             println!("     does not regress arena ELO — the entropy-regularized manifold estimate");
             println!("     is compatible with the TJS sparse support mask.");
         } else if manifold_ratio >= 0.95 {
-            println!("  ⚠ T1.10 PARTIAL: TJS+ManifoldE achieves {:.1}% of TJS-alone ELO (target {:.0}%)", manifold_ratio * 100.0, MANIFOLD_ELO_RATIO_TARGET * 100.0);
+            println!(
+                "  ⚠ T1.10 PARTIAL: TJS+ManifoldE achieves {:.1}% of TJS-alone ELO (target {:.0}%)",
+                manifold_ratio * 100.0,
+                MANIFOLD_ELO_RATIO_TARGET * 100.0
+            );
             println!("     Close to gate but below threshold. The ManifoldE head is slightly");
             println!("     destabilizing the TJS support mask. Consider lowering the manifold");
             println!("     mixing coefficient or warmup-stepping the entropy regularizer.");
         } else {
-            println!("  ❌ T1.10 NOT PASSED: TJS+ManifoldE achieves only {:.1}% of TJS-alone ELO", manifold_ratio * 100.0);
+            println!(
+                "  ❌ T1.10 NOT PASSED: TJS+ManifoldE achieves only {:.1}% of TJS-alone ELO",
+                manifold_ratio * 100.0
+            );
             println!("     ManifoldE composition is regressing arena play. Inspect the");
             println!("     training curve for divergence between the TJS and Manifold heads,");
             println!("     and verify the manifold estimator is not amplifying noise.");
@@ -658,8 +709,14 @@ fn main() {
 
         println!();
         println!("  Secondary metric — avg_score:");
-        println!("    TJS           (Arena A): {:+.1}", stats_a[3].avg_score());
-        println!("    TJS+Manifold  (Arena B): {:+.1}", stats_b[3].avg_score());
+        println!(
+            "    TJS           (Arena A): {:+.1}",
+            stats_a[3].avg_score()
+        );
+        println!(
+            "    TJS+Manifold  (Arena B): {:+.1}",
+            stats_b[3].avg_score()
+        );
         println!();
     }
 

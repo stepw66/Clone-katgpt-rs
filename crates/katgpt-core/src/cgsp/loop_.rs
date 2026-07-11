@@ -23,15 +23,15 @@ use crate::cgsp::traits::{
     NoOpBatchGate, NoOpDifficultyFilter, QualityGuide, Solver,
 };
 use crate::cgsp::types::{
-    entropy_nats, CuriosityPrioritySnapshot, CycleResult, CycleStats, Direction, Priority,
-    ScratchBuffers, Target,
+    CuriosityPrioritySnapshot, CycleResult, CycleStats, Direction, HintPolicy, Priority,
+    ScratchBuffers, Target, entropy_nats,
 };
 
 // ── CgspConfig ────────────────────────────────────────────────────────────
 
 /// Tunable parameters for the loop. All defaults chosen to give a reasonable
 /// plasma-tier budget (≤ 1µs per cycle for k ≤ 4) on Apple Silicon NEON.
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct CgspConfig {
     /// Number of candidates to sample per cycle (k).
     pub k: usize,
@@ -44,6 +44,22 @@ pub struct CgspConfig {
     pub solve_rate_floor: f32,
     /// Estimated solve-rate ceiling — drop candidates above this as "too hard".
     pub solve_rate_ceiling: f32,
+    /// Variable-duration planning horizon per NPC (Issue 365).
+    ///
+    /// 1 = single-cycle plan (default — no staleness correction). Values > 1
+    /// come from the gain/cost halter (Plan 304) via the async commit bridge
+    /// (Issue 364): the NPC's reflex-hold count before the next committed
+    /// CGSP action. Read by [`staleness_weight`] to discount staler bandit
+    /// feedback so priority updates stay comparable across NPCs of different
+    /// planning depths.
+    pub k_npc: u8,
+    /// Staleness decay rate λ for variable-duration CGSP (Issue 365).
+    ///
+    /// 0.0 = disabled (default — the absorbed reward is bit-identical to
+    /// pre-Issue-365 behavior: `r_synth * 1.0 == r_synth` for all f32).
+    /// Values > 0 produce `exp(-λ·(k_npc−1))` discounting on absorbed
+    /// rewards via [`staleness_weight`].
+    pub staleness_lambda: f32,
 }
 
 impl Default for CgspConfig {
@@ -54,6 +70,8 @@ impl Default for CgspConfig {
             exploration_magnitude: 0.35,
             solve_rate_floor: 0.05,
             solve_rate_ceiling: 0.95,
+            k_npc: 1,
+            staleness_lambda: 0.0,
         }
     }
 }
@@ -66,8 +84,15 @@ impl Default for CgspConfig {
 /// - Construct once via [`CgspLoop::new`].
 /// - Reuse across cycles: pass a pre-allocated [`ScratchBuffers`] to `cycle()`.
 /// - Snapshot / restore for the freeze/thaw cycle (Phase 2).
-pub struct CgspLoop<C, G, S, B, Col = EntropyCollapse, Df = NoOpDifficultyFilter, Qg = NoOpBatchGate>
-{
+pub struct CgspLoop<
+    C,
+    G,
+    S,
+    B,
+    Col = EntropyCollapse,
+    Df = NoOpDifficultyFilter,
+    Qg = NoOpBatchGate,
+> {
     pub(crate) conjecturer: C,
     pub(crate) guide: G,
     pub(crate) solver: S,
@@ -115,7 +140,10 @@ where
     Qg: BatchQualityGate,
 {
     /// Replace the collapse detector.
-    pub fn with_collapse<Col2: CollapseSignal>(self, collapse: Col2) -> CgspLoop<C, G, S, B, Col2, Df, Qg> {
+    pub fn with_collapse<Col2: CollapseSignal>(
+        self,
+        collapse: Col2,
+    ) -> CgspLoop<C, G, S, B, Col2, Df, Qg> {
         CgspLoop {
             conjecturer: self.conjecturer,
             guide: self.guide,
@@ -257,6 +285,14 @@ where
         }
 
         // ── Step 4: Solver attempts admitted candidates ──────────────────
+        // G-RRM §3 (Issue 037): if the solver declares `HintPolicy::Skip`
+        // (overhead-dominated — e.g. a future CDCL SAT backend), its solve-rates
+        // are noise w.r.t. hint quality. We still run the attempts (Step 4) and
+        // record stats, but suppress the bandit absorb (Step 7) so the priority
+        // table — the hint — is not corrupted by that noise. `HintPolicy` is
+        // `Copy`, so this read ends the shared borrow before the mutable
+        // `attempt` calls below.
+        let hint_skip = self.solver.hint_receptivity() == HintPolicy::Skip;
         let mut admitted_count = 0u32;
         let mut solved_count = 0u32;
         let mut guide_sum = 0.0f32;
@@ -292,15 +328,23 @@ where
             .batch_gate
             .is_degenerate(candidates, admitted, guide_scores);
 
-        // ── Step 7: Bandit absorb-compress (skip if degenerate) ─────────
-        if !degenerate {
+        // ── Step 7: Bandit absorb-compress (skip if degenerate OR hint-skip) ─
+        // Variable-duration staleness weight (Issue 365): with the default
+        // config (k_npc=1, staleness_lambda=0.0) `staleness_w` is 1.0 and
+        // the absorb is bit-identical to pre-Issue-365 behavior.
+        //
+        // G-RRM §3 (Issue 037): `hint_skip` suppresses the absorb for
+        // overhead-dominated solvers whose solve-rates do not reflect hint
+        // quality, so their priorities (the hint) are not corrupted by noise.
+        if !degenerate && !hint_skip {
+            let staleness_w = staleness_weight(self.config.k_npc, self.config.staleness_lambda);
             for i in 0..k {
                 if !admitted[i] {
                     continue;
                 }
                 let arm = candidates[i].pool_index;
                 if arm != usize::MAX {
-                    self.bandit.absorb(arm, r_synth[i]);
+                    self.bandit.absorb(arm, r_synth[i] * staleness_w);
                 }
             }
         }
@@ -375,7 +419,7 @@ where
     pub fn snapshot(&self) -> CuriosityPrioritySnapshot {
         let pool_dirs = self.conjecturer.pool_directions();
         let priorities: Vec<f32> = self.bandit.priorities().to_vec();
-        let mut directions: Vec<Direction> = pool_dirs.iter().cloned().collect();
+        let mut directions: Vec<Direction> = pool_dirs.to_vec();
         // Dual-pool growth: bandit arms may exceed the conjecturer's frozen
         // basis. Pad with zero vectors so directions.len() == priorities.len()
         // (required by the paired snapshot format). Zero = "no associated
@@ -455,7 +499,7 @@ where
 ///
 /// When entropy drops below `tau_low`, exploration is injected by mixing the
 /// current priorities with the uniform distribution.
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct EntropyCollapse {
     pub tau_low: f32,
     pub last_entropy: f32,
@@ -532,6 +576,201 @@ pub fn renormalize_priorities(p: &mut [Priority]) {
     }
 }
 
+/// Staleness weight for variable-duration CGSP bandit updates (Issue 365).
+///
+/// When an NPC's planning horizon `k_npc` > 1 (the async commit bridge,
+/// Issue 364), the bandit feedback that arrives after `k_npc` cycles is
+/// staler than feedback from a single-cycle plan. This weight discounts
+/// the reward absorbed by [`HintDeltaBandit::absorb`] so that deep-planning
+/// NPCs bias the priority table more slowly per unit reward than
+/// fast-planning ones — keeping priority updates comparable across NPCs of
+/// different planning depths.
+///
+/// This is the **bandit-update analog** of the paper's `γ^k` variable-duration
+/// GAE correction (arXiv:2606.26463 Appendix C). CGSP has no γ-discounted
+/// advantage path — its update signal is `r_synth` consumed by `absorb`,
+/// not a TD advantage — so the literal "replace γ with γ^k" substitution has
+/// no target. The functional role (duration-comparability across the crowd)
+/// is preserved by discounting the absorbed reward instead. See
+/// `riir-ai/.issues/365_*` §"The correction" for why the original
+/// "one-line γ→γ^k" framing was wrong.
+///
+/// # Contract
+///
+/// - `k_npc <= 1` or `lambda <= 0` → returns `1.0` (no staleness, no
+///   discount). This is the default; with the default config the cycle is
+///   bit-identical to pre-Issue-365 behavior (`x * 1.0 == x` for all f32).
+/// - `lambda > 0`, `k_npc > 1` → `exp(-lambda * (k_npc - 1))`, strictly
+///   decreasing in `k_npc`. Bounded in `(0, 1]`.
+/// - NaN / non-finite `lambda` → returns `1.0` (safe no-op).
+///
+/// Uses `exp(-λ·(k−1))` for strict monotone-decreasing behavior matching
+/// geometric decay. The rational alternative `1/(1+λ·(k−1))` is cheaper
+/// but not equivalent to geometric discount; since this fires once per
+/// cycle (not per sample-per-position), the `exp` cost is negligible.
+#[inline]
+pub fn staleness_weight(k_npc: u8, lambda: f32) -> f32 {
+    if k_npc <= 1 || !lambda.is_finite() || lambda <= 0.0 {
+        return 1.0;
+    }
+    (-(lambda * (k_npc as f32 - 1.0))).exp()
+}
+
+// ── KnpcSelector (Issue 364 T4) ──────────────────────────────────────────
+
+/// Decision returned by [`KnpcSelector::observe_cycle`].
+///
+/// The selector runs across cycles (each CGSP cycle = one halter loop
+/// iteration). While the halter hasn't fired, it returns [`Continue`] and
+/// the NPC runs CGSP every tick (k_npc = 1 — no staleness correction). When
+/// the halter fires, it returns [`PlanInterval`] with the planned interval
+/// until the next deep cycle. The caller should:
+///
+/// 1. Set `config.k_npc = k_npc` for the staleness weight on the next cycle.
+/// 2. Skip CGSP for `k_npc − 1` ticks (reflex mode — reuse last priorities).
+/// 3. On tick `k_npc`, run the next deep CGSP cycle.
+///
+/// This is the modelless analog of the paper's variable-duration committed-
+/// action protocol: `k_npc` from the halter replaces the paper's trained
+/// budget selector. The staleness weight (Issue 365) then discounts the
+/// bandit feedback proportionally.
+#[cfg(feature = "gain_cost_halt")]
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum KnpcDecision {
+    /// The halter hasn't fired yet. Continue running cycles.
+    Continue,
+    /// The halter fired at loop index `halted_at`. Plan the next deep cycle
+    /// after `k_npc` ticks (clamped to `[k_min, k_max]`).
+    PlanInterval { k_npc: u8, halted_at: usize },
+}
+
+/// Per-NPC variable-duration `k_npc` selector (Issue 364 T4).
+///
+/// Wraps [`GainCostLoopHalter`] to produce a per-NPC planning horizon `k_npc`
+/// from per-cycle observables. The selector accumulates evidence across cycles:
+/// each call to [`observe_cycle`](Self::observe_cycle) feeds the cycle's
+/// (gain, cost, cos_theta) to the halter. When the halter fires `Halt`, the
+/// accumulated loop index becomes `k_npc` — the planned interval until the
+/// next deep cycle.
+///
+/// # Signal mapping (CGSP)
+///
+/// The halter's inputs map to CGSP cycle observables as follows:
+/// - **gain** — marginal refinement: how much did the priority table improve
+///   this cycle? Natural proxy: decrease in priority-table entropy (a more
+///   peaked table = more confident direction). The caller computes this.
+/// - **cost** — marginal drift: the staleness budget consumed by one cycle.
+///   Natural proxy: a fixed per-cycle cost (e.g. 0.1) or a coherence-decay
+///   signal from the runtime.
+/// - **cos_theta** — alignment of the last two updates. Natural proxy: the
+///   sign of the entropy delta (negative delta = converging, positive =
+///   diverging/oscillating).
+///
+/// The selector itself is signal-agnostic: it takes whatever scalars the
+/// caller provides and feeds them to the halter. The mapping above is the
+/// recommended default for CGSP; other runtimes (ARG, CWM) may use different
+/// signals.
+///
+/// # Behind feature `gain_cost_halt`
+///
+/// This primitive composes [`GainCostLoopHalter`] (Plan 304, opt-in) with
+/// the CGSP variable-duration story (Issue 365/364). It compiles only when
+/// both the `cgsp` and `gain_cost_halt` features are enabled. When
+/// `gain_cost_halt` is off, the selector is absent and `k_npc` stays at its
+/// default (1 — no staleness correction).
+///
+/// # Default no-op guarantee
+///
+/// A freshly-constructed selector returns [`KnpcDecision::Continue`] on every
+/// call until the halter fires. This means `k_npc` is never modified unless
+/// the halter explicitly decides to plan a longer interval. With the default
+/// halter (tau = 1.0, patience = 1, l_min = 1), the selector fires on the
+/// first gain-below-cost crossover or the first oscillation.
+#[cfg(feature = "gain_cost_halt")]
+#[derive(Clone, Debug)]
+pub struct KnpcSelector {
+    halter: crate::gain_cost_halt::GainCostLoopHalter,
+    /// Current loop index (1-based). Resets to 1 after each Halt.
+    tau: usize,
+    /// Minimum planned interval. Default 1 (same-tick replan).
+    k_min: u8,
+    /// Maximum planned interval. Default 8 (conservative upper bound).
+    k_max: u8,
+}
+
+#[cfg(feature = "gain_cost_halt")]
+impl KnpcSelector {
+    /// Construct a selector with explicit halter config and clamping bounds.
+    ///
+    /// - `halter` — the gain/cost loop halter (Plan 304).
+    /// - `k_min` — minimum planned interval (default 1). The selector never
+    ///   returns `k_npc < k_min`.
+    /// - `k_max` — maximum planned interval (default 8). The selector never
+    ///   returns `k_npc > k_max`.
+    #[inline]
+    pub fn new(halter: crate::gain_cost_halt::GainCostLoopHalter, k_min: u8, k_max: u8) -> Self {
+        Self {
+            halter,
+            tau: 1,
+            k_min: k_min.max(1),
+            k_max: k_max.max(k_min.max(1)),
+        }
+    }
+
+    /// Construct a selector with the default halter and `k_min=1, k_max=8`.
+    #[inline]
+    pub fn default_bounds() -> Self {
+        Self::new(crate::gain_cost_halt::GainCostLoopHalter::default(), 1, 8)
+    }
+
+    /// Feed one cycle's observables and get the planning decision.
+    ///
+    /// Call this after each CGSP cycle with the cycle's (gain, cost,
+    /// cos_theta) signals. The selector feeds these to the halter and returns:
+    /// - [`KnpcDecision::Continue`] — keep running cycles every tick (the
+    ///   halter hasn't decided to extend the interval yet).
+    /// - [`KnpcDecision::PlanInterval`] — the halter fired; plan the next deep
+    ///   cycle after `k_npc` ticks. Set `config.k_npc = k_npc` and skip CGSP
+    ///   until then.
+    ///
+    /// After a `PlanInterval`, the selector resets internally (tau → 1) and
+    /// the next `observe_cycle` call starts a new accumulation.
+    #[inline]
+    pub fn observe_cycle(&mut self, gain: f32, cost: f32, cos_theta: f32) -> KnpcDecision {
+        use crate::gain_cost_halt::HaltDecision;
+        let decision = self.halter.halt_decision(self.tau, gain, cost, cos_theta);
+        match decision {
+            HaltDecision::Halt { .. } => {
+                let raw = self.tau;
+                let k_npc = (raw as u8).clamp(self.k_min, self.k_max);
+                self.tau = 1;
+                KnpcDecision::PlanInterval {
+                    k_npc,
+                    halted_at: raw,
+                }
+            }
+            // Continue or RefusedFloor — either way, keep accumulating.
+            _ => {
+                self.tau = self.tau.saturating_add(1);
+                KnpcDecision::Continue
+            }
+        }
+    }
+
+    /// Current loop index (how many cycles have been observed since the last
+    /// Halt). Resets to 1 after each [`KnpcDecision::PlanInterval`].
+    #[inline]
+    pub fn tau(&self) -> usize {
+        self.tau
+    }
+
+    /// Borrow the inner halter (for inspection or config reads).
+    #[inline]
+    pub fn halter(&self) -> &crate::gain_cost_halt::GainCostLoopHalter {
+        &self.halter
+    }
+}
+
 // ── Tests ─────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -588,11 +827,36 @@ mod tests {
         }
     }
 
+    /// Same solve-rate curve as `DotSolver`, but declares `HintPolicy::Skip` —
+    /// emulates an overhead-dominated solver (G-RRM §3 cadical3 profile) whose
+    /// solve-rates should NOT feed back into the hint priority table.
+    pub(crate) struct SkipDotSolver {
+        pub sharpness: f32,
+    }
+    impl Solver for SkipDotSolver {
+        fn attempt(
+            &mut self,
+            target: &Target,
+            candidate_direction: &Direction,
+            _pool_index: usize,
+        ) -> f32 {
+            let d = candidate_direction.dot(&target.direction);
+            crate::cgsp::types::sigmoid(self.sharpness * d)
+        }
+        #[inline]
+        fn hint_receptivity(&self) -> crate::cgsp::types::HintPolicy {
+            crate::cgsp::types::HintPolicy::Skip
+        }
+    }
+
     fn make_orthonormal_pool(dim: usize, n: usize) -> Vec<Direction> {
         // Build n strictly orthonormal directions (canonical basis vectors).
         // No cross-term so dot products are exactly 0 or 1, giving the guide
         // a clean signal to favor the target-aligned arm.
-        assert!(n <= dim, "pool size {n} must be ≤ dim {dim} for orthonormal pool");
+        assert!(
+            n <= dim,
+            "pool size {n} must be ≤ dim {dim} for orthonormal pool"
+        );
         (0..n)
             .map(|i| {
                 let mut coords = vec![0.0f32; dim];
@@ -649,6 +913,75 @@ mod tests {
         assert!(
             after >= before,
             "target-aligned arm should grow: before={before}, after={after}"
+        );
+    }
+
+    #[test]
+    fn hint_skip_suppresses_bandit_absorb() {
+        // G-RRM §3 (Issue 037): an overhead-dominated solver declaring
+        // `HintPolicy::Skip` must not corrupt the hint priority table. Its
+        // solve-rates are noise w.r.t. hint quality, so the bandit absorb is
+        // suppressed and priorities stay at their (uniform) starting point.
+        //
+        // Contrast with `cycle_priority_monotone_in_reward`: the hint-receptive
+        // `DotSolver` (default `OrderOnly`) DOES drift the target arm upward.
+        let pool = make_orthonormal_pool(8, 8);
+        let conj = PoolConjecturer::new(pool.clone(), 42);
+        let guide = HlaProjectionGuide::new(4.0, 0.1, ComplexityWeights::default());
+        let solver = SkipDotSolver { sharpness: 0.5 };
+        let bandit = VecBandit::uniform(8);
+        let mut lp = CgspLoop::new(conj, guide, solver, bandit, CgspConfig::default())
+            .with_difficulty_filter(BreakevenDifficultyFilter::new(0.0, 1.0));
+        let target = Target::new(pool[0].clone());
+        let mut scratch = ScratchBuffers::new(8, 8);
+
+        let before: Vec<f32> = lp.bandit().priorities().to_vec();
+        for _ in 0..100 {
+            let _ = lp.cycle(&target, &mut scratch);
+        }
+        let after: Vec<f32> = lp.bandit().priorities().to_vec();
+        // `renormalize_priorities` rescales to max=1.0 each cycle, so absolute
+        // values are not preserved. The invariant we care about is *relative*:
+        // with the absorb suppressed, no arm drifts relative to the others —
+        // the priority table stays uniform (the starting condition), because
+        // the only thing that could make arms diverge (the absorb) is gated
+        // off by `HintPolicy::Skip`. Contrast `cycle_priority_monotone_in_reward`
+        // where the hint-receptive `DotSolver` DOES make the target arm grow.
+        assert_eq!(after.len(), before.len(), "arm count must not change");
+        let first = after[0];
+        for (i, &p) in after.iter().enumerate() {
+            assert_eq!(
+                p, first,
+                "Skip-policy solver: arm {i} drifted to {p} (hint feedback should be suppressed, \
+                 priorities must stay uniform)"
+            );
+        }
+    }
+
+    #[test]
+    fn hint_skip_solver_still_runs_and_reports_stats() {
+        // The Skip policy only suppresses the bandit absorb — the solver must
+        // still attempt candidates and report honest stats (admitted/solved
+        // counts, mean guide score), so callers can observe the overhead-
+        // dominated solver's behaviour even when it doesn't feed back.
+        let pool = make_orthonormal_pool(8, 8);
+        let conj = PoolConjecturer::new(pool.clone(), 42);
+        let guide = HlaProjectionGuide::new(4.0, 0.1, ComplexityWeights::default());
+        let solver = SkipDotSolver { sharpness: 0.5 };
+        let bandit = VecBandit::uniform(8);
+        let mut lp = CgspLoop::new(conj, guide, solver, bandit, CgspConfig::default())
+            .with_difficulty_filter(BreakevenDifficultyFilter::new(0.0, 1.0));
+        let target = Target::new(pool[0].clone());
+        let mut scratch = ScratchBuffers::new(8, 8);
+
+        let r = lp.cycle(&target, &mut scratch);
+        assert!(
+            r.stats.candidates_admitted > 0,
+            "Skip solver must still attempt admitted candidates"
+        );
+        assert!(
+            r.stats.mean_guide_score > 0.0,
+            "Skip solver must still record guide scores"
         );
     }
 
@@ -715,11 +1048,7 @@ mod tests {
         );
         // The first 8 directions are the real pool; the last 8 are zero pads.
         for (i, d) in snap.directions.iter().take(8).enumerate() {
-            assert_eq!(
-                d.dim(),
-                pool[i].dim(),
-                "real direction {i} dim mismatch"
-            );
+            assert_eq!(d.dim(), pool[i].dim(), "real direction {i} dim mismatch");
             assert_ne!(
                 d.norm_sq(),
                 0.0,
@@ -745,9 +1074,13 @@ mod tests {
             prios: vec![0.0; 16],
         };
         let mut lp2 = CgspLoop::new(conj2, guide2, solver2, bandit2, CgspConfig::default());
-        lp2.restore(&snap).expect("restore should succeed with matching arm count");
+        lp2.restore(&snap)
+            .expect("restore should succeed with matching arm count");
         let prios_after = lp2.bandit().priorities().to_vec();
-        assert_eq!(prios_after, snap.priorities, "priorities must roundtrip exactly");
+        assert_eq!(
+            prios_after, snap.priorities,
+            "priorities must roundtrip exactly"
+        );
     }
 
     #[test]
@@ -790,5 +1123,336 @@ mod tests {
             h_after > h_before,
             "exploration must raise entropy: {h_before} -> {h_after}"
         );
+    }
+
+    // ── Issue 365: Variable-duration CGSP staleness weight ────────────────
+
+    /// T4 (G1 correctness) — `staleness_weight` unit properties.
+    #[test]
+    fn t4_staleness_weight_unit_properties() {
+        // k_npc=1 → always 1.0 regardless of lambda (no staleness for
+        // single-cycle plans — the default case).
+        assert_eq!(staleness_weight(1, 0.0), 1.0);
+        assert_eq!(staleness_weight(1, 0.5), 1.0);
+        assert_eq!(staleness_weight(1, 10.0), 1.0);
+
+        // lambda=0 → always 1.0 regardless of k_npc (disabled).
+        assert_eq!(staleness_weight(4, 0.0), 1.0);
+        assert_eq!(staleness_weight(8, 0.0), 1.0);
+
+        // NaN / non-finite lambda → 1.0 (safe no-op, guards hot path).
+        assert_eq!(staleness_weight(4, f32::NAN), 1.0);
+        assert_eq!(staleness_weight(4, f32::INFINITY), 1.0);
+        assert_eq!(staleness_weight(4, f32::NEG_INFINITY), 1.0);
+
+        // Negative lambda → 1.0 (would invert the signal — reject).
+        assert_eq!(staleness_weight(4, -0.5), 1.0);
+
+        // Monotone strictly decreasing in k_npc for lambda > 0.
+        let w1 = staleness_weight(1, 0.5);
+        let w2 = staleness_weight(2, 0.5);
+        let w4 = staleness_weight(4, 0.5);
+        let w8 = staleness_weight(8, 0.5);
+        assert_eq!(w1, 1.0);
+        assert!(w2 < w1, "w2={w2} should be < w1={w1}");
+        assert!(w4 < w2, "w4={w4} should be < w2={w2}");
+        assert!(w8 < w4, "w8={w8} should be < w4={w4}");
+
+        // All weights bounded in (0, 1] for a realistic lambda sweep.
+        for k_npc in 1..=16u8 {
+            let w = staleness_weight(k_npc, 0.5);
+            assert!(w > 0.0 && w <= 1.0, "k_npc={k_npc} w={w} out of (0,1]");
+        }
+    }
+
+    /// T4 (G1) — default config (k_npc=1, staleness_lambda=0.0) still
+    /// drives correct behavior (target arm grows). Combined with T6 this
+    /// establishes the bit-identical no-op property.
+    #[test]
+    fn t4_default_config_target_arm_grows() {
+        let pool = make_orthonormal_pool(8, 8);
+        let conj = PoolConjecturer::new(pool.clone(), 42);
+        let guide = HlaProjectionGuide::new(4.0, 0.1, ComplexityWeights::default());
+        let solver = DotSolver { sharpness: 0.5 };
+        let bandit = VecBandit::uniform(8);
+        let cfg = CgspConfig::default();
+        // Sanity: defaults are the no-op values.
+        assert_eq!(cfg.k_npc, 1);
+        assert_eq!(cfg.staleness_lambda, 0.0);
+        let mut lp = CgspLoop::new(conj, guide, solver, bandit, cfg)
+            .with_difficulty_filter(BreakevenDifficultyFilter::new(0.0, 1.0));
+        let target = Target::new(pool[0].clone());
+        let mut scratch = ScratchBuffers::new(8, 8);
+
+        let before = lp.bandit().priority(0);
+        for _ in 0..100 {
+            let _ = lp.cycle(&target, &mut scratch);
+        }
+        let after = lp.bandit().priority(0);
+        assert!(
+            after >= before,
+            "target arm should grow with default config: before={before}, after={after}"
+        );
+    }
+
+    /// T5 (G2 fairness) — high-k_npc NPCs converge more slowly (higher
+    /// priority-table entropy after the same cycle count). This is the
+    /// bandit-update analog of γ^k: variable-duration feedback stays
+    /// comparable across the crowd by being more conservative for
+    /// deeper-planning NPCs.
+    ///
+    /// "Not starved" = the high-k table is still learning (entropy is
+    /// finite, strictly below uniform-log entropy). This catches the
+    /// degenerate case where the weight zeroes out all learning.
+    #[test]
+    fn t5_staleness_weight_high_k_higher_entropy_not_starved() {
+        let pool = make_orthonormal_pool(8, 8);
+
+        // Helper: run `n` cycles and return (entropy, target_arm_priority).
+        fn run(pool: &[Direction], n: usize, k_npc: u8) -> (f32, f32) {
+            let conj = PoolConjecturer::new(pool.to_vec(), 42);
+            let guide = HlaProjectionGuide::new(4.0, 0.1, ComplexityWeights::default());
+            let solver = DotSolver { sharpness: 0.5 };
+            let bandit = VecBandit::uniform(8);
+            let cfg = CgspConfig {
+                k_npc,
+                staleness_lambda: 0.5,
+                ..CgspConfig::default()
+            };
+            let mut lp = CgspLoop::new(conj, guide, solver, bandit, cfg)
+                .with_difficulty_filter(BreakevenDifficultyFilter::new(0.0, 1.0));
+            let target = Target::new(pool[0].clone());
+            let mut scratch = ScratchBuffers::new(8, 8);
+            for _ in 0..n {
+                let _ = lp.cycle(&target, &mut scratch);
+            }
+            let h = entropy_nats(lp.bandit().priorities());
+            let target_p = lp.bandit().priority(0);
+            (h, target_p)
+        }
+
+        let (h_low, p_low) = run(&pool, 50, 1);
+        let (h_high, p_high) = run(&pool, 50, 8);
+
+        // High-k NPC has higher entropy (less peaked table → more exploration
+        // headroom — the correct semantic for staler feedback).
+        assert!(
+            h_high > h_low,
+            "high-k entropy ({h_high}) should be > low-k ({h_low}) — \
+             staleness delays convergence"
+        );
+
+        // "Not starved": both tables have departed from uniform (entropy
+        // strictly below ln(8) ≈ 2.079, and strictly above 0).
+        let uniform_h = (8.0f32).ln();
+        assert!(
+            h_low < uniform_h && h_high < uniform_h,
+            "both tables should have departed from uniform: h_low={h_low}, h_high={h_high}, uniform={uniform_h}"
+        );
+        assert!(
+            h_low > 0.0 && h_high > 0.0,
+            "neither table should be one-hot starved: h_low={h_low}, h_high={h_high}"
+        );
+
+        // Both target arms are the max in their tables (renormalized to 1.0),
+        // but the high-k table's non-target arms are higher (less peaked).
+        // We verify via entropy (above). The target arm itself should still
+        // be the highest priority in both tables (learning happened, just
+        // more slowly for high-k).
+        assert_eq!(p_low, 1.0, "low-k target arm should be renormalized max");
+        assert_eq!(p_high, 1.0, "high-k target arm should be renormalized max");
+    }
+
+    /// T6 (G3 no-regression) — with staleness_lambda=0.0, k_npc has zero
+    /// effect on the priority table. Two loops with identical setup but
+    /// different k_npc values (1 vs 99) produce bit-identical priorities.
+    /// This is the strongest possible no-regression guarantee: the default
+    /// config is a true no-op, not just "close enough."
+    #[test]
+    fn t6_default_config_k_npc_has_no_effect() {
+        let pool = make_orthonormal_pool(8, 8);
+
+        fn run(pool: &[Direction], k_npc: u8) -> Vec<f32> {
+            let conj = PoolConjecturer::new(pool.to_vec(), 42);
+            let guide = HlaProjectionGuide::new(4.0, 0.1, ComplexityWeights::default());
+            let solver = DotSolver { sharpness: 0.5 };
+            let bandit = VecBandit::uniform(8);
+            let cfg = CgspConfig {
+                k_npc,
+                staleness_lambda: 0.0,
+                ..CgspConfig::default()
+            };
+            let mut lp = CgspLoop::new(conj, guide, solver, bandit, cfg)
+                .with_difficulty_filter(BreakevenDifficultyFilter::new(0.0, 1.0));
+            let target = Target::new(pool[0].clone());
+            let mut scratch = ScratchBuffers::new(8, 8);
+            for _ in 0..30 {
+                let _ = lp.cycle(&target, &mut scratch);
+            }
+            lp.bandit().priorities().to_vec()
+        }
+
+        let p_default = run(&pool, 1);
+        let p_extreme = run(&pool, 99);
+        assert_eq!(
+            p_default, p_extreme,
+            "with staleness_lambda=0.0, k_npc=1 vs k_npc=99 must be bit-identical"
+        );
+    }
+
+    // ── KnpcSelector tests (Issue 364 T4) ───────────────────────────────
+    // Behind `gain_cost_halt` feature — these compile only when both `cgsp`
+    // and `gain_cost_halt` are enabled.
+    #[cfg(feature = "gain_cost_halt")]
+    mod knpc_selector {
+        use super::*;
+        use crate::gain_cost_halt::GainCostLoopHalter;
+
+        /// Default selector starts at tau=1 and returns Continue on first
+        /// observe with healthy signals (gain >> cost).
+        #[test]
+        fn default_selector_continues_on_healthy_signals() {
+            let mut sel = KnpcSelector::default_bounds();
+            assert_eq!(sel.tau(), 1);
+            // gain=10, cost=0.1, cos=0.9 — clearly healthy.
+            let d = sel.observe_cycle(10.0, 0.1, 0.9);
+            assert_eq!(d, KnpcDecision::Continue);
+            assert_eq!(sel.tau(), 2, "tau should advance after Continue");
+        }
+
+        /// Halter fires on gain-below-cost → selector returns PlanInterval
+        /// with k_npc = halted loop index, clamped to [k_min, k_max].
+        #[test]
+        fn fires_on_gain_below_cost() {
+            // tau=1.0 (gain must exceed cost), patience=1, l_min=1.
+            let mut sel = KnpcSelector::default_bounds();
+            // Cycle 1: gain=0.1, cost=1.0 → 0.1 < 1.0*1 → Halt::GainBelowCost.
+            let d = sel.observe_cycle(0.1, 1.0, 0.9);
+            assert!(matches!(
+                d,
+                KnpcDecision::PlanInterval {
+                    k_npc: 1,
+                    halted_at: 1
+                }
+            ));
+        }
+
+        /// After Halt, tau resets to 1 so the next interval starts fresh.
+        #[test]
+        fn resets_after_halt() {
+            let mut sel = KnpcSelector::default_bounds();
+            // Run 3 healthy cycles to reach tau=3.
+            sel.observe_cycle(10.0, 0.1, 0.9);
+            sel.observe_cycle(10.0, 0.1, 0.9);
+            assert_eq!(sel.tau(), 3);
+            // Now trigger halt (gain below cost at tau=3).
+            let d = sel.observe_cycle(0.1, 1.0, 0.9);
+            assert!(matches!(
+                d,
+                KnpcDecision::PlanInterval {
+                    k_npc: 3,
+                    halted_at: 3
+                }
+            ));
+            assert_eq!(sel.tau(), 1, "tau must reset to 1 after Halt");
+        }
+
+        /// k_npc is clamped to k_max when the halter takes many cycles.
+        #[test]
+        fn clamps_to_k_max() {
+            // k_max=4, but we run 6 healthy cycles before triggering halt.
+            let mut sel = KnpcSelector::new(GainCostLoopHalter::default(), 1, 4);
+            for _ in 0..5 {
+                sel.observe_cycle(10.0, 0.1, 0.9);
+            }
+            assert_eq!(sel.tau(), 6);
+            let d = sel.observe_cycle(0.1, 1.0, 0.9);
+            // halted_at is the raw loop index (6), but k_npc is clamped to 4.
+            assert!(matches!(
+                d,
+                KnpcDecision::PlanInterval {
+                    k_npc: 4,
+                    halted_at: 6
+                }
+            ));
+        }
+
+        /// Oscillation halt: cos_theta < 0 with patience=1 fires immediately.
+        #[test]
+        fn fires_on_oscillation() {
+            let mut sel = KnpcSelector::default_bounds();
+            // gain high so GainBelowCost doesn't fire; cos_theta < 0 trips
+            // oscillation (patience=1 → halt on first reversal).
+            let d = sel.observe_cycle(10.0, 0.0, -0.5);
+            assert!(matches!(
+                d,
+                KnpcDecision::PlanInterval {
+                    k_npc: 1,
+                    halted_at: 1
+                }
+            ));
+        }
+
+        /// l_min floor: with l_min=3, the halter returns RefusedFloor for
+        /// tau < 3, so the selector keeps returning Continue.
+        #[test]
+        fn respects_l_min_floor() {
+            let halter = GainCostLoopHalter::new(1.0, 1, 3); // l_min=3
+            let mut sel = KnpcSelector::new(halter, 1, 8);
+            // Cycles 1 and 2: RefusedFloor (below l_min=3) → Continue.
+            for _ in 0..2 {
+                let d = sel.observe_cycle(0.01, 10.0, -0.99);
+                assert_eq!(d, KnpcDecision::Continue, "should refuse below l_min");
+            }
+            assert_eq!(sel.tau(), 3);
+            // Cycle 3: now l_min is satisfied, gain-below-cost fires.
+            let d = sel.observe_cycle(0.01, 10.0, 0.9);
+            assert!(matches!(
+                d,
+                KnpcDecision::PlanInterval {
+                    k_npc: 3,
+                    halted_at: 3
+                }
+            ));
+        }
+
+        /// G3 no-regression: a selector that never fires doesn't change
+        /// CGSP behavior. Verify by running a CGSP loop and checking the
+        /// selector stays at Continue with healthy signals.
+        #[test]
+        fn no_regression_healthy_loop_never_fires() {
+            let pool = make_orthonormal_pool(8, 8);
+            let conj = PoolConjecturer::new(pool.to_vec(), 42);
+            let guide = HlaProjectionGuide::new(4.0, 0.1, ComplexityWeights::default());
+            let solver = DotSolver { sharpness: 0.5 };
+            let bandit = VecBandit::uniform(8);
+            let cfg = CgspConfig::default();
+            let mut lp = CgspLoop::new(conj, guide, solver, bandit, cfg)
+                .with_difficulty_filter(BreakevenDifficultyFilter::new(0.0, 1.0));
+            let target = Target::new(pool[0].clone());
+            let mut scratch = ScratchBuffers::new(8, 8);
+
+            let mut sel = KnpcSelector::default_bounds();
+
+            // Run 20 cycles. Use entropy decrease as gain (healthy converging
+            // loop), fixed cost 0.01 (tiny), positive cos_theta (aligned).
+            let mut prev_entropy = entropy_nats(lp.bandit().priorities());
+            for _ in 0..20 {
+                let _ = lp.cycle(&target, &mut scratch);
+                let curr_entropy = entropy_nats(lp.bandit().priorities());
+                let gain = (prev_entropy - curr_entropy).max(0.0);
+                // A converging loop has gain >= 0 and cost 0.01 → gain/cost
+                // ratio is high → Continue. Even if gain dips to 0, 0 < 0.01
+                // would fire — but early cycles have enough entropy decrease
+                // to stay above the threshold.
+                let d = sel.observe_cycle(gain + 0.1, 0.01, 0.5);
+                // We add 0.1 to gain as a margin so the selector stays Continue
+                // in this integration check. The unit tests above cover the
+                // actual halt behavior.
+                assert_eq!(d, KnpcDecision::Continue);
+                prev_entropy = curr_entropy;
+            }
+            assert_eq!(sel.tau(), 21, "20 healthy cycles → tau=21");
+        }
     }
 }

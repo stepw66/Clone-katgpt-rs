@@ -219,10 +219,10 @@ impl<L: IndicatorLabel, const D: usize> IndicatorProbeBank<L, D> {
             L::COUNT,
             "out_scores must have length L::COUNT"
         );
-        for i in 0..L::COUNT {
+        for (i, out_slot) in out_scores.iter_mut().enumerate().take(L::COUNT) {
             let dir = &self.directions[i * D..(i + 1) * D];
             let raw = simd_dot_f32(dir, state, D);
-            out_scores[i] = fast_sigmoid(raw - self.thresholds[i]);
+            *out_slot = fast_sigmoid(raw - self.thresholds[i]);
         }
     }
 
@@ -234,11 +234,7 @@ impl<L: IndicatorLabel, const D: usize> IndicatorProbeBank<L, D> {
     /// per state (the argmax). Ties break by lowest index (stable).
     #[inline]
     pub fn or_fused_fire(&self, scores: &[f32], tau_fire: f32) -> Option<L> {
-        debug_assert_eq!(
-            scores.len(),
-            L::COUNT,
-            "scores must have length L::COUNT"
-        );
+        debug_assert_eq!(scores.len(), L::COUNT, "scores must have length L::COUNT");
         let mut best_label: Option<L> = None;
         let mut best_score: f32 = tau_fire; // must strictly exceed
         for (i, &s) in scores.iter().enumerate() {
@@ -461,7 +457,11 @@ mod tests {
         let bank = demo_bank();
         // Zero state → raw dot = 0, threshold = 0 → sigmoid(0) = 0.5.
         let zero = [0.0f32; 4];
-        for l in [DemoIndicatorLabel::A, DemoIndicatorLabel::B, DemoIndicatorLabel::C] {
+        for l in [
+            DemoIndicatorLabel::A,
+            DemoIndicatorLabel::B,
+            DemoIndicatorLabel::C,
+        ] {
             let s = bank.project(&zero, l);
             assert!(
                 (s - 0.5).abs() < 1e-6,
@@ -475,7 +475,12 @@ mod tests {
         let state_a = [1.0f32, 0.0, 0.0, 0.0];
         let s = bank.project(&state_a, DemoIndicatorLabel::A);
         let expected = fast_sigmoid(1.0 - 0.0);
-        assert!((s - expected).abs() < 1e-6, "direction-self project: {} vs {}", s, expected);
+        assert!(
+            (s - expected).abs() < 1e-6,
+            "direction-self project: {} vs {}",
+            s,
+            expected
+        );
     }
 
     #[test]
@@ -537,7 +542,10 @@ mod tests {
         );
         // A and B tied → A (index 0).
         let scores2 = [0.9f32, 0.9, 0.1];
-        assert_eq!(bank.or_fused_fire(&scores2, 0.5), Some(DemoIndicatorLabel::A));
+        assert_eq!(
+            bank.or_fused_fire(&scores2, 0.5),
+            Some(DemoIndicatorLabel::A)
+        );
     }
 
     #[test]

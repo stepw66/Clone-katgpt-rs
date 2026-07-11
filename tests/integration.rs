@@ -198,6 +198,7 @@ fn test_matmul_zero_weight() {
 }
 
 #[test]
+#[allow(deprecated)] // exercises the deprecated `sample_token` public API for backward-compat coverage
 fn test_sample_token_valid() {
     let config = types::Config::micro();
     let mut rng = types::Rng::new(42);
@@ -561,7 +562,7 @@ fn test_speculative_step_consistent_for_same_seed() {
 
 // ── Percepta 2D Convex Hull Attention Tests ────────────────────────
 
-use katgpt_rs::percepta::{KVCache2D, Vec2};
+use katgpt_percepta::{KVCache2D, Vec2};
 
 #[test]
 fn test_percepta_vec2_dot() {
@@ -1402,7 +1403,7 @@ fn test_percepta_nqueens_8() {
 
 #[test]
 fn test_sudoku9x9_arto_inkala_clues() {
-    let puzzle = katgpt_rs::percepta::Sudoku9x9::arto_inkala();
+    let puzzle = katgpt_percepta::Sudoku9x9::arto_inkala();
     assert_eq!(puzzle.clue_count(), 21, "Arto Inkala should have 21 clues");
     assert_eq!(puzzle.grid[0][0], 8);
     assert_eq!(puzzle.grid[8][1], 9);
@@ -1410,7 +1411,7 @@ fn test_sudoku9x9_arto_inkala_clues() {
 
 #[test]
 fn test_sudoku9x9_is_valid_move() {
-    let puzzle = katgpt_rs::percepta::Sudoku9x9::arto_inkala();
+    let puzzle = katgpt_percepta::Sudoku9x9::arto_inkala();
     // Row 0 has 8, so placing 8 at (0,1) is invalid (row)
     assert!(!puzzle.is_valid_move(0, 1, 8));
     // Col 1 has 5 (at row 3), 7 (row 2), 9 (row 8), so those are invalid for col
@@ -1426,7 +1427,7 @@ fn test_sudoku9x9_is_valid_move() {
 
 #[test]
 fn test_sudoku9x9_display_format() {
-    let puzzle = katgpt_rs::percepta::Sudoku9x9::arto_inkala();
+    let puzzle = katgpt_percepta::Sudoku9x9::arto_inkala();
     let display = puzzle.display();
     assert!(display.contains("8 . . | . . . | . . "));
     assert!(display.contains("------+-------+------"));
@@ -1434,8 +1435,8 @@ fn test_sudoku9x9_display_format() {
 
 #[test]
 fn test_sudoku9x9_solve_arto_inkala() {
-    let mut puzzle = katgpt_rs::percepta::Sudoku9x9::arto_inkala();
-    let mut cache = katgpt_rs::percepta::KVCache2D::new();
+    let mut puzzle = katgpt_percepta::Sudoku9x9::arto_inkala();
+    let mut cache = katgpt_percepta::KVCache2D::new();
     let mut step = 0usize;
 
     let solved = puzzle.solve(&mut cache, &mut step);
@@ -1454,8 +1455,8 @@ fn test_sudoku9x9_solve_arto_inkala() {
 
 #[test]
 fn test_sudoku9x9_solve_hull_compression() {
-    let mut puzzle = katgpt_rs::percepta::Sudoku9x9::arto_inkala();
-    let mut cache = katgpt_rs::percepta::KVCache2D::new();
+    let mut puzzle = katgpt_percepta::Sudoku9x9::arto_inkala();
+    let mut cache = katgpt_percepta::KVCache2D::new();
     let mut step = 0usize;
 
     puzzle.solve(&mut cache, &mut step);
@@ -1468,7 +1469,7 @@ fn test_sudoku9x9_solve_hull_compression() {
     );
 
     // Attention retrieves final state
-    let query = katgpt_rs::percepta::Vec2::new(1.0, 0.0);
+    let query = katgpt_percepta::Vec2::new(1.0, 0.0);
     let (lin_s, lin_v) = cache.linear_attention(&query);
     let (fast_s, fast_v) = cache.fast_attention(&query);
     assert!((lin_s - fast_s).abs() < 1e-3, "scores should match");
@@ -1478,7 +1479,7 @@ fn test_sudoku9x9_solve_hull_compression() {
 
 #[test]
 fn test_symbolic_validator_prune_drafts() {
-    use katgpt_rs::percepta::{Sudoku9x9, SymbolicValidator};
+    use katgpt_percepta::{Sudoku9x9, SymbolicValidator};
 
     let puzzle = Sudoku9x9::arto_inkala();
 
@@ -1510,7 +1511,7 @@ fn test_symbolic_validator_prune_drafts() {
 
 #[test]
 fn test_symbolic_validator_prune_all_invalid() {
-    use katgpt_rs::percepta::{Sudoku9x9, SymbolicValidator};
+    use katgpt_percepta::{Sudoku9x9, SymbolicValidator};
 
     let puzzle = Sudoku9x9::arto_inkala();
 
@@ -1535,9 +1536,9 @@ fn test_symbolic_validator_prune_all_invalid() {
 
 #[test]
 fn test_streaming_solver_arto_inkala() {
-    use katgpt_rs::percepta::{SolveEvent, StreamingSolver};
+    use katgpt_percepta::{SolveEvent, StreamingSolver};
 
-    let mut solver = StreamingSolver::new(katgpt_rs::percepta::Sudoku9x9::arto_inkala().grid);
+    let mut solver = StreamingSolver::new(katgpt_percepta::Sudoku9x9::arto_inkala().grid);
 
     let solved = solver.solve_streaming();
 
@@ -1576,7 +1577,7 @@ fn test_streaming_solver_arto_inkala() {
 
 #[test]
 fn test_sudoku9x9_next_empty() {
-    let puzzle = katgpt_rs::percepta::Sudoku9x9::arto_inkala();
+    let puzzle = katgpt_percepta::Sudoku9x9::arto_inkala();
     let empty = puzzle.next_empty();
     assert!(empty.is_some(), "should find empty cell");
     let (r, c) = empty.unwrap();
@@ -1601,7 +1602,7 @@ fn percepta_reference_puzzle() -> [[u8; 9]; 9] {
 
 #[test]
 fn test_percepta_sudoku_reference_puzzle_solves() {
-    use katgpt_rs::percepta::{SolveEvent, StreamingSolver};
+    use katgpt_percepta::{SolveEvent, StreamingSolver};
 
     let grid = percepta_reference_puzzle();
     let mut solver = StreamingSolver::new(grid);
@@ -1620,7 +1621,7 @@ fn test_percepta_sudoku_reference_puzzle_solves() {
 
 #[test]
 fn test_percepta_sudoku_hull_compression() {
-    use katgpt_rs::percepta::StreamingSolver;
+    use katgpt_percepta::StreamingSolver;
 
     let grid = percepta_reference_puzzle();
     let mut solver = StreamingSolver::new(grid);
@@ -1648,7 +1649,7 @@ fn test_percepta_sudoku_hull_compression() {
 
 #[test]
 fn test_percepta_sudoku_beats_their_throughput() {
-    use katgpt_rs::percepta::StreamingSolver;
+    use katgpt_percepta::StreamingSolver;
     use std::time::Instant;
 
     // Percepta reports ~30K tok/s for their C++ engine, ~900K tokens → ~30s
@@ -1686,13 +1687,13 @@ fn test_percepta_sudoku_beats_their_throughput() {
 
 #[test]
 fn test_percepta_arto_inkala_beats_their_throughput() {
-    use katgpt_rs::percepta::StreamingSolver;
+    use katgpt_percepta::StreamingSolver;
     use std::time::Instant;
 
     // Arto Inkala (21 clues, world's hardest): ~49K steps, we typically solve in ~5ms
     // Percepta would take ~900K tokens / 30K tok/s = ~30s for easier puzzles
     // If they ran Arto Inkala it would take much longer (more backtracking → more tokens)
-    let grid = katgpt_rs::percepta::Sudoku9x9::arto_inkala().grid;
+    let grid = katgpt_percepta::Sudoku9x9::arto_inkala().grid;
     let iterations = 10;
     let mut durations = Vec::with_capacity(iterations);
 
@@ -1720,7 +1721,7 @@ fn test_percepta_arto_inkala_beats_their_throughput() {
 #[cfg(feature = "percepta")]
 #[test]
 fn test_cht_streaming_solver_populates_head() {
-    use katgpt_rs::percepta::{StreamingSolver, Sudoku9x9};
+    use katgpt_percepta::{StreamingSolver, Sudoku9x9};
 
     let mut solver = StreamingSolver::new(Sudoku9x9::arto_inkala().grid);
     let solved = solver.solve_streaming();
@@ -1741,7 +1742,7 @@ fn test_cht_streaming_solver_populates_head() {
 #[cfg(feature = "percepta")]
 #[test]
 fn test_cht_streaming_solver_parity() {
-    use katgpt_rs::percepta::{StreamingSolver, Sudoku9x9};
+    use katgpt_percepta::{StreamingSolver, Sudoku9x9};
 
     let mut solver = StreamingSolver::new(Sudoku9x9::arto_inkala().grid);
     let solved = solver.solve_streaming();
@@ -1757,7 +1758,7 @@ fn test_cht_streaming_solver_parity() {
 #[cfg(feature = "percepta")]
 #[test]
 fn test_cht_streaming_solver_query_correctness() {
-    use katgpt_rs::percepta::{HardAttentionHead, TieBreak};
+    use katgpt_percepta::{HardAttentionHead, TieBreak};
 
     let mut head = HardAttentionHead::new();
 
@@ -1801,7 +1802,7 @@ fn test_cht_streaming_solver_query_correctness() {
 #[cfg(feature = "percepta")]
 #[test]
 fn test_cht_streaming_solver_reference_puzzle() {
-    use katgpt_rs::percepta::StreamingSolver;
+    use katgpt_percepta::StreamingSolver;
 
     let grid = {
         let s = "530070000600195000098000060800060003400803001700020006060000280000419005000080079";
@@ -1827,7 +1828,7 @@ fn test_cht_streaming_solver_reference_puzzle() {
 #[cfg(feature = "percepta")]
 #[test]
 fn test_cht_lower_hull_query_after_solve() {
-    use katgpt_rs::percepta::{StreamingSolver, Sudoku9x9, TieBreak};
+    use katgpt_percepta::{StreamingSolver, Sudoku9x9, TieBreak};
 
     let mut solver = StreamingSolver::new(Sudoku9x9::arto_inkala().grid);
     let solved = solver.solve_streaming();

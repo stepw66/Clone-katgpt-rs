@@ -19,8 +19,6 @@
 //! `should_write_memory(r_k, S_LP)` as a local closure (the real CLR lives in
 //! riir-ai; the composition contract is the `clr_allows: bool` parameter).
 
-#![cfg(test)]
-
 use super::{BranchBank, VerifierGate, WriteDecision};
 
 // ──────────────────────────────────────────────────────────────────────────
@@ -51,8 +49,8 @@ use super::{BranchBank, VerifierGate, WriteDecision};
 #[cfg(feature = "arg_protocol")]
 mod t41_arg_protocol {
     use super::BranchBank;
-    use crate::arg::{LifecycleState, RedirectTable};
     use crate::arg::taxonomy::LabelId;
+    use crate::arg::{LifecycleState, RedirectTable};
     use crate::branching::types::BranchLifecycle;
 
     /// Compile-time proof that `BranchLifecycle` IS `LifecycleState` when
@@ -83,7 +81,10 @@ mod t41_arg_protocol {
             LifecycleState::Deprecated as u8,
             BranchLifecycle::Deprecated as u8
         );
-        assert_eq!(LifecycleState::Removed as u8, BranchLifecycle::Removed as u8);
+        assert_eq!(
+            LifecycleState::Removed as u8,
+            BranchLifecycle::Removed as u8
+        );
     }
 
     /// `is_routable` / `requires_redirect` semantics are identical between
@@ -359,7 +360,7 @@ mod t42_clr_composition {
 mod t43_engram_composition {
     use super::BranchBank;
     use crate::branching::router::{BranchRouter, RouteMode};
-    use crate::engram::{multi_head_hash, CanonicalId, EngramHash, HashHead, K_MAX};
+    use crate::engram::{CanonicalId, EngramHash, HashHead, K_MAX, multi_head_hash};
 
     /// Build K_MAX deterministic hash heads (distinct seeds + primes) for the
     /// composition fixture. Mirrors the Engram test helper convention.
@@ -435,7 +436,10 @@ mod t43_engram_composition {
 
         // Sanity: different suffixes → different anchors (at least one dim).
         let any_diff = anchor_a.iter().zip(anchor_b.iter()).any(|(x, y)| x != y);
-        assert!(any_diff, "different suffixes must produce different anchors");
+        assert!(
+            any_diff,
+            "different suffixes must produce different anchors"
+        );
 
         let mut bank: BranchBank<()> = BranchBank::new(8);
         let _branch = bank.spawn(anchor_a).expect("spawn");
@@ -492,7 +496,7 @@ mod t44_closure_composition {
     use super::BranchBank;
     use crate::branching::projection::NonInterferenceProjection;
     use crate::branching::types::{BranchId, ProceduralRule};
-    use crate::closure::bridge::{ptg_to_motif_embedding, MotifDirections};
+    use crate::closure::bridge::{MotifDirections, ptg_to_motif_embedding};
     use crate::closure::{PrimitiveKind, PrimitiveTransitionGraph, PtgNode};
 
     const D: usize = 8;
@@ -591,7 +595,11 @@ mod t44_closure_composition {
         let mut proj: NonInterferenceProjection<D> = NonInterferenceProjection::default();
         let branch = BranchId::new(0);
         let result = proj.assign_direction(branch, &emb);
-        assert!(result.error.is_none(), "assign should succeed: {:?}", result);
+        assert!(
+            result.error.is_none(),
+            "assign should succeed: {:?}",
+            result
+        );
 
         // Project the embedding onto the branch's own direction → high value.
         let projected = proj.project(branch, &emb).expect("assigned");
@@ -631,13 +639,9 @@ mod t44_closure_composition {
         assert!(any_diff, "distinct PTGs must produce distinct embeddings");
 
         // Manual interference: |dot(emb_a, emb_b)| (both normalized → in [0,1]).
-        let manual_interference: f32 = emb_a
-            .iter()
-            .zip(emb_b.iter())
-            .map(|(a, b)| a * b)
-            .sum();
+        let manual_interference: f32 = emb_a.iter().zip(emb_b.iter()).map(|(a, b)| a * b).sum();
         assert!(
-            manual_interference >= 0.0 && manual_interference <= 1.0 + 1e-6,
+            (0.0..=1.0 + 1e-6).contains(&manual_interference),
             "manual interference in [0,1]: {manual_interference}"
         );
 

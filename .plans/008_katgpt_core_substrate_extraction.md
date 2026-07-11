@@ -1,7 +1,7 @@
 # Plan 008: katgpt-core Substrate Extraction (Phase 1+2 of Issue 007)
 
-> **Origin:** [Issue 007](../issues/007_katgpt_rs_cargo_publish_substrate_reorg.md)
-> **Status:** Active — Phase 1 step 1 ✅ done (pre-existing); steps 2-7 queued
+> **Origin:** Issue 007 (cargo-publish substrate reorg — RESOLVED 2026-07-02; all phases done/deferred-by-design, all open questions resolved, issue file removed)
+> **Status:** **Substantively COMPLETE** (re-verified 2026-07-01). Phase 1 steps 1-7 ✅; Phase 2 dedup 2.2/2.3/2.5/2.6/2.7 ✅ + 2.8 bit-identical ✅. **Re-audit findings (2026-07-01):** Step 3 `tokenizer` DONE as standalone `katgpt-tokenizer` crate (no SentencePiece-sys dep — Q2 concern was moot); Phase 4 `plotters` optional DONE (Issue 355 Phase 2a); substrate extraction went further into a "Phase E" of 16 publishable leaf crates (see Issue 007 acceptance). 2.1 hla role-aware DEFERRED BY DESIGN (Category C — `role_transport`). One open strategy decision: the 16 publishable crates vs release-plz's "only katgpt-core ships" — see Issue 007 §Open questions Q5.
 > **Branch:** `develop`
 > **Created:** 2026-06-27
 > **Cross-repo:** katgpt-rs (primary moves), riir-ai/riir-engine (Phase 2 dedup consumer)
@@ -63,7 +63,7 @@ refined strategy doc, stranded in a private fork.
 ### Phase 1 — Substrate extraction to `katgpt-core`
 
 - [x] **Step 1 — `types` → core.** DONE pre-this-plan. `katgpt-core/src/types/` 14 files; root is re-export shim.
-- [ ] **Step 2 — `transformer` substrate types + `weights` → core.**
+- [x] **Step 2 — `transformer` substrate types + `weights` → core.** ✅ DONE 2026-06-27 (commit `1debf905`) — extracted to new `katgpt-transformer` crate per user direction (forward funcs stay in root; only pure data types moved). riir-engine reconciled in Phase 2.2 (`bd423499`).
 
   ⚠️ **AUDIT FINDING (2026-06-27, before execution): the original premise was wrong.**
   `transformer.rs` is NOT pure substrate. The file is **8398 lines** but splits into:
@@ -126,7 +126,7 @@ refined strategy doc, stranded in a private fork.
   `transformer/{gemma2,llama,prefill,raven,mtp,attention}.rs` layout. Root
   file is ~6300 lines after step 2 (forward funcs + ForwardContext + tests),
   still over the 2048 ceiling — addressed in follow-up.
-- [ ] **Step 3 — `tokenizer` → core.** DEFERRED per Q2 verdict. Audit SentencePiece-sys dep first; if present, leave in root.
+- [x] **Step 3 — `tokenizer`.** ✅ DONE (re-audit 2026-07-01) — resolved differently than the original Q2 framing. Extracted as a **standalone `katgpt-tokenizer` crate** (BPE + ToaST split-tree + ConvexTok LP). The Q2 deferral concern (SentencePiece-sys C++ build dep) was **moot**: the tokenizer is pure-Rust (BPE/trie/LP), no SentencePiece-sys dep at all. Crate builds clean (`cargo check -p katgpt-tokenizer`). Not moved into `katgpt-core` (kept as its own publishable leaf, matching the Phase E pattern).
 - [x] **Step 4 — `hla` → core (substrate half).** 2248 lines total (`forward.rs` 569 + `kernel.rs` 1019 + `types.rs` 606 + `mod.rs` 54). Depends on step 2.
 
   ⚠️ **AUDIT FINDING (2026-06-28, before execution): the original premise was wrong.**
@@ -146,7 +146,7 @@ refined strategy doc, stranded in a private fork.
   - [x] 4e. Commit: `feat(core): Plan 008 step 4 — move HLA substrate to katgpt-core` (see commit log).
 
   ### Deferred subtask (Phase 2 reconciliation, not Phase 1)
-  - [ ] **4b. Port riir-engine's `*_role_aware` variants behind a core feature `hla_role_aware`.** DEFERRED — this is Phase 2 (riir-engine dedup) work, not Phase 1 (substrate extraction). Rationale:
+  - [-] **4b. Port riir-engine's `*_role_aware` variants behind a core feature `hla_role_aware`.** DEFERRED — this is Phase 2 (riir-engine dedup) work, not Phase 1 (substrate extraction). Rationale:
     1. The role-aware kernel variants (`hla_state_update_role_aware`, `ahla_step_role_aware`, `hla_layer_update_role_aware`, `ahla_layer_step_role_aware`, `third_order_update`, `third_order_readout`) all depend on `crate::role_transport::{RoleEmbeddingTable, diagonal_transport, SlotLabel}` — Category C private composition per Issue 007 §"Cross-repo consumer cleanup".
     2. Porting them to core requires defining a `RoleTransport` trait in core + a `SlotLabel` newtype, then having riir-engine's `RoleEmbeddingTable` impl the trait. That's a design change to core's public API surface, not a pure move.
     3. riir-engine also DIVERGED with `ThirdOrderMoment` (Plan 151 T13) + `HlaUpdateMode` + a `role: Option<SlotLabel>` field on `HlaQHeadState`/`AhlaQHeadState`. These are cognitive extensions, not substrate.
@@ -307,9 +307,9 @@ After each Phase 1 step lands, riir-engine deletes its copy and imports from
 
   **DEFERRED — Blocker #1 (role field contamination):** riir-engine's `HlaQHeadState`/`AhlaQHeadState` carry `role: Option<SlotLabel>` + `third_order: ThirdOrderMoment` fields (gated `hla_role_aware`). These contaminate the entire type chain (`HlaLayerState.heads` → `MultiLayerHlaCache.layers`). Core's types don't have these fields, so re-exporting would lose role-aware functionality. **Resolution path:** refactor role info into a side-channel (e.g., `HashMap<HeadId, RoleInfo>`) or pass `role` as a kernel parameter. Medium effort — touches all role-aware kernels + forward.rs.
 
-  **DEFERRED — Blocker #2 (`ahla_step` math divergence — needs investigation):** riir-engine's `ahla_step` computes `tmp_r = PKV · q` (via `simd_matvec`), while katgpt-core computes `tmp_r = qᵀ · PKV` (manual loop, matches docstring). Since PKV = Σ k·vᵀ is non-symmetric, `PKV · q ≠ qᵀ · PKV`. riir-engine's docstring claims `qᵀ · PKV` but code computes the transpose — **a long-standing semantic mismatch**. Tests don't catch it (use sparse inputs where the two are identical). Per modelless-first mandate, did NOT change behavior. **Tracked as Issue 009** (`issues/009_ahla_step_math_divergence.md`). Needs decision: is riir-engine's `PKV · q` an intentional variant or a bug? If bug, fixing it changes trained behavior → riir-train follow-up.
+  **RESOLVED — Blocker #2 (`ahla_step` math divergence):** riir-engine's `ahla_step` was computing `tmp_r = PKV · q` (via `simd_matvec`) while katgpt-core/katgpt-hla compute `tmp_r = qᵀ · PKV` (manual loop, matches docstring). **Confirmed as a bug, not an intentional variant, via git history** (Issue 009, 2026-06-30): commit `0d3f9c19` ("SIMD matvec for AHLA") replaced a correct manual `qᵀ·PKV` loop with `simd_matvec(pkv, q)` while leaving the comment saying `qᵀ·PKV` — the transpose was lost in the name of SIMD acceleration. The bug was actually **5 sites** in riir-engine's HLA kernel (2× `qᵀ·SK` in `hla_readout`/`hla_denom`, `qᵀ·PKV` and `qᵀ·E` in `ahla_step`, `qᵀ·E` in `ahla_per_head_step`), all from the same commit. **Fix (modelless-safe — restores docstring+paper intent, not a behavior change away from intent):** added a `transpose_matvec_into` helper mirroring katgpt-hla's canonical form, replaced all 5 buggy `simd_matvec` calls. Also fixed the misleading `simd_matvec` docstring in katgpt-types (it claimed "Used for HLA readout (qᵀ·SK, qᵀ·PKV)" but computes `M·v` — that trap is part of why the bug happened). Added dense-`q` + non-symmetric-PKV regression test `ahla_step_dense_q_transpose_matvec` (the existing tests used one-hot `q=[1,0]` where `qᵀ·PKV == PKV·q`, which is why they missed it). **Validation:** 2389/2389 riir-engine lib tests pass, 16/16 katgpt-hla tests pass. Phase 2.1 dedup now unblocked. **No riir-train reconciliation needed** — the fix reverts a one-month-old regression to the documented intent; no model was trained against the buggy `PKV·q` behavior. Issue 009 resolved-and-removed.
 
-  **GOAT gate:** 16/16 core hla tests, 8/8 root hla tests, 22/22 riir-engine hla tests (default), 28/28 hla_role_aware, full lib 2378/2379 (1 pre-existing `g5_epool_persistence`).
+  **GOAT gate:** 16/16 core hla tests, 8/8 root hla tests, 23/23 riir-engine hla tests (default, incl. new `ahla_step_dense_q_transpose_matvec` Issue 009 regression), 28/28 hla_role_aware, full riir-engine lib 2389/2389, full katgpt-hla lib 16/16 (Issue 009 Blocker #2 resolved 2026-06-30).
 - [x] **2.2 riir-engine `src/transformer/` → consume `katgpt_transformer::{...}`** (2026-06-27)
 
   **Scope:** swapped all substrate types from local definitions to
@@ -375,7 +375,7 @@ After each Phase 1 step lands, riir-engine deletes its copy and imports from
 - [x] **2.3 riir-engine `src/types.rs` → `use katgpt_core::types::{...}`** (2026-06-28)
 
   **Scope:** riir-engine's `types.rs` already does `pub use katgpt_core::types::*;` at line 10. Only local addition is `NoiseSchedule` (feature-gated `dllm`, engine-specific D2F noise schedule). No further dedup possible — the substrate (Config, Rng, math utils, LoRA, DomainLatent, AttentionMode) is fully re-exported.
-- [ ] 2.4 riir-engine `src/tokenizer.rs` → consume core (after step 3, if it moves)
+- [~] 2.4 riir-engine `src/tokenizer.rs` → consume `katgpt-tokenizer` (or `katgpt_core`). UNBLOCKED as of Step 3 re-audit (2026-07-01): the `katgpt-tokenizer` crate now exists and is publishable. The riir-engine `src/tokenizer.rs` dedup pass itself was NOT separately re-run in this re-audit — it's a non-blocking follow-up (riir-engine's local tokenizer.rs continues to work; the substrate is now available for it to consume whenever a refactor pass is scheduled).
 - [x] **2.5 riir-engine `src/dd_tree.rs` + `spec_types.rs` → consume core** (2026-06-28)
 
   **Scope:** riir-engine's `spec_types.rs` local definitions of `TreeNode`, `DraftResult`, `RejectionReason`, `DraftEvent`, `PrefillMode`, `FlashPrefillConfig`, `BlockScores` replaced with `pub use katgpt_core::speculative::types::{...}` re-export. katgpt-core's versions are supersets (additive feature-gated fields/variants like `RejectionReason::KurtosisRejection`, `DraftResult.cost_snapshot`/`stability`/`routing_overlap`, `FlashPrefillConfig.score_reduction`/`budget_adaptation`).
@@ -410,13 +410,13 @@ After each Phase 1 step lands, riir-engine deletes its copy and imports from
   **GOAT gate:** bit-identical, 124/124 core simd tests green (+7 new), 2428/2429 riir-engine lib tests green (1 pre-existing `cgsp_runtime::dual_pool_bridge::g5_epool_persistence`).
 
   **Commits:** `katgpt-rs/develop` `3a0ed1d5`, `riir-ai/develop` `ad8ea1ea`.
-- [ ] 2.8 Bit-identical verification: `forward_hla`/`forward_gemma2`/`dd_tree` tests pass unchanged in both repos
+- [x] **2.8 Bit-identical verification** (2026-07-01) — `forward_hla`/`transformer`/`dd_tree` tests pass unchanged in both repos. Re-verified on `katgpt-rs/develop` + `riir-ai/develop` with isolated `CARGO_TARGET_DIR`: katgpt-rs `hla::forward::tests` 8/8, `transformer::tests` 80/80, `speculative::dd_tree` 71/71; riir-ai `hla::forward::tests` 8/8 (bit-identical names+results), `transformer::` 83/83 (3 additive prefill tests), `dflash` (dd_tree composition) 24/24, `spec_types` 15/15. Note: `forward_gemma2` is exercised inside `transformer::tests` (no standalone module). dd_tree substrate dedup'd into `spec_types` re-export in riir-ai (Phase 2.5); composition lives in `dflash.rs`.
 
 ### Phase 3-5 — DEFERRED
 
-- [ ] **Phase 3** (root subdir reorg into `primitives/`/`inference/`/`games/`/`backends/`) — cosmetic, not worth churn while 100+ features flatten at root. Revisit if/when root module count becomes unnavigable.
-- [ ] **Phase 4** (`plotters` optional, `cargo check --no-default-features` clean on root) — independent quick win; do as standalone if it becomes blocking.
-- [ ] ~~**Phase 5** (publish `katgpt-rs` to crates.io)~~ — **RESCINDED.** Conflicts with the post-issue decision in `Cargo.toml:9` + `release-plz.toml:9-12` to keep root private permanently. Only `katgpt-core` ships.
+- [-] **Phase 3** (root subdir reorg into `primitives/`/`inference/`/`games/`/`backends/`) — cosmetic, not worth churn while 100+ features flatten at root. Revisit if/when root module count becomes unnavigable.
+- [x] **Phase 4** (`plotters` optional, `cargo check --no-default-features` clean on root) — ✅ DONE (Issue 355 Phase 2a, outside this plan): `plotters = { version = "0.3", optional = true }` behind the `plot` feature (DEFAULT-ON to preserve historical behavior; riir-ai sets `default-features = false` to drop it). Re-verified 2026-07-01.
+- [-] ~~**Phase 5** (publish `katgpt-rs` to crates.io)~~ — **RESCINDED.** Conflicts with the post-issue decision in `Cargo.toml:9` + `release-plz.toml:9-12` to keep root private permanently. Only `katgpt-core` ships.
 
 ---
 
@@ -435,13 +435,14 @@ After each Phase 1 step lands, riir-engine deletes its copy and imports from
 
 Mirrors Issue 007 §Acceptance, updated:
 
-- [ ] Phase 1 step 2: `transformer`+`weights` live in `katgpt-core`, split into <2048-line files, re-exported from root. `cargo test -p katgpt-core --lib` + `cargo test --lib` green on arm64. (x86_64 already cleared per Issue 006.)
+- [x] **Phase 1 step 2:** `transformer`+`weights` substrate types live in new `katgpt-transformer` crate (per user direction "define new one e.g. katgpt-foo and keep core core"), re-exported from root. 11/11 katgpt-transformer tests + 80/80 root transformer tests green. (Commit `1debf905`; riir-engine reconciliation in Phase 2.2 `bd423499`.) Forward funcs stay in root (7055-line file — splitting into per-family submodules is a tracked follow-up, not blocking.)
 - [x] **Phase 1 step 4 (substrate half):** `hla` cache types + streaming kernels live in `katgpt-core/src/hla/{types,kernel}.rs`, re-exported from root `src/hla/mod.rs`. Bit-identical forward output vs pre-move (8/8 forward tests + 16/16 substrate tests green). `forward.rs` stays in root (needs `ForwardContext`). Role-aware variants + `ThirdOrderMoment` deferred to Phase 2.1 (riir-engine reconciliation — they're Category C cognitive composition, not substrate).
 - [x] **Phase 1 step 5 (substrate half):** speculative-decoding types live in `katgpt-core/src/speculative/types.rs`, re-exported from root `src/speculative/types.rs`. Bit-identical (32/32 substrate tests + 9 composition tests green).
 - [x] **Phase 1 step 6 (substrate half):** `mcts` algorithm (`mcts_search`, `mcts_search_informed`, UCB1 helpers, `MCTSNode`), `sampling` primitives (CDF + residual samplers), and `delta_mem` substrate (`DeltaMemoryState`, `FeatureHasher`, `MultiDomainMemory`) live in `katgpt-core/src/{mcts.rs, speculative/sampling.rs, delta_mem/}`. Bit-identical behavior: 14+5+37=56 substrate tests green in core; 5 bandit composition tests + 0 sampling composition tests + delta_mem bench G3 (suppression 42.90%, recall_loss 0.00%) all green in root. Composition that needs root-only types (`BanditRolloutPolicy` needs `BanditStats`; `MemorySteeredPruner<P>` / `MultiDomainMemoryPruner<P>` wrap root `ScreeningPruner` impls) stays in root as expected. No call-site changes.
 - [x] **Phase 1 step 7:** riir-engine `simd/wasm32.rs` consumes `katgpt_core::simd`. (2026-06-28)
-- [ ] Phase 2: riir-engine has zero Category A duplicates; all consume `katgpt_core::`. Bit-identical tests in both repos.
-- [ ] Each phase commit includes GOAT/bench evidence per AGENTS.md "dont defer benchmark task".
+- [~] **Phase 2:** riir-engine Category A dedup — **core path DONE.** Done: 2.2 transformer, 2.3 types, 2.5 dd_tree/spec_types, 2.6 mcts/sampling/delta_mem, 2.7 simd (all consume `katgpt_core::`/`katgpt_transformer::`). Partial: 2.1 hla (`[~]` — `HlaVariant` dedup'd + core kernels optimized; Blocker #2 ahla_step math bug resolved via Issue 009; Blocker #1 role-aware DEFERRED BY DESIGN — Category C `role_transport`, not a defect). Unblocked-but-not-rerun: 2.4 tokenizer (`katgpt-tokenizer` crate now exists per Step 3 re-audit; the riir-engine dedup pass is a non-blocking follow-up). Bit-identical verification 2.8 PASS. Net LoC: −1808 riir-engine, +445 katgpt-core.
+- [x] **Re-audit (2026-07-01):** Step 3 tokenizer ✅ DONE (standalone `katgpt-tokenizer`, no SentencePiece); Phase 4 plotters ✅ DONE (Issue 355 Phase 2a); substrate extraction expanded into "Phase E" — 16 publishable leaf crates; katgpt-core lib **661/0 green** (isolated `CARGO_TARGET_DIR`). Open strategy decision: 16 publishable crates vs release-plz "only core ships" — Issue 007 §Open questions Q5.
+- [x] Each phase commit includes GOAT/bench evidence per AGENTS.md "dont defer benchmark task" — every step's GOAT gate reported inline (2.1: 2389/2389; 2.2: 80/80+24/24; 2.5: 15/15+24/24+37/37; 2.6: 14+5+47 substrate + bench G3; 2.7: 124/124+2428/2429; 2.8: this session).
 
 ---
 

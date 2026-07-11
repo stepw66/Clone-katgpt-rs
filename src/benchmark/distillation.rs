@@ -1,4 +1,12 @@
+// BenchCategory + Instant are only referenced inside the feature-gated
+// sub-functions below; gate the imports so they don't read as unused when
+// all three distillation features are off (e.g. when a downstream consumer
+// builds katgpt-rs with default-features = false).
+#[cfg(not(any(feature = "bt_rank", feature = "bandit", feature = "g_zero")))]
+use super::BenchResult;
+#[cfg(any(feature = "bt_rank", feature = "bandit", feature = "g_zero"))]
 use super::{BenchCategory, BenchResult};
+#[cfg(any(feature = "bt_rank", feature = "bandit", feature = "g_zero"))]
 use std::time::Instant;
 
 /// Distillation / Compression benchmarks for the Paper Feature Comparison Matrix.
@@ -11,6 +19,7 @@ use std::time::Instant;
 /// All results use `feature_dim: "Distill"` and `category: BenchCategory::Distillation`.
 pub fn bench_distillation() -> Vec<BenchResult> {
     // Up to 6 results: bt_rank(2) + bandit(2) + absorb_compress(2).
+    #[allow(unused_mut)] // only mutated when at least one sub-feature is on
     let mut results = Vec::with_capacity(6);
 
     #[cfg(feature = "bt_rank")]
@@ -207,7 +216,7 @@ fn bench_absorb_compress() -> Vec<BenchResult> {
 
     // ── absorb() throughput ──
     let mut ac: AbsorbCompressLayer<NoScreeningPruner> =
-        AbsorbCompressLayer::new(NoScreeningPruner, num_arms, compress_config.clone());
+        AbsorbCompressLayer::new(NoScreeningPruner, num_arms, compress_config);
 
     for _ in 0..warmup {
         let arm = (rng.next() as usize) % num_arms;

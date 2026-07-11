@@ -7,6 +7,7 @@ description = "Discrete Exterior Calculus substrate — exterior derivative, cod
 repository = "https://github.com/katopz/katgpt-rs"
 keywords = ["dec", "stokes", "hodge", "exterior-calculus", "cochains"]
 categories = ["mathematics", "science"]
+publish = false  # only katgpt-core ships to crates.io
 
 [dependencies]
 # Zero dependencies. katgpt-dec is a pure-math substrate that ships its own
@@ -16,20 +17,80 @@ categories = ["mathematics", "science"]
 # fallbacks matching katgpt-core's implementations.
 
 [features]
-# katgpt-dec compiles all DEC code unconditionally — the crate's entire purpose
-# is DEC. The features below are pass-through tracking flags so katgpt-core can
-# preserve its historical feature surface (`dec_operators` enables this crate;
-# `dec_terrain_ai` / `lattice_utility` / `interest_cochain` are promotion-tracking
-# flags that imply `dec_operators` in katgpt-core). They gate nothing inside
-# katgpt-dec itself — mirroring the pre-promotion behavior where the whole
-# `dec` module compiled whenever `dec_operators` was on.
-default = []
+# katgpt-dec compiles its core DEC code unconditionally — the crate's entire
+# purpose is DEC. The historical pass-through tracking flags (`dec_terrain_ai`,
+# `lattice_utility`, `interest_cochain`) were removed on 2026-06-28 (katgpt-rs
+# Issue 008): the eggshell IP they tracked was migrated to the private
+# `riir-neuron-db` crate (`dec_arena` module). The remaining katgpt-core
+# `dec_operators` flag enables this crate.
+#
+# `motor_gated_field` (Plan 357, Research 359) is the one opt-in primitive
+# inside this crate: the Amari-style motor-gated neural-field evolution step
+# (`evolve_motor_gated_field`). It composes the existing DEC surface
+# (`hodge_laplacian` / `graph_laplacian_into`) + a ReLU gate + a per-channel
+# motor gain — no new deps. Stays opt-in by design (it's a primitive, not a
+# default-on capability); promotion to downstream consumption (riir-ai
+# Research 168) is gated on the Plan 357 Phase 2 GOAT (G1–G5).
+#
+# `heat_kernel_trajectory` (Plan 359, Research 365) — DEFAULT-ON (2026-07-02,
+# Plan 359 Phase 5 GOAT): the single-shot DEC heat-kernel trajectory predictor
+# (`exp(t·A)·h₀` via precomputed eigendecomposition + Krylov online path).
+# Distills PhysiFormer's single-shot-vs-autoregressive insight
+# (arXiv:2606.27364) into a modelless DEC analog — exact for linear
+# propagation, zero error accumulation. GOAT gate G1–G5 ALL PASS:
+# G1 5.00× more accurate than coarse Euler at matching fine-Euler ground truth
+# (t=15), G2 Krylov 1.87× Euler latency at T=100 (≤ 2× gate), G3 heat kernel
+# drift 3e-7 < coarse Euler drift 3e-6, G4 0 allocs/1000 calls (linear path),
+# G5 finite + stable decay. Eigensolver accuracy (~8% on 8×8) is the limiting
+# factor, NOT the heat-kernel math (which is exact); for large complexes use
+# the Krylov path. See .benchmarks/365_dec_heat_kernel_trajectory_goat.md.
+#
+# Phase 3 (2026-07-02): nonlinear exponential integrator added in
+# `nonlinear_heat_kernel.rs` — Duhamel integral + Gauss-Legendre quadrature
+# for the ReLU-gated source term (`heat_kernel_trajectory_nonlinear`).
+# Extends the linear path to handle the ReLU nonlinearity in motor-gated
+# field evolution. 13 unit tests pass; T5.2 formal GOAT bench still deferred.
+#
+# `sheaf_admm` (Plan 407, Research 384) — DEFAULT-ON (Phase 2 GOAT gate passed
+# 2026-07-07, G1–G6 ALL PASS): the modelless one-step Sheaf-ADMM coordination
+# primitive (`sheaf_admm_step` / `sheaf_admm_step_into`) distilled from Seely
+# et al., "Learning Multi-Agent Coordination via Sheaf-ADMM"
+# (arXiv:2605.31005, ICML 2026). Gives each vertex a primal/consensus/dual
+# triple and runs one ADMM iteration over a cellular sheaf (x-update proximal
+# solve → z-update sheaf diffusion via explicit restriction maps → u-update
+# dual accumulation). Builds on the DEC substrate (`graph_laplacian` identity
+# reduction); no new deps. The identity fast path (Plan 407 T2.4) uses a 5-point
+# grid stencil for G4 latency (1.808 µs at K=100/d_v=8/d_e=5/T=5). See
+# .benchmarks/407_sheaf_admm_goat.md for the GOAT gate results.
+default = ["heat_kernel_trajectory", "sheaf_admm"]
+motor_gated_field = []
+heat_kernel_trajectory = []
+sheaf_admm = []  # DEFAULT-ON (Plan 407 Phase 2 GOAT G1–G6 ALL PASS)
+# Multi-scale V-cycle on cell complexes via selector restriction maps
+# (gather-scatter fine→coarse→fine). Composes the single-complex DEC
+# operators into a two-level hierarchy. Opt-in — commutativity is verified
+# on grid coarsenings (the production path) and path-complex coarsenings.
+htno_v_cycle = []
 
-# Tracking flag: dynamic DEC topology + terrain cochains (Plan 261).
-dec_terrain_ai = []
+# Continuous cochain point sampler (Plan 422, Research 404) — Whitney/de-Rham
+# reconstruction for modelless intra-primitive field queries. Turns a discrete
+# CochainField into a continuously-queryable field: sample at any continuous
+# point inside a quad (grid) or triangle (mesh) with local-coordinate
+# conditioning (Cartesian sincos / barycentric sort+CDF remap). Stays opt-in
+# (Gain verdict — substrate completeness, not a default-path win).
+cochain_point_sampler = []
 
-# Tracking flag: SIMD lattice-edge utility op (Plan 335 Phase 5/6/7 GOAT gate).
-lattice_utility = []
+[[bench]]
+name = "bench_407_sheaf_admm_goat"
+harness = false
+required-features = ["sheaf_admm"]
 
-# Tracking flag: InterestCohain type for fame/notability (Plan 335 Phase 1).
-interest_cochain = []
+[[bench]]
+name = "bench_407_phase3_sheaf_admm"
+harness = false
+required-features = ["sheaf_admm"]
+
+[[bench]]
+name = "bench_422_cochain_point_sampler_goat"
+harness = false
+required-features = ["cochain_point_sampler"]

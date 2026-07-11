@@ -40,9 +40,7 @@
 #![cfg(feature = "self_advantage_gate")]
 #![cfg(feature = "micro_belief")]
 
-use katgpt_core::micro_belief::{
-    AttractorKernel, LatentThoughtKernel, MicroRecurrentBeliefState,
-};
+use katgpt_core::micro_belief::{AttractorKernel, LatentThoughtKernel, MicroRecurrentBeliefState};
 use katgpt_rs::pruners::self_advantage::self_advantage_margin;
 use std::time::Instant;
 
@@ -96,11 +94,7 @@ fn shannon_entropy_nats(probs: &[f32]) -> f32 {
 fn normalized_entropy(probs: &[f32]) -> f32 {
     let h = shannon_entropy_nats(probs);
     let log_v = (probs.len() as f32).ln();
-    if log_v > 0.0 {
-        h / log_v
-    } else {
-        0.0
-    }
+    if log_v > 0.0 { h / log_v } else { 0.0 }
 }
 
 /// Smooth bandpass gate in [0,1] — sigmoid rise at `low`, sigmoid fall at `high`.
@@ -195,7 +189,11 @@ impl RngState {
 
 fn rng_from_seed(seed: u64) -> RngState {
     // Avoid zero-state (xorshift64 stays at 0). Mix the seed.
-    let s = if seed == 0 { 0x9E37_79B9_7F4A_7C15 } else { seed };
+    let s = if seed == 0 {
+        0x9E37_79B9_7F4A_7C15
+    } else {
+        seed
+    };
     RngState { state: s }
 }
 
@@ -239,8 +237,8 @@ fn make_queries(seed: u64, _projection: &[f32]) -> Vec<(Vec<f32>, usize, Vec<f32
         // zero — no noise dims to confuse the projection.
         let mut input = vec![0.0f32; DIM];
         input[correct] = 1.5; // very strong signal
-        for k in 0..VOCAB {
-            input[k] += (rng.next_f32() - 0.5) * 0.05; // tiny noise on signal subspace
+        for slot in input.iter_mut().take(VOCAB) {
+            *slot += (rng.next_f32() - 0.5) * 0.05; // tiny noise on signal subspace
         }
 
         out.push((state, correct, input));
@@ -264,7 +262,7 @@ fn run_trajectory(
         // The kernel was constructed with K=1; we manually loop to produce
         // variable-length trajectories without rebuilding the kernel.
         for _ in 0..k_iters {
-            kernel.step(&mut state, &input);
+            kernel.step(&mut state, input);
         }
     }
     state
@@ -292,6 +290,7 @@ struct TrajectoryScore {
 }
 
 /// Score a single trajectory under all four scoring variants.
+#[allow(clippy::too_many_arguments)] // bench-only scorer: all 8 inputs are used by every call site
 fn score_trajectory(
     pre_logits: &[f32],
     post_logits: &[f32],
@@ -305,9 +304,9 @@ fn score_trajectory(
     // Argmax of post_logits = voted action.
     let mut voted_action = 0;
     let mut best_logit = f32::NEG_INFINITY;
-    for v in 0..VOCAB {
-        if post_logits[v] > best_logit {
-            best_logit = post_logits[v];
+    for (v, &l) in post_logits.iter().enumerate().take(VOCAB) {
+        if l > best_logit {
+            best_logit = l;
             voted_action = v;
         }
     }
@@ -396,9 +395,9 @@ fn pick_action(scorer: Scorer, scores: &[TrajectoryScore]) -> usize {
             }
             let mut best = 0;
             let mut best_count = tally[0];
-            for v in 1..VOCAB {
-                if tally[v] > best_count {
-                    best_count = tally[v];
+            for (v, &count) in tally.iter().enumerate().take(VOCAB).skip(1) {
+                if count > best_count {
+                    best_count = count;
                     best = v;
                 }
             }
@@ -419,9 +418,9 @@ fn pick_action(scorer: Scorer, scores: &[TrajectoryScore]) -> usize {
             }
             let mut best = 0;
             let mut best_weight = tally[0];
-            for v in 1..VOCAB {
-                if tally[v] > best_weight {
-                    best_weight = tally[v];
+            for (v, &weight) in tally.iter().enumerate().take(VOCAB).skip(1) {
+                if weight > best_weight {
+                    best_weight = weight;
                     best = v;
                 }
             }
@@ -511,14 +510,17 @@ fn run_g1(
             project_to_logits(&post_state, projection, &mut post_logits);
 
             // softmax(post_logits) → post_probs (for entropy).
-            let max_l = post_logits.iter().copied().fold(f32::NEG_INFINITY, f32::max);
+            let max_l = post_logits
+                .iter()
+                .copied()
+                .fold(f32::NEG_INFINITY, f32::max);
             let mut z = 0.0f32;
             for v in 0..VOCAB {
                 post_probs[v] = (post_logits[v] - max_l).exp();
                 z += post_probs[v];
             }
-            for v in 0..VOCAB {
-                post_probs[v] /= z.max(1e-12);
+            for slot in post_probs.iter_mut().take(VOCAB) {
+                *slot /= z.max(1e-12);
             }
 
             scored.push(score_trajectory(
@@ -536,8 +538,7 @@ fn run_g1(
         // "Discarded" = trajectories that the composite scorer would not pick
         // because their composite score is below the median (cost-aware budget).
         if !scored.is_empty() {
-            let mut composite_vals: Vec<f32> =
-                scored.iter().map(|s| s.composite).collect();
+            let mut composite_vals: Vec<f32> = scored.iter().map(|s| s.composite).collect();
             composite_vals.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
             let median = composite_vals[composite_vals.len() / 2];
             for s in &scored {
@@ -594,10 +595,7 @@ fn run_g2(
     // Also test the "no gate" baseline (gate ≡ 1): xi_low = 0, xi_high = 1+ε.
     println!();
     println!("── G2: Entropy Band Sweep (composite scorer accuracy) ─────────");
-    println!(
-        "{:<10} {:<10} {:>10}",
-        "xi_low", "xi_high", "accuracy"
-    );
+    println!("{:<10} {:<10} {:>10}", "xi_low", "xi_high", "accuracy");
     println!("{}", "─".repeat(36));
 
     // No-gate baseline.
@@ -616,7 +614,9 @@ fn run_g2(
     );
     println!(
         "{:<10} {:<10} {:>9.2}%   (baseline: gate≡1)",
-        "—", "—", no_gate * 100.0
+        "—",
+        "—",
+        no_gate * 100.0
     );
 
     let mut best_acc = 0.0_f64;
@@ -656,7 +656,12 @@ fn run_g2(
 
     println!();
     let interior_peak = best_low > 0.0 && best_high < 1.0;
-    println!("Best band: xi_low={:.2}, xi_high={:.2} → {:.2}%", best_low, best_high, best_acc * 100.0);
+    println!(
+        "Best band: xi_low={:.2}, xi_high={:.2} → {:.2}%",
+        best_low,
+        best_high,
+        best_acc * 100.0
+    );
     println!("Baseline (gate≡1): {:.2}%", no_gate * 100.0);
     println!(
         "G2: Interior maximum exists? {}   {}",
@@ -674,6 +679,7 @@ fn run_g2(
 }
 
 /// Single-scorer accuracy helper for G2.
+#[allow(clippy::too_many_arguments)] // bench harness: pre-allocated scratch buffers threaded through to avoid per-iter alloc
 fn run_g1_accuracy_only(
     kernel: &LatentThoughtKernel,
     projection: &[f32],
@@ -696,14 +702,17 @@ fn run_g1_accuracy_only(
             let post_state = run_trajectory(kernel, init_state, input, k);
             project_to_logits(&post_state, projection, post_logits);
 
-            let max_l = post_logits.iter().copied().fold(f32::NEG_INFINITY, f32::max);
+            let max_l = post_logits
+                .iter()
+                .copied()
+                .fold(f32::NEG_INFINITY, f32::max);
             let mut z = 0.0f32;
             for v in 0..VOCAB {
                 post_probs[v] = (post_logits[v] - max_l).exp();
                 z += post_probs[v];
             }
-            for v in 0..VOCAB {
-                post_probs[v] /= z.max(1e-12);
+            for slot in post_probs.iter_mut().take(VOCAB) {
+                *slot /= z.max(1e-12);
             }
 
             scored.push(score_trajectory(
@@ -766,14 +775,17 @@ fn run_g3(kernel: &LatentThoughtKernel, projection: &[f32]) {
         project_to_logits(&post, projection, &mut post_logits);
 
         // softmax
-        let max_l = post_logits.iter().copied().fold(f32::NEG_INFINITY, f32::max);
+        let max_l = post_logits
+            .iter()
+            .copied()
+            .fold(f32::NEG_INFINITY, f32::max);
         let mut z = 0.0f32;
         for v in 0..VOCAB {
             post_probs[v] = (post_logits[v] - max_l).exp();
             z += post_probs[v];
         }
-        for v in 0..VOCAB {
-            post_probs[v] /= z.max(1e-12);
+        for slot in post_probs.iter_mut().take(VOCAB) {
+            *slot /= z.max(1e-12);
         }
 
         let score = score_trajectory(
@@ -794,15 +806,28 @@ fn run_g3(kernel: &LatentThoughtKernel, projection: &[f32]) {
     let n_decision_ns = full_ns * N_TRAJECTORIES as f64;
 
     println!();
-    println!("── G3: Latency (DIM={}, VOCAB={}, N={}, K={}) ────────────────", DIM, VOCAB, N_TRAJECTORIES, k);
-    println!("{:<40} {:>9.1} ns", "Kernel-only trajectory (K=3):", kernel_ns);
+    println!(
+        "── G3: Latency (DIM={}, VOCAB={}, N={}, K={}) ────────────────",
+        DIM, VOCAB, N_TRAJECTORIES, k
+    );
+    println!(
+        "{:<40} {:>9.1} ns",
+        "Kernel-only trajectory (K=3):", kernel_ns
+    );
     println!("{:<40} {:>9.1} ns", "Full scoring per trajectory:", full_ns);
-    println!("{:<40} {:>9.1} ns", "Per-query decision (N=8 trajectories):", n_decision_ns);
+    println!(
+        "{:<40} {:>9.1} ns",
+        "Per-query decision (N=8 trajectories):", n_decision_ns
+    );
     println!(
         "{:<40} {:>9.1} ns   {}",
         "G3: Per-trajectory scoring (<1000ns):",
         full_ns,
-        if full_ns < 1000.0 { "✅ PASS" } else { "❌ FAIL" }
+        if full_ns < 1000.0 {
+            "✅ PASS"
+        } else {
+            "❌ FAIL"
+        }
     );
 }
 
@@ -828,9 +853,9 @@ fn print_per_k_accuracy(
             project_to_logits(&post, projection, &mut post_logits);
             let mut amax = 0;
             let mut best = f32::NEG_INFINITY;
-            for v in 0..VOCAB {
-                if post_logits[v] > best {
-                    best = post_logits[v];
+            for (v, &l) in post_logits.iter().enumerate().take(VOCAB) {
+                if l > best {
+                    best = l;
                     amax = v;
                 }
             }
@@ -838,7 +863,11 @@ fn print_per_k_accuracy(
                 correct += 1;
             }
         }
-        println!("  K={:<3} → {:.2}%", k, (correct as f64 / N_QUERIES as f64) * 100.0);
+        println!(
+            "  K={:<3} → {:.2}%",
+            k,
+            (correct as f64 / N_QUERIES as f64) * 100.0
+        );
     }
     let _ = pre_logits; // suppress unused warning if N_QUERIES == 0
 }
@@ -885,10 +914,7 @@ fn main() {
     let mut weighted_advantage_acc = 0.0_f64;
     let mut majority_acc = 0.0_f64;
 
-    println!(
-        "{:<32} {:>10} {:>12}",
-        "Scorer", "Accuracy", "Discard %"
-    );
+    println!("{:<32} {:>10} {:>12}", "Scorer", "Accuracy", "Discard %");
     println!("{}", "─".repeat(56));
     for (sc, rep) in &reports {
         let acc = rep.accuracy();
@@ -927,7 +953,9 @@ fn main() {
     }
 
     let g1_acc_gain = composite_acc - best_single_acc;
-    let best_fusion = composite_acc.max(weighted_composite_acc).max(weighted_advantage_acc);
+    let best_fusion = composite_acc
+        .max(weighted_composite_acc)
+        .max(weighted_advantage_acc);
     let best_fusion_label = if weighted_advantage_acc == best_fusion {
         "weighted-vote (advantage)"
     } else if weighted_composite_acc == best_fusion {
@@ -938,25 +966,51 @@ fn main() {
     let fusion_vs_majority = best_fusion - majority_acc;
 
     println!();
-    println!("Best single-component:           {} ({:.2}%)", best_single_label, best_single_acc * 100.0);
-    println!("Majority vote (no score):        {:.2}%", majority_acc * 100.0);
-    println!("Composite (argmax, paper shape): {:.2}%", composite_acc * 100.0);
-    println!("Best fusion variant:             {} ({:.2}%)", best_fusion_label, best_fusion * 100.0);
+    println!(
+        "Best single-component:           {} ({:.2}%)",
+        best_single_label,
+        best_single_acc * 100.0
+    );
+    println!(
+        "Majority vote (no score):        {:.2}%",
+        majority_acc * 100.0
+    );
+    println!(
+        "Composite (argmax, paper shape): {:.2}%",
+        composite_acc * 100.0
+    );
+    println!(
+        "Best fusion variant:             {} ({:.2}%)",
+        best_fusion_label,
+        best_fusion * 100.0
+    );
     println!();
     println!(
         "G1a: Composite-argmax vs best single (≥3pp target): {:+.2}pp   {}",
         g1_acc_gain * 100.0,
-        if g1_acc_gain >= 0.03 { "✅ PASS" } else { "❌ FAIL" }
+        if g1_acc_gain >= 0.03 {
+            "✅ PASS"
+        } else {
+            "❌ FAIL"
+        }
     );
     println!(
         "G1b: Best fusion vs majority vote (≥1pp target):     {:+.2}pp   {}",
         fusion_vs_majority * 100.0,
-        if fusion_vs_majority >= 0.01 { "✅ PASS" } else { "❌ FAIL" }
+        if fusion_vs_majority >= 0.01 {
+            "✅ PASS"
+        } else {
+            "❌ FAIL"
+        }
     );
     println!(
         "G1c: Discard rate (≥30% target):                    {:.2}%    {}",
         composite_discard * 100.0,
-        if composite_discard >= 0.30 { "✅ PASS" } else { "❌ FAIL" }
+        if composite_discard >= 0.30 {
+            "✅ PASS"
+        } else {
+            "❌ FAIL"
+        }
     );
 
     let g1_pass = g1_acc_gain >= 0.03;

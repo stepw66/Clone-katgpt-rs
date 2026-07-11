@@ -14,7 +14,7 @@
 //!
 //! Run: `cargo run --example spechop_01_pipeline --features spechop`
 
-use katgpt_rs::spechop::{
+use katgpt_speculative::spechop::{
     CacheSpeculator, HopCandidate, HopMarginal, HopTreeConfig, PipelineResult, RuleBasedVerifier,
     SpecHopConfig, SpecHopPipeline, TrajectoryHop, build_hop_dd_tree, extract_best_hop_path,
     verify_hop_tree,
@@ -245,8 +245,8 @@ fn print_results(result: &PipelineResult) {
     println!("  Committed observations:");
     for (i, obs) in result.committed.iter().enumerate() {
         let state_icon = match obs.state {
-            katgpt_rs::spechop::HopState::Committed => "✓",
-            katgpt_rs::spechop::HopState::RolledBack => "↺",
+            katgpt_speculative::spechop::HopState::Committed => "✓",
+            katgpt_speculative::spechop::HopState::RolledBack => "↺",
             _ => "?",
         };
 

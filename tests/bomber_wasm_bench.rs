@@ -59,6 +59,7 @@ fn bench_bombs() -> Vec<((i32, i32), u32, u32)> {
 }
 
 /// Micro-benchmark: time a closure over N iterations, return ns/iter.
+#[allow(clippy::unit_arg)] // black_box on f() keeps the call from being elided by LLVM
 fn bench_ns(label: &str, warmup: u64, iters: u64, mut f: impl FnMut()) -> f64 {
     for _ in 0..warmup {
         black_box(f());
